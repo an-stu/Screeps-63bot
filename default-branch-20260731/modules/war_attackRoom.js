@@ -22,7 +22,9 @@ Creep.prototype.attackRoom = function () {
     }
 
     this.atk = function () {
-        let em = null;//this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);//
+        let em = this.memory.attackRoomTargetUntil >= Game.time
+            ? Game.getObjectById(this.memory.attackRoomTargetId) : undefined;
+        if(em && em.pos.roomName != this.room.name)em = undefined;
         if (!em) em = this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { filter: e => checkStructs(e) && e.structureType != STRUCTURE_WALL && !e.pos.coverRampart() });
         if (!em) em = this.pos.findClosestByPath(FIND_HOSTILE_CONSTRUCTION_SITES, { filter: e => e.progress })
         if (!em) em = this.pos.findClosestByPath(FIND_HOSTILE_CREEPS, { filter: e => inner(e.pos) });
@@ -30,6 +32,14 @@ Creep.prototype.attackRoom = function () {
         if (!em) em = this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { filter: e => e.structureType == STRUCTURE_SPAWN });
         if (!em) em = this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { filter: e => checkStructs(e) && e.structureType != STRUCTURE_RAMPART });
         if (!em) em = this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { filter: e => checkStructs(e) });
+
+        if(em){
+            this.memory.attackRoomTargetId = em.id;
+            this.memory.attackRoomTargetUntil = Game.time + 3;
+        }else{
+            delete this.memory.attackRoomTargetId;
+            delete this.memory.attackRoomTargetUntil;
+        }
 
         if (em) HelperVisual.showText(em, "X")
         if (em) this.attack(em)
@@ -249,7 +259,6 @@ let pro = {
 }
 
 global.WarAttackRoom = pro;
-
 
 
 

@@ -496,13 +496,20 @@ let action = {
      */
     canHoldHeal(flag,tick){
         const creeps = flag._creeps;
+        let hostileCreepsByRoom = {};
+        let hostileTowersByRoom = {};
+        let getHostiles = room => hostileCreepsByRoom[room.name]
+            || (hostileCreepsByRoom[room.name] = room.getHostileCreeps());
+        let getTowers = room => hostileTowersByRoom[room.name]
+            || (hostileTowersByRoom[room.name] = room.getHostileStructures().filter(e=>e.structureType==STRUCTURE_TOWER));
 
         // 获取全部需要注意的creep
         creeps.forEach(creep=>{
-            creep._ra_touch = creep.room.find(FIND_HOSTILE_CREEPS)// 远程攻击
+            let roomHostiles = getHostiles(creep.room);
+            creep._ra_touch = roomHostiles// 远程攻击
                 .filter(e=>e.pos.inRangeTo(creep,3+tick) && e.getPartCnt(RANGED_ATTACK)>0
                     && e.touchAbleNTickInRange(creep,tick,3,1));
-            creep._atk_ra_touch = creep.room.find(FIND_HOSTILE_CREEPS)// 近战 或者 贴脸mass
+            creep._atk_ra_touch = roomHostiles// 近战 或者 贴脸mass
                 .filter(e=>e.pos.inRangeTo(creep,1+tick) && (e.getPartCnt(ATTACK)>0 || e.getPartCnt(RANGED_ATTACK)>0)
                     && e.touchAbleNTickInRange(creep,tick,1,1));
             let possibleMaxDmg = 0 // 被集火伤害
@@ -517,7 +524,7 @@ let action = {
             })
 
             let towerDmg = 0
-            let towers = creep.room.find(FIND_HOSTILE_STRUCTURES).filter(e=>e.structureType==STRUCTURE_TOWER)
+            let towers = getTowers(creep.room)
             if(towers.find(e=>e.store[RESOURCE_ENERGY]>=10)){
                 towerDmg = towers.map(e=>e.getDamageTo(creep)).sum()
             }
@@ -997,5 +1004,4 @@ global.WarTeamCore = {
     ManageTeam:ManageTeam,
     SpawnTeam:SpawnTeam
 }
-
 

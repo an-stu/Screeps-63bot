@@ -142,6 +142,17 @@ function roomDetail(roomName) {
     let resources = roomResources(room);
     let resourceRows = Object.keys(resources).sort((a, b) => resources[b] - resources[a])
         .map(resourceType => `<tr><td style="${style.left}">${escapeHtml(resourceType)}</td><td style="${style.td};color:${COLORS.good}">${number(resources[resourceType])}</td></tr>`).join("");
+    let unitRows = units.sort((a, b) => (a.memory.role || "").localeCompare(b.memory.role || "") || a.name.localeCompare(b.name))
+        .map(unit => {
+            let current = (unit.memory.tasks || []).slice(-1)[0] || {};
+            let ttlTone = unit.spawning || unit.ticksToLive > 250 ? "good" : unit.ticksToLive > 80 ? "warn" : "bad";
+            return `<tr><td style="${style.left}">${escapeHtml(unit.name)}</td>`
+                + `<td style="${style.left}">${escapeHtml(unit.memory.role || "unknown")}</td>`
+                + `<td style="${style.td}">${color(unit.spawning ? "spawn" : unit.ticksToLive, ttlTone)}</td>`
+                + `<td style="${style.left}">${escapeHtml(current.taskName || "idle")}</td>`
+                + `<td style="${style.left}">${escapeHtml(current.roomName || current.flagName || current.id || "-")}</td>`
+                + `<td style="${style.td}">${number(unit.store.getUsedCapacity())}/${number(unit.store.getCapacity())}</td></tr>`;
+        }).join("");
     let controller = room.controller;
     let summary = `<table style="${style.table};min-width:760px"><tbody>`
         + `<tr><th style="${style.th};text-align:left">Room</th><td style="${style.left}">${room.name}</td><th style="${style.th}">RCL</th><td style="${style.td}">${controller ? controller.level : "-"}</td><th style="${style.th}">Hostiles</th><td style="${style.td}">${room.find(FIND_HOSTILE_CREEPS).length}</td></tr>`
@@ -149,7 +160,10 @@ function roomDetail(roomName) {
         + `<tr><th style="${style.th};text-align:left">Current tasks</th><td style="${style.left}" colspan="5">${pairs(tasks) || "-"}</td></tr>`
         + `</tbody></table>`;
     let resourceTable = `<table style="${style.table};min-width:420px"><thead><tr><th style="${style.th};text-align:left">Resource</th><th style="${style.th}">Amount</th></tr></thead><tbody>${resourceRows || `<tr><td style="${style.left}">empty</td><td style="${style.td}">0</td></tr>`}</tbody></table>`;
-    return header(`Room ${roomName}`) + summary + resourceTable
+    let unitTable = `<table style="${style.table};min-width:880px"><thead><tr>`
+        + ["Creep", "Role", "TTL", "Current task", "Target", "Store"].map((name, index) => `<th style="${index < 2 || index == 3 || index == 4 ? style.th + ";text-align:left" : style.th}">${name}</th>`).join("")
+        + `</tr></thead><tbody>${unitRows || `<tr><td style="${style.left}" colspan="6">no creeps assigned to this room</td></tr>`}</tbody></table>`;
+    return header(`Room ${roomName}`) + summary + unitTable + resourceTable
         + `<div style="color:${COLORS.dim};font:11px monospace">overview: dash()</div>`;
 }
 
@@ -163,4 +177,3 @@ let dashboard = {
 
 global.ConsoleDashboard = dashboard;
 global.dash = roomName => dashboard.show(roomName);
-

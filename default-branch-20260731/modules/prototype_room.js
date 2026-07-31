@@ -46,6 +46,18 @@ Room.prototype.flags=function (prefix) {
     }
 };
 
+// Per-tick tactical query caches. Room objects are recreated every tick, so
+// these never become stale and let tower/safe-mode/team code share one scan.
+Room.prototype.getHostileCreeps=function () {
+    if(this._hostileCreeps === undefined)this._hostileCreeps = this.find(FIND_HOSTILE_CREEPS);
+    return this._hostileCreeps;
+};
+
+Room.prototype.getHostileStructures=function () {
+    if(this._hostileStructures === undefined)this._hostileStructures = this.find(FIND_HOSTILE_STRUCTURES);
+    return this._hostileStructures;
+};
+
 
 /** roomName 的哈希值 */
 Room.prototype.hashCode=function () {

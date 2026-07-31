@@ -114,10 +114,22 @@ let pro = {
             .map(e => e.id);
             
     },
-    checkSafeMode(room) {
+    checkSafeMode(room, hostiles) {
         // HelperError.catchError(()=>StationDefense.checkSafeMode(room))
-        let hostileCnt = room.find(FIND_HOSTILE_CREEPS, { filter: e => e.owner.username != "Invader" && e.body.filter(e => e.type == HEAL && e.boost).length >= 5 }).length;
-        if (!hostileCnt) return;
+        hostiles = hostiles || room.getHostileCreeps();
+        let dangerous = false;
+        for(let hostile of hostiles){
+            if(hostile.owner.username == "Invader")continue;
+            let boostedHeal = 0;
+            for(let part of hostile.body){
+                if(part.type == HEAL && part.boost && ++boostedHeal >= 5){
+                    dangerous = true;
+                    break;
+                }
+            }
+            if(dangerous)break;
+        }
+        if (!dangerous) return;
         // room.controller.pos.createFlag("raL1_W19N21_crossShard_114514")
         let MyRuinCnt = room.find(FIND_RUINS, {
             filter: e => e.structure.owner && e.structure.owner.username == room.controller.owner.username

@@ -390,3 +390,22 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
 - Increased staggered full room/station discovery from 31 to 61 ticks to
   reduce periodic room-management spikes while retaining prompt recognition
   of completed structures.
+## v0.23.0 — Tactical query and target caching
+
+### Added
+
+- Expanded `dash("ROOM")` with a per-creep task table showing role, TTL,
+  current task, target, and carried capacity for stalled-task diagnosis.
+
+### Changed
+
+- Added per-tick hostile creep/structure caches on visible Room objects and
+  shared them across safe-mode, tower, advanced-defense, and team calculations.
+- Preserved immediate safe-mode checks while removing duplicate hostile scans
+  from downstream tower and combat logic.
+- Reused hostile and tower lists across every member of a combat team during
+  incoming-damage evaluation.
+- Reworked highway-defense target selection to use one room scan and cheap
+  range selection, and removed a duplicate PathFinder call used only for logs.
+- Added a three-tick attack-room target cache so active attackers do not repeat
+  up to seven `findClosestByPath` searches every tick.

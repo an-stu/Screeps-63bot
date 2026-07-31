@@ -15,21 +15,20 @@ Creep.prototype.defenseHighWay=function () {
     let flag = this.headTaskFlag()
     this.autoHeal();
     if(!flag)return;
-    let em = this.pos.findClosestByPath(FIND_HOSTILE_CREEPS,{filter:e=>e.body.find(e=>e.type==ATTACK)});//遇到 attack 拉开距离
+    let hostiles = this.room.getHostileCreeps();
+    let em = this.pos.findClosestByRange(hostiles.filter(e=>e.getActiveBodyparts(ATTACK)>0));//遇到 attack 拉开距离
     if(em && this.pos.inRangeTo(em,2)){
-        em.range = 4
-        let path = PathFinder.search(this.pos,em,{flee:true}).path;
-        let code = this.moveByPath(path)
+        let path = PathFinder.search(this.pos,{pos:em.pos,range:4},{flee:true}).path;
+        this.moveByPath(path)
         this.rangedAttack(em);
-        log(code,PathFinder.search(this.pos,em,{flee:true}))
         return;
     }
 
-    if(!em)em=this.pos.findClosestByPath(FIND_HOSTILE_CREEPS,{filter:e=>!e.body.find(e=>e.type==HEAL||e.type==RANGED_ATTACK)});
+    if(!em)em=this.pos.findClosestByRange(hostiles.filter(e=>!e.getActiveBodyparts(HEAL)&&!e.getActiveBodyparts(RANGED_ATTACK)));
     if(!this.memory.myDamage) this.memory.myDamage = this.possibleRangeDamage()
-    if(!em)em=this.pos.findClosestByPath(FIND_HOSTILE_CREEPS,{filter:e=>e.possibleHealWithToughDamage()<this.memory.myDamage});
-    if(!em)em=this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);
-    if(!em)em=this.pos.findClosestByPath(FIND_HOSTILE_POWER_CREEPS);
+    if(!em)em=this.pos.findClosestByRange(hostiles.filter(e=>e.possibleHealWithToughDamage()<this.memory.myDamage));
+    if(!em)em=this.pos.findClosestByRange(hostiles);
+    if(!em)em=this.pos.findClosestByRange(FIND_HOSTILE_POWER_CREEPS);
 
     if(em){
         this.moveTo(em);
@@ -46,9 +45,10 @@ let pro = {
     getDefenseHighWayData(flagName,room,spawnRoom){
         let flag = Game.flags[flagName];
         if(!flag)return;
-        let sumDamage =  room.find(FIND_HOSTILE_CREEPS).map(e=>e.possibleDamage(false,2)).sum();// ra的全部伤害
-        let sumHeal =  room.find(FIND_HOSTILE_CREEPS).map(e=>e.possibleHealDamage(1,false)).sum();// 全部奶量
-        let maxToughDamage =  room.find(FIND_HOSTILE_CREEPS).map(e=>e.possibleToughBeHitsDamage(sumHeal)).maxBy(e=>e);// 单个能奶起来的最大值
+        let hostiles = room.getHostileCreeps();
+        let sumDamage = hostiles.map(e=>e.possibleDamage(false,2)).sum();// ra的全部伤害
+        let sumHeal = hostiles.map(e=>e.possibleHealDamage(1,false)).sum();// 全部奶量
+        let maxToughDamage = hostiles.map(e=>e.possibleToughBeHitsDamage(sumHeal)).maxBy(e=>e);// 单个能奶起来的最大值
         let rangeNeedCnt = Math.ceil(maxToughDamage/10+5)
         let toughNeedCnt = Math.ceil(sumDamage*0.3/100)
         let healNeedCnt = Math.ceil(sumDamage*0.3/12)||1

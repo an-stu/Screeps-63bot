@@ -38,15 +38,17 @@ let pro={
             .map(e => e.id)
     },
     exec (room){
-        StationDefense.checkSafeMode(room);
+        // Safe-mode detection stays immediate; the same tactical scan is then
+        // reused by tower targeting and advanced defense.
+        let hostiles = room.getHostileCreeps();
+        StationDefense.checkSafeMode(room, hostiles);
         if (!pro.lastUpdateMap[room.name]||pro.lastUpdateMap[room.name] <= 0) {
             pro.lastUpdateMap[room.name] = 10
-            let hostiles = room.find(FIND_HOSTILE_CREEPS);
             if (global.WarDefenseCore && isCpuFeatureEnabled("combat")) WarDefenseCore.checkNeedDefense(room, hostiles);
             let randomAttack = undefined;
             if(hostiles.length){
                 pro.lastUpdateMap[room.name] = 0;
-                hostiles = hostiles.sort((a,b)=>a.hits/a.hitsMax!=b.hits/b.hitsMax?(a.hits/a.hitsMax-b.hits/b.hitsMax):a.hits-b.hits)
+                hostiles = hostiles.slice().sort((a,b)=>a.hits/a.hitsMax!=b.hits/b.hitsMax?(a.hits/a.hitsMax-b.hits/b.hitsMax):a.hits-b.hits)
             }
 
             let injured = undefined;

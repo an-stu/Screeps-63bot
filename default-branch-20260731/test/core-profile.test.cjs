@@ -19,6 +19,10 @@ const managerRooms = fs.readFileSync(path.join(root, "modules/manager_rooms.js")
 const managerFlags = fs.readFileSync(path.join(root, "modules/manager_flags.js"), "utf8");
 const main = fs.readFileSync(path.join(root, "modules/main.js"), "utf8");
 const prototypeRoom = fs.readFileSync(path.join(root, "modules/prototype_room.js"), "utf8");
+const stationDefense = fs.readFileSync(path.join(root, "modules/station_defense.js"), "utf8");
+const warTeamCore = fs.readFileSync(path.join(root, "modules/war_teamCore.js"), "utf8");
+const highwayDefense = fs.readFileSync(path.join(root, "modules/strategy_defenserHighWay.js"), "utf8");
+const attackRoom = fs.readFileSync(path.join(root, "modules/war_attackRoom.js"), "utf8");
 const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
 const marketPrice = fs.readFileSync(path.join(root, "modules/strategy_marketPrice.js"), "utf8");
@@ -100,6 +104,11 @@ assert.ok(market.includes("MARKET_SELL_PRICE_TTL = 1000"), "commodity profit pri
 assert.ok(market.includes("MARKET_ORDER_TTL = 20"), "market order queries must be cached across ticks");
 assert.ok(market.includes(".commodities;"), "market strategy must consume the pricing result payload correctly");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
+assert.ok(prototypeRoom.includes("getHostileCreeps") && prototypeRoom.includes("getHostileStructures"), "tactical room queries must be cached per tick");
+assert.ok(stationDefense.includes("checkSafeMode(room, hostiles)"), "safe-mode detection must reuse the immediate hostile scan");
+assert.ok(warTeamCore.includes("hostileCreepsByRoom") && warTeamCore.includes("hostileTowersByRoom"), "team damage calculation must share tactical room scans");
+assert.ok(!highwayDefense.includes("log(code,PathFinder.search"), "highway flee must never repeat PathFinder just for logging");
+assert.ok(attackRoom.includes("attackRoomTargetUntil"), "attack-room creeps must keep a short-lived selected target");
 assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instrumentation must default to off");
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");
 assert.ok(betterMove.includes('!isCpuFeatureEnabled("visual")'), "legacy moveTo styles must obey the global visual gate");

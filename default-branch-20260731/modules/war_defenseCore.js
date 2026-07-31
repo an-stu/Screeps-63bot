@@ -81,7 +81,7 @@ let pro={
         // if(upgradeFlag)return true;
         // if((Game.time+room.hashCode())%30!=0)return;
         if(room.level < 7)return;
-        hostiles = hostiles || room.find(FIND_HOSTILE_CREEPS);
+        hostiles = hostiles || room.getHostileCreeps();
         let healCnt = 0;
         for(let hostile of hostiles){
             if(hostile.owner.username == "Invader")continue;
