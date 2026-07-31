@@ -34,6 +34,7 @@ assert.ok(mainMount.includes("global.LOCAL_SHARD_NAME = Game.shard.name"), "core
 assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep Power Creeps alive and operating storage");
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be independently restorable");
+assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(manifest.includes("station_factory"), "core mode must keep owned factories and OPF creeps functional");
 assert.ok(manifest.includes("station_observer"), "observer scanning must be independently restorable");
@@ -54,6 +55,8 @@ assert.ok(main.includes(".filter(shouldRunCreep)"), "creep execution must apply 
 assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
 assert.ok(mainMount.includes("observer: true"), "observer scanning must be switchable without another upload");
 assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");
+assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies must have an allocation-free gate");
+assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instrumentation must default to off");
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");

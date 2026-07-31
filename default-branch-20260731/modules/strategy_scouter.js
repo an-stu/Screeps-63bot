@@ -5,7 +5,8 @@
 
 Creep.prototype.registerMoveTo=function () {
     if(this.spawning){
-        this.headTaskFlag().memory.spawnTime = Game.time
+        let flag = this.headTaskFlag();
+        if(flag)flag.memory.spawnTime = Game.time
     }
 };
 
@@ -13,12 +14,15 @@ Creep.prototype.moveto=function () {
     let obj = this.headTaskFlag()
     if(obj&&!this.pos.isEqualTo(obj)){
         this.goTo(obj);
+    }else if(!obj){
+        this.popTask();
     }
 };
 
 let pro = {
     exec () {
         if(Game.time%3!=0)return;
+        if(!ManagerFlags.hasPrefix("moveto"))return;
         ManagerFlags.getFlagsByPrefix("moveto").forEach(flag=> {
             let spawnRoom;
             if (Game.rooms[flag.getRoomName()] && Game.rooms[flag.getRoomName()].my) spawnRoom = Game.rooms[flag.getRoomName()]

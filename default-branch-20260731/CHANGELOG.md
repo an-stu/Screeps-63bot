@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.12.0 — Flag-gated scouter restoration
+
+### Added
+
+- Restore `strategy_scouter` behind `Memory.cpuFeatures.scouter`.
+- Add `ManagerFlags.hasPrefix()` so dormant flag-driven modules can avoid
+  entering their strategy functions on ordinary ticks.
+
+### Fixed
+
+- Safely handle a `moveto` flag being removed while its scouter is alive.
+
 ## v0.11.0 — Remote harvesting restoration
 
 ### Added

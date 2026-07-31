@@ -43,6 +43,10 @@ let pro={
     },
     getFlagsByPrefix (prefix){
         return Game._flagPerfixMap[prefix]||[]
+    },
+    hasPrefix (prefix){
+        let flags = Game._flagPerfixMap[prefix];
+        return !!(flags && flags.length);
     }
 
 };
