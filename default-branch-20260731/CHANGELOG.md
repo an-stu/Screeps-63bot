@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.16.0 — Dormant flag utilities
+
+### Added
+
+- Restore `strategy_cleanBuild`, `strategy_blockRoom`, and `strategy_pillage`
+  behind independent feature switches and active flag gates.
+
+### Fixed
+
+- Guard removed block-room flags, absent pillage storage, empty last-position
+  state, and missing clean-build worker counts.
+- Remove per-tick block-room registration logging and avoid sorting cached flag
+  objects unnecessarily.
+
 ## v0.15.0 — Flag-gated claim restoration
 
 ### Added

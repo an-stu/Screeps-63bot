@@ -83,7 +83,7 @@ let pro={
         if(global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest") && !room.flags("stopRemote").length) //stopRemote_W8N8 用来停止外矿，进入战斗状态的
             HelperError.catchError(()=>StrategyOuterHarvest.exec(room))
 
-        if (global.StrategyPillage) HelperError.catchError(()=>StrategyPillage.exec(room))
+        if (global.StrategyPillage && isCpuFeatureEnabled("pillage") && room.flags("pillage").length) HelperError.catchError(()=>StrategyPillage.exec(room))
 
         if(!MIN_CPU && global.StationObserver && isCpuFeatureEnabled("observer") && Game.shard.name!="shard1")
             HelperError.catchError(()=>StationObserver.obOverRooms(room))

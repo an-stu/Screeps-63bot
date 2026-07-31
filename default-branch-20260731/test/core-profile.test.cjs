@@ -39,6 +39,7 @@ assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
 assert.ok(manifest.includes("strategy_claim"), "claim task handlers must ship with planner dependencies");
+assert.ok(manifest.includes("strategy_cleanBuild") && manifest.includes("strategy_blockRoom") && manifest.includes("strategy_pillage"), "flag utility task handlers must be restored together");
 assert.ok(manifest.includes("helper_visual") && manifest.includes("manager_planner") && manifest.includes("manager_autoPlanner"), "planner dependencies must ship together");
 assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(manifest.includes("station_factory"), "core mode must keep owned factories and OPF creeps functional");
@@ -63,6 +64,7 @@ assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be s
 assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies must have an allocation-free gate");
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("claim")'), "claim strategy must not run without a matching flag");
+assert.ok(main.includes('ManagerFlags.hasPrefix("cleanBuild")') && main.includes('ManagerFlags.hasPrefix("blockRoom")'), "global flag utilities must use prefix gates");
 assert.ok(mainMount.includes('CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual"])'), "expensive optional modules must require explicit online opt-in");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
 assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");

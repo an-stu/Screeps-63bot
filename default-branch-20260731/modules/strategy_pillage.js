@@ -23,14 +23,14 @@ Creep.prototype.pillage=function () {
         this.goTo(flag);
         return;
     }
-    if(this.store.getFreeCapacity(RESOURCE_ENERGY)<=0){
+    if(this.store.getFreeCapacity()<=0){
         if(!this.memory.concatTime)this.memory.concatTime=(1500-this.ticksToLive)*2
         return this.fillAll(this.mainRoom().storage)
     }
     let target = this.pos.findClosestByPath(FIND_RUINS,{filter:e=>{
             return e.store&&e.store.getAllResTypeCount()
         },ignoreCreeps:true}); 
-    if (!target) target = this.room.storage.store.getUsedCapacity()?this.room.storage:0;
+    if (!target && this.room.storage) target = this.room.storage.store.getUsedCapacity()?this.room.storage:0;
     if(!target) target = this.pos.findClosestByPath(FIND_STRUCTURES,{filter:e=>{
             return e.store&&e.store.getAllResTypeCount()
                 &&!e.pos.coverRampart()
@@ -76,7 +76,9 @@ let pro = {
     exec (room) {
         if((Game.time+room.hashCode())%30!=0)return;
         if(!room.storage)return;
-        room.flags("pillage").sort().forEach(flag=>{
+        let flags=room.flags("pillage");
+        if(!flags.length)return;
+        flags.forEach(flag=>{
             let pillager = room.creeps("pillager", false).filter(e => e.headTaskFlag()&&e.headTaskFlag().name == flag.name).head();
             if(pillager)return;
             let tasks = [UtilsTask.taskFlag(flag,  "pillage","registerPillage")]

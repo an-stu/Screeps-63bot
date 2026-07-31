@@ -84,8 +84,8 @@ let pro = {
         if (global.StrategyClaimCrossShard) HelperError.catchError(() => StrategyClaimCrossShard.exec());
         if (global.StrategyScouter && isCpuFeatureEnabled("scouter") && ManagerFlags.hasPrefix("moveto")) HelperError.catchError(() => StrategyScouter.exec());
         if (global.StrategyFactoryPowerCreep) HelperError.catchError(() => StrategyFactoryPowerCreep.exec());
-        if (global.StrategyCleanBuild) HelperError.catchError(() => StrategyCleanBuild.exec());
-        if (global.StrategyBlockRoom) HelperError.catchError(() => StrategyBlockRoom.exec());
+        if (global.StrategyCleanBuild && isCpuFeatureEnabled("cleanBuild") && ManagerFlags.hasPrefix("cleanBuild")) HelperError.catchError(() => StrategyCleanBuild.exec());
+        if (global.StrategyBlockRoom && isCpuFeatureEnabled("blockRoom") && ManagerFlags.hasPrefix("blockRoom")) HelperError.catchError(() => StrategyBlockRoom.exec());
         if (cpuProfile) {
             cpuProfile.flagStrategies = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();

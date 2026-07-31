@@ -45,5 +45,8 @@
   "strategy_marketPrice",
   "strategy_market",
   "strategy_claim",
+  "strategy_cleanBuild",
+  "strategy_blockRoom",
+  "strategy_pillage",
   "team_raL1"
 ]

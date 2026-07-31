@@ -45,7 +45,7 @@ Creep.prototype.collectStructEnergy=function () {
     if(!obj||this.storeFull())return this.popTask();
     if(this.dismantle(obj)==ERR_NOT_IN_RANGE){
         this.moveTo(obj)
-        if(obj.pos.inRangeTo(this,2)&&this.memory.lastPos.time==2){
+        if(obj.pos.inRangeTo(this,2)&&this.memory.lastPos&&this.memory.lastPos.time==2){
             return this.popTask();
         }
     }
@@ -88,13 +88,15 @@ Creep.prototype.upgradeWithEnergy=function (){
 let pro = {
     exec () {
         if(Game.time%10!=0)return;
+        if(!ManagerFlags.hasPrefix("cleanBuild"))return;
         ManagerFlags.getFlagsByPrefix("cleanBuild").forEach(flag=>{
             if(flag.room&&flag.room.find(FIND_STRUCTURES).every(e=>e.my)){//全部清理完毕
                 return flag.remove();
             }
 
             if(!flag._creeps)flag._creeps = []
-            if(flag._creeps.length<parseInt(flag.getNameSplit()[3])){
+            let workerCount = parseInt(flag.getNameSplit()[3])||1;
+            if(flag._creeps.length<workerCount){
                 let body = StationWork.getMiddleLevelWorkerBodyConfig(flag.getRoom(2))
                 StationHive.trySpawn(flag.getRoom(2),flag.getRoomName(),body,"cleanBuild",[UtilsTask.taskFlag(flag,"cleanBuild","registerCleanBuild")])
             }

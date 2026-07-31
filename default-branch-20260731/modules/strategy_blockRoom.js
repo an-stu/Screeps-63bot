@@ -6,11 +6,9 @@
 
 
 Creep.prototype.registerBlockRoom=function () {
-    log(1,this.pos);
     pro.aliveCreep=this.id
 };
 Creep.prototype.registerBlockRoom2=function () {
-    log(2,this.pos);
     pro.aliveCreep2=this.id
 };
 
@@ -18,6 +16,7 @@ Creep.prototype.registerBlockRoom2=function () {
 Creep.prototype.BlockRoom=function () {
     let headTask = this.headTask();
     let flag = Game.flags[headTask.id];
+    if(!flag)return this.popTask();
 
     if(this.pos.roomName!=flag.pos.roomName){
         return this.moveTo(flag)
@@ -77,6 +76,7 @@ let pro = {
     spawnTime:0,
     exec () {
         if(Game.time%10!=0)return;
+        if(!ManagerFlags.hasPrefix("blockRoom"))return;
         ManagerFlags.getFlagsByPrefix("blockRoom").take(1).forEach(flag=>{
             if(!Game.getObjectById(pro.aliveCreep)&&pro.spawnTime!=Game.time&&(!flag.room||!flag.room.my)){
                 let body = ManagerCreeps.calcBodyPart({  [CLAIM]: 1 ,[MOVE]: 2 })
