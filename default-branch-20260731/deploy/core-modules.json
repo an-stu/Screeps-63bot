@@ -24,6 +24,8 @@
   "manager_flags",
   "manager_planner",
   "manager_autoPlanner",
+  "manager_missions",
+  "manager_crossShard",
   "station_defense",
   "station_sources",
   "station_minetral",

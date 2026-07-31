@@ -15,8 +15,9 @@ global.CPU_FEATURES = {
     cleanBuild: true,
     blockRoom: true,
     pillage: true,
+    crossShard: true,
 }
-global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual"])
+global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard"])
 global.isCpuFeatureEnabled = name => {
     let value = (Memory.cpuFeatures || {})[name];
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
@@ -56,6 +57,8 @@ require('manager_creeps');
 require('manager_flags');
 require('manager_planner');
 require('manager_autoPlanner');
+require('manager_missions');
+require('manager_crossShard');
 
 require('station_defense');
 require('station_sources');

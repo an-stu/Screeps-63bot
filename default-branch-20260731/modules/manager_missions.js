@@ -107,6 +107,7 @@ let pro={
     init() {
         if(Memory.missions instanceof Array) Memory.missions = {}
         let missions  = (Memory.missions = Memory.missions || {});
+        if(!Object.keys(missions).length)return;
 
         Object.entries(missions).forEach(l=>{
             let id = l[0];
@@ -114,7 +115,7 @@ let pro={
             HelperError.catchError(()=>{
                 e.ttl = e.ttl===undefined ? TTL:e.ttl-1;
                 if(!e.ttl)delete missions[id];
-                else if(missionFunc[e.func](e.data)){
+                else if(missionFunc[e.func]&&missionFunc[e.func](e.data)){
                     if(e.callBack){
                         if(missionCallBack[e.callBack])
                             missionCallBack[e.callBack](e.data)
@@ -129,7 +130,7 @@ let pro={
 };
 
 global.sendRes = function(fromRoomName,toRoomName,resType,amount) {
-    data = {data: {fromRoomName:fromRoomName,toRoomName:toRoomName,resType:resType,amount:amount}, func:'sendRes'}
+    let data = {data: {fromRoomName:fromRoomName,toRoomName:toRoomName,resType:resType,amount:amount}, func:'sendRes'}
     pro.addMission(data)
     return 0;
 };

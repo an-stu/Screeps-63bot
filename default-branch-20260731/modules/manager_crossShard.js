@@ -4,8 +4,6 @@ global.ALL_SHARD_NAME = ["shard0","shard1","shard2","shard3"]
 // global.ALL_SHARD_NAME = ['shard3']
 global.CORSS_SHARD_TIME_OUT = 5000 // 任务超过5000tick 自动删除，防止内存泄漏 如果没有时间默认删除 比如说我去S1，S1没有cpu，而且爬被吃了,可能我1天都不去,S1没有运行，所以内存泄漏了
 
- global.InterShardMemory = undefined;
-
 /**
  path: [
  { shard: 'shard3', roomName: 'W20N10', x: 40, y: 16 },
@@ -109,7 +107,6 @@ let pro={
         }
         if(pro.localShardData){ //及时保存，防止丢内存
             pro.localShardData[id] = task
-            if(InterShardMemory)InterShardMemory.setLocal(JSON.stringify(pro.localShardData))
         }
         else pro.addDataList.push([id,task])
         return id;
@@ -138,12 +135,12 @@ let pro={
     localShardData : {},
     shardData : {},
     init(){
-        return;
-        try{if(!InterShardMemory)return;}catch (e) {return;}// 如果私服或者赛季就没
+        if(!isCpuFeatureEnabled("crossShard")||typeof InterShardMemory=="undefined")return;
+        let parse = value=>{try{return JSON.parse(value||"{}")||{}}catch(e){return {}}};
         // 获取所有 shard 的 InterShardMemory
         ALL_SHARD_NAME.forEach(name => {
-            if(name == LOCAL_SHARD_NAME)pro.shardData[name] = JSON.parse(InterShardMemory.getLocal()) || {};
-            else pro.shardData[name] = JSON.parse(InterShardMemory.getRemote(name)) || {}
+            if(name == LOCAL_SHARD_NAME)pro.shardData[name] = parse(InterShardMemory.getLocal());
+            else pro.shardData[name] = parse(InterShardMemory.getRemote(name));
         });
 
         if(!pro.shardData[LOCAL_SHARD_NAME]) { // 报错 暂时不执行，防止奇怪的东西混进来
@@ -183,14 +180,13 @@ let pro={
     },
 
     afterWork (){
-        return;
-        try{if(!InterShardMemory)return;}catch (e) {return;}// 如果私服或者赛季就没
+        if(!isCpuFeatureEnabled("crossShard")||typeof InterShardMemory=="undefined")return;
         // log(LOCAL_SHARD_NAME,pro.localShardData)
         while (pro.addDataList.length){ // 在初始化之前或者 tick提交的则 下一tick保存
             let t = pro.addDataList.pop();
             pro.localShardData[t[0]] = t[1]
         }
-        InterShardMemory.setLocal(JSON.stringify(pro.localShardData))
+        if(pro.localShardData)InterShardMemory.setLocal(JSON.stringify(pro.localShardData))
         pro.localShardData = undefined
     },
 

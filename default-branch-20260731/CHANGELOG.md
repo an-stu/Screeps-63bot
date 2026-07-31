@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.17.0 — Cross-shard foundation
+
+### Added
+
+- Restore `manager_missions` and `manager_crossShard` as the opt-in
+  `Memory.cpuFeatures.crossShard` foundation.
+
+### Fixed
+
+- Stop shadowing the official `InterShardMemory` object and remove the old
+  unconditional early returns that made the manager inert.
+- Parse empty/corrupt remote payloads safely, batch request serialization in
+  `afterWork`, and ignore unknown local mission handlers without throwing.
+- Fix the leaked global variable in `sendRes`.
+
 ## v0.16.0 — Dormant flag utilities
 
 ### Added

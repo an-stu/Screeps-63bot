@@ -34,7 +34,7 @@ let pro = {
         if (MIN_CPU && Game.time % 100 == 0) console.log("warning : min cpu on")
         let objects = getTickObjects();
         objects.rooms.forEach(room => room.used = {});
-        if (global.ManagerCrossShard) HelperError.catchError(() => ManagerCrossShard.init());
+        if (global.ManagerCrossShard && isCpuFeatureEnabled("crossShard")) HelperError.catchError(() => ManagerCrossShard.init());
         if (global.ManagerMissions) HelperError.catchError(() => ManagerMissions.init());// 依赖 ManagerCrossShard
         HelperError.catchError(() => ManagerCreeps.init());
         HelperError.catchError(() => ManagerRooms.init());
@@ -124,7 +124,7 @@ let pro = {
         if (cpuProfile) cpuProfile.optional = Game.cpu.getUsed() - phaseStart;
     },
     afterWork() {
-        if (global.ManagerCrossShard) HelperError.catchError(() => ManagerCrossShard.afterWork());
+        if (global.ManagerCrossShard && isCpuFeatureEnabled("crossShard")) HelperError.catchError(() => ManagerCrossShard.afterWork());
     }
 };
 
