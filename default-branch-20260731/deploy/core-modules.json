@@ -29,6 +29,7 @@
   "station_upgrade",
   "station_work",
   "station_tower",
+  "station_lab",
   "strategy_lowLevel",
   "strategy_highLevel",
   "strategy_minSizeRoom",

@@ -197,6 +197,28 @@ let space_action = {
 
 let _global_memory = undefined
 
+let updateCodeHealth = function () {
+    if (Game.time % 20 != 0) return;
+    let missingTaskHandlers = {};
+    let units = _.values(Game.creeps).concat(_.values(Game.powerCreeps).filter(e => e.ticksToLive));
+    for (let unit of units) {
+        for (let task of unit.memory.tasks || []) {
+            if (task && task.taskName && typeof unit[task.taskName] != "function") {
+                missingTaskHandlers[task.taskName] = (missingTaskHandlers[task.taskName] || 0) + 1;
+            }
+        }
+    }
+    Memory.codeHealth = Object.assign(Memory.codeHealth || {}, {
+        time: Game.time,
+        cpu: Game.cpu.getUsed(),
+        averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),
+        bucket: Game.cpu.bucket,
+        creeps: _.size(Game.creeps),
+        powerCreeps: _.values(Game.powerCreeps).filter(e => e.ticksToLive).length,
+        missingTaskHandlers: missingTaskHandlers,
+    });
+}
+
 let main = function () {
     if (_global_memory) {
         delete global.Memory;
@@ -228,6 +250,7 @@ let main = function () {
     HelperError.catchError(() => exec_wake_task());
     HelperError.throwAllError();
     HelperCpuUsed.exec();
+    updateCodeHealth();
     // P0();
     // space_action.an_w();
 

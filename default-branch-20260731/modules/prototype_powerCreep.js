@@ -63,9 +63,10 @@ PowerCreep.prototype.needOpStorage = function (storage) {
     let pcPower = this.powers[PWR_OPERATE_STORAGE]//
     if (!storage) return false;
     let effect = storage.effects && storage.effects.find(e => e.power == PWR_OPERATE_STORAGE);
-    return pcPower && !pcPower.cooldown && pcPower.level >= 1 &&
+    let shouldOperate = pcPower && !pcPower.cooldown && pcPower.level >= 1 &&
         storage.store.getUsedCapacity() > 950000 &&
         (!effect || effect.ticksRemaining < 100);
+    return shouldOperate ? storage : false;
 }
 
 PowerCreep.prototype.OpStorage = function () {

@@ -49,6 +49,7 @@ require('station_carry');
 require('station_upgrade');
 require('station_work');
 require('station_tower');
+require('station_lab');
 
 require('strategy_lowLevel');
 require('strategy_highLevel');

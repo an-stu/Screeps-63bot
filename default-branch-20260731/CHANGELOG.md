@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.4.0 — Core lab and boost tasks
+
+### Added
+
+- Restore `station_lab`, which provides the existing `boostCreepBodyPart` task
+  handler and the boost/unboost task generators used by room spawning logic.
+- Resume lab filling, clearing, reactions, and boost allocation in owned rooms.
+
+### Optimized
+
+- Skip the lab subsystem entirely in rooms with no labs.
+- Correct the controller-level active-lab capacity check.
+- Add a core task dependency audit and ignore null entries when composing task
+  arrays, preventing one unavailable target from corrupting a creep task stack.
+- Record a lightweight `Memory.codeHealth` snapshot every 20 ticks with the
+  recent average CPU, bucket, unit counts, and missing live task handlers.
+- Preserve the most recent caught error and tick in `Memory.codeHealth`.
+
+## v0.3.1 — Power Creep task-target hotfix
+
+### Fixed
+
+- Return the storage object from `needOpStorage` instead of boolean `true`, so
+  `UtilsTask.task` receives a valid target.
+- Build task room names from `RoomPosition.roomName` and report invalid targets
+  explicitly, including the affected task name.
+
 ## v0.3.0 — Storage and terminal balancing
 
 ### Added

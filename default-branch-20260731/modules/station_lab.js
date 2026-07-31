@@ -355,7 +355,7 @@ let pro={
         obj["otherLabs"]=obj["otherLabs"]||[]
         let labCnt = (obj["centerLabs"].concat(obj["otherLabs"])).filter(id=>Game.getObjectById(id)).length
         let historyCnt = obj["centerLabs"].length+obj["otherLabs"].length
-        let notCheckActive = room.level>=8||CONTROLLER_STRUCTURES[STRUCTURE_LAB]>=room.lab.length
+        let notCheckActive = room.level >= 8 || CONTROLLER_STRUCTURES[STRUCTURE_LAB][room.level] >= room.lab.length
         let labs = room.lab.filter(e=>notCheckActive||e.isActive()).sort((a,b)=>a.id<b.id) //  先按id排序
         if(labs.length>=3&&labCnt!=labs.length||historyCnt!=labCnt){
             obj.task = []

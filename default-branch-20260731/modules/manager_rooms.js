@@ -59,7 +59,7 @@ let pro={
         // room.creeps("carrier").forEach(e=>e.memory.tasks=[])
         // room.creeps("worker").forEach(e=>e.memory.tasks=[])
 
-        if (global.StationLab) HelperError.catchError(()=>StationLab.exec(room));// 先预计算 labs
+        if (global.StationLab && room.lab && room.lab.length) HelperError.catchError(()=>StationLab.exec(room));// 先预计算 labs
 
         if (global.StationFactory) HelperError.catchError(()=>StationFactory.exec(room));// 先预计算 factory
 

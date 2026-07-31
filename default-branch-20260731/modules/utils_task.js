@@ -10,10 +10,13 @@ let pro={
         return newTask;
     },
     task (obj,taskName,registerFuncName,ops = {}) {
+        if (!obj || !obj.pos) {
+            throw new TypeError("UtilsTask.task: invalid target for " + taskName);
+        }
         let newTask ={
             taskName:taskName,
             id:obj.id,
-            roomName:obj.room.name,
+            roomName:obj.pos.roomName,
             x:obj.pos.x,
             y:obj.pos.y,
             regFun:registerFuncName
@@ -61,4 +64,3 @@ let pro={
 };
 
 global.UtilsTask=pro;
-

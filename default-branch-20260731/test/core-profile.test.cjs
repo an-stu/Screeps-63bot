@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { execFileSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "deploy/core-modules.json"), "utf8"));
@@ -11,6 +12,7 @@ const mounted = [...fs.readFileSync(path.join(root, "modules/main_mount.js"), "u
 const mainMount = fs.readFileSync(path.join(root, "modules/main_mount.js"), "utf8");
 const powerCreepStrategy = fs.readFileSync(path.join(root, "modules/strategy_factoryPowerCreep.js"), "utf8");
 const powerCreepPrototype = fs.readFileSync(path.join(root, "modules/prototype_powerCreep.js"), "utf8");
+const utilsTask = fs.readFileSync(path.join(root, "modules/utils_task.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -25,8 +27,12 @@ assert.equal(typeof source.modules.algo_wasm_priorityqueue.binary, "string", "Pr
 assert.ok(mainMount.includes("global.LOCAL_SHARD_NAME = Game.shard.name"), "core mode must initialize its shard name");
 assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep Power Creeps alive and operating storage");
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
+assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(powerCreepStrategy.includes("spawnCooldownTime <= Date.now()"), "Power Creeps must respawn after their cooldown expires");
 assert.ok(powerCreepPrototype.includes("effect.ticksRemaining < 100"), "storage operation must refresh near expiry");
+assert.ok(powerCreepPrototype.includes("return shouldOperate ? storage : false"), "storage operation must return a task target, not a boolean");
+assert.ok(utilsTask.includes("roomName:obj.pos.roomName"), "task targets must use their stable RoomPosition room name");
+execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {
     Game: {
@@ -55,5 +61,6 @@ for (let time = 5; time <= 5 * 605; time += 5) {
 assert.equal(context.HelperCpuUsed.size, 600, "sampler should cap its retained history");
 assert.equal(context.HelperCpuUsed.series(context.HelperCpuUsed.cpu).length, 600);
 assert.equal(context.HelperCpuUsed.series(context.HelperCpuUsed.cpu)[0], 6, "ring buffer must return chronological samples");
+assert.equal(context.HelperCpuUsed.average(context.HelperCpuUsed.cpu, 20), 595.5, "sampler must average only recent values");
 
 console.log("core profile checks passed");

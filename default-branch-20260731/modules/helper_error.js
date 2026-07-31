@@ -19,6 +19,10 @@ let pro_err={
         if(pro_err.errList.length){
             let tmp = pro_err.errList;
             pro_err.errList = [];
+            Memory.codeHealth = Memory.codeHealth || {};
+            Memory.codeHealth.lastErrorTick = Game.time;
+            Memory.codeHealth.errorCount = (Memory.codeHealth.errorCount || 0) + tmp.length;
+            Memory.codeHealth.lastError = String(tmp[0]).slice(0, 800);
             if(!tmp.length){
                 pro_err.print=0;
             }

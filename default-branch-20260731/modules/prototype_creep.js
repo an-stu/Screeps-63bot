@@ -219,10 +219,11 @@ Creep.prototype.headTask = function () {
 
 Creep.prototype.addTask = function (task) {
     // log(this.memory.tasks.push(task))
+    if (!task) return this;
     if (task.taskName) {
         this.memory.tasks.push(task)
     }
-    else for (let t of task) {
+    else if (Array.isArray(task)) for (let t of task) {
         this.addTask(t);
     }
     return this;

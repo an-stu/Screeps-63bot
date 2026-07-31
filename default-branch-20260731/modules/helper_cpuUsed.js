@@ -99,6 +99,16 @@ let pro={
         if (this.size < this.maxSamples) return data.slice(0, this.size);
         return data.slice(this.cursor).concat(data.slice(0, this.cursor));
     },
+    average(data, count = 20) {
+        let samples = Math.min(count, this.size);
+        if (!samples) return 0;
+        let total = 0;
+        for (let i = 0; i < samples; i++) {
+            let index = (this.cursor - 1 - i + this.maxSamples) % this.maxSamples;
+            total += data[index] || 0;
+        }
+        return total / samples;
+    },
     show(){
         console.log(cpuEcharts(Game.time, this.series(this.cpu), this.series(this.bucket)))
     },
