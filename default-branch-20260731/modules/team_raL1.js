@@ -13,6 +13,14 @@ global.raL1Target = ""
 
 global.pathData= {}
 
+// Keep persisted cross-shard tasks inert until manager_crossShard is restored.
+// The full manager replaces this placeholder when it is mounted first.
+if (!Creep.prototype.moveCrossShardByPath) {
+    Creep.prototype.moveCrossShardByPath = function () {
+        if (Game.time % 100 == 0) this.say("cross paused");
+    }
+}
+
 // shard1 / E50S20
 
 Creep.prototype.registerRaL1=function () {
@@ -65,6 +73,7 @@ Creep.prototype.raL1=function () {
         let em=Game.getObjectById(raL1Target);//this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);//
         let isHostileCreep = false;
         let isHostileConstruction = false;
+        let isSite = false;
         if (em) isHostileCreep = true;
         if(!em)em = flag.room&&flag.pos.lookFor(LOOK_STRUCTURES).find(e=>!e.my && e.structureType !== STRUCTURE_CONTAINER)
         if(!em) em=this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES,{range:3,filter:e=>e.hits&&e.structureType!=STRUCTURE_WALL&&e.structureType!=STRUCTURE_POWER_BANK&&!e.pos.coverRampart()});
@@ -95,7 +104,7 @@ Creep.prototype.raL1=function () {
         if(!em)em = this.pos.findInRange(FIND_HOSTILE_CREEPS,3,{filter:e=>!e.pos.coverRampart()}).head()
         if(!em)em = this.pos.findInRange(FIND_HOSTILE_STRUCTURES,3, {filter:e=>e.structureType!=STRUCTURE_POWER_BANK}).head()
 
-        if(em)HelperVisual.showText(em,"X")
+        if(em && global.HelperVisual)HelperVisual.showText(em,"X")
         if(em&&em.structureType)isHostileConstruction=true
         if(isHostileConstruction){
             if ( !this.pos.inRangeTo(em, 2)) {
@@ -264,6 +273,10 @@ let pro = {
     // raBody3:ManagerCreeps.calcBodyPart({ [TOUGH]: 1, [RANGED_ATTACK]: 1, [MOVE]: 1 , [HEAL]: 1 , [CARRY]: 1 , [ATTACK]: 1, [WORK]: 1 }),
     // raBoost3:{[BOOST_RES["damage"][0]]:30*1,[BOOST_RES["fatigue"][0]]:30*1,[BOOST_RES["rangedAttack"][0]]:30*1,[BOOST_RES["heal"][0]]:30*1,[BOOST_RES["capacity"][0]]:30*1,[BOOST_RES["attack"][0]]:30*1,[BOOST_RES["build"][0]]:30*1},
     execSpawnCrossShard (flag,raBody,raBoost) {
+        if (!global.ManagerCrossShard) {
+            if (Game.time % 100 == 0) console.log(flag.name + ": cross-shard manager is disabled");
+            return;
+        }
         if(flag.name.indexOf("_keeper")>=0){
             if(flag.memory.taskId && flag.memory.spawnTime+1400<Game.time){
                 delete flag.memory.taskId;

@@ -17,6 +17,7 @@ const stationTower = fs.readFileSync(path.join(root, "modules/station_tower.js")
 const managerRooms = fs.readFileSync(path.join(root, "modules/manager_rooms.js"), "utf8");
 const managerFlags = fs.readFileSync(path.join(root, "modules/manager_flags.js"), "utf8");
 const main = fs.readFileSync(path.join(root, "modules/main.js"), "utf8");
+const prototypeRoom = fs.readFileSync(path.join(root, "modules/prototype_room.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -33,6 +34,7 @@ assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep 
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(manifest.includes("station_factory"), "core mode must keep owned factories and OPF creeps functional");
+assert.ok(manifest.includes("team_raL1"), "core mode must service the active raL3 flag");
 assert.ok(powerCreepStrategy.includes("spawnCooldownTime <= Date.now()"), "Power Creeps must respawn after their cooldown expires");
 assert.ok(powerCreepPrototype.includes("effect.ticksRemaining < 100"), "storage operation must refresh near expiry");
 assert.ok(powerCreepPrototype.includes("return shouldOperate ? storage : false"), "storage operation must return a task target, not a boolean");
@@ -42,6 +44,7 @@ assert.ok(!managerRooms.includes("room.find(FIND_FLAGS)"), "room manager must us
 assert.ok(managerFlags.includes("let prefixMap = Game._flagPerfixMap = {}"), "flag prefixes must be indexed during initialization");
 assert.ok(main.includes("Game._coreObjects"), "main loop must cache tick object arrays");
 assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop must not serialize all Memory manually");
+assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {

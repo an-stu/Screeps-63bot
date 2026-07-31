@@ -32,8 +32,8 @@ Room.prototype.setFlagList=function (list) {
 };
 
 Room.prototype.flags=function (prefix) {
+    this._flagList = this._flagList || []
     if(prefix){
-        this._flagList = this._flagList||[]
         let flags = this[prefix+"_flagList"];
         if(flags == null){
             flags = this._flagList.filter(e=>e.getPrefix() == prefix);

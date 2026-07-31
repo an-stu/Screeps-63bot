@@ -35,5 +35,6 @@
   "strategy_highLevel",
   "strategy_minSizeRoom",
   "strategy_factoryPowerCreep",
-  "strategy_resourceBalance"
+  "strategy_resourceBalance",
+  "team_raL1"
 ]

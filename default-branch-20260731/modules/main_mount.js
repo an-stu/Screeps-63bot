@@ -57,6 +57,7 @@ require('strategy_highLevel');
 require('strategy_minSizeRoom');
 require('strategy_factoryPowerCreep');
 require('strategy_resourceBalance');
+require('team_raL1');
 // Optional modules are intentionally not loaded in the 20 CPU bootstrap
 // profile. Reintroduce only one group at a time after measuring its impact:
 // helper_visual, station_lab, station_observer, station_factory,

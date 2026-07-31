@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.7.0 — Active raL creep strategy
+
+### Added
+
+- Restore `team_raL1`, covering the active `raL3_E49S31_1` flag and its creep
+  task handler. Cross-shard variants remain paused while their manager is off.
+
+### Fixed
+
+- Keep construction-site state local to the raL task and guard the optional
+  visual helper.
+- Ensure `room.flags()` returns an empty array in rooms with no flags, fixing a
+  resource-balancing exception introduced by the room index refactor.
+
 ## v0.6.0 — Per-tick room indexes
 
 ### Optimized
