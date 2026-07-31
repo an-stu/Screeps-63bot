@@ -565,3 +565,44 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
 
 - Allow RCL1 workers to build the first spawn construction site instead of
   always upgrading the controller until RCL2.
+
+## v0.32.0 — Observer-assisted claiming
+
+### Added
+
+- Let claim operations automatically select an owned Observer within its
+  10-room range and request priority vision for the target room.
+- Refresh target-room stations and generate the blueprint directly from the
+  Observer visibility tick, avoiding a manual console observation step.
+
+### Optimized
+
+- Keep claim observations in a separate priority queue so ordinary highway
+  scans cannot overwrite them, while issuing at most one Observer intent per
+  room and tick.
+- Run the claim strategy on its normal three-tick cadence, with an additional
+  pass only on the exact priority-vision tick.
+- Spawn the short-lived claimer before the reusable cleanup worker when both
+  are missing from a long-range expansion.
+
+## v0.33.0 — Claim safety audit and persistent diagnostics
+
+### Added
+
+- Persist a bounded state history and latest room snapshot under
+  `Memory.claimOperations[roomName]`; inspect it with `claimLog("E53S21")`.
+- Record observation, scouting, planning, claiming, cleanup, first-spawn
+  construction, completion, and blocking states without unbounded Memory use.
+
+### Fixed
+
+- Count only `FIND_MY_SPAWNS` when selecting a spawn room or completing an
+  expansion, so an old hostile spawn can never satisfy the operation.
+- Dismantle every non-blueprint structure that blocks the new layout, while
+  retaining ownerless roads, containers, and walls already used by the saved
+  blueprint.
+- Create only the first spawn site while the room is spawnless; secondary
+  extension and container sites are added after that spawn exists, ensuring
+  bootstrap workers cannot choose lower-priority construction first.
+- Spawn the reusable cleaner/bootstrap worker even in an already-empty target
+  room, guaranteeing that the first spawn has a local builder after claiming.

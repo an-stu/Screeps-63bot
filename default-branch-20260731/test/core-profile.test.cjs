@@ -29,6 +29,7 @@ const teamRaL1 = fs.readFileSync(path.join(root, "modules/team_raL1.js"), "utf8"
 const strategyAtkL2 = fs.readFileSync(path.join(root, "modules/strategy_atkL2.js"), "utf8");
 const strategyClaim = fs.readFileSync(path.join(root, "modules/strategy_claim.js"), "utf8");
 const strategyLowLevel = fs.readFileSync(path.join(root, "modules/strategy_lowLevel.js"), "utf8");
+const stationObserver = fs.readFileSync(path.join(root, "modules/station_observer.js"), "utf8");
 const strategyCleanBuild = fs.readFileSync(path.join(root, "modules/strategy_cleanBuild.js"), "utf8");
 const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
@@ -108,9 +109,15 @@ assert.ok(main.includes('ManagerFlags.hasPrefix("claim")'), "claim strategy must
 assert.ok(strategyClaim.includes("flag.memory.spawnRoom"), "claim operations must support a pinned safe spawn room");
 assert.ok(strategyClaim.includes("Creep.prototype.clearClaimRoom") && strategyClaim.includes('this.memory.role = "worker"'), "claim cleanup must automatically become a bootstrap worker");
 assert.ok(strategyClaim.includes("[WORK]: 5") && strategyClaim.includes("[CARRY]: 5") && strategyClaim.includes("[MOVE]: 5"), "claim cleanup must use a bounded reusable body");
-assert.ok(strategyClaim.includes("claimCleanupTarget") && strategyClaim.includes("findClosestByRange(FIND_HOSTILE_STRUCTURES"), "claim cleanup must cache targets instead of path-searching every tick");
-assert.ok(strategyClaim.includes("ensureConstructionSites") && strategyClaim.includes("STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER"), "claim operations must create blueprint bootstrap sites automatically");
+assert.ok(strategyClaim.includes("claimCleanupTarget") && strategyClaim.includes("findClosestByRange(FIND_STRUCTURES"), "claim cleanup must cache targets instead of path-searching every tick");
+assert.ok(strategyClaim.includes("ensureConstructionSites") && strategyClaim.includes("createConstructionSite(STRUCTURE_SPAWN)") && strategyClaim.includes("[STRUCTURE_EXTENSION, STRUCTURE_CONTAINER]"), "claim operations must create blueprint bootstrap sites automatically");
 assert.ok(!strategyLowLevel.includes("room.level > 1 && StationWork.constructionNeedBuild"), "RCL1 workers must be allowed to build the first spawn");
+assert.ok(strategyClaim.includes("StationObserver.requestRoom") && strategyClaim.includes("priorityVisibleTick == Game.time"), "claim operations must consume scheduled Observer vision automatically");
+assert.ok(stationObserver.includes("PriorityObserveRoomQueue") && stationObserver.includes("getRoomLinearDistance"), "claim observations must use a range-checked priority queue");
+assert.ok(strategyClaim.includes("room.find(FIND_MY_SPAWNS)") && !strategyClaim.includes("targetRoom.spawn.length>0"), "hostile spawns must never complete a claim operation");
+assert.ok(strategyClaim.includes("isClaimCleanupTarget") && strategyClaim.includes("!isPlannedClaimStructure"), "claim cleanup must remove non-blueprint neutral blockers as well as hostile structures");
+assert.ok(strategyClaim.includes("global.claimLog") && strategyClaim.includes("Memory.claimOperations"), "claim operations must retain bounded diagnostics for later inspection");
+assert.ok(strategyClaim.includes("operation.history.length > 40"), "claim diagnostics must not grow Memory without a bound");
 assert.ok(strategyCleanBuild.includes("FIND_HOSTILE_STRUCTURES") && strategyCleanBuild.includes("!structure.my"), "claim cleanup must remove hostile structures that block a new spawn");
 assert.ok(main.includes('ManagerFlags.hasPrefix("cleanBuild")') && main.includes('ManagerFlags.hasPrefix("blockRoom")'), "global flag utilities must use prefix gates");
 assert.ok(main.includes('isCpuFeatureEnabled("combat")') && main.includes("ManagerFlags.hasAnyPrefix"), "advanced combat must remain dormant without its opt-in and flags");

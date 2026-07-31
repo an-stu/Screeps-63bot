@@ -23,6 +23,23 @@ let AVOID_ROOMS = (function () {
 let pro={
     stationName:"stationObserver",
     ObserveRoomQueue:{},// id:room
+    PriorityObserveRoomQueue:{},
+    requestRoom(roomName, preferredObserverRoom) {
+        if (Game.rooms[roomName]) return preferredObserverRoom;
+        let preferred = preferredObserverRoom && Game.rooms[preferredObserverRoom];
+        let observerRoom = preferred && preferred.my && preferred.observer
+            && Game.map.getRoomLinearDistance(preferred.name, roomName) <= 10
+            ? preferred
+            : Object.values(Game.rooms)
+                .filter(room => room.my && room.observer && Game.map.getRoomLinearDistance(room.name, roomName) <= 10)
+                .sort((left, right) => Game.map.getRoomLinearDistance(left.name, roomName)
+                    - Game.map.getRoomLinearDistance(right.name, roomName))[0];
+        if (!observerRoom) return;
+        let queue = pro.PriorityObserveRoomQueue[observerRoom.observer.id]
+            = pro.PriorityObserveRoomQueue[observerRoom.observer.id] || [];
+        if (!queue.includes(roomName)) queue.push(roomName);
+        return observerRoom.name;
+    },
     getClosedMyRoomName (roomName){
         if(AVOID_ROOMS.has(roomName))return;
         Memory.rooms[roomName] = Memory.rooms[roomName] || {};
@@ -102,17 +119,30 @@ let pro={
         // log(room.name,sm.deposits )
     },
     obOverRooms (room){
-        if(!room.observer||!room.memory[pro.stationName])return;// 如果没有ob就不动
-        let lastRoomName = room.memory[pro.stationName].lastRoomName
+        if(!room.observer)return;// 如果没有ob就不动
+        let stationMemory = room.memory[pro.stationName] = room.memory[pro.stationName] || {};
+        let lastRoomName = stationMemory.lastRoomName
         if(lastRoomName&&Game.rooms[lastRoomName]){
             // log(room.name,Game.time,pro.ObserveRoomQueue[room.observer.id])
             pro.observeLastRoom(Game.rooms[lastRoomName]);
-            delete room.memory[pro.stationName].lastRoomName;
+            delete stationMemory.lastRoomName;
         }
-        if(room.observer&&pro.ObserveRoomQueue[room.observer.id]&&pro.ObserveRoomQueue[room.observer.id].head()){
-            let roomName = pro.ObserveRoomQueue[room.observer.id].shift();
-            room.observer.observeRoom(roomName);
-            room.memory[pro.stationName].lastRoomName=roomName;
+        let priorityQueue = pro.PriorityObserveRoomQueue[room.observer.id];
+        let regularQueue = pro.ObserveRoomQueue[room.observer.id];
+        let isPriorityObservation = priorityQueue && priorityQueue.length;
+        let roomName = isPriorityObservation
+            ? priorityQueue.shift()
+            : regularQueue && regularQueue.length ? regularQueue.shift() : undefined;
+        if(roomName){
+            let observeResult = room.observer.observeRoom(roomName);
+            if (observeResult == OK && isPriorityObservation) {
+                Memory.rooms[roomName] = Memory.rooms[roomName] || {};
+                let targetMemory = Memory.rooms[roomName][pro.stationName]
+                    = Memory.rooms[roomName][pro.stationName] || {};
+                targetMemory.priorityVisibleTick = Game.time + 1;
+            }
+            if (observeResult == OK) stationMemory.lastRoomName=roomName;
+            else if (isPriorityObservation && !priorityQueue.includes(roomName)) priorityQueue.unshift(roomName);
         }
     },
     update (room) {
