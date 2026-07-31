@@ -49,13 +49,13 @@ Room.prototype.flags=function (prefix) {
 // Per-tick tactical query caches. Room objects are recreated every tick, so
 // these never become stale and let tower/safe-mode/team code share one scan.
 Room.prototype.getHostileCreeps=function () {
-    if(this._hostileCreeps === undefined)this._hostileCreeps = this.find(FIND_HOSTILE_CREEPS);
-    return this._hostileCreeps;
+    if(this._cpuHostileCreepCache === undefined)this._cpuHostileCreepCache = this.find(FIND_HOSTILE_CREEPS);
+    return this._cpuHostileCreepCache;
 };
 
 Room.prototype.getHostileStructures=function () {
-    if(this._hostileStructures === undefined)this._hostileStructures = this.find(FIND_HOSTILE_STRUCTURES);
-    return this._hostileStructures;
+    if(this._cpuHostileStructureCache === undefined)this._cpuHostileStructureCache = this.find(FIND_HOSTILE_STRUCTURES);
+    return this._cpuHostileStructureCache;
 };
 
 

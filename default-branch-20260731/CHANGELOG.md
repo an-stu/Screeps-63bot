@@ -409,3 +409,9 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   range selection, and removed a duplicate PathFinder call used only for logs.
 - Added a three-tick attack-room target cache so active attackers do not repeat
   up to seven `findClosestByPath` searches every tick.
+## v0.23.1 — Room cache-key hotfix
+
+### Fixed
+
+- Renamed tactical Room cache fields with a project-specific prefix so they
+  cannot collide with Screeps engine internals.
