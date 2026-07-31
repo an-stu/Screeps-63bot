@@ -58,15 +58,15 @@ let pro = {
         }
 
         // 出击！
-        if (global.teamL2) HelperError.catchError(() => teamL2.exec());
-        if (global.StrategyAtkl2) HelperError.catchError(() => StrategyAtkl2.exec());
+        if (global.teamL2 && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["teamL1","teamL2","teamL4"])) HelperError.catchError(() => teamL2.exec());
+        if (global.StrategyAtkl2 && isCpuFeatureEnabled("combat") && ManagerFlags.hasPrefix("l2")) HelperError.catchError(() => StrategyAtkl2.exec());
         if (global.TeamRaL1) HelperError.catchError(() => TeamRaL1.exec());
-        if (global.WarDefenseCore) HelperError.catchError(() => WarDefenseCore.exec());
-        if (global.WarPowerCreepOperator) HelperError.catchError(() => WarPowerCreepOperator.exec());
+        if (global.WarDefenseCore && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["defense","defenseAH","defenseRA"])) HelperError.catchError(() => WarDefenseCore.exec());
+        if (global.WarPowerCreepOperator && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["disCtrl","OPSCarry","PCAtk","showDisSpawn"])) HelperError.catchError(() => WarPowerCreepOperator.exec());
 
         // 配置资源
-        if (global.WarTeamFlag) HelperError.catchError(() => WarTeamFlag.exec());
-        if (global.WarAttackRoom) HelperError.catchError(() => WarAttackRoom.exec());
+        if (global.WarTeamFlag && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["f4team","f2team","spawnTeam","target","team","r4","r1","a4","a2","w2"])) HelperError.catchError(() => WarTeamFlag.exec());
+        if (global.WarAttackRoom && isCpuFeatureEnabled("combat") && ManagerFlags.hasPrefix("warAttackRoom")) HelperError.catchError(() => WarAttackRoom.exec());
         if (cpuProfile) {
             cpuProfile.commands = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();

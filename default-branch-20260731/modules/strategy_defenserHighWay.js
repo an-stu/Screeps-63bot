@@ -16,7 +16,7 @@ Creep.prototype.defenseHighWay=function () {
     this.autoHeal();
     if(!flag)return;
     let em = this.pos.findClosestByPath(FIND_HOSTILE_CREEPS,{filter:e=>e.body.find(e=>e.type==ATTACK)});//遇到 attack 拉开距离
-    if(this.pos.inRangeTo(em,2)){
+    if(em && this.pos.inRangeTo(em,2)){
         em.range = 4
         let path = PathFinder.search(this.pos,em,{flee:true}).path;
         let code = this.moveByPath(path)
@@ -33,17 +33,19 @@ Creep.prototype.defenseHighWay=function () {
 
     if(em){
         this.moveTo(em);
-        if(!em.pos.isNearTo(em))this.rangedAttack(em);
+        if(!this.pos.isNearTo(em))this.rangedAttack(em);
         else this.rangedMassAttack();
     }
 
-    if(!em&&(!flag.pos.inRangeTo(em,4)||this.pos.isBorder())){
+    if(!em&&(!this.pos.inRangeTo(flag,4)||this.pos.isBorder())){
         this.moveTo(flag);
     }
 };
 
 let pro = {
-    getDefenseHighWayData(room,spawnRoom){
+    getDefenseHighWayData(flagName,room,spawnRoom){
+        let flag = Game.flags[flagName];
+        if(!flag)return;
         let sumDamage =  room.find(FIND_HOSTILE_CREEPS).map(e=>e.possibleDamage(false,2)).sum();// ra的全部伤害
         let sumHeal =  room.find(FIND_HOSTILE_CREEPS).map(e=>e.possibleHealDamage(1,false)).sum();// 全部奶量
         let maxToughDamage =  room.find(FIND_HOSTILE_CREEPS).map(e=>e.possibleToughBeHitsDamage(sumHeal)).maxBy(e=>e);// 单个能奶起来的最大值
@@ -93,7 +95,7 @@ let pro = {
     checkDefense(flagName,room,spawnRoom){
         if(!Memory.flags[flagName])Memory.flags[flagName]={}
         if(!Memory.flags[flagName].spawnData&&(Memory.flags[flagName].spawnDefenseTime||0)<Game.time){
-            let data = pro.getDefenseHighWayData(room,spawnRoom)
+            let data = pro.getDefenseHighWayData(flagName,room,spawnRoom)
             if(data)Memory.flags[flagName].spawnData = data
         }
     },

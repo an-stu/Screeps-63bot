@@ -64,6 +64,7 @@ let pro = {
     },
     // 大概消耗1 CPU！ 慎用！
     showRoomStructures(roomName, structMap) {
+        if(!isCpuFeatureEnabled("visual"))return;
         let roomStructs = new RoomArray().init()
         const visual = new RoomVisual(roomName);
         if (!structMap) structMap = Memory.rooms[roomName].structMap
@@ -85,6 +86,7 @@ let pro = {
         pro.showRoomTowerDamage();
     },
     showRoomTowerDamage() {
+        if(!isCpuFeatureEnabled("visual"))return;
         let flag = Game.flags.showRoomTowerDamage;
         if (flag) {
             if(!global.WarCache)return;
@@ -110,6 +112,7 @@ let pro = {
         }
     },
     showText(roomNameOrObj, text, objOrPos, color = 'red', font = 1) {
+        if(!isCpuFeatureEnabled("visual"))return;
         if (roomNameOrObj.pos || roomNameOrObj.x !== undefined) {
             if (roomNameOrObj.x === undefined) objOrPos = roomNameOrObj.pos
             else objOrPos = roomNameOrObj
@@ -120,6 +123,7 @@ let pro = {
         visual.text(text, pos.x, pos.y + 0.35, { color: color, opacity: 0.75, font: font })
     },
     showLine(posA, posB, color = 'red', offset) {
+        if(!isCpuFeatureEnabled("visual"))return;
         let visual = pro.getRoomVisual(posA.pos ? posA.pos.roomName : posA.roomName)
         posA = posA.pos || posA
         posB = posB.pos || posB
@@ -127,6 +131,7 @@ let pro = {
         else visual.line(posA, posB, { color: color })
     },
     mapShowText(roomNameOrObj, text, objOrPos, color = 'red', font = 1) {
+        if(!isCpuFeatureEnabled("visual"))return;
         if (roomNameOrObj.pos) {
             objOrPos = roomNameOrObj.pos
             roomNameOrObj = objOrPos.roomName
@@ -136,6 +141,7 @@ let pro = {
         Game.map.visual.text(text, pos, { color: color, opacity: 0.75, font: font })
     },
     showPath(posArray, color = 'red') {
+        if(!isCpuFeatureEnabled("visual"))return;
         let roomNameMap = {}
         posArray.forEach(e => {
             if (!roomNameMap[e.roomName]) {

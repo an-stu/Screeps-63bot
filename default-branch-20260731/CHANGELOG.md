@@ -351,3 +351,21 @@
 After its module group has been uploaded and its `require` restored, enable a
 feature with `Memory.cpuFeatures.<name> = true`; disable it with `false`.
 Current feature switches are `market`, `autoPlanner`, and `visual`.
+## v0.21.0 — Advanced combat package
+
+### Added
+
+- Restored the damage, cache, team core/control/flag, attack-room, defense,
+  Power Creep operator, L2 attack, and highway-defense modules as one
+  dependency-complete package.
+- Added the explicit `Memory.cpuFeatures.combat` opt-in. Every combat
+  dispatcher also requires a matching active flag, keeping idle CPU cost low.
+
+### Fixed
+
+- Guarded missing Power Creeps, unregistered defense teams, and absent highway
+  targets instead of throwing during combat ticks.
+- Corrected highway defender range checks and task creation to use the actual
+  flag rather than an undefined variable.
+- Applied the visual feature gate inside drawing helpers so combat code cannot
+  accidentally spend CPU on visuals while visuals are disabled.

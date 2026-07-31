@@ -142,7 +142,7 @@ let pro={
                 &&flag.memory.healer&&!Game.getObjectById(flag.memory.healer)){
                 flag.remove()
             }
-            if(flag._creeps.length){
+            if(flag._creeps && flag._creeps.length){
                 ManageTeam.execCalDamage(flag);
                 ManageTeam.execCalTarget(flag);
             }

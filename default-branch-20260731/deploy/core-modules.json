@@ -26,6 +26,15 @@
   "manager_autoPlanner",
   "manager_missions",
   "manager_crossShard",
+  "war_damageCal",
+  "war_cache",
+  "war_teamCore",
+  "war_teamControl",
+  "war_teamFlag",
+  "war_attackRoom",
+  "war_defenseCore",
+  "war_powerCreepOperator",
+  "teamL2",
   "station_defense",
   "station_sources",
   "station_minetral",
@@ -54,5 +63,7 @@
   "strategy_pillage",
   "strategy_deposits",
   "strategy_GCLRoom",
+  "strategy_atkL2",
+  "strategy_defenserHighWay",
   "team_raL1"
 ]

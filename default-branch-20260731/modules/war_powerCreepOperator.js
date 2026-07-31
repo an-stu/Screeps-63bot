@@ -250,8 +250,7 @@ let pro={
         ManagerFlags.getFlagsByPrefix("PCAtk").forEach(flag=>{
             let pcName = flag.getNameSplit()[1]
             let pc = Game.powerCreeps[pcName]
-            if(pc.ticksToLive)
-            if(!pc.headTask()||pc.headTask().taskName!="powerCreepAttacker"){
+            if(pc && pc.ticksToLive && (!pc.headTask()||pc.headTask().taskName!="powerCreepAttacker")){
                 pc.memory.tasks=[]
                 pc.addTask(UtilsTask.taskFlag(flag,"powerCreepAttacker","registerPowerCreepAttacker"))
             }

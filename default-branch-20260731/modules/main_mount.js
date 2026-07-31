@@ -20,8 +20,9 @@ global.CPU_FEATURES = {
     claimCrossShard: true,
     deposits: true,
     GCLRoom: true,
+    combat: true,
 }
-global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits","GCLRoom"])
+global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits","GCLRoom","combat"])
 global.isCpuFeatureEnabled = name => {
     let value = (Memory.cpuFeatures || {})[name];
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
@@ -64,6 +65,18 @@ require('manager_autoPlanner');
 require('manager_missions');
 require('manager_crossShard');
 
+// Advanced combat is shipped as one dependency-complete package. Its tick
+// dispatchers remain dormant until Memory.cpuFeatures.combat is explicitly set.
+require('war_damageCal');
+require('war_cache');
+require('war_teamCore');
+require('war_teamControl');
+require('war_teamFlag');
+require('war_attackRoom');
+require('war_defenseCore');
+require('war_powerCreepOperator');
+require('teamL2');
+
 require('station_defense');
 require('station_sources');
 require('station_minetral');
@@ -93,6 +106,8 @@ require('strategy_blockRoom');
 require('strategy_pillage');
 require('strategy_deposits');
 require('strategy_GCLRoom');
+require('strategy_atkL2');
+require('strategy_defenserHighWay');
 require('team_raL1');
 // Optional modules are intentionally not loaded in the 20 CPU bootstrap
 // profile. Reintroduce only one group at a time after measuring its impact:

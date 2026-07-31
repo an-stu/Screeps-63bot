@@ -47,6 +47,12 @@ let pro={
     hasPrefix (prefix){
         let flags = Game._flagPerfixMap[prefix];
         return !!(flags && flags.length);
+    },
+    hasAnyPrefix (prefixes){
+        for(let prefix of prefixes){
+            if(pro.hasPrefix(prefix))return true;
+        }
+        return false;
     }
 
 };

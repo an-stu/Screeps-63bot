@@ -92,6 +92,9 @@ let pro={
 
         if(!MIN_CPU && global.StrategyDeposits && isCpuFeatureEnabled("deposits"))HelperError.catchError(()=>StrategyDeposits.exec(room))
 
+        if(global.StrategyDefenserHighWay && isCpuFeatureEnabled("combat") && room.flags("defenserHighWay").length)
+            HelperError.catchError(()=>StrategyDefenserHighWay.exec(room))
+
 
         if(Game.time%30==0&&room.level>=7&&room.storage&&room.storage.store.getFreeCapacity()<=0){
             console.log(room.name+" storage is full")
