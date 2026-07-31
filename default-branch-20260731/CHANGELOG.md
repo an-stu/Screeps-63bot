@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.10.0 — Observer restoration
+
+### Added
+
+- Restore `station_observer` behind `Memory.cpuFeatures.observer` and keep it
+  enabled by default outside emergency low-CPU mode.
+- Add a shared optional-feature gate so later modules can be disabled without
+  another code upload.
+
+### Fixed
+
+- Allow observer scans to run before Deposit and Power Bank strategies are
+  restored. Missing strategies are skipped, so PB missions remain paused.
+- Initialize remote-room observer memory defensively.
+
 ## v0.9.0 — Adaptive 20 CPU scheduling
 
 ### Optimized

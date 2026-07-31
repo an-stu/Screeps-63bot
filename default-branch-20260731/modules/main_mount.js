@@ -8,7 +8,9 @@ global.CPU_FEATURES = {
     market: true,
     autoPlanner: false,
     visual: false,
+    observer: true,
 }
+global.isCpuFeatureEnabled = name => (Memory.cpuFeatures || {})[name] !== false && CPU_FEATURES[name] !== false
 // Cross-shard management is intentionally disabled in the core profile, but
 // creep and spawn naming still require the local shard identifier.
 global.LOCAL_SHARD_NAME = Game.shard.name
@@ -51,6 +53,7 @@ require('station_work');
 require('station_tower');
 require('station_lab');
 require('station_factory');
+require('station_observer');
 
 require('strategy_lowLevel');
 require('strategy_highLevel');

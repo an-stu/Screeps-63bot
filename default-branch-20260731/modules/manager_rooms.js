@@ -37,7 +37,7 @@ let pro={
     },
     firstActive : true,
     exec (room) {
-        if(!MIN_CPU && global.StationObserver)StationObserver.update(room);
+        if(!MIN_CPU && global.StationObserver && isCpuFeatureEnabled("observer"))StationObserver.update(room);
         if((Game.time+room.hashCode())%31==0||pro.firstActive){
             HelperError.catchError(()=>pro.updateRoom(room))
             pro.firstActive = false;
@@ -85,7 +85,7 @@ let pro={
 
         if (global.StrategyPillage) HelperError.catchError(()=>StrategyPillage.exec(room))
 
-        if(global.StationObserver && Game.shard.name!="shard1")
+        if(!MIN_CPU && global.StationObserver && isCpuFeatureEnabled("observer") && Game.shard.name!="shard1")
             HelperError.catchError(()=>StationObserver.obOverRooms(room))
 
         if(!MIN_CPU && global.StrategyPowerBank)HelperError.catchError(()=>StrategyPowerBank.exec(room))

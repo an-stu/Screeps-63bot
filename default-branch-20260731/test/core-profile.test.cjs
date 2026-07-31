@@ -35,6 +35,7 @@ assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep 
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(manifest.includes("station_factory"), "core mode must keep owned factories and OPF creeps functional");
+assert.ok(manifest.includes("station_observer"), "observer scanning must be independently restorable");
 assert.ok(manifest.includes("team_raL1"), "core mode must service the active raL3 flag");
 assert.ok(powerCreepStrategy.includes("spawnCooldownTime <= Date.now()"), "Power Creeps must respawn after their cooldown expires");
 assert.ok(powerCreepPrototype.includes("effect.ticksRemaining < 100"), "storage operation must refresh near expiry");
@@ -49,6 +50,8 @@ assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache m
 assert.ok(main.includes("Game.time % 100 == 0"), "detailed CPU profiling must remain low frequency");
 assert.ok(main.includes("room.controller.ticksToDowngrade < 20000"), "upgrader throttling must preserve controllers near downgrade");
 assert.ok(main.includes(".filter(shouldRunCreep)"), "creep execution must apply the safe adaptive throttle");
+assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
+assert.ok(mainMount.includes("observer: true"), "observer scanning must be switchable without another upload");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instrumentation must default to off");
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");

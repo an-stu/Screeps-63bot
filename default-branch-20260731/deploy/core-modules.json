@@ -31,6 +31,7 @@
   "station_tower",
   "station_lab",
   "station_factory",
+  "station_observer",
   "strategy_lowLevel",
   "strategy_highLevel",
   "strategy_minSizeRoom",

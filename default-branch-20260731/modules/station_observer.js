@@ -25,6 +25,7 @@ let pro={
     ObserveRoomQueue:{},// id:room
     getClosedMyRoomName (roomName){
         if(AVOID_ROOMS.has(roomName))return;
+        Memory.rooms[roomName] = Memory.rooms[roomName] || {};
         Memory.rooms[roomName][pro.stationName] = Memory.rooms[roomName][pro.stationName]||{}
 
         if (Game.time - (Memory.rooms[roomName][pro.stationName].closedMyRoomLastUpdate || 0) >10000) {
@@ -88,8 +89,8 @@ let pro={
         if(AVOID_ROOMS.has(room.name))return;
         let sm=room.memory[pro.stationName]=room.memory[pro.stationName]||{};
         sm.lastUpdateTime= Game.time
-        let deposits = room.find(FIND_DEPOSITS);
-        let powerBanks = room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_POWER_BANK});
+        let deposits = global.StrategyDeposits ? room.find(FIND_DEPOSITS) : [];
+        let powerBanks = global.StrategyPowerBank ? room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_POWER_BANK}) : [];
         deposits.filter(e=>!pro.inNovice(room,e)).map(e=>{return {id:e.id,x:e.pos.x,y:e.pos.y,disappearTime:Game.time+e.ticksToDecay,depositType:e.depositType,lastCooldown:e.lastCooldown}})
             .forEach(data=> StrategyDeposits.createOrUpdateDepositMission(room.name,data));
         // if(Game.shard.name == "shard3")return;
