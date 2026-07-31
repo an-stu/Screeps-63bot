@@ -118,6 +118,9 @@ const originMoveTo = Creep.prototype.moveTo;
 const originFindClosestByPath = RoomPosition.prototype.findClosestByPath;
 
 // 统计变量
+// CPU 统计会在每次 moveTo 前后调用 Game.cpu.getUsed()。20 CPU 额度下默认关闭，
+// 仅在诊断时通过 BetterMove.setCpuStats(true) 临时启用。
+let enableCpuStats = false;
 let startTime;
 let endTime;
 let startCacheSearch;
@@ -903,7 +906,7 @@ let minX, maxX, minY, maxY;
  * @param {MoveToOpts} ops
  */
 function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops) {     // ops.range设置越大找的越慢
-    startCacheSearch = Game.cpu.getUsed();
+    if (enableCpuStats) startCacheSearch = Game.cpu.getUsed();
     minX = formalFromPos.x + formalFromPos.y - 2;
     maxX = formalFromPos.x + formalFromPos.y + 2;
     minY = formalToPos.x + formalToPos.y - 1 - ops.range;
@@ -913,7 +916,7 @@ function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, o
             for (combinedY = minY; combinedY <= maxY; combinedY++) {
                 if (combinedY in globalPathCache[combinedX]) {
                     for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
-                        pathCounter++;
+                        if (enableCpuStats) pathCounter++;
                         if (isNear(path.start, formalFromPos) && isNear(fromPos, path.posArray[1]) && inRange(path.end, formalToPos, ops.range) && isSameOps(path, ops)) {     // 找到路了
                             creepCache.path = path;
                             return true;
@@ -934,7 +937,7 @@ function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, o
  * @param {MoveToOpts} ops
  */
 function findLongPathInCache(formalFromPos, formalToPos, creepCache, ops) {     // ops.range设置越大找的越慢
-    startCacheSearch = Game.cpu.getUsed();
+    if (enableCpuStats) startCacheSearch = Game.cpu.getUsed();
     minX = formalFromPos.x + formalFromPos.y - 2;
     maxX = formalFromPos.x + formalFromPos.y + 2;
     minY = formalToPos.x + formalToPos.y - 1 - ops.range;
@@ -944,7 +947,7 @@ function findLongPathInCache(formalFromPos, formalToPos, creepCache, ops) {     
             for (combinedY = minY; combinedY <= maxY; combinedY++) {
                 if (combinedY in globalPathCache[combinedX]) {
                     for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
-                        pathCounter++;
+                        if (enableCpuStats) pathCounter++;
                         if (isNear(path.start, formalFromPos) && inRange(path.end, formalToPos, ops.range) && isSameOps(path, ops)) {     // 找到路了
                             creepCache.path = path;
                             return true;
@@ -1018,12 +1021,14 @@ function moveOneStep(creep, visualStyle, toPos) {
     }
     creepCache.idx++;
     creepMoveCache[creep.name] = Game.time;
-    testNormal++;
-    let t = Game.cpu.getUsed() - startTime;
-    if (t > 0.2) {  // 对穿导致的另一个creep的0.2不计在内
-        normalLogicalCost += t - 0.2;
-    } else {
-        normalLogicalCost += t;
+    if (enableCpuStats) {
+        testNormal++;
+        let t = Game.cpu.getUsed() - startTime;
+        if (t > 0.2) {  // 对穿导致的另一个creep的0.2不计在内
+            normalLogicalCost += t - 0.2;
+        } else {
+            normalLogicalCost += t;
+        }
     }
     //creep.room.visual.circle(creepCache.path.posArray[creepCache.idx]);
     return originMove.call(creep, creepCache.path.directionArray[creepCache.idx]);
@@ -1124,12 +1129,13 @@ function direction2Pos(pos, target) {
  */
 function wrapFn(fn, name) {
     return function () {
-        startTime = Game.cpu.getUsed();     // 0.0015cpu
         if (obTick < Game.time) {
             obTick = Game.time;
             checkObResult();
             doObTask();
         }
+        if (!enableCpuStats) return fn.apply(this, arguments);
+        startTime = Game.cpu.getUsed();
         let code = fn.apply(this, arguments);
         endTime = Game.cpu.getUsed();
         if (endTime - startTime >= 0.2) {
@@ -1220,9 +1226,11 @@ function betterMoveTo(firstArg, secondArg, opts) {
             trySwap(this, toPos, false, true);
         }
         creepMoveCache[this.name] = Game.time;      // 用于防止自己移动后被误对穿
-        testNormal++;
-        let t = Game.cpu.getUsed() - startTime;
-        normalLogicalCost += t > 0.2 ? t - 0.2 : t;
+        if (enableCpuStats) {
+            testNormal++;
+            let t = Game.cpu.getUsed() - startTime;
+            normalLogicalCost += t > 0.2 ? t - 0.2 : t;
+        }
         return originMove.call(this, getDirection(this.pos, toPos));
     }
     ops.range = ops.range || 1;
@@ -1364,7 +1372,9 @@ function betterMoveTo(firstArg, secondArg, opts) {
     creepCache.dst = toPos;
     setPathTimer(creepCache);
 
-    found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
+    if (enableCpuStats) {
+        found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
+    }
 
     return startRoute(this, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
 }
@@ -1426,6 +1436,10 @@ Creep.prototype.moveTo = wrapFn(config.changeMoveTo ? betterMoveTo : originMoveT
 
 // module.exports
 global.BetterMove = {
+    setCpuStats(bool) {
+        enableCpuStats = !!bool;
+        return OK;
+    },
     // getPosMoveAble (pos){
     //     generateCostMatrix(Game.rooms[pos.roomName])
     //     if(pos.roomName in costMatrixCache)

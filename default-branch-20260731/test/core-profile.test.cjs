@@ -18,6 +18,7 @@ const managerRooms = fs.readFileSync(path.join(root, "modules/manager_rooms.js")
 const managerFlags = fs.readFileSync(path.join(root, "modules/manager_flags.js"), "utf8");
 const main = fs.readFileSync(path.join(root, "modules/main.js"), "utf8");
 const prototypeRoom = fs.readFileSync(path.join(root, "modules/prototype_room.js"), "utf8");
+const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -46,6 +47,9 @@ assert.ok(main.includes("Game._coreObjects"), "main loop must cache tick object 
 assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop must not serialize all Memory manually");
 assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache must only span consecutive ticks");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
+assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instrumentation must default to off");
+assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");
+assert.ok(betterMove.includes("setCpuStats(bool)"), "movement CPU instrumentation must remain explicitly switchable");
 execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {

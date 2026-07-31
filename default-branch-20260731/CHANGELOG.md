@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8.0 — Movement instrumentation control
+
+### Optimized
+
+- Disable BetterMove's per-call CPU analyzer by default. It previously called
+  `Game.cpu.getUsed()` before and after every `moveTo`, plus during cache lookup.
+- Keep the analyzer available for short diagnostic sessions with
+  `BetterMove.setCpuStats(true)` without charging normal gameplay for profiling.
+
 ## v0.7.0 — Active raL creep strategy
 
 ### Added
