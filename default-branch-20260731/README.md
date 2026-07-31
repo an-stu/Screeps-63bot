@@ -23,5 +23,5 @@ only; it does not emulate the Screeps runtime or its globals.
 The full snapshot is retained for incremental refactoring. Do not upload it as
 the first deployment on a 20 CPU account. Start with `deploy/core-modules.json`
 and use the accompanying `CHANGELOG.md` to restore one optional module group at
-a time. The JSON source module `algo_wasm_PriorityQueue` is a WASM binary
+a time. The lowercase source module `algo_wasm_priorityqueue` is a WASM binary
 module, not JavaScript; preserve its exact raw representation when packaging.

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.0 — Power Creep survival profile
+
+### Added
+
+- Restore `strategy_factoryPowerCreep` as the only new runtime module. It runs
+  every three ticks and keeps renewal, storage capacity, extension filling,
+  source regeneration, Power Spawn operation, and mineral regeneration active.
+
+### Fixed
+
+- Spawn a dead Power Creep only after `spawnCooldownTime` has elapsed; the old
+  comparison prevented respawning once the cooldown was actually over.
+- Refresh `PWR_OPERATE_STORAGE` when its effect is absent or below 100 ticks,
+  instead of retrying while a long effect was active.
+- Skip factory operation safely while `station_factory` remains disabled.
+
 ## v0.1.1 — Shard-name startup hotfix
 
 ### Fixed
@@ -35,12 +51,10 @@
   module are paused without throwing every tick. They remain in Memory so the
   matching module can be restored before the operation is resumed.
 
-### Deployment hold
+### Deployment status
 
-- The current Memory has one `AttackerPB` and one `HealerPB` task. Both belong
-  to the deliberately omitted Power Bank module, so this bootstrap payload
-  must not be uploaded until those creeps have finished or the user explicitly
-  accepts pausing that operation.
+- Power Bank tasks were explicitly cleared before deploying the bootstrap
+  profile. Power Bank automation remains disabled.
 
 ### Validation
 

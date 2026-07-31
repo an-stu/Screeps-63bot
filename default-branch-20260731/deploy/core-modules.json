@@ -31,5 +31,6 @@
   "station_tower",
   "strategy_lowLevel",
   "strategy_highLevel",
-  "strategy_minSizeRoom"
+  "strategy_minSizeRoom",
+  "strategy_factoryPowerCreep"
 ]

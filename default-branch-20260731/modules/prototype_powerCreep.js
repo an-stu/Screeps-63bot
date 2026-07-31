@@ -61,17 +61,19 @@ PowerCreep.prototype.needOpSource = function () {
 
 PowerCreep.prototype.needOpStorage = function (storage) {
     let pcPower = this.powers[PWR_OPERATE_STORAGE]//
+    if (!storage) return false;
+    let effect = storage.effects && storage.effects.find(e => e.power == PWR_OPERATE_STORAGE);
     return pcPower && !pcPower.cooldown && pcPower.level >= 1 &&
         storage.store.getUsedCapacity() > 950000 &&
-        (!storage.effects ||
-            !storage.effects.find(e => e.power == PWR_OPERATE_STORAGE && e.ticksRemaining < 100));
+        (!effect || effect.ticksRemaining < 100);
 }
 
 PowerCreep.prototype.OpStorage = function () {
     let pcPower = this.powers[PWR_OPERATE_STORAGE];
     let storage = this.lastTaskObj();
-    if (pcPower.cooldown > 0 || !storage) {
+    if (!pcPower || pcPower.cooldown > 0 || !storage) {
         this.popTask().execLastTask();
+        return;
     }
     if (!this.pos.inRangeTo(storage, 3)) {
         this.moveTo(storage, { range: 3 });

@@ -96,7 +96,7 @@ let P0 = function () {
     let flag = Game.flags.P0;
     let pc = Game.powerCreeps["P0"]
     if (flag && flag.room && flag.room.powerSpawn) {
-        if (!pc.ticksToLive && (!pc.spawnCooldownTime || pc.spawnCooldownTime > Date.now())) {
+        if (!pc.ticksToLive && (!pc.spawnCooldownTime || pc.spawnCooldownTime <= Date.now())) {
             pc.spawnPowerCreep(flag.room.powerSpawn, "P0", flag.pos.roomName)
         }
     }
