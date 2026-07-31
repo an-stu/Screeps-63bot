@@ -1,27 +1,3 @@
-/*
-ofost46865  
-Game.market.createOrder({
-    type: ORDER_SELL,  
-    resourceType: 'ops',  
-    price: 105,
-    totalAmount: 100000, 
-    roomName: "E55S31"    
-});
-(需要的伤害-塔伤害 )/30*40
-
-11t 6ra 10m 23h
-
-Game.cpu.bucket+" "+Game.cpu.getUsed()
-
-挖墙角策略
-StationLab.boostAbleLevel(Game.rooms.W19N11,"upgradeController",15,1);
-
-system.setTickDuration(1)
-
-damege*2 - tough*100/0.3 >heal
-3t 3m 6ra
-3t 4m 13h
-*/ 
 console.log("Script Reload In Time " + Game.time + " , bucket " + Game.cpu.bucket);
 require("main_mount");
 
@@ -44,12 +20,6 @@ let pro = {
         let objects = getTickObjects();
         let cpuProfile = Game._coreCpuProfile;
         let phaseStart = cpuProfile ? Game.cpu.getUsed() : 0;
-        // _.values(Game.creeps).filter(e=>e.memory.role=="carrier").forEach(e=>e.memory.tasks = [])
-        // _.values(Game.creeps).forEach(e=>e.sayHeadTask());
-        // _.values(Game.creeps).forEach(e=>e.spawning||e.say(e.lastTask().taskName));
-        // 注册
-        // _.values(Game.creeps).forEach(e=>{try{e.execRegFun()}catch (exc) {log(e.memory.role)}});
-        // _.values(Game.creeps).forEach(e=>{e.suicide()});
         HelperError.runEach(objects.creeps, e => e.execRegFun());
         HelperError.runEach(objects.powerCreeps, e => e.ticksToLive && e.execRegFun());
         if (cpuProfile) {
@@ -79,7 +49,7 @@ let pro = {
             cpuProfile.rooms = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();
         }
-        if (global.StrategytradeCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("crossShardTrade")) HelperError.catchError(() => StrategytradeCrossShard.exec());
+        if (global.StrategyTradeCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("crossShardTrade")) HelperError.catchError(() => StrategyTradeCrossShard.exec());
         if (global.StrategyClaim && isCpuFeatureEnabled("claim") && ManagerFlags.hasPrefix("claim")) HelperError.catchError(() => StrategyClaim.exec());
         if (global.StrategyClaimCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("claimCrossShard") && ManagerFlags.hasPrefix("claimCrossShard")) HelperError.catchError(() => StrategyClaimCrossShard.exec());
         if (global.StrategyScouter && isCpuFeatureEnabled("scouter") && ManagerFlags.hasPrefix("moveto")) HelperError.catchError(() => StrategyScouter.exec());
@@ -91,8 +61,6 @@ let pro = {
             phaseStart = Game.cpu.getUsed();
         }
 
-        // 执行
-        // _.values(Game.creeps).forEach(e=>{try{e.spawning||e.execLastTask()}catch (exc) {e.suicide()}});
         let activeCreeps = (!MIN_CPU ? objects.creeps : objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0))
             .filter(shouldRunCreep);
         if (cpuProfile) {
@@ -128,45 +96,6 @@ let pro = {
     }
 };
 
-let P0 = function () {
-    let flag = Game.flags.P0;
-    let pc = Game.powerCreeps["P0"]
-    if (flag && flag.room && flag.room.powerSpawn) {
-        if (!pc.ticksToLive && (!pc.spawnCooldownTime || pc.spawnCooldownTime <= Date.now())) {
-            pc.spawnPowerCreep(flag.room.powerSpawn, "P0", flag.pos.roomName)
-        }
-    }
-    if (!pc || !flag) return;
-    if (pc.ticksToLive) {
-        // if (!pc.pos.isEqualTo(flag.pos)) pc.moveTo(flag)
-        if (pc.room.controller) pc.enableRoom(pc.room.controller);
-        if (!pc.room.my) {
-            let cap = pc.pos.findInRange(FIND_HOSTILE_STRUCTURES, 1).find(e => e.store && !e.store.isEmpty())
-            if (cap) {
-                let res = cap.store.getLessResTypes().head()
-                pc.withdraw(cap, res, Math.min(cap.store[res], pc.store.getFreeCapacity(res)))
-                if (pc.store.isFull()) {
-                    let res = pc.store.getLessResTypes().head()
-                    pc.drop(res, pc.store[res])
-                }
-            }
-        }
-        if (pc.pos.isNearTo(pc.room.powerSpawn)) {
-            pc.renew(pc.room.powerSpawn);
-        }
-        else if (pc.ticksToLive && pc.needRenewInRoom()) {
-            pc.addRenewMainRoomTask();
-        }
-        // regen source
-        // pc.OpSource();
-        // Op Lab
-        // let lab = pc.needOpLab();
-        // if (lab) {
-        //     pc.OpLab(lab);
-        // }
-    }
-}
-
 /**
  * 命令行执行
  * task 返回 有值 时 tryTime-- ,并且打印结果\
@@ -178,55 +107,20 @@ let P0 = function () {
  * WAKE_TASK.XKHO2_W19S54 = {tryTime:30,sleep:10,task:(thisTask)=>{return Game.rooms.W19S54.terminal.send("XKHO2",3000,"W22N19")==OK}};
  */
 global.WAKE_TASK = {}
-let exec_wake_task = () => {
-    HelperError.catchError(() => _.keys(WAKE_TASK).forEach(name => {
-        if (WAKE_TASK[name].sleep > 1 && Game.time % WAKE_TASK[name].sleep != 0) return;
-        if (!WAKE_TASK[name].tryTime || !WAKE_TASK[name].task || WAKE_TASK[name].tryTime < 0) return delete WAKE_TASK[name]
-        let result = WAKE_TASK[name].task(WAKE_TASK[name]);
-        console.log(name, result)
-        if (result) WAKE_TASK[name].tryTime--;
-        if (result == "done") delete WAKE_TASK[name]
-    }));
-}
-
-let space_action = {
-    // an_w: function () {
-    //     if (WHO_AM_I == "an_w" && Game.shard.name == 'shard3') {
-    //         if (!isSaveCpu && Game.cpu.bucket < 500) {
-    //             global.isSaveCpu = true;
-    //         }
-    //         else if (isSaveCpu && Game.cpu.bucket > 9000) {
-    //             global.isSaveCpu = false;
-    //         }
-    //     }
-    // },
-    action_nanachi: function () {
-        if (WHO_AM_I == "nanachi" && Game.shard.name == 'shard3') {
-            if (Game.rooms["W25S39"].terminal.store['emanation'] >= 18)
-                Game.rooms["W25S39"].terminal.send('emanation', 1, 'E19N11')
-            if (Game.rooms["W23S59"].terminal.store['machine'] >= 10)
-                Game.rooms["W23S59"].terminal.send('machine', 1, 'E19N11')
-
-            // let obs = Game.rooms.W12S41.observer;
-            // let roomName = "W9S49";
-            // if(obs&&!StationObserver.ObserveRoomQueue[obs.id])StationObserver.ObserveRoomQueue[obs.id]=[];
-            // if(obs&&StationObserver.ObserveRoomQueue[obs.id].length==0)//&&Game.time%10==0
-            //     StationObserver.ObserveRoomQueue[obs.id].unshift(roomName)
-            // if(Game.rooms[roomName]&&Game.rooms[roomName].terminal&&Game.rooms[roomName].storage){
-            //     for(let resType of ["oxidant","reductant","ghodium_melt","utrium_bar","lemergium_bar","keanium_bar","zynthium_bar"]){//,"purifier"
-            //         if((Game.rooms[roomName].terminal.store[resType]||0)+(Game.rooms[roomName].storage.store[resType]||0)<6000){
-            //             let successCnt = _.values(Game.rooms).filter(e=>e.my&&e.terminal&&e.terminal.send(resType,e.terminal.store[resType],roomName)==OK).length
-            //             if(successCnt)break;
-            //         }
-            //     }
-            //     for(let resType of ["circuit","hydraulics","emanation","organoid"]){
-            //         if((Game.rooms[roomName].terminal.store[resType]||0)+(Game.rooms[roomName].storage.store[resType]||0)<1){
-            //             let success = _.values(Game.rooms).find(e=>e.my&&e.terminal&&e.terminal.send(resType,1,roomName)==OK)
-            //             if(success)break;
-            //         }
-            //     }
-            // }
+let executeWakeTasks = function () {
+    for (let name in WAKE_TASK) {
+        let wakeTask = WAKE_TASK[name];
+        if (wakeTask.sleep > 1 && Game.time % wakeTask.sleep != 0) continue;
+        if (!wakeTask.tryTime || !wakeTask.task || wakeTask.tryTime < 0) {
+            delete WAKE_TASK[name];
+            continue;
         }
+        HelperError.catchError(() => {
+            let result = wakeTask.task(wakeTask);
+            console.log(name, result);
+            if (result) wakeTask.tryTime--;
+            if (result == "done") delete WAKE_TASK[name];
+        }, name);
     }
 }
 
@@ -316,20 +210,14 @@ let main = function () {
     }
     pro.afterWork();
 
-    // try { if (Game.cpu.bucket >= 10000 && !isSaveCpu && WHO_AM_I != "6g3y") Game.cpu.generatePixel(); } catch (e) { }
     if (Game.time % 300 == 0) {
         console.log(LOCAL_SHARD_NAME + " bucket : " + Game.cpu.bucket)
     }
-    // if (WHO_AM_I == "an_w") TalkAll()
-    HelperError.catchError(() => _.values(space_action).forEach(e => e()));
-    HelperError.catchError(() => exec_wake_task());
+    executeWakeTasks();
     HelperError.throwAllError();
     HelperCpuUsed.exec();
     HelperCpuUsed.recordLongTerm(Game.cpu.getUsed());
     updateCodeHealth();
-    // P0();
-    // space_action.an_w();
-
     if (Game.time % 20) return;
   
     if (!Memory.stats) Memory.stats = {}
@@ -351,6 +239,4 @@ let main = function () {
 };
 
 global.main = pro;
-
-// module.exports.loop=require("调用栈分析器").warpLoop(main);
 module.exports.loop = main;

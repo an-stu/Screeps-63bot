@@ -548,11 +548,11 @@ let pro = {
         ]
     },
     trySpawnHarKeeper(room) {
-        if (room.spawnFailue) return null;
+        if (room.spawnFailure) return null;
         pro.trySpawnOuterHarKeeper(room.name, room);
     },
     trySpawnOuterHarKeeper(roomName, spawnRoom) {
-        if (spawnRoom.spawnFailue) return null;
+        if (spawnRoom.spawnFailure) return null;
         // log(roomName,spawnRoom.name)
         if (roomName == spawnRoom.name
             && spawnRoom.creeps("harvestEnergyKeeper").filter(e => e.ticksToLive > 300).length
@@ -584,7 +584,7 @@ let pro = {
         });
     },
     trySpawnOuterMineralKeeper(roomName, spawnRoom) {
-        if (spawnRoom.spawnFailue) return null;
+        if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName];
         if (!harRoom) return;
         let data = Memory.rooms[roomName][StationMineral.stationName];
@@ -624,7 +624,7 @@ let pro = {
         }
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
-        if (spawnRoom.spawnFailue) return null;
+        if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
         if (!harRoom) return;
         let sm = harRoom.memory[pro.stationName]
@@ -653,7 +653,7 @@ let pro = {
         })
     },
     trySpawnOuterDefenser(roomName, spawnRoom, isInvader) {
-        if (spawnRoom.spawnFailue) return null;
+        if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
         let data = Memory.rooms[roomName.name || roomName][StationMineral.stationName];
         if (isInvader) {

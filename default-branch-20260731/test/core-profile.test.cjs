@@ -30,6 +30,7 @@ const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化ho
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
 const marketPrice = fs.readFileSync(path.join(root, "modules/strategy_marketPrice.js"), "utf8");
 const consoleDashboard = fs.readFileSync(path.join(root, "modules/helper_consoleDashboard.js"), "utf8");
+const roomResource = fs.readFileSync(path.join(root, "modules/helper_roomResource.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -60,6 +61,8 @@ assert.ok(consoleDashboard.includes("global.dash"), "console dashboard must expo
 assert.ok(consoleDashboard.includes("console.logUnsafe(output)"), "rich dashboard output must use the post-security-update console API");
 assert.ok(consoleDashboard.includes("Object.keys(object.store)"), "resource details must exclude enumerable Store prototype helpers");
 assert.ok(consoleDashboard.includes("click a room name") && consoleDashboard.includes("Modules & feature gates"), "dashboard details must use click-to-expand sections instead of hover-only hints");
+assert.ok(consoleDashboard.includes("global.dash.help"), "dashboard must explain its callable console syntax");
+assert.ok(roomResource.includes("console.logUnsafe(html)"), "resource reports must use the rich console API");
 assert.ok(!main.includes("ConsoleDashboard"), "console dashboard must never run from the tick loop");
 assert.ok(manifest.includes("manager_missions") && manifest.includes("manager_crossShard"), "cross-shard requests must ship with local mission handlers");
 assert.ok(manifest.includes("strategy_tradeCrossShard") && manifest.includes("strategy_claimCrossShard"), "cross-shard strategies must ship with their manager");
@@ -127,7 +130,13 @@ assert.ok(betterMove.includes('!isCpuFeatureEnabled("visual")'), "legacy moveTo 
 assert.ok(betterMove.includes("setCpuStats(bool)"), "movement CPU instrumentation must remain explicitly switchable");
 const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
 assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longTermSummary()"), "CPU telemetry must persist exact long-window statistics");
+assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
+assert.ok(marketPrice.includes("console.logUnsafe(htmlOutput)"), "market HTML reports must use the rich console API");
 assert.ok(main.includes("HelperCpuUsed.recordLongTerm(Game.cpu.getUsed())"), "long-window CPU telemetry must record every completed tick");
+assert.ok(!main.includes("space_action") && !main.includes("let P0"), "dead account-specific tick actions must stay removed");
+assert.ok(!main.includes("_.keys(WAKE_TASK)"), "wake tasks must not allocate a Lodash key array every tick");
+assert.ok(managerRooms.includes("let roomHash = room.hashCode()"), "room management must calculate its scheduling hash only once per room tick");
+assert.ok(!stationHive.includes("spawnFailue"), "spawn failure guard must use the corrected property name");
 execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {

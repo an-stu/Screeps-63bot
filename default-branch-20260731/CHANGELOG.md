@@ -465,3 +465,31 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
 
 - Added a two-tick upgrader interval between bucket 9800 and 9950, smoothing
   the previous jump from one-third speed directly to full speed.
+
+## v0.27.0 — Room manager and runtime cleanup
+
+### Changed
+
+- Reorganized room-management scheduling with descriptive constants and
+  method names, while retaining compatibility aliases for older console code.
+- Standardized the transient spawn-failure property and cross-shard strategy
+  global; legacy public names remain as aliases during staged deployment.
+- Added an explicit `dash.help` hint for correct console invocation.
+
+### Optimized
+
+- Removed the unused account-specific tick dispatcher, obsolete manual Power
+  Creep routine, and historical debug blocks from the production runtime.
+- Execute wake tasks without allocating a Lodash key/value array and calculate
+  each room's scheduling hash only once per tick.
+
+### Fixed
+
+- Clear the first refreshed room's movement cache after a script reload as
+  originally intended, rather than losing the bootstrap flag too early.
+- Corrected `spawnFailue` and `setChangeFindClostestByPath` spellings while
+  preserving the latter as a compatibility alias.
+- Route resource reports, CPU charts, and commodity-profit HTML through
+  `console.logUnsafe`, with readable text fallbacks on older servers.
+- Correct empty Store SVG percentages and size each resource background bar
+  to its requested width.

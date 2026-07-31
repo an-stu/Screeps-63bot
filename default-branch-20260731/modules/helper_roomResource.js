@@ -43,6 +43,11 @@ HelperRoomResource.showAllRes();
 global.RES_COLOR_MAP = {"empty":"rgba(0,0,0,0)","energy":"rgb(255,242,0)","battery":"rgb(255,242,0)","Z":"rgb(247, 212, 146)","L":"rgb(108, 240, 169)","U":"rgb(76, 167, 229)","K":"rgb(218, 107, 245)","X":"rgb(255, 192, 203)","G":"rgb(255,255,255)","zynthium_bar":"rgb(247, 212, 146)","lemergium_bar":"rgb(108, 240, 169)","utrium_bar":"rgb(76, 167, 229)","keanium_bar":"rgb(218, 107, 245)","purifier":"rgb(255, 192, 203)","ghodium_melt":"rgb(255,255,255)","power":"rgb(224,90,90)","ops":"rgb(224,90,90)","composite":"#ccc","crystal":"#ccc","liquid":"#ccc","device":"rgb(76, 167,229)","circuit":"rgb(76, 167,229)","microchip":"rgb(76, 167,229)","transistor":"rgb(76, 167,229)","switch":"rgb(76, 167,229)","wire":"rgb(76, 167,229)","silicon":"rgb(76, 167,229)","machine":"rgb(247,212,146)","hydraulics":"rgb(247,212,146)","frame":"rgb(247,212,146)","fixtures":"rgb(247,212,146)","tube":"rgb(247,212,146)","alloy":"rgb(247,212,146)","metal":"rgb(247,212,146)","essence":"rgb(218,107,245)","emanation":"rgb(218,107,245)","spirit":"rgb(218,107,245)","extract":"rgb(218,107,245)","concentrate":"rgb(218,107,245)","condensate":"rgb(218,107,245)","mist":"rgb(218,107,245)","organism":"rgb(108,240,169)","organoid":"rgb(108,240,169)","muscle":"rgb(108,240,169)","tissue":"rgb(108,240,169)","phlegm":"rgb(108,240,169)","cell":"rgb(108,240,169)","biomass":"rgb(108,240,169)","OH":"#ccc","ZK":"#ccc","UL":"#ccc","UH":"rgb(76, 167,229)","UH2O":"rgb(76, 167,229)","XUH2O":"rgb(76, 167,229)","UO":"rgb(76, 167,229)","UHO2":"rgb(76, 167,229)","XUHO2":"rgb(76, 167,229)","ZH":"rgb(247,212,146)","ZH2O":"rgb(247,212,146)","XZH2O":"rgb(247,212,146)","ZO":"rgb(247,212,146)","ZHO2":"rgb(247,212,146)","XZHO2":"rgb(247,212,146)","KH":"rgb(218,107,245)","KH2O":"rgb(218,107,245)","XKH2O":"rgb(218,107,245)","KO":"rgb(218,107,245)","KHO2":"rgb(218,107,245)","XKHO2":"rgb(218,107,245)","LH":"rgb(108,240,169)","LH2O":"rgb(108,240,169)","XLH2O":"rgb(108,240,169)","LO":"rgb(108,240,169)","LHO2":"rgb(108,240,169)","XLHO2":"rgb(108,240,169)","GH":"rgb(255,255,255)","GH2O":"rgb(255,255,255)","XGH2O":"rgb(255,255,255)","GO":"rgb(255,255,255)","GHO2":"rgb(255,255,255)","XGHO2":"rgb(255,255,255)","H":"#ccc","O":"#ccc","oxidant":"#ccc","reductant":"#ccc"};
 global.RES_TREE = {"POWER资源":{"POWER资源":["power","ops"]},"基础资源":{"能量":["energy","battery"],"原矿":["U","L","K","Z","X","O","H","G"],"压缩":["utrium_bar","lemergium_bar","keanium_bar","zynthium_bar","purifier","oxidant","reductant","ghodium_melt"]},"商品资源":{"无色":["liquid","crystal","composite"],"蓝色":["silicon","wire","switch","transistor","microchip","circuit","device"],"黄色":["metal","alloy","tube","fixtures","frame","hydraulics","machine"],"紫色":["mist","condensate","concentrate","extract","spirit","emanation","essence"],"绿色":["biomass","cell","phlegm","tissue","muscle","organoid","organism"]},"LAB资源":{"蓝色":["UH","UH2O","XUH2O","UO","UHO2","XUHO2"],"黄色":["ZH","ZH2O","XZH2O","ZO","ZHO2","XZHO2"],"紫色":["KH","KH2O","XKH2O","KO","KHO2","XKHO2"],"绿色":["LH","LH2O","XLH2O","LO","LHO2","XLHO2"],"白色":["GH","GH2O","XGH2O","GO","GHO2","XGHO2"]},"empty":{"empty":["empty"]}};
 
+function printRichHtml(html) {
+    if (typeof console.logUnsafe == "function") console.logUnsafe(html);
+    else console.log(String(html).replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
+}
+
 global.roomResSvg=(res, allCnt,len)=>{
     let r = Object.entries(res).sort((a,b)=>b[1]-a[1])
     let left = 0;
@@ -52,8 +57,8 @@ global.roomResSvg=(res, allCnt,len)=>{
         left+=e[1];
         return t;
     }).join("")
-    let exist = allCnt?`<rect width="500" height="10" fill="black"/>${svgs}</svg>`:"";
-    return `<svg width="${len}px" height="8px"> ${exist} ${_.padLeft((left/allCnt*100).toFixed(1),4)}% ${_.padLeft((allCnt/1000000).toFixed(1),4)}M  `
+    let ratio = allCnt ? left / allCnt * 100 : 0;
+    return `<svg width="${len}px" height="8px"><rect width="${len}" height="8" fill="black"/>${svgs}</svg> ${_.padLeft(ratio.toFixed(1),4)}% ${_.padLeft((allCnt/1000000).toFixed(1),4)}M  `
 }
 global.roomResEcharts=()=>{
     // <div id="${divName}" style="height: 600px;width:600px;color:#000"/>
@@ -285,7 +290,7 @@ let pro = {
         addList(b_pink)
         addList(b_green)
         addList(b_withe)
-        console.log(str)
+        printRichHtml(str)
 
         return "Game.cpu.used:"+(Game.cpu.getUsed() - time)
     },
@@ -312,7 +317,7 @@ let pro = {
             return [roomResTips(room.name,res)+str+roomResSvg(storage,storageCap,500)+roomResSvg(terminal,terminalCap,150)+"<br>",
                 (storageCap+terminalCap)?(storageFreeCap+terminalFreeCap)/(storageCap+terminalCap):0]
         }).sort((a,b)=>a[1]-b[1]).map(e=>e[0]).join("")
-        console.log(result)
+        printRichHtml(result)
         return "Game.cpu.used:"+(Game.cpu.getUsed() - time)
         //HelperRoomResource.show()
     }

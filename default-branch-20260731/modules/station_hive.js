@@ -99,7 +99,7 @@ let pro = {
         else return undefined
     },
     spawnAble(room) {
-        if (room.spawnFailue) return false;
+        if (room.spawnFailure) return false;
         if (!room.spawnedMap) room.spawnedMap = {};
         return room.spawn.filter(e => !e.spawning && !room.spawnedMap[e.id]).head();
     },
@@ -109,7 +109,7 @@ let pro = {
             return
         }
         if (!room.spawnedMap) room.spawnedMap = {};
-        if (room.spawnFailue) return null;
+        if (room.spawnFailure) return null;
         // log(room.name,role)
         if (room.currentEnergyAvailable == undefined) room.currentEnergyAvailable = room.getEnergyAvailable();//缓存当前的能量
         Game._name_hash = (Game._name_hash || 0) + 1;//防止同一帧冲突名字
@@ -123,11 +123,11 @@ let pro = {
         if (ops) for (let t in ops) opts[t] = ops[t];
         let spend = Utils.getBodyEnergyNeed(body);
         if (room.currentEnergyAvailable < spend) {
-            room.spawnFailue = true; return undefined;
+            room.spawnFailure = true; return undefined;
         }
         let spawn = room.spawn.find(e => !e.spawning && !room.spawnedMap[e.id] && (room.level == 8 || e.isActive()));
         if (!spawn) {
-            room.spawnFailue = true; return undefined;
+            room.spawnFailure = true; return undefined;
         }
         let code = spawn.spawnCreep(body, name, opts);
         if (code == OK) {
@@ -135,7 +135,7 @@ let pro = {
             room.currentEnergyAvailable -= spend;
             return name;
         }
-        room.spawnFailue = true
+        room.spawnFailure = true
         return null;
     },
     update(room) {

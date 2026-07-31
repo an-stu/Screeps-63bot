@@ -209,3 +209,4 @@ let dashboard = {
 
 global.ConsoleDashboard = dashboard;
 global.dash = roomName => dashboard.show(roomName);
+global.dash.help = 'Use dash() for overview or dash("W31N55") for one room; square brackets do not call the function.';

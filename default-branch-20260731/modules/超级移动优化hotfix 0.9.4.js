@@ -1472,10 +1472,14 @@ global.BetterMove = {
         cacheMissCost = 0;
         return OK;
     },
-    setChangeFindClostestByPath(bool) {
+    setChangeFindClosestByPath(bool) {
         // RoomPosition.prototype.findClosestByPath = wrapFn(bool? betterFindClosestByPath : originFindClosestByPath, 'findClosestByPath');
         analyzeCPU.findClosestByPath = { sum: 0, calls: 0 };
         return OK;
+    },
+    // Preserve the misspelled console API for existing snippets.
+    setChangeFindClostestByPath(bool) {
+        return this.setChangeFindClosestByPath(bool);
     },
     setPathClearDelay(number) {
         if (typeof number == "number" && number > 0) {

@@ -176,7 +176,9 @@ let pro={
         };
     },
     show(){
-        console.log(cpuEcharts(Game.time, this.series(this.cpu), this.series(this.bucket)))
+        let output = cpuEcharts(Game.time, this.series(this.cpu), this.series(this.bucket));
+        if (typeof console.logUnsafe == "function") console.logUnsafe(output);
+        else console.log("CPU samples: " + this.size + ", average: " + this.average(this.cpu, this.size).toFixed(2));
     },
     exec (){
         if (!this.shouldRun(this.sampleInterval)) return;

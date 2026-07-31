@@ -32,6 +32,7 @@ global.isCpuFeatureEnabled = name => {
 // creep and spawn naming still require the local shard identifier.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
+    version: "0.27.0",
     uploadedModules: 68,
     restoredSnapshotModules: 67,
     intentionallyExcluded: ["strategy_powerBank", "调用栈分析器", "闲聊 v1.0"]
@@ -115,15 +116,3 @@ require('strategy_GCLRoom');
 require('strategy_atkL2');
 require('strategy_defenserHighWay');
 require('team_raL1');
-// Optional modules are intentionally not loaded in the 20 CPU bootstrap
-// profile. Reintroduce only one group at a time after measuring its impact:
-// helper_visual, station_lab, station_observer, station_factory,
-// manager_crossShard, manager_autoPlanner, manager_planner, war_cache,
-// war_*, team*, strategy_outerHarvest, strategy_pillage, strategy_market,
-// strategy_claim*, strategy_deposits, strategy_powerBank, and the remaining
-// expansion/combat strategies.
-
-
-
-
-

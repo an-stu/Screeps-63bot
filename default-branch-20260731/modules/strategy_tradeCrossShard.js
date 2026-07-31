@@ -177,4 +177,7 @@ let pro = {
 
 
 
-global.StrategytradeCrossShard=pro;
+global.StrategyTradeCrossShard = pro;
+// Keep the historical global name for console snippets and cached code that
+// may still reference it during a staged deployment.
+global.StrategytradeCrossShard = pro;

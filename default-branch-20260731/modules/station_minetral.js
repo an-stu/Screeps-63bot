@@ -108,7 +108,7 @@ let pro = {
         return [task];
     },
     trySpawnHarKeeper(room) {
-        if (room.spawnFailue) return null;
+        if (room.spawnFailure) return null;
         if (room.mineral.ticksToRegeneration > 0) return; // 如果已经生了，就不生了
         let data = room.memory[StationMineral.stationName]
         // 如果两个多个连在一起死掉一个

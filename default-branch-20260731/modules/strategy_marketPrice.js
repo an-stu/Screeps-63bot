@@ -404,7 +404,8 @@ pro.calculateAllCommoditiesProfit = function(showDetail = false, outputToConsole
     
     // 输出到控制台
     if (outputToConsole) {
-        console.log(htmlOutput);
+        if (typeof console.logUnsafe == "function") console.logUnsafe(htmlOutput);
+        else console.log(htmlOutput.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
     }
     
     // 保持返回值不变

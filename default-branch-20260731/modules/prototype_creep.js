@@ -19,7 +19,7 @@ let whiteList = new Set([
  1.write your whiteList in a Set
  https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set
  2. return your whiteList in function getWhiteList
- 3. all find method including Room.find RoomPosition.findClostestByRange/.findInRange/.findClostestByPath and so on
+ 3. all find methods, including Room.find and RoomPosition.findClosestByRange/findInRange/findClosestByPath
  with param type=== FIND_HOSTILE_CONSTRUCTION_SITES
  FIND_HOSTILE_POWER_CREEPS
  FIND_HOSTILE_CREEPS
@@ -317,7 +317,7 @@ Creep.prototype.scouterToRoom = function () {
         this.suicide();//自杀！
     }
     if (!Memory.rooms[this.room.name] || !Memory.rooms[this.room.name][StationSources.stationName]) {
-        ManagerRooms.updateRoom(this.room)
+        ManagerRooms.refreshRoom(this.room)
     }
     else this.goTo(position, { visualizePathStyle: { stroke: '#67ffed' } })
 };
