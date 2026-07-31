@@ -50,6 +50,7 @@ require('station_upgrade');
 require('station_work');
 require('station_tower');
 require('station_lab');
+require('station_factory');
 
 require('strategy_lowLevel');
 require('strategy_highLevel');

@@ -30,6 +30,7 @@
   "station_work",
   "station_tower",
   "station_lab",
+  "station_factory",
   "strategy_lowLevel",
   "strategy_highLevel",
   "strategy_minSizeRoom",

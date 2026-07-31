@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.0 — Factory economy loop
+
+### Added
+
+- Restore `station_factory` for factory carry tasks, energy compression and
+  decompression, base commodities, powered commodities, and OPF integration.
+
+### Optimized
+
+- Skip factory dispatch in rooms without a factory.
+- Guard stale Power Creep room assignments before reading the room name.
+
 ## v0.4.0 — Core lab and boost tasks
 
 ### Added

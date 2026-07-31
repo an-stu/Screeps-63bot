@@ -61,7 +61,7 @@ let pro={
 
         if (global.StationLab && room.lab && room.lab.length) HelperError.catchError(()=>StationLab.exec(room));// 先预计算 labs
 
-        if (global.StationFactory) HelperError.catchError(()=>StationFactory.exec(room));// 先预计算 factory
+        if (global.StationFactory && room.factory) HelperError.catchError(()=>StationFactory.exec(room));// 先预计算 factory
 
         HelperError.catchError(()=>StationTower.exec(room));
         /** strategy */

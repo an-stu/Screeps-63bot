@@ -149,7 +149,8 @@ let pro={
     stationName:"stationFactory",
     checkPowerCreep (room,pc){
         if(!pc || !pc.ticksToLive )return false;
-        if(pc.mainRoom().name == room.name) return !(pc.store[RESOURCE_OPS] < 100);
+        let mainRoom = pc.mainRoom();
+        if(mainRoom && mainRoom.name == room.name) return !(pc.store[RESOURCE_OPS] < 100);
         return false
     },
     needPower (room){
