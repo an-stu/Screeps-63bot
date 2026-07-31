@@ -204,6 +204,9 @@ let pro = {
         // log(room.name,pro.roomRequire[room.name])
     },
     needBalanceWithPowerFactoryRoom(room) { // 富集商品
+        // Factory production is restored in a later profile. Normal terminal
+        // and storage balancing does not depend on its commodity tables.
+        if (!global.StationFactory || !global.BALANCE_POWER_FACTORY_LIST || !global.BALANCE_POWER_FACTORY_MAP) return;
         if ((Game.time + room.hashCode()) % 10 != 0) return;
         let level = StrategyFactoryPowerCreep.getPowerFactoryLevel(room);
         let trade = room.flags("trade").length > 0 || room.name == 'E21N9'
@@ -296,8 +299,8 @@ let pro = {
                 }
             }
 
-            let storageCnt = room.storage && room.storage.store.getFreeCapacity(RESOURCE_ENERGY)
-            if (storageCnt < STORAGE_MIN_CAP_CNT) {
+            let storageFree = room.storage && room.storage.store.getFreeCapacity()
+            if (storageFree < STORAGE_MIN_CAP_CNT) {
                 let maxCnt = 0;
                 let maxResType = undefined;
                 if (room.storage.store[RESOURCE_ENERGY] > room.storage.store.getCapacity(RESOURCE_ENERGY) * 0.3) {
@@ -315,7 +318,7 @@ let pro = {
                 }
                 if (maxCnt) {
                     let sends = (targetRoom, mul) => {
-                        if (targetRoom.storage && targetRoom.storage.store.getFreeCapacity(RESOURCE_ENERGY) > STORAGE_MIN_CAP_CNT * mul) {
+                        if (targetRoom.storage && targetRoom.storage.store.getFreeCapacity() > STORAGE_MIN_CAP_CNT * mul) {
                             let amount = Math.min(room.terminal.store[maxResType], 3000)
                             let code = room.terminal.send(maxResType, amount, targetRoom.name);
                             if (code == OK) console.log("full storage send : " + room.name + " -> " + targetRoom.name + " = ( " + amount + " , " + maxResType + " ) ")

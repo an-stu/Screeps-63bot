@@ -24,6 +24,7 @@ assert.equal(typeof source.modules.algo_wasm_PriorityQueue, "string", "PriorityQ
 assert.equal(typeof source.modules.algo_wasm_priorityqueue.binary, "string", "PriorityQueue runtime must remain binary data");
 assert.ok(mainMount.includes("global.LOCAL_SHARD_NAME = Game.shard.name"), "core mode must initialize its shard name");
 assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep Power Creeps alive and operating storage");
+assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(powerCreepStrategy.includes("spawnCooldownTime <= Date.now()"), "Power Creeps must respawn after their cooldown expires");
 assert.ok(powerCreepPrototype.includes("effect.ticksRemaining < 100"), "storage operation must refresh near expiry");
 

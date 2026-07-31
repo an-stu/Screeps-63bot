@@ -32,5 +32,6 @@
   "strategy_lowLevel",
   "strategy_highLevel",
   "strategy_minSizeRoom",
-  "strategy_factoryPowerCreep"
+  "strategy_factoryPowerCreep",
+  "strategy_resourceBalance"
 ]

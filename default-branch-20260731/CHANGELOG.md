@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.0 — Storage and terminal balancing
+
+### Added
+
+- Restore `strategy_resourceBalance` to keep terminal target stocks balanced,
+  redistribute shortages, and evacuate resources from nearly full storages.
+
+### Optimized
+
+- Keep the existing staggered ten-tick schedule for per-room work.
+- Use total storage free capacity for fullness decisions rather than a
+  resource-specific capacity query.
+- Skip factory commodity balancing until the factory module and its tables are
+  deliberately restored.
+
 ## v0.2.0 — Power Creep survival profile
 
 ### Added
