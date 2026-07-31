@@ -44,7 +44,7 @@ let pro = {
         }
         // if ((room.getEnergyCapacityAvailable(room) < 800 || (room.storage && !room.storage.my))) {
         if ((room.getEnergyCapacityAvailable(room) < 800 )) {
-            if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel0(room);
+            if (global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")) ManagerAutoPlanner.tryAutoBuildLowLevel0(room);
             // if((Game.time+room.hashCode()) % 150 == 0  && Game.cpu.bucket>50 && room.memory.structMap){
             //     room.memory.structMap[STRUCTURE_SPAWN].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_SPAWN)})
             //     room.memory.structMap[STRUCTURE_EXTENSION].take(10).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_EXTENSION)})
@@ -92,7 +92,7 @@ let pro = {
                 }
             })
         } else { // 3级的时候可以分化creep来了
-            if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel800(room);
+            if (global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")) ManagerAutoPlanner.tryAutoBuildLowLevel800(room);
 
             if (room.creeps("worker", false).length + room.creeps("carrier", false).length == 0)// 如果没用搬运的就直接优先生一个
                 StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room), "worker", [])

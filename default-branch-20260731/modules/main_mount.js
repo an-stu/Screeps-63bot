@@ -6,13 +6,13 @@ global.WHO_AM_I = "an_w"
 // a value in Memory.cpuFeatures, for example: Memory.cpuFeatures.market = false.
 global.CPU_FEATURES = {
     market: true,
-    autoPlanner: false,
-    visual: false,
+    autoPlanner: true,
+    visual: true,
     observer: true,
     outerHarvest: true,
     scouter: true,
 }
-global.CPU_OPT_IN_FEATURES = new Set(["market"])
+global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual"])
 global.isCpuFeatureEnabled = name => {
     let value = (Memory.cpuFeatures || {})[name];
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
@@ -33,6 +33,7 @@ require('class_RoomArray');
 require('helper_cpuUsed');
 require('helper_roomResource');
 require('helper_error');
+require('helper_visual');
 
 // tools and addition
 require("utils");
@@ -49,6 +50,8 @@ require('prototype_flag');
 require('manager_rooms');
 require('manager_creeps');
 require('manager_flags');
+require('manager_planner');
+require('manager_autoPlanner');
 
 require('station_defense');
 require('station_sources');

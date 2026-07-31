@@ -104,7 +104,7 @@ Creep.prototype.raL1=function () {
         if(!em)em = this.pos.findInRange(FIND_HOSTILE_CREEPS,3,{filter:e=>!e.pos.coverRampart()}).head()
         if(!em)em = this.pos.findInRange(FIND_HOSTILE_STRUCTURES,3, {filter:e=>e.structureType!=STRUCTURE_POWER_BANK}).head()
 
-        if(em && global.HelperVisual)HelperVisual.showText(em,"X")
+        if(em && global.HelperVisual && isCpuFeatureEnabled("visual"))HelperVisual.showText(em,"X")
         if(em&&em.structureType)isHostileConstruction=true
         if(isHostileConstruction){
             if ( !this.pos.inRangeTo(em, 2)) {

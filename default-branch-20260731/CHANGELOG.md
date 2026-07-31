@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.14.0 — Planner foundation
+
+### Added
+
+- Restore `helper_visual`, `manager_planner`, and `manager_autoPlanner` as
+  opt-in dependencies for later claim and combat modules.
+
+### Optimized
+
+- Gate automatic planning calls in low/high-level room strategies and raL
+  visuals behind their feature switches, leaving both at zero runtime work
+  until explicitly enabled.
+- Skip tower-damage visualization safely until `war_cache` is restored.
+
 ## v0.13.0 — Opt-in market restoration
 
 ### Added

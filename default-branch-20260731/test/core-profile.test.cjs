@@ -38,6 +38,7 @@ assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent
 assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be independently restorable");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
+assert.ok(manifest.includes("helper_visual") && manifest.includes("manager_planner") && manifest.includes("manager_autoPlanner"), "planner dependencies must ship together");
 assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(manifest.includes("station_factory"), "core mode must keep owned factories and OPF creeps functional");
 assert.ok(manifest.includes("station_observer"), "observer scanning must be independently restorable");
@@ -60,7 +61,8 @@ assert.ok(mainMount.includes("observer: true"), "observer scanning must be switc
 assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");
 assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies must have an allocation-free gate");
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
-assert.ok(mainMount.includes('CPU_OPT_IN_FEATURES = new Set(["market"])'), "market execution must require an explicit online opt-in");
+assert.ok(mainMount.includes('CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual"])'), "expensive optional modules must require explicit online opt-in");
+assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
 assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");
 assert.ok(market.includes("MARKET_SELL_PRICE_TTL = 1000"), "commodity profit prices must be cached across ticks");
 assert.ok(market.includes("MARKET_ORDER_TTL = 20"), "market order queries must be cached across ticks");

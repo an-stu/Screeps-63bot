@@ -274,7 +274,7 @@ let pro = {
         // the shard's 20 CPU allowance without delaying tower defense.
         let economyInterval = MIN_CPU ? 10 : 5;
         if ((Game.time + room.hashCode()) % economyInterval != 0) return;
-        if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildHighLevel(room);
+        if (global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")) ManagerAutoPlanner.tryAutoBuildHighLevel(room);
 
 
 

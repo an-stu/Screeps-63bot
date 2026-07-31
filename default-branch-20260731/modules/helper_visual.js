@@ -87,6 +87,7 @@ let pro = {
     showRoomTowerDamage() {
         let flag = Game.flags.showRoomTowerDamage;
         if (flag) {
+            if(!global.WarCache)return;
             let visual = pro.getRoomVisual(flag.pos.roomName)
             let t = Game.cpu.getUsed();
             let font = 0.25
