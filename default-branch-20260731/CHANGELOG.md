@@ -449,3 +449,19 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   when several teams or path searches request the same room.
 - Added three-tick selected-target caches to raL1 and atkL2 combat creeps while
   preserving explicit console target overrides and all existing priorities.
+## v0.26.0 — Persistent CPU telemetry and smooth surplus use
+
+### Added
+
+- Added persistent per-tick CPU totals plus 100-tick buckets for exact
+  since-version, approximately 1000-tick, and approximately 10000-tick
+  averages. Statistics include peaks, over-limit ticks, and bucket delta.
+- Exposed the uploaded/restored/excluded module profile to the on-demand
+  console dashboard.
+- Replaced unreliable hover-only dashboard details with native click-to-expand
+  room, task, resource, and module sections.
+
+### Changed
+
+- Added a two-tick upgrader interval between bucket 9800 and 9950, smoothing
+  the previous jump from one-third speed directly to full speed.

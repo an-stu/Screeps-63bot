@@ -59,6 +59,7 @@ assert.ok(manifest.includes("helper_consoleDashboard"), "on-demand console dashb
 assert.ok(consoleDashboard.includes("global.dash"), "console dashboard must expose the short dash() command");
 assert.ok(consoleDashboard.includes("console.logUnsafe(output)"), "rich dashboard output must use the post-security-update console API");
 assert.ok(consoleDashboard.includes("Object.keys(object.store)"), "resource details must exclude enumerable Store prototype helpers");
+assert.ok(consoleDashboard.includes("click a room name") && consoleDashboard.includes("Modules & feature gates"), "dashboard details must use click-to-expand sections instead of hover-only hints");
 assert.ok(!main.includes("ConsoleDashboard"), "console dashboard must never run from the tick loop");
 assert.ok(manifest.includes("manager_missions") && manifest.includes("manager_crossShard"), "cross-shard requests must ship with local mission handlers");
 assert.ok(manifest.includes("strategy_tradeCrossShard") && manifest.includes("strategy_claimCrossShard"), "cross-shard strategies must ship with their manager");
@@ -82,6 +83,7 @@ assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop mu
 assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache must only span consecutive ticks");
 assert.ok(main.includes("Game.time % 100 == 0"), "detailed CPU profiling must remain low frequency");
 assert.ok(main.includes("room.controller.ticksToDowngrade < 20000"), "upgrader throttling must preserve controllers near downgrade");
+assert.ok(main.includes("Game.cpu.bucket < 9950) return 2"), "near-full buckets must ramp upgrader CPU smoothly");
 assert.ok(main.includes(".filter(shouldRunCreep)"), "creep execution must apply the safe adaptive throttle");
 assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
 assert.ok(mainMount.includes("observer: true"), "observer scanning must be switchable without another upload");
@@ -123,6 +125,9 @@ assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instr
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");
 assert.ok(betterMove.includes('!isCpuFeatureEnabled("visual")'), "legacy moveTo styles must obey the global visual gate");
 assert.ok(betterMove.includes("setCpuStats(bool)"), "movement CPU instrumentation must remain explicitly switchable");
+const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
+assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longTermSummary()"), "CPU telemetry must persist exact long-window statistics");
+assert.ok(main.includes("HelperCpuUsed.recordLongTerm(Game.cpu.getUsed())"), "long-window CPU telemetry must record every completed tick");
 execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {

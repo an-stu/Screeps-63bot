@@ -95,15 +95,31 @@ function roomResources(room) {
 function header(title) {
     let health = Memory.codeHealth || {};
     let average = Number(health.averageCpu || 0);
+    let longTerm = health.cpuLongTerm || {};
     let avgTone = average <= Game.cpu.limit ? "good" : average <= Game.cpu.limit * 1.2 ? "warn" : "bad";
     return `<div style="background:${COLORS.bg};color:${COLORS.text};padding:8px 10px;border:1px solid ${COLORS.line};font:12px/1.5 monospace">`
         + `<b style="color:${COLORS.cyan};font-size:14px">▣ ${escapeHtml(title)}</b> &nbsp; tick ${Game.time}`
         + ` &nbsp; CPU ${color(Game.cpu.getUsed().toFixed(2), "blue")}/${Game.cpu.limit}`
         + ` &nbsp; avg ${color(average.toFixed(2), avgTone)}`
+        + (longTerm.last1000 ? ` &nbsp; ~1k ${color(Number(longTerm.last1000.average).toFixed(2), longTerm.last1000.average <= Game.cpu.limit ? "good" : "warn")}` : "")
+        + (longTerm.last10000 ? ` &nbsp; ~10k ${color(Number(longTerm.last10000.average).toFixed(2), longTerm.last10000.average <= Game.cpu.limit ? "good" : "warn")}` : "")
         + ` &nbsp; bucket ${color(Game.cpu.bucket, Game.cpu.bucket >= 6000 ? "good" : "warn")}`
         + ` &nbsp; creeps ${Object.keys(Game.creeps).length}`
         + ` &nbsp; PC ${Object.values(Game.powerCreeps).filter(pc => pc.ticksToLive).length}`
         + ` &nbsp; errors <span title="last error tick: ${escapeHtml(health.lastErrorTick || "none")}">${color(health.errorCount || 0, health.lastErrorTick && health.lastErrorTick > Game.time - 20 ? "bad" : "good")}</span></div>`;
+}
+
+function moduleStatus() {
+    let profile = global.RUNTIME_PROFILE || {};
+    let features = Object.keys(global.CPU_FEATURES || {});
+    let enabled = features.filter(name => isCpuFeatureEnabled(name));
+    let dormant = features.filter(name => !isCpuFeatureEnabled(name));
+    let detailsStyle = `background:${COLORS.panel};color:${COLORS.text};border:1px solid ${COLORS.line};padding:5px 8px;font:12px/1.5 monospace;max-width:900px`;
+    return `<details style="${detailsStyle}"><summary style="cursor:pointer;color:${COLORS.cyan}">▸ Modules & feature gates</summary>`
+        + `<div>uploaded ${color(profile.uploadedModules || "-", "blue")} · restored snapshot ${color(profile.restoredSnapshotModules || "-", "good")}</div>`
+        + `<div>enabled: ${escapeHtml(enabled.join(", ") || "none")}</div>`
+        + `<div style="color:${COLORS.dim}">dormant: ${escapeHtml(dormant.join(", ") || "none")}</div>`
+        + `<div style="color:${COLORS.warn}">excluded: ${escapeHtml((profile.intentionallyExcluded || []).join(", ") || "none")}</div></details>`;
 }
 
 function overview() {
@@ -121,7 +137,7 @@ function overview() {
         let tasks = aggregate(units, taskName);
         let hover = `Terminal ${number(room.terminal && room.terminal.store.getUsedCapacity())} | Power ${number(sumStore(room, RESOURCE_POWER))} | OPS ${number(sumStore(room, RESOURCE_OPS))} | Roles ${plainPairs(roles)} | Tasks ${plainPairs(tasks)}`;
         return `<tr>`
-            + `<td title="${escapeHtml(hover)}" style="${style.left};color:${COLORS[tone]}"><b>${room.name}</b></td>`
+            + `<td style="${style.left};color:${COLORS[tone]}"><details><summary style="cursor:pointer"><b>${room.name}</b></summary><div style="color:${COLORS.dim};padding:4px 0;white-space:normal;max-width:360px">${escapeHtml(hover)}</div></details></td>`
             + `<td style="${style.td}">${room.controller.level} ${bar(rclProgress, 100, "purple")}</td>`
             + `<td style="${style.td}">${number(room.energyAvailable)}/${number(room.energyCapacityAvailable)}</td>`
             + `<td style="${style.td}">${number(sumStore(room, RESOURCE_ENERGY))}</td>`
@@ -135,8 +151,8 @@ function overview() {
         + ["Room ⓘ", "RCL", "Hive energy", "Total energy", "Storage", "Creeps (+spawn)", "Hostiles", "profile CPU"]
             .map((name, index) => `<th style="${index ? style.th : style.th + ";text-align:left"}">${name}</th>`).join("")
         + `</tr></thead><tbody>${rows}</tbody></table>`;
-    return header("Screeps Room Dashboard") + table
-        + `<div style="color:${COLORS.dim};font:11px monospace">hover Room ⓘ for secondary resources/roles/tasks · detail: dash("ROOM") · profile CPU is the latest 100-tick sample</div>`;
+    return header("Screeps Room Dashboard") + table + moduleStatus()
+        + `<div style="color:${COLORS.dim};font:11px monospace">click a room name for secondary resources/roles/tasks · detail: dash("ROOM") · profile CPU is the latest 100-tick sample</div>`;
 }
 
 function roomDetail(roomName) {
@@ -154,12 +170,12 @@ function roomDetail(roomName) {
             let ttlTone = unit.spawning || unit.ticksToLive > 250 ? "good" : unit.ticksToLive > 80 ? "warn" : "bad";
             let target = current.roomName || current.flagName || current.id || "-";
             let shortTarget = target.length > 16 ? target.slice(0, 13) + "…" : target;
-            let taskTip = `${current.taskName || "idle"} | room ${current.roomName || "-"} | id ${current.id || "-"} | pos ${current.x === undefined ? "-" : current.x + "," + current.y} | register ${current.regFun || "-"}`;
+            let taskDetail = `room ${current.roomName || "-"} · id ${current.id || "-"} · pos ${current.x === undefined ? "-" : current.x + "," + current.y} · register ${current.regFun || "-"}`;
             return `<tr><td style="${style.left}">${escapeHtml(unit.name)}</td>`
                 + `<td style="${style.left}">${escapeHtml(unit.memory.role || "unknown")}</td>`
                 + `<td style="${style.td}">${color(unit.spawning ? "spawn" : unit.ticksToLive, ttlTone)}</td>`
-                + `<td title="${escapeHtml(taskTip)}" style="${style.left}">${escapeHtml(current.taskName || "idle")}</td>`
-                + `<td title="${escapeHtml(target)}" style="${style.left}">${escapeHtml(shortTarget)}</td>`
+                + `<td style="${style.left}"><details><summary style="cursor:pointer">${escapeHtml(current.taskName || "idle")}</summary><div style="color:${COLORS.dim};white-space:normal;max-width:420px">${escapeHtml(taskDetail)}</div></details></td>`
+                + `<td style="${style.left}">${escapeHtml(shortTarget)}</td>`
                 + `<td style="${style.td}">${number(unit.store.getUsedCapacity())}/${number(unit.store.getCapacity())}</td></tr>`;
         }).join("");
     let controller = room.controller;

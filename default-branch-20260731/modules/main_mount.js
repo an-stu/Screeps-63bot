@@ -31,6 +31,11 @@ global.isCpuFeatureEnabled = name => {
 // Cross-shard management is intentionally disabled in the core profile, but
 // creep and spawn naming still require the local shard identifier.
 global.LOCAL_SHARD_NAME = Game.shard.name
+global.RUNTIME_PROFILE = {
+    uploadedModules: 68,
+    restoredSnapshotModules: 67,
+    intentionallyExcluded: ["strategy_powerBank", "调用栈分析器", "闲聊 v1.0"]
+}
 
 // 数据结构
 require("algo_wasm_PriorityQueue")

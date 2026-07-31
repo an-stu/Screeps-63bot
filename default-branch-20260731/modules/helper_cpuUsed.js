@@ -88,6 +88,8 @@ showCpuUsed('${divName}',data,data2)
 let pro={
     sampleInterval: 5,
     maxSamples: 600,
+    longTermBucketTicks: 100,
+    longTermMaxBuckets: 100,
     cpu: new Array(600),
     bucket: new Array(600),
     cursor: 0,
@@ -108,6 +110,70 @@ let pro={
             total += data[index] || 0;
         }
         return total / samples;
+    },
+    recordLongTerm(cpu) {
+        let telemetry = Memory.cpuTelemetry;
+        if(!telemetry || telemetry.version != 1){
+            telemetry = Memory.cpuTelemetry = {
+                version: 1,
+                startTick: Game.time,
+                lastTick: 0,
+                samples: 0,
+                sum: 0,
+                min: cpu,
+                max: cpu,
+                overLimit: 0,
+                bucketStart: Game.cpu.bucket,
+                bucketEnd: Game.cpu.bucket,
+                buckets: []
+            };
+        }
+        if(telemetry.lastTick == Game.time)return;
+        telemetry.lastTick = Game.time;
+        telemetry.samples++;
+        telemetry.sum += cpu;
+        telemetry.min = Math.min(telemetry.min, cpu);
+        telemetry.max = Math.max(telemetry.max, cpu);
+        if(cpu > Game.cpu.limit)telemetry.overLimit++;
+        telemetry.bucketEnd = Game.cpu.bucket;
+
+        let id = Math.floor(Game.time / pro.longTermBucketTicks);
+        let bucket = telemetry.buckets[telemetry.buckets.length - 1];
+        if(!bucket || bucket.id != id){
+            bucket = {id:id, samples:0, sum:0, max:0, overLimit:0};
+            telemetry.buckets.push(bucket);
+            if(telemetry.buckets.length > pro.longTermMaxBuckets)telemetry.buckets.shift();
+        }
+        bucket.samples++;
+        bucket.sum += cpu;
+        bucket.max = Math.max(bucket.max, cpu);
+        if(cpu > Game.cpu.limit)bucket.overLimit++;
+    },
+    longTermSummary() {
+        let telemetry = Memory.cpuTelemetry;
+        if(!telemetry || !telemetry.samples)return {};
+        let aggregate = count => {
+            let samples = 0, sum = 0, max = 0, overLimit = 0;
+            for(let index=telemetry.buckets.length-1;index>=0 && samples<count;index--){
+                let bucket = telemetry.buckets[index];
+                samples += bucket.samples;
+                sum += bucket.sum;
+                max = Math.max(max, bucket.max);
+                overLimit += bucket.overLimit;
+            }
+            return {samples:samples, average:samples?sum/samples:0, max:max, overLimit:overLimit};
+        };
+        return {
+            startTick: telemetry.startTick,
+            samples: telemetry.samples,
+            average: telemetry.sum / telemetry.samples,
+            min: telemetry.min,
+            max: telemetry.max,
+            overLimit: telemetry.overLimit,
+            bucketDelta: telemetry.bucketEnd - telemetry.bucketStart,
+            last1000: aggregate(1000),
+            last10000: aggregate(10000)
+        };
     },
     show(){
         console.log(cpuEcharts(Game.time, this.series(this.cpu), this.series(this.bucket)))

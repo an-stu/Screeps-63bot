@@ -252,6 +252,7 @@ let getUpgraderInterval = function () {
     if (Game.cpu.bucket < 5000) return 5;
     if (Game.cpu.bucket < 9000) return 4;
     if (Game.cpu.bucket < 9800) return 3;
+    if (Game.cpu.bucket < 9950) return 2;
     return 1;
 }
 
@@ -279,6 +280,7 @@ let updateCodeHealth = function () {
         time: Game.time,
         cpu: Game.cpu.getUsed(),
         averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),
+        cpuLongTerm: HelperCpuUsed.longTermSummary(),
         bucket: Game.cpu.bucket,
         creeps: objects.creeps.length,
         powerCreeps: objects.powerCreeps.filter(e => e.ticksToLive).length,
@@ -323,6 +325,7 @@ let main = function () {
     HelperError.catchError(() => exec_wake_task());
     HelperError.throwAllError();
     HelperCpuUsed.exec();
+    HelperCpuUsed.recordLongTerm(Game.cpu.getUsed());
     updateCodeHealth();
     // P0();
     // space_action.an_w();
