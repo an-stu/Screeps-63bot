@@ -27,6 +27,8 @@ const attackRoom = fs.readFileSync(path.join(root, "modules/war_attackRoom.js"),
 const warCache = fs.readFileSync(path.join(root, "modules/war_cache.js"), "utf8");
 const teamRaL1 = fs.readFileSync(path.join(root, "modules/team_raL1.js"), "utf8");
 const strategyAtkL2 = fs.readFileSync(path.join(root, "modules/strategy_atkL2.js"), "utf8");
+const strategyClaim = fs.readFileSync(path.join(root, "modules/strategy_claim.js"), "utf8");
+const strategyCleanBuild = fs.readFileSync(path.join(root, "modules/strategy_cleanBuild.js"), "utf8");
 const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
 const marketPrice = fs.readFileSync(path.join(root, "modules/strategy_marketPrice.js"), "utf8");
@@ -102,6 +104,8 @@ assert.ok(managerCreeps.includes("Game._alivePowerCreeps"), "Power Creep managem
 assert.ok(!managerCreeps.includes("_.keys(creeps)"), "creep grouping must avoid a temporary Lodash key array");
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("claim")'), "claim strategy must not run without a matching flag");
+assert.ok(strategyClaim.includes("flag.memory.spawnRoom"), "claim operations must support a pinned safe spawn room");
+assert.ok(strategyCleanBuild.includes("FIND_HOSTILE_STRUCTURES") && strategyCleanBuild.includes("!structure.my"), "claim cleanup must remove hostile structures that block a new spawn");
 assert.ok(main.includes('ManagerFlags.hasPrefix("cleanBuild")') && main.includes('ManagerFlags.hasPrefix("blockRoom")'), "global flag utilities must use prefix gates");
 assert.ok(main.includes('isCpuFeatureEnabled("combat")') && main.includes("ManagerFlags.hasAnyPrefix"), "advanced combat must remain dormant without its opt-in and flags");
 for (const feature of ["market", "autoPlanner", "visual", "crossShard", "crossShardTrade", "claimCrossShard", "deposits", "GCLRoom", "combat"]) {
@@ -135,6 +139,7 @@ assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instr
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");
 assert.ok(betterMove.includes('!isCpuFeatureEnabled("visual")'), "legacy moveTo styles must obey the global visual gate");
 assert.ok(betterMove.includes("setCpuStats(bool)"), "movement CPU instrumentation must remain explicitly switchable");
+assert.ok(betterMove.includes("Memory.betterMoveAvoidRooms"), "manual route exclusions must survive global resets");
 const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
 assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longTermSummary()"), "CPU telemetry must persist exact long-window statistics");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");

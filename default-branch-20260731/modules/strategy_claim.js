@@ -3,6 +3,11 @@
  */
 
 let pro = {
+    getSpawnRoom(flag) {
+        let configuredRoom = flag.memory.spawnRoom && Game.rooms[flag.memory.spawnRoom];
+        if (configuredRoom && configuredRoom.my && configuredRoom.spawn.length) return configuredRoom;
+        return StationHive.getClosestSpawnRoom(flag.pos.roomName, 7, 3, 15);
+    },
     exec () {
         if(Game.time%3!=0)return;
         if(!ManagerFlags.hasPrefix("claim"))return;
@@ -12,7 +17,7 @@ let pro = {
                 return;
             }
             if(!Memory.rooms[flag.pos.roomName]||!Memory.rooms[flag.pos.roomName][StationSources.stationName]){
-                let spawnRoom = StationHive.getClosestSpawnRoom(flag.pos.roomName,7,3,15)
+                let spawnRoom = pro.getSpawnRoom(flag);
                 if(!spawnRoom){
                     log("no active able room");
                     return;
@@ -32,7 +37,7 @@ let pro = {
                     ManagerAutoPlanner.computeRoom(flag);
                 }else {
                     if(Game.rooms[flag.pos.roomName]&&Game.rooms[flag.pos.roomName].my)return;
-                    let spawnRoom = StationHive.getClosestSpawnRoom(flag.pos.roomName,7,3,15)
+                    let spawnRoom = pro.getSpawnRoom(flag);
                     if(!spawnRoom){
                         log("no active able room");
                         return;

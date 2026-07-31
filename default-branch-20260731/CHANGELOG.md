@@ -517,3 +517,20 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
 - Replace an accidental bitwise `&` in upgrader movement throttling with the
   intended short-circuit boolean condition.
 - Remove the duplicate `Creep.prototype.headTask` definition.
+
+## v0.29.0 — Safe claim operations
+
+### Added
+
+- Allow a claim flag to pin its spawning room through
+  `flag.memory.spawnRoom`, keeping long-range expansion on an audited route.
+- Persist manually excluded BetterMove rooms in
+  `Memory.betterMoveAvoidRooms` so route safety survives script reloads.
+
+### Fixed
+
+- Extend clean-build workers to dismantle inactive hostile spawns and other
+  damageable hostile structures that block construction in a newly claimed
+  room.
+- Keep cleanup flags until the target controller is owned and hostile
+  structures are actually gone.

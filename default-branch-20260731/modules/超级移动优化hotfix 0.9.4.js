@@ -1425,6 +1425,7 @@ avoidRooms = avoidRooms.reduce((temp, roomName) => {
     temp[roomName] = 1;
     return temp;
 }, {});
+for (let roomName of Memory.betterMoveAvoidRooms || []) avoidRooms[roomName] = 1;
 
 observers = observers.reduce((temp, id) => {
     let ob = Game.getObjectById(id);
@@ -1515,6 +1516,8 @@ global.BetterMove = {
         let splited = reg1.exec(roomName);
         if (splited && splited.length == 5) {
             avoidRooms[roomName] = 1;
+            Memory.betterMoveAvoidRooms = Memory.betterMoveAvoidRooms || [];
+            if (!Memory.betterMoveAvoidRooms.includes(roomName)) Memory.betterMoveAvoidRooms.push(roomName);
             return OK;
         } else {
             return ERR_INVALID_ARGS;
@@ -1524,6 +1527,9 @@ global.BetterMove = {
         let splited = reg1.exec(roomName);
         if (splited && splited.length == 5 && avoidRooms[roomName]) {
             delete avoidRooms[roomName];
+            if (Memory.betterMoveAvoidRooms) {
+                Memory.betterMoveAvoidRooms = Memory.betterMoveAvoidRooms.filter(name => name != roomName);
+            }
             return OK;
         } else {
             return ERR_INVALID_ARGS;

@@ -20,7 +20,13 @@ Creep.prototype.cleanBuild=function () {
     if(flag&&this.room.name != flag.pos.roomName)
         this.moveTo(flag);
     else if(this.store.isEmpty()){
-        let struct = this.pos.findClosestByPath(FIND_STRUCTURES,{filter:e=>e.hits&&((!e.my&&e.structureType==STRUCTURE_RAMPART)||e.structureType==STRUCTURE_WALL),ignoreCreeps:false})
+        // A newly claimed room may contain an inactive hostile spawn or other
+        // ruins that block our RCL structure limit. Dismantle every hostile
+        // damageable structure, not only old walls and ramparts.
+        let struct = this.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: structure => structure.hits && !structure.my && structure.structureType != STRUCTURE_CONTROLLER,
+            ignoreCreeps: false,
+        });
         if(struct)this.addTaskAndExec(UtilsTask.task(struct,"collectStructEnergy"))
     }
     else{
@@ -90,7 +96,7 @@ let pro = {
         if(Game.time%10!=0)return;
         if(!ManagerFlags.hasPrefix("cleanBuild"))return;
         ManagerFlags.getFlagsByPrefix("cleanBuild").forEach(flag=>{
-            if(flag.room&&flag.room.find(FIND_STRUCTURES).every(e=>e.my)){//全部清理完毕
+            if(flag.room && flag.room.my && flag.room.find(FIND_HOSTILE_STRUCTURES).length == 0){//全部清理完毕
                 return flag.remove();
             }
 
