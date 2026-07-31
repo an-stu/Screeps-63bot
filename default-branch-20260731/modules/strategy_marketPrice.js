@@ -41,6 +41,8 @@ let DEFAULT_PRICE = // 默认资源价格//如果不能从市场算的话//所�
 })();
 
 let MAX_DELAY = 86400/16 ; // 更新商品价格的延迟  大概6小时跟新一次
+let HISTORY_CACHE_TTL = 1000;
+let historyCache = {};
 
 
 
@@ -127,7 +129,12 @@ let pro = {
     },
 
     getHistory(resType) {
-        return Game.market.getHistory(resType)||[];//historys //
+        let key = resType || "*";
+        let cached = historyCache[key];
+        if(cached && Game.time-cached.time < HISTORY_CACHE_TTL)return cached.data;
+        let data = Game.market.getHistory(resType)||[];
+        historyCache[key] = {time:Game.time,data:data};
+        return data;//historys //
     },
 
     updateDepoHistroyPrice (){
@@ -263,7 +270,7 @@ let pro = {
 /**
  * 计算所有商品的价格和利润，并可视化打印
  */
-pro.calculateAllCommoditiesProfit = function(showDetail = false, outputToConsole = true) {
+pro.calculateAllCommoditiesProfit = function(showDetail = false, outputToConsole = false) {
     // 更新价格数据
     pro.updatePrice();
     
@@ -533,9 +540,8 @@ function generateSingleLineTable(items, status, statusIcon, statusText) {
 
 // 添加一个更简洁的显示函数
 pro.showProfitAnalysis = function() {
-    let result = pro.calculateAllCommoditiesProfit();
+    let result = pro.calculateAllCommoditiesProfit(true,true);
     return result;
 };
 
-pro.updatePrice()
 global.StrategyMarketPrice=pro;

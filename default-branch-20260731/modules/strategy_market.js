@@ -94,6 +94,10 @@ let getSeriesMap = function() {
 let ON_SALE = {};
 
 let allRoomRes = { updateTime: 0 }
+let MARKET_SELL_PRICE_TTL = 1000;
+let MARKET_ORDER_TTL = 20;
+let sellPriceCache = {updateTime:-1e9,prices:{},bestCommodities:{}};
+let orderCache = {};
 
 
 // global.MAX_PIXEL_PRICE = 5836
@@ -116,9 +120,7 @@ let pro = {
         return all;
     },
     getOnSellPrice() {
-            if (Game._sellPrice && Game.time - (Game._sellPrice.updateTime || 0) < 100) {
-        return Game._sellPrice.prices;
-    }
+        if (Game.time - sellPriceCache.updateTime < MARKET_SELL_PRICE_TTL) return sellPriceCache.prices;
     
     // 获取最佳商品
     let bestCommodities = pro.getBestCommoditiesToSell();
@@ -135,7 +137,7 @@ let pro = {
     }
     
     // 缓存结果
-    Game._sellPrice = {
+    sellPriceCache = {
         prices: out,
         bestCommodities: bestCommodities,
         updateTime: Game.time
@@ -144,18 +146,12 @@ let pro = {
     return out;
     },
     getAllOrdersCacheList(resourceType, type) {
-        if (!Game.market._cache_order) Game.market._cache_order = {};
-        if (!Game.market._cache_order[type] || !Game.market._cache_order[type][resourceType]) {
-            let allOrders = Game.market.getAllOrders({ type: type, resourceType: resourceType })
-            for (let order of allOrders) {
-                if (!Game.market._cache_order[type]) Game.market._cache_order[type] = {}
-                if (!Game.market._cache_order[type][resourceType]) Game.market._cache_order[type][resourceType] = []
-                Game.market._cache_order[type][resourceType].push(order)
-            }
-        }
-        if (Game.market._cache_order[type] && Game.market._cache_order[type][resourceType])
-            return Game.market._cache_order[type][resourceType];
-        else return [];
+        let key = type+":"+resourceType;
+        let cached = orderCache[key];
+        if(cached && Game.time-cached.time < MARKET_ORDER_TTL)return cached.orders;
+        let orders = Game.market.getAllOrders({ type: type, resourceType: resourceType }) || [];
+        orderCache[key] = {time:Game.time,orders:orders};
+        return orders;
     },
     autoBuy() {
         if ((Game.time) % 100 == 0) {
@@ -559,7 +555,7 @@ let pro = {
 
     // 卖东西 - 只卖最佳商品
     let sellPrice = pro.getOnSellPrice();
-    let bestCommodities = Game._sellPrice.bestCommodities || {};
+    let bestCommodities = sellPriceCache.bestCommodities || {};
     let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
     
     // 按利润率排序，优先卖出利润率高的商品
@@ -665,7 +661,7 @@ let pro = {
 
 pro.getBestCommoditiesToSell = function(showDetail = false) {
     // 首先获取所有商品的利润分析
-    let allCommodities = StrategyMarketPrice.calculateAllCommoditiesProfit(false);
+    let allCommodities = StrategyMarketPrice.calculateAllCommoditiesProfit(false,false).commodities;
     
     let seriesMap = getSeriesMap();
     let bestCommodities = {};

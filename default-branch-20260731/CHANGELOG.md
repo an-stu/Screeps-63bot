@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.13.0 — Opt-in market restoration
+
+### Added
+
+- Restore `strategy_marketPrice` and `strategy_market` as an explicit opt-in
+  feature (`Memory.cpuFeatures.market = true`).
+
+### Optimized
+
+- Remove the full market-price calculation from script initialization.
+- Cache market history for 1,000 ticks, commodity sell prices for 1,000 ticks,
+  and order lists for 20 ticks.
+- Spread the twelve-room market pass across four five-tick batches.
+
+### Fixed
+
+- Consume the `commodities` field returned by profit analysis instead of
+  treating the wrapper object as the commodity map.
+- Suppress the large profit-analysis HTML unless explicitly requested.
+
 ## v0.12.0 — Flag-gated scouter restoration
 
 ### Added

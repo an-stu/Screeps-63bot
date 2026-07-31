@@ -12,7 +12,12 @@ global.CPU_FEATURES = {
     outerHarvest: true,
     scouter: true,
 }
-global.isCpuFeatureEnabled = name => (Memory.cpuFeatures || {})[name] !== false && CPU_FEATURES[name] !== false
+global.CPU_OPT_IN_FEATURES = new Set(["market"])
+global.isCpuFeatureEnabled = name => {
+    let value = (Memory.cpuFeatures || {})[name];
+    if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
+    return value !== false && CPU_FEATURES[name] !== false;
+}
 // Cross-shard management is intentionally disabled in the core profile, but
 // creep and spawn naming still require the local shard identifier.
 global.LOCAL_SHARD_NAME = Game.shard.name
@@ -64,6 +69,8 @@ require('strategy_factoryPowerCreep');
 require('strategy_resourceBalance');
 require('strategy_outerHarvest');
 require('strategy_scouter');
+require('strategy_marketPrice');
+require('strategy_market');
 require('team_raL1');
 // Optional modules are intentionally not loaded in the 20 CPU bootstrap
 // profile. Reintroduce only one group at a time after measuring its impact:

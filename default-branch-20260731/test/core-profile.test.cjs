@@ -19,6 +19,8 @@ const managerFlags = fs.readFileSync(path.join(root, "modules/manager_flags.js")
 const main = fs.readFileSync(path.join(root, "modules/main.js"), "utf8");
 const prototypeRoom = fs.readFileSync(path.join(root, "modules/prototype_room.js"), "utf8");
 const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
+const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
+const marketPrice = fs.readFileSync(path.join(root, "modules/strategy_marketPrice.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -35,6 +37,7 @@ assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep 
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be independently restorable");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
+assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
 assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(manifest.includes("station_factory"), "core mode must keep owned factories and OPF creeps functional");
 assert.ok(manifest.includes("station_observer"), "observer scanning must be independently restorable");
@@ -57,6 +60,11 @@ assert.ok(mainMount.includes("observer: true"), "observer scanning must be switc
 assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");
 assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies must have an allocation-free gate");
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
+assert.ok(mainMount.includes('CPU_OPT_IN_FEATURES = new Set(["market"])'), "market execution must require an explicit online opt-in");
+assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");
+assert.ok(market.includes("MARKET_SELL_PRICE_TTL = 1000"), "commodity profit prices must be cached across ticks");
+assert.ok(market.includes("MARKET_ORDER_TTL = 20"), "market order queries must be cached across ticks");
+assert.ok(market.includes(".commodities;"), "market strategy must consume the pricing result payload correctly");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instrumentation must default to off");
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");

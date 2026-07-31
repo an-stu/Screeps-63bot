@@ -111,8 +111,11 @@ let pro = {
         // These jobs do not keep creeps alive or defend a room. Spread them
         // over several ticks and make them independently switchable in Memory.
         if (!MIN_CPU && global.StrategyMarket && isCpuFeatureEnabled("market") && HelperCpuUsed.shouldRun(5)) {
-            HelperError.runEach(objects.rooms, room => StrategyMarket.exec(room));
-            HelperError.catchError(() => StrategyMarket.autoBuy());
+            let batch = Math.floor(Game.time / 5) % 4;
+            for(let index=batch;index<objects.rooms.length;index+=4){
+                HelperError.catchError(() => StrategyMarket.exec(objects.rooms[index]), objects.rooms[index].name);
+            }
+            if(HelperCpuUsed.shouldRun(100))HelperError.catchError(() => StrategyMarket.autoBuy());
         }
         if (!MIN_CPU && global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner") && HelperCpuUsed.shouldRun(25))
             HelperError.catchError(() => ManagerAutoPlanner.exec());

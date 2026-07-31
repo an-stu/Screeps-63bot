@@ -39,5 +39,7 @@
   "strategy_resourceBalance",
   "strategy_outerHarvest",
   "strategy_scouter",
+  "strategy_marketPrice",
+  "strategy_market",
   "team_raL1"
 ]
