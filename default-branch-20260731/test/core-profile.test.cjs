@@ -105,6 +105,8 @@ assert.ok(!managerCreeps.includes("_.keys(creeps)"), "creep grouping must avoid 
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("claim")'), "claim strategy must not run without a matching flag");
 assert.ok(strategyClaim.includes("flag.memory.spawnRoom"), "claim operations must support a pinned safe spawn room");
+assert.ok(strategyClaim.includes("Creep.prototype.clearClaimRoom") && strategyClaim.includes('this.memory.role = "worker"'), "claim cleanup must automatically become a bootstrap worker");
+assert.ok(strategyClaim.includes("[WORK]: 5") && strategyClaim.includes("[CARRY]: 5") && strategyClaim.includes("[MOVE]: 5"), "claim cleanup must use a bounded reusable body");
 assert.ok(strategyCleanBuild.includes("FIND_HOSTILE_STRUCTURES") && strategyCleanBuild.includes("!structure.my"), "claim cleanup must remove hostile structures that block a new spawn");
 assert.ok(main.includes('ManagerFlags.hasPrefix("cleanBuild")') && main.includes('ManagerFlags.hasPrefix("blockRoom")'), "global flag utilities must use prefix gates");
 assert.ok(main.includes('isCpuFeatureEnabled("combat")') && main.includes("ManagerFlags.hasAnyPrefix"), "advanced combat must remain dormant without its opt-in and flags");

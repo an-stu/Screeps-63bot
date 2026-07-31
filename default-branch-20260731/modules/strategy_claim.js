@@ -2,11 +2,42 @@
  * claim 房间 策略
  */
 
+Creep.prototype.clearClaimRoom = function () {
+    let task = this.lastTask();
+    if (this.room.name != task.roomName) {
+        this.goTo(new RoomPosition(task.x || 25, task.y || 25, task.roomName));
+        return;
+    }
+
+    let target = this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
+        filter: structure => structure.hits && structure.structureType != STRUCTURE_CONTROLLER,
+    });
+    if (target) {
+        if (this.dismantle(target) == ERR_NOT_IN_RANGE) this.moveTo(target);
+        return;
+    }
+
+    if (this.room.my) {
+        this.memory.role = "worker";
+        this.memory.roomName = this.room.name;
+        this.memory.tasks = [];
+        this.memory.dontPullMe = false;
+    }
+};
+
 let pro = {
     getSpawnRoom(flag) {
         let configuredRoom = flag.memory.spawnRoom && Game.rooms[flag.memory.spawnRoom];
         if (configuredRoom && configuredRoom.my && configuredRoom.spawn.length) return configuredRoom;
         return StationHive.getClosestSpawnRoom(flag.pos.roomName, 7, 3, 15);
+    },
+    spawnCleaner(flag, spawnRoom) {
+        let targetRoom = Game.rooms[flag.pos.roomName];
+        if (!targetRoom || !targetRoom.find(FIND_HOSTILE_STRUCTURES).some(structure => structure.hits)) return;
+        if (targetRoom.creeps("claimCleaner", false).length) return;
+        let body = ManagerCreeps.calcBodyPart({[WORK]: 5, [CARRY]: 5, [MOVE]: 5});
+        let tasks = [UtilsTask.taskOutView(undefined, flag.pos.roomName, 25, 25, "clearClaimRoom")];
+        StationHive.trySpawn(spawnRoom, flag.pos.roomName, body, "claimCleaner", tasks);
     },
     exec () {
         if(Game.time%3!=0)return;
@@ -43,6 +74,7 @@ let pro = {
                         return;
                     }
                     if(Game.rooms[flag.getRoomName()]&&Game.rooms[flag.getRoomName()].my)spawnRoom=Game.rooms[flag.getRoomName()]
+                    pro.spawnCleaner(flag, spawnRoom);
                     // let controller = Memory.rooms[flag.pos.roomName][StationUpgrade.stationName][STRUCTURE_CONTROLLER]
                     let claimer = spawnRoom.creeps("claimer",false).filter(e=>{
                         let task=e.headTask();

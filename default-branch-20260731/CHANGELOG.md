@@ -534,3 +534,13 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   room.
 - Keep cleanup flags until the target controller is owned and hostile
   structures are actually gone.
+
+## v0.30.0 — Integrated claim cleanup
+
+### Changed
+
+- Replace the separate long-lived clean-build flag for expansion with one
+  bounded 5 WORK / 5 CARRY / 5 MOVE claim cleaner spawned by the claim
+  strategy only when hostile structures are visible.
+- After dismantling the old structure and gaining controller ownership, the
+  cleaner automatically becomes a normal bootstrap worker in the new room.
