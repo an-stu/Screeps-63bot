@@ -8,6 +8,7 @@ global.SPECIAL_ROOM = new Set([
 ])
 
 let ROOM_MEMORY_TTL=20000
+let ROOM_REFRESH_INTERVAL=61
 
 let pro={
     init(){
@@ -38,7 +39,10 @@ let pro={
     firstActive : true,
     exec (room) {
         if(!MIN_CPU && global.StationObserver && isCpuFeatureEnabled("observer"))StationObserver.update(room);
-        if((Game.time+room.hashCode())%31==0||pro.firstActive){
+        // Full structure/station discovery is expensive and new owned
+        // structures do not need sub-minute recognition. Hash staggering keeps
+        // the refresh load spread across rooms.
+        if((Game.time+room.hashCode())%ROOM_REFRESH_INTERVAL==0||pro.firstActive){
             HelperError.catchError(()=>pro.updateRoom(room))
             pro.firstActive = false;
         }

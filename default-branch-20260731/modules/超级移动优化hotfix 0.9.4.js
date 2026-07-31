@@ -1212,6 +1212,12 @@ function betterMoveTo(firstArg, secondArg, opts) {
         toPos = { x: firstArg, y: secondArg, roomName: this.room.name };
         ops = opts || {};
     }
+    // Many legacy callers always provide a visualizePathStyle. Cloning only
+    // those option objects keeps visuals truly opt-in without mutating caller
+    // data or adding allocation to normal moveTo calls.
+    if (ops.visualizePathStyle && global.isCpuFeatureEnabled && !isCpuFeatureEnabled("visual")) {
+        ops = Object.assign({}, ops, {visualizePathStyle: undefined});
+    }
     ops.bypassHostileCreeps = ops.bypassHostileCreeps === undefined || ops.bypassHostileCreeps;    // 设置默认值为true
     ops.ignoreCreeps = ops.ignoreCreeps === undefined || ops.ignoreCreeps;
 

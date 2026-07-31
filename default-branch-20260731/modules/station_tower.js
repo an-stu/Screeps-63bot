@@ -39,14 +39,21 @@ let pro={
     },
     exec (room){
         StationDefense.checkSafeMode(room);
-        if (global.WarDefenseCore) WarDefenseCore.checkNeedDefense(room);
         if (!pro.lastUpdateMap[room.name]||pro.lastUpdateMap[room.name] <= 0) {
             pro.lastUpdateMap[room.name] = 10
             let hostiles = room.find(FIND_HOSTILE_CREEPS);
+            if (global.WarDefenseCore && isCpuFeatureEnabled("combat")) WarDefenseCore.checkNeedDefense(room, hostiles);
             let randomAttack = undefined;
             if(hostiles.length){
                 pro.lastUpdateMap[room.name] = 0;
                 hostiles = hostiles.sort((a,b)=>a.hits/a.hitsMax!=b.hits/b.hitsMax?(a.hits/a.hitsMax-b.hits/b.hitsMax):a.hits-b.hits)
+            }
+
+            let injured = undefined;
+            if(!hostiles.length){
+                let damaged = room.find(FIND_MY_CREEPS, {filter:e=>e.hits < e.hitsMax})
+                    .concat(room.find(FIND_MY_POWER_CREEPS, {filter:e=>e.hits < e.hitsMax}));
+                injured = damaged.minBy(e=>e.hits/e.hitsMax);
             }
 
             if(!lastAttackCreepMap[room.name])lastAttackCreepMap[room.name] = {}
@@ -54,11 +61,8 @@ let pro={
 
             room.tower.filter(e=>!e._used).forEach(tower => {
 
-                let closestMyCreeps = tower.pos.findClosestByRange(FIND_MY_CREEPS,{filter:e=>e.hits!=e.hitsMax});
-                if(!closestMyCreeps)closestMyCreeps = tower.pos.findClosestByRange(FIND_MY_POWER_CREEPS,{filter:e=>e.hits!=e.hitsMax});
-                // if((!hostiles.length||(hostiles&&hostiles.find(e=>e.owner.username!='Invader')))&&closestMyCreeps){
-                if((!hostiles.length)&&closestMyCreeps){
-                    tower.heal(closestMyCreeps)
+                if(injured){
+                    tower.heal(injured)
                     pro.lastUpdateMap[room.name]=0
                     return;
                 }

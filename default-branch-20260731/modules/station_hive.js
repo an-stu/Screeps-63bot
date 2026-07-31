@@ -30,15 +30,12 @@ Creep.prototype.fillHive = function () {
     //这里只在自己的房间
     let room = Game.rooms[this.memory["roomName"]]
     room.hiveEnergySendingUsed = room.hiveEnergySendingUsed || {}
-    let target = this.pos.findClosestByPath(FIND_MY_STRUCTURES, {
-        filter: e =>
-            (e.structureType == STRUCTURE_EXTENSION || e.structureType == STRUCTURE_SPAWN) &&
-            e.store[RESOURCE_ENERGY] < e.store.getCapacity(RESOURCE_ENERGY) && //&& e.isActive()
-            !room.hiveEnergySendingUsed[e.id],
-        ignoreCreeps: true
-    })
-    // room.spawn.concat(room.extension).filter(e=>e.store.getFreeCapacity(RESOURCE_ENERGY))
-    //     .map(e=> UtilsTask.task(e,"fillRes","registerStationHive",{resType:RESOURCE_ENERGY}))
+    // Owned spawn/extension targets are already cached by room. Range
+    // selection is sufficient here because BetterMove handles the actual
+    // route, avoiding a PathFinder search every time a carrier gets work.
+    let targets = room.spawn.concat(room.extension).filter(e =>
+        e.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !room.hiveEnergySendingUsed[e.id]);
+    let target = this.pos.findClosestByRange(targets);
     if (target) {
         room.hiveEnergySendingUsed[target.id] = true
         this.addTask(UtilsTask.task(target, "fillRes", undefined, { resType: RESOURCE_ENERGY }))
@@ -128,7 +125,7 @@ let pro = {
         if (room.currentEnergyAvailable < spend) {
             room.spawnFailue = true; return undefined;
         }
-        let spawn = room.find(FIND_MY_SPAWNS).filter(e => !e.spawning && !room.spawnedMap[e.id] && (room.level == 8 || e.isActive())).head();
+        let spawn = room.spawn.find(e => !e.spawning && !room.spawnedMap[e.id] && (room.level == 8 || e.isActive()));
         if (!spawn) {
             room.spawnFailue = true; return undefined;
         }

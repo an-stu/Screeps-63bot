@@ -76,12 +76,19 @@ let pro={
         return ManagerCreeps.calcBodyPart([ [TOUGH,10],[MOVE,9],[HEAL,30],[MOVE,1]])
     },
 
-    checkNeedDefense(room){
+    checkNeedDefense(room, hostiles){
         // let upgradeFlag = room.flags("defense").head()
         // if(upgradeFlag)return true;
         // if((Game.time+room.hashCode())%30!=0)return;
-        let hostiles = room.find(FIND_HOSTILE_CREEPS,{filter:e => e.owner.username != "Invader"});
-        let healCnt = hostiles.length&&hostiles.map(e=>e.body.filter(e=>e.type==HEAL &&e.boost=="XLHO2").length).sum()
+        if(room.level < 7)return;
+        hostiles = hostiles || room.find(FIND_HOSTILE_CREEPS);
+        let healCnt = 0;
+        for(let hostile of hostiles){
+            if(hostile.owner.username == "Invader")continue;
+            for(let part of hostile.body){
+                if(part.type == HEAL && part.boost == "XLHO2")healCnt++;
+            }
+        }
         let flag  = Game.flags["defense_"+room.name];
         if(room.level==8&&healCnt>=12||(room.level==7&&healCnt>=6)){
             if(!flag)room.randomPosition().createFlag("defense_"+room.name);

@@ -44,6 +44,7 @@ require('helper_cpuUsed');
 require('helper_roomResource');
 require('helper_error');
 require('helper_visual');
+require('helper_consoleDashboard');
 
 // tools and addition
 require("utils");

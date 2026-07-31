@@ -9,6 +9,7 @@
   "helper_error",
   "helper_roomResource",
   "helper_visual",
+  "helper_consoleDashboard",
   "utils",
   "utils_task",
   "超级移动优化hotfix 0.9.4",

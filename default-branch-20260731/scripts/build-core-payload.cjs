@@ -13,17 +13,18 @@ const sourceModules = source.modules || source.code;
 const modules = {};
 
 for (const name of selected) {
-    if (sourceModules[name] === undefined) throw new Error(`Missing source module: ${name}`);
     const localFile = name === "algo_wasm_PriorityQueue"
         ? "algo_wasm_PriorityQueue.case-conflict.js"
         : `${name}.js`;
     const localPath = path.join(root, "modules", localFile);
     if (!fs.existsSync(localPath)) throw new Error(`Missing local module: ${name}`);
     // Preserve Screeps binary modules verbatim from the API snapshot.
-    // JavaScript source comes from the refactored local file.
-    modules[name] = typeof sourceModules[name] === "string"
-        ? fs.readFileSync(localPath, "utf8")
-        : sourceModules[name];
+    // JavaScript source, including newly-created folder modules, comes from
+    // the local source tree.
+    const snapshotModule = sourceModules[name];
+    modules[name] = snapshotModule && typeof snapshotModule !== "string"
+        ? snapshotModule
+        : fs.readFileSync(localPath, "utf8");
 }
 
 const payload = { branch: process.env.SCREEPS_BRANCH || source.branch || "default", modules };

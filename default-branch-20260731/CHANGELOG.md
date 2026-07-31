@@ -369,3 +369,24 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   flag rather than an undefined variable.
 - Applied the visual feature gate inside drawing helpers so combat code cannot
   accidentally spend CPU on visuals while visuals are disabled.
+## v0.22.0 — Room and movement hot paths
+
+### Added
+
+- Added an on-demand colored console dashboard. Run `dash()` for the owned-room
+  overview or `dash("ROOM")` for resource, role, and current-task details. It
+  is never called by the tick loop and therefore has no ongoing CPU cost.
+
+### Changed
+
+- Reused the tower hostile scan for advanced defense detection instead of
+  scanning every owned room again on every tick.
+- Selected one damaged friendly target per room for tower healing rather than
+  repeating two closest-target searches for every tower.
+- Replaced carrier hive-target `findClosestByPath` calls with range selection
+  over the cached spawn/extension arrays; BetterMove still handles routing.
+- Suppressed legacy `visualizePathStyle` options inside BetterMove whenever
+  the global visual feature is disabled.
+- Increased staggered full room/station discovery from 31 to 61 ticks to
+  reduce periodic room-management spikes while retaining prompt recognition
+  of completed structures.
