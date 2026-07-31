@@ -71,7 +71,10 @@ let pro = {
             cpuProfile.commands = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();
         }
-        HelperError.runEach(objects.rooms, room => ManagerRooms.exec(room));
+        if (cpuProfile) {
+            cpuProfile.roomDetails = {};
+            HelperError.runEachProfiled(objects.rooms, room => ManagerRooms.exec(room), room => room.name, cpuProfile.roomDetails);
+        } else HelperError.runEach(objects.rooms, room => ManagerRooms.exec(room));
         if (cpuProfile) {
             cpuProfile.rooms = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();
@@ -90,9 +93,15 @@ let pro = {
 
         // 执行
         // _.values(Game.creeps).forEach(e=>{try{e.spawning||e.execLastTask()}catch (exc) {e.suicide()}});
-        HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
-        if (!MIN_CPU) HelperError.runEach(objects.creeps, e => e.spawning || e.execLastTask());
-        else HelperError.runEach(objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0), e => e.spawning || e.execLastTask());
+        let activeCreeps = !MIN_CPU ? objects.creeps : objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0);
+        if (cpuProfile) {
+            cpuProfile.unitRoles = {};
+            HelperError.runEachProfiled(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()), e => "power:" + (e.memory.role || "unknown"), cpuProfile.unitRoles);
+            HelperError.runEachProfiled(activeCreeps, e => e.spawning || e.execLastTask(), e => e.memory.role || "unknown", cpuProfile.unitRoles);
+        } else {
+            HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
+            HelperError.runEach(activeCreeps, e => e.spawning || e.execLastTask());
+        }
         if (cpuProfile) {
             cpuProfile.unitTasks = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();

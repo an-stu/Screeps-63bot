@@ -15,6 +15,8 @@
   resource-balancing exception introduced by the room index refactor.
 - Record low-frequency CPU phase timings in `Memory.codeHealth.phases` so
   optimization work targets measured runtime costs.
+- On profiling ticks, break room CPU down by room name and unit-task CPU down
+  by creep role.
 
 ## v0.6.0 — Per-tick room indexes
 

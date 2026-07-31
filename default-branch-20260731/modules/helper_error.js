@@ -27,6 +27,18 @@ let pro_err={
             }
         }
     },
+    runEachProfiled (list, func, getKey, output) {
+        for (let value of list) {
+            let start = Game.cpu.getUsed();
+            try {
+                func(value)
+            } catch (error) {
+                pro_err.capture(error, value && value.name)
+            }
+            let key = getKey(value);
+            output[key] = (output[key] || 0) + Game.cpu.getUsed() - start;
+        }
+    },
     throwAllError () {
         if(pro_err.errList.length){
             let tmp = pro_err.errList;
