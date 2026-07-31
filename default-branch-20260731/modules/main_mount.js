@@ -16,8 +16,10 @@ global.CPU_FEATURES = {
     blockRoom: true,
     pillage: true,
     crossShard: true,
+    crossShardTrade: true,
+    claimCrossShard: true,
 }
-global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard"])
+global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard"])
 global.isCpuFeatureEnabled = name => {
     let value = (Memory.cpuFeatures || {})[name];
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
@@ -82,6 +84,8 @@ require('strategy_scouter');
 require('strategy_marketPrice');
 require('strategy_market');
 require('strategy_claim');
+require('strategy_tradeCrossShard');
+require('strategy_claimCrossShard');
 require('strategy_cleanBuild');
 require('strategy_blockRoom');
 require('strategy_pillage');

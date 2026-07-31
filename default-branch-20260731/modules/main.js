@@ -79,9 +79,9 @@ let pro = {
             cpuProfile.rooms = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();
         }
-        if (global.StrategytradeCrossShard) HelperError.catchError(() => StrategytradeCrossShard.exec());
+        if (global.StrategytradeCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("crossShardTrade")) HelperError.catchError(() => StrategytradeCrossShard.exec());
         if (global.StrategyClaim && isCpuFeatureEnabled("claim") && ManagerFlags.hasPrefix("claim")) HelperError.catchError(() => StrategyClaim.exec());
-        if (global.StrategyClaimCrossShard) HelperError.catchError(() => StrategyClaimCrossShard.exec());
+        if (global.StrategyClaimCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("claimCrossShard") && ManagerFlags.hasPrefix("claimCrossShard")) HelperError.catchError(() => StrategyClaimCrossShard.exec());
         if (global.StrategyScouter && isCpuFeatureEnabled("scouter") && ManagerFlags.hasPrefix("moveto")) HelperError.catchError(() => StrategyScouter.exec());
         if (global.StrategyFactoryPowerCreep) HelperError.catchError(() => StrategyFactoryPowerCreep.exec());
         if (global.StrategyCleanBuild && isCpuFeatureEnabled("cleanBuild") && ManagerFlags.hasPrefix("cleanBuild")) HelperError.catchError(() => StrategyCleanBuild.exec());

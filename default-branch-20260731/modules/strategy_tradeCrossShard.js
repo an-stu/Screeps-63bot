@@ -131,7 +131,7 @@ let pro = {
     exec () {
         if(!Memory.trade)Memory.trade={}
         Object.values(Memory.trade).map(e=>{if(!e.lastTime)e.lastTime=Game.time})
-        if(Game.time%163==17&&InterShardMemory&&Game.shard.name.startsWith("shard")){
+        if(Game.time%1000==17&&typeof InterShardMemory!="undefined"&&Game.shard.name.startsWith("shard")){
             let all = {}
             let addStore = (store,b)=> {for(let v in b) if(b[v]>0)store[v]=(store[v]||0)+b[v];return store}
             ManagerRooms.getNormalRoom().map(room=>{
@@ -139,7 +139,7 @@ let pro = {
                 if(room.terminal)addStore(all,room.terminal.store)
             })
             let price={}
-            RESOURCES_ALL.forEach(e=>{
+            Object.keys(all).forEach(e=>{
                 let p = StrategyMarketPrice.getResTypeHistory(e)
                 if(p>0)price[e]=p
             })

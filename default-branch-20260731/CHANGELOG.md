@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.18.0 — Cross-shard strategies
+
+### Added
+
+- Restore trade and claim cross-shard strategies behind separate explicit
+  opt-ins, both additionally requiring the cross-shard manager switch.
+
+### Optimized
+
+- Reduce inventory publication from every 163 ticks to every 1,000 ticks and
+  price only resources actually present in owned-room storage.
+
+### Fixed
+
+- Remove accidental `String` fields from cross-shard spawn missions, stop work
+  after completed flags are removed, and defer claim blueprints below 9500
+  bucket.
+
 ## v0.17.0 — Cross-shard foundation
 
 ### Added

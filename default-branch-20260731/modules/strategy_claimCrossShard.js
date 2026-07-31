@@ -99,9 +99,11 @@ let pro = {
     },
     exec() {
         if (Game.time % 3 != 0) return;
+        if(!ManagerFlags.hasPrefix("claimCrossShard"))return;
         ManagerFlags.getFlagsByPrefix("claimCrossShard").forEach(flag => {
             if (Game.rooms[flag.pos.roomName] && Game.rooms[flag.pos.roomName].my && Game.rooms[flag.pos.roomName].storage && Game.rooms[flag.pos.roomName].storage.my) {//&&Game.rooms[flag.pos.roomName].spawn.length>0
-                flag.remove()
+                flag.remove();
+                return;
             }
             if (!flag.memory.spawnTime) flag.memory.spawnTime = 0
             let room = Game.rooms[flag.pos.roomName]
@@ -114,7 +116,7 @@ let pro = {
                         data: {
                             spawnRoom: split[2],
                             targetRoomName: flag.pos.roomName,
-                            String, body: pro.getClaimerBody(withAttack),
+                            body: pro.getClaimerBody(withAttack),
                             role: "claimer",
                             tasks: [
                                 UtilsTask.taskFlag(flag, "claimRoom"),
@@ -127,6 +129,7 @@ let pro = {
                 }
             } else {
                 if (!Memory.rooms[flag.pos.roomName].structMap && flag.room) { // 创建蓝图
+                    if(Game.cpu.bucket<9500)return;
                     ManagerAutoPlanner.computeRoom(flag);
                 } else {
                     if (Game.time - flag.memory.spawnTime > 300) {
@@ -136,7 +139,7 @@ let pro = {
                             data: {
                                 spawnRoom: split[2],
                                 targetRoomName: flag.pos.roomName,
-                                String, body: ManagerCreeps.calcBodyPart({ [WORK]: 16, [CARRY]: 18, [MOVE]: 16 }),// 这里写死了
+                                body: ManagerCreeps.calcBodyPart({ [WORK]: 16, [CARRY]: 18, [MOVE]: 16 }),// 这里写死了
                                 role: "worker",
                                 tasks: [
                                     UtilsTask.taskData("moveCrossShardByPath", undefined, pathData)
