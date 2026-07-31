@@ -1,0 +1,64 @@
+
+global.isSaveCpu = true
+global.MIN_CPU = false
+global.WHO_AM_I = "an_w"
+// Optional work is off by default only when it has no survival value. Override
+// a value in Memory.cpuFeatures, for example: Memory.cpuFeatures.market = false.
+global.CPU_FEATURES = {
+    market: true,
+    autoPlanner: false,
+    visual: false,
+}
+
+// 数据结构
+require("algo_wasm_PriorityQueue")
+require("algo_algorithm")
+
+// class
+require('class_RoomArray');
+
+// helper
+require('helper_cpuUsed');
+require('helper_roomResource');
+require('helper_error');
+
+// tools and addition
+require("utils");
+require("utils_task");
+require("超级移动优化hotfix 0.9.4");
+require('极致建筑缓存 v1.4.3');
+require('prototype_creep');
+require('prototype_powerCreep');
+require('prototype_room');
+require('prototype_roomPostiton');
+require('prototype_store');
+require('prototype_flag');
+
+require('manager_rooms');
+require('manager_creeps');
+require('manager_flags');
+
+require('station_defense');
+require('station_sources');
+require('station_minetral');
+require('station_hive');
+require('station_carry');
+require('station_upgrade');
+require('station_work');
+require('station_tower');
+
+require('strategy_lowLevel');
+require('strategy_highLevel');
+require('strategy_minSizeRoom');
+// Optional modules are intentionally not loaded in the 20 CPU bootstrap
+// profile. Reintroduce only one group at a time after measuring its impact:
+// helper_visual, station_lab, station_observer, station_factory,
+// manager_crossShard, manager_autoPlanner, manager_planner, war_cache,
+// war_*, team*, strategy_outerHarvest, strategy_pillage, strategy_market,
+// strategy_claim*, strategy_deposits, strategy_powerBank, and the remaining
+// expansion/combat strategies.
+
+
+
+
+

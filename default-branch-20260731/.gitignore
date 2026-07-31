@@ -1,0 +1,8 @@
+deploy/core-payload.json
+.memory-*.json
+.creeps*.json
+.clear-pb-response.json
+.room-*.json
+room-*.json
+.probe.json
+.syntax-check.log
