@@ -47,7 +47,7 @@ let pro={
             if (global.BetterMove) BetterMove.deletePathInRoom(room.name);
         }
         if(!room.my){
-            if(global.StrategyGCLRoom && room.flags("GCLRoom").length)
+            if(global.StrategyGCLRoom && isCpuFeatureEnabled("GCLRoom") && room.flags("GCLRoom").length)
                 HelperError.catchError(()=>StrategyGCLRoom.exec(room))
             return; //如果不是自己的房子则不动
         }
@@ -68,7 +68,7 @@ let pro={
 
         if(room.flags("blockRoom").length){
             return;
-        }if(global.StrategyGCLRoom && room.flags("GCLRoom").length){
+        }if(global.StrategyGCLRoom && isCpuFeatureEnabled("GCLRoom") && room.flags("GCLRoom").length){
             HelperError.catchError(()=>StrategyGCLRoom.exec(room))
         }else if(room.flags("minSizeRoom").length) //minSizeRoom_W8N8
             HelperError.catchError(()=>StrategyMinSizeRoom.exec(room))

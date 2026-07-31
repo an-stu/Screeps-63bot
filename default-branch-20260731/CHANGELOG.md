@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.20.0 — GCL room restoration
+
+### Added
+
+- Restore `strategy_GCLRoom` as the explicit opt-in
+  `Memory.cpuFeatures.GCLRoom` feature.
+
+### Optimized
+
+- Require both the feature switch and a room-local `GCLRoom` flag before the
+  specialized room strategy can replace normal room execution.
+
 ## v0.19.0 — Opt-in Deposit restoration
 
 ### Added

@@ -19,8 +19,9 @@ global.CPU_FEATURES = {
     crossShardTrade: true,
     claimCrossShard: true,
     deposits: true,
+    GCLRoom: true,
 }
-global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits"])
+global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits","GCLRoom"])
 global.isCpuFeatureEnabled = name => {
     let value = (Memory.cpuFeatures || {})[name];
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
@@ -91,6 +92,7 @@ require('strategy_cleanBuild');
 require('strategy_blockRoom');
 require('strategy_pillage');
 require('strategy_deposits');
+require('strategy_GCLRoom');
 require('team_raL1');
 // Optional modules are intentionally not loaded in the 20 CPU bootstrap
 // profile. Reintroduce only one group at a time after measuring its impact:
