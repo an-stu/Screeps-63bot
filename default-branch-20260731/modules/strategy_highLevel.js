@@ -269,8 +269,11 @@ let pro = {
     },
     exec(room) {
         if (!MIN_CPU) pro.processPowerSpawn(room)// 每tick都要处理
-        if ((Game.time + room.hashCode()) % 3 != 0) return;
-        if (MIN_CPU && (Game.time + room.hashCode()) % 2) return;
+        // Task assignment and spawn planning tolerate a short delay. Spreading
+        // this expensive economy pass across rooms keeps ordinary ticks below
+        // the shard's 20 CPU allowance without delaying tower defense.
+        let economyInterval = MIN_CPU ? 10 : 5;
+        if ((Game.time + room.hashCode()) % economyInterval != 0) return;
         if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildHighLevel(room);
 
 

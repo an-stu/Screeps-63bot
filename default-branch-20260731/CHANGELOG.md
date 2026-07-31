@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.0 — Adaptive 20 CPU scheduling
+
+### Optimized
+
+- Spread high-level room economy and spawn planning over five ticks instead of
+  three; tower defense, labs, factories and Power Creeps remain independent.
+- When the CPU bucket drops below 9800, stagger only safe RCL8 upgrader ticks.
+  Controllers below 20,000 downgrade ticks bypass the throttle immediately.
+- Reduce detailed per-room/per-role profiling from every 20 ticks to every 100
+  ticks while retaining lightweight health reporting every 20 ticks.
+
 ## v0.8.0 — Movement instrumentation control
 
 ### Optimized

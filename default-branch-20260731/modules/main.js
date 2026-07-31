@@ -93,7 +93,8 @@ let pro = {
 
         // 执行
         // _.values(Game.creeps).forEach(e=>{try{e.spawning||e.execLastTask()}catch (exc) {e.suicide()}});
-        let activeCreeps = !MIN_CPU ? objects.creeps : objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0);
+        let activeCreeps = (!MIN_CPU ? objects.creeps : objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0))
+            .filter(shouldRunCreep);
         if (cpuProfile) {
             cpuProfile.unitRoles = {};
             HelperError.runEachProfiled(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()), e => "power:" + (e.memory.role || "unknown"), cpuProfile.unitRoles);
@@ -243,6 +244,24 @@ let getTickObjects = function () {
     return Game._coreObjects;
 }
 
+// RCL8 controllers have a large downgrade buffer. When the bucket is falling,
+// stagger only their upgrader intents; economy, defense and Power Creeps keep
+// running at full frequency. Controllers near downgrade always run normally.
+let getUpgraderInterval = function () {
+    if (Game.cpu.bucket < 5000) return 5;
+    if (Game.cpu.bucket < 9000) return 4;
+    if (Game.cpu.bucket < 9800) return 3;
+    return 1;
+}
+
+let shouldRunCreep = function (creep) {
+    if (creep.memory.role != "upgrader") return true;
+    let room = Game.rooms[creep.memory.roomName];
+    if (!room || !room.controller || room.controller.level < 8 || room.controller.ticksToDowngrade < 20000) return true;
+    let interval = Game._upgraderInterval || (Game._upgraderInterval = getUpgraderInterval());
+    return interval == 1 || (Game.time + room.hashCode()) % interval == 0;
+}
+
 let updateCodeHealth = function () {
     if (Game.time % 20 != 0) return;
     let missingTaskHandlers = {};
@@ -262,6 +281,7 @@ let updateCodeHealth = function () {
         bucket: Game.cpu.bucket,
         creeps: objects.creeps.length,
         powerCreeps: objects.powerCreeps.filter(e => e.ticksToLive).length,
+        upgraderInterval: Game._upgraderInterval || getUpgraderInterval(),
         missingTaskHandlers: missingTaskHandlers,
         phases: Game._coreCpuProfile || Memory.codeHealth.phases || {},
     });
@@ -282,7 +302,7 @@ let main = function () {
         if (myRoom) global.WHO_AM_I = myRoom.controller.owner.username
     }
 
-    let profileStart = Game.time % 20 == 0 ? Game.cpu.getUsed() : 0;
+    let profileStart = Game.time % 100 == 0 ? Game.cpu.getUsed() : 0;
     pro.init();
     if (profileStart) Game._coreCpuProfile = {init: Game.cpu.getUsed() - profileStart};
     if (Game.cpu.bucket > 40 || !isSaveCpu) pro.exec();
