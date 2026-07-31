@@ -9,6 +9,9 @@ global.CPU_FEATURES = {
     autoPlanner: false,
     visual: false,
 }
+// Cross-shard management is intentionally disabled in the core profile, but
+// creep and spawn naming still require the local shard identifier.
+global.LOCAL_SHARD_NAME = Game.shard.name
 
 // 数据结构
 require("algo_wasm_PriorityQueue")

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.1 — Shard-name startup hotfix
+
+### Fixed
+
+- Initialize `LOCAL_SHARD_NAME` in `main_mount` so creep initialization and
+  high-level worker spawning run without loading the costly cross-shard module.
+
 ## v0.1.0 — CPU bootstrap profile
 
 ### Changed
