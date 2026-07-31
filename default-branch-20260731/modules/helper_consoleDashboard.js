@@ -68,6 +68,11 @@ function pairs(map) {
         .map(key => `${escapeHtml(key)} ${color(map[key], "blue")}`).join(" &nbsp; ");
 }
 
+function plainPairs(map) {
+    return Object.keys(map).sort((a, b) => map[b] - map[a] || a.localeCompare(b))
+        .map(key => `${key}:${map[key]}`).join(", ");
+}
+
 function taskName(unit) {
     let tasks = unit.memory.tasks || [];
     let task = tasks[tasks.length - 1];
@@ -96,7 +101,7 @@ function header(title) {
         + ` &nbsp; bucket ${color(Game.cpu.bucket, Game.cpu.bucket >= 6000 ? "good" : "warn")}`
         + ` &nbsp; creeps ${Object.keys(Game.creeps).length}`
         + ` &nbsp; PC ${Object.values(Game.powerCreeps).filter(pc => pc.ticksToLive).length}`
-        + ` &nbsp; errors ${color(health.errorCount || 0, health.errorCount ? "bad" : "good")}</div>`;
+        + ` &nbsp; errors <span title="last error tick: ${escapeHtml(health.lastErrorTick || "none")}">${color(health.errorCount || 0, health.lastErrorTick && health.lastErrorTick > Game.time - 20 ? "bad" : "good")}</span></div>`;
 }
 
 function overview() {
@@ -110,27 +115,26 @@ function overview() {
         let storageUsed = room.storage ? room.storage.store.getUsedCapacity() : 0;
         let storageCap = room.storage ? room.storage.store.getCapacity() : 0;
         let tone = hostiles ? "bad" : room.energyAvailable < room.energyCapacityAvailable * 0.25 ? "warn" : "good";
+        let roles = aggregate(units, unit => unit.memory.role || "unknown");
+        let tasks = aggregate(units, taskName);
+        let hover = `Terminal ${number(room.terminal && room.terminal.store.getUsedCapacity())} | Power ${number(sumStore(room, RESOURCE_POWER))} | OPS ${number(sumStore(room, RESOURCE_OPS))} | Roles ${plainPairs(roles)} | Tasks ${plainPairs(tasks)}`;
         return `<tr>`
-            + `<td style="${style.left};color:${COLORS[tone]}"><b>${room.name}</b></td>`
+            + `<td title="${escapeHtml(hover)}" style="${style.left};color:${COLORS[tone]}"><b>${room.name}</b></td>`
             + `<td style="${style.td}">${room.controller.level} ${bar(rclProgress, 100, "purple")}</td>`
             + `<td style="${style.td}">${number(room.energyAvailable)}/${number(room.energyCapacityAvailable)}</td>`
             + `<td style="${style.td}">${number(sumStore(room, RESOURCE_ENERGY))}</td>`
             + `<td style="${style.td}">${number(storageUsed)}/${number(storageCap)}</td>`
-            + `<td style="${style.td}">${number(room.terminal && room.terminal.store.getUsedCapacity())}</td>`
-            + `<td style="${style.td}">${number(sumStore(room, RESOURCE_POWER))}</td>`
-            + `<td style="${style.td}">${number(sumStore(room, RESOURCE_OPS))}</td>`
-            + `<td style="${style.td}">${units.length}</td>`
-            + `<td style="${style.td}">${units.filter(unit => unit.spawning).length}</td>`
+            + `<td style="${style.td}">${units.length} <span style="color:${COLORS.dim}">(+${units.filter(unit => unit.spawning).length})</span></td>`
             + `<td style="${style.td};color:${hostiles ? COLORS.bad : COLORS.good}">${hostiles}</td>`
             + `<td style="${style.td}">${profile[room.name] === undefined ? "-" : Number(profile[room.name]).toFixed(3)}</td>`
             + `</tr>`;
     }).join("");
-    let table = `<table style="${style.table}"><thead><tr>`
-        + ["Room", "RCL", "Hive energy", "Total energy", "Storage", "Terminal", "Power", "OPS", "Creeps", "Spawning", "Hostiles", "profile CPU"]
+    let table = `<table style="${style.table};min-width:760px"><thead><tr>`
+        + ["Room ⓘ", "RCL", "Hive energy", "Total energy", "Storage", "Creeps (+spawn)", "Hostiles", "profile CPU"]
             .map((name, index) => `<th style="${index ? style.th : style.th + ";text-align:left"}">${name}</th>`).join("")
         + `</tr></thead><tbody>${rows}</tbody></table>`;
     return header("Screeps Room Dashboard") + table
-        + `<div style="color:${COLORS.dim};font:11px monospace">detail: dash("ROOM") · profile CPU is the latest 100-tick sample · dashboard runs only when called</div>`;
+        + `<div style="color:${COLORS.dim};font:11px monospace">hover Room ⓘ for secondary resources/roles/tasks · detail: dash("ROOM") · profile CPU is the latest 100-tick sample</div>`;
 }
 
 function roomDetail(roomName) {
@@ -146,11 +150,14 @@ function roomDetail(roomName) {
         .map(unit => {
             let current = (unit.memory.tasks || []).slice(-1)[0] || {};
             let ttlTone = unit.spawning || unit.ticksToLive > 250 ? "good" : unit.ticksToLive > 80 ? "warn" : "bad";
+            let target = current.roomName || current.flagName || current.id || "-";
+            let shortTarget = target.length > 16 ? target.slice(0, 13) + "…" : target;
+            let taskTip = `${current.taskName || "idle"} | room ${current.roomName || "-"} | id ${current.id || "-"} | pos ${current.x === undefined ? "-" : current.x + "," + current.y} | register ${current.regFun || "-"}`;
             return `<tr><td style="${style.left}">${escapeHtml(unit.name)}</td>`
                 + `<td style="${style.left}">${escapeHtml(unit.memory.role || "unknown")}</td>`
                 + `<td style="${style.td}">${color(unit.spawning ? "spawn" : unit.ticksToLive, ttlTone)}</td>`
-                + `<td style="${style.left}">${escapeHtml(current.taskName || "idle")}</td>`
-                + `<td style="${style.left}">${escapeHtml(current.roomName || current.flagName || current.id || "-")}</td>`
+                + `<td title="${escapeHtml(taskTip)}" style="${style.left}">${escapeHtml(current.taskName || "idle")}</td>`
+                + `<td title="${escapeHtml(target)}" style="${style.left}">${escapeHtml(shortTarget)}</td>`
                 + `<td style="${style.td}">${number(unit.store.getUsedCapacity())}/${number(unit.store.getCapacity())}</td></tr>`;
         }).join("");
     let controller = room.controller;
@@ -163,7 +170,10 @@ function roomDetail(roomName) {
     let unitTable = `<table style="${style.table};min-width:880px"><thead><tr>`
         + ["Creep", "Role", "TTL", "Current task", "Target", "Store"].map((name, index) => `<th style="${index < 2 || index == 3 || index == 4 ? style.th + ";text-align:left" : style.th}">${name}</th>`).join("")
         + `</tr></thead><tbody>${unitRows || `<tr><td style="${style.left}" colspan="6">no creeps assigned to this room</td></tr>`}</tbody></table>`;
-    return header(`Room ${roomName}`) + summary + unitTable + resourceTable
+    let sectionStyle = `background:${COLORS.panel};color:${COLORS.cyan};border:1px solid ${COLORS.line};padding:5px 8px;font:12px monospace;max-width:880px`;
+    let collapsibleTasks = `<details style="${sectionStyle}"><summary style="cursor:pointer">▸ Creep task details (${units.length})</summary>${unitTable}</details>`;
+    let collapsibleResources = `<details style="${sectionStyle}"><summary style="cursor:pointer">▸ Resource details (${Object.keys(resources).length} types)</summary>${resourceTable}</details>`;
+    return header(`Room ${roomName}`) + summary + collapsibleTasks + collapsibleResources
         + `<div style="color:${COLORS.dim};font:11px monospace">overview: dash()</div>`;
 }
 

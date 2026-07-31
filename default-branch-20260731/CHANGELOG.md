@@ -421,3 +421,13 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
 
 - Validate tactical cache values as arrays because the legacy structure-cache
   Proxy returns `null`, rather than `undefined`, for unknown Room fields.
+## v0.24.0 — Compact interactive console dashboard
+
+### Changed
+
+- Reduced the default `dash()` overview from twelve columns to eight; hover a
+  room name to see terminal, Power, OPS, role, and task summaries.
+- Moved per-creep task rows and complete resource lists in `dash("ROOM")` into
+  collapsed sections that can be expanded independently.
+- Added task tooltips with the full target, position, and registration handler,
+  while truncating long IDs in the visible table.
