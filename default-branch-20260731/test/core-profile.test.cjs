@@ -13,6 +13,7 @@ const mainMount = fs.readFileSync(path.join(root, "modules/main_mount.js"), "utf
 const powerCreepStrategy = fs.readFileSync(path.join(root, "modules/strategy_factoryPowerCreep.js"), "utf8");
 const powerCreepPrototype = fs.readFileSync(path.join(root, "modules/prototype_powerCreep.js"), "utf8");
 const utilsTask = fs.readFileSync(path.join(root, "modules/utils_task.js"), "utf8");
+const stationTower = fs.readFileSync(path.join(root, "modules/station_tower.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -33,6 +34,7 @@ assert.ok(powerCreepStrategy.includes("spawnCooldownTime <= Date.now()"), "Power
 assert.ok(powerCreepPrototype.includes("effect.ticksRemaining < 100"), "storage operation must refresh near expiry");
 assert.ok(powerCreepPrototype.includes("return shouldOperate ? storage : false"), "storage operation must return a task target, not a boolean");
 assert.ok(utilsTask.includes("roomName:obj.pos.roomName"), "task targets must use their stable RoomPosition room name");
+assert.ok(stationTower.includes("pro.lastUpdateMap[room.name]=3"), "peaceful tower repair must be throttled");
 execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {

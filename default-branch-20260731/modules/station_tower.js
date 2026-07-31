@@ -34,7 +34,7 @@ let pro={
             .filter(e => e.structureType != STRUCTURE_WALL && e.structureType != STRUCTURE_RAMPART)
             .filter(e => e.hits / e.hitsMax < 0.8 && e.hits < 10000000)
             .filter(e => (!roadNeedRepair||roadNeedRepair[e.pos.x*50+e.pos.y])||e.structureType != STRUCTURE_ROAD)
-            .sort((a, b) => a.hits - b.hitsMax)
+            .sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax)
             .map(e => e.id)
     },
     exec (room){
@@ -70,10 +70,8 @@ let pro={
                         tower.attack(headHostiles)
                         lastAttackCreepMap[room.name] = headHostiles
                     }else{
-                        if(Game.time%15==0){
-                            tower.attack(randomAttack)
-                        }else if(Game.time%15==7){
-                            randomAttack = Utils.randomGet(hostiles);
+                        if(Game.time%15==0 || Game.time%15==7){
+                            randomAttack = randomAttack || Utils.randomGet(hostiles);
                             tower.attack(randomAttack)
                         }
                     }
@@ -90,7 +88,9 @@ let pro={
                 if(target){
                     tower.repair(target)
                     // HelperVisual.commonText(tower.room.name,target.hits/target.hitsMax,target)
-                    pro.lastUpdateMap[room.name]=0
+                    // Peaceful repairs do not need to run every tick. Hostile
+                    // rooms set the interval back to zero above.
+                    pro.lastUpdateMap[room.name]=3
                 }
             })
         }

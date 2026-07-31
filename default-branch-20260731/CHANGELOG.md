@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.1 — Tower idle CPU reduction
+
+### Optimized
+
+- Run peaceful tower repairs every three ticks instead of every tick; hostile
+  rooms still attack every tick.
+- Sort repair targets by damage ratio and never issue an attack with an
+  undefined random target.
+
 ## v0.5.0 — Factory economy loop
 
 ### Added
