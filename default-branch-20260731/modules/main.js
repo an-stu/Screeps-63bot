@@ -42,6 +42,8 @@ let pro = {
     },
     exec() {
         let objects = getTickObjects();
+        let cpuProfile = Game._coreCpuProfile;
+        let phaseStart = cpuProfile ? Game.cpu.getUsed() : 0;
         // _.values(Game.creeps).filter(e=>e.memory.role=="carrier").forEach(e=>e.memory.tasks = [])
         // _.values(Game.creeps).forEach(e=>e.sayHeadTask());
         // _.values(Game.creeps).forEach(e=>e.spawning||e.say(e.lastTask().taskName));
@@ -50,6 +52,10 @@ let pro = {
         // _.values(Game.creeps).forEach(e=>{e.suicide()});
         HelperError.runEach(objects.creeps, e => e.execRegFun());
         HelperError.runEach(objects.powerCreeps, e => e.ticksToLive && e.execRegFun());
+        if (cpuProfile) {
+            cpuProfile.registration = Game.cpu.getUsed() - phaseStart;
+            phaseStart = Game.cpu.getUsed();
+        }
 
         // 出击！
         if (global.teamL2) HelperError.catchError(() => teamL2.exec());
@@ -61,7 +67,15 @@ let pro = {
         // 配置资源
         if (global.WarTeamFlag) HelperError.catchError(() => WarTeamFlag.exec());
         if (global.WarAttackRoom) HelperError.catchError(() => WarAttackRoom.exec());
+        if (cpuProfile) {
+            cpuProfile.commands = Game.cpu.getUsed() - phaseStart;
+            phaseStart = Game.cpu.getUsed();
+        }
         HelperError.runEach(objects.rooms, room => ManagerRooms.exec(room));
+        if (cpuProfile) {
+            cpuProfile.rooms = Game.cpu.getUsed() - phaseStart;
+            phaseStart = Game.cpu.getUsed();
+        }
         if (global.StrategytradeCrossShard) HelperError.catchError(() => StrategytradeCrossShard.exec());
         if (global.StrategyClaim) HelperError.catchError(() => StrategyClaim.exec());
         if (global.StrategyClaimCrossShard) HelperError.catchError(() => StrategyClaimCrossShard.exec());
@@ -69,12 +83,20 @@ let pro = {
         if (global.StrategyFactoryPowerCreep) HelperError.catchError(() => StrategyFactoryPowerCreep.exec());
         if (global.StrategyCleanBuild) HelperError.catchError(() => StrategyCleanBuild.exec());
         if (global.StrategyBlockRoom) HelperError.catchError(() => StrategyBlockRoom.exec());
+        if (cpuProfile) {
+            cpuProfile.flagStrategies = Game.cpu.getUsed() - phaseStart;
+            phaseStart = Game.cpu.getUsed();
+        }
 
         // 执行
         // _.values(Game.creeps).forEach(e=>{try{e.spawning||e.execLastTask()}catch (exc) {e.suicide()}});
         HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
         if (!MIN_CPU) HelperError.runEach(objects.creeps, e => e.spawning || e.execLastTask());
         else HelperError.runEach(objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0), e => e.spawning || e.execLastTask());
+        if (cpuProfile) {
+            cpuProfile.unitTasks = Game.cpu.getUsed() - phaseStart;
+            phaseStart = Game.cpu.getUsed();
+        }
 
         // These jobs do not keep creeps alive or defend a room. Spread them
         // over several ticks and make them independently switchable in Memory.
@@ -88,6 +110,7 @@ let pro = {
             HelperError.catchError(() => ManagerAutoPlanner.exec());
         if (!MIN_CPU && global.HelperVisual && featureEnabled("visual") && HelperCpuUsed.shouldRun(10))
             HelperError.catchError(() => HelperVisual.exec());
+        if (cpuProfile) cpuProfile.optional = Game.cpu.getUsed() - phaseStart;
     },
     afterWork() {
         if (global.ManagerCrossShard) HelperError.catchError(() => ManagerCrossShard.afterWork());
@@ -198,6 +221,7 @@ let space_action = {
 
 
 let _global_memory = undefined
+let _global_memory_tick = -1
 
 let getTickObjects = function () {
     if (!Game._coreObjects) {
@@ -230,24 +254,28 @@ let updateCodeHealth = function () {
         creeps: objects.creeps.length,
         powerCreeps: objects.powerCreeps.filter(e => e.ticksToLive).length,
         missingTaskHandlers: missingTaskHandlers,
+        phases: Game._coreCpuProfile || Memory.codeHealth.phases || {},
     });
 }
 
 let main = function () {
-    if (_global_memory) {
+    if (_global_memory && _global_memory_tick + 1 == Game.time) {
         delete global.Memory;
         global.Memory = _global_memory;
         RawMemory._parsed = global.Memory;
     } else {
         _global_memory = global.Memory
     }
+    _global_memory_tick = Game.time
 
     if (!global.WHO_AM_I) {
         let myRoom = getTickObjects().rooms.find(e => e.my);
         if (myRoom) global.WHO_AM_I = myRoom.controller.owner.username
     }
 
+    let profileStart = Game.time % 20 == 0 ? Game.cpu.getUsed() : 0;
     pro.init();
+    if (profileStart) Game._coreCpuProfile = {init: Game.cpu.getUsed() - profileStart};
     if (Game.cpu.bucket > 40 || !isSaveCpu) pro.exec();
     else {
         let objects = getTickObjects();

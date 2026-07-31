@@ -13,6 +13,8 @@
   visual helper.
 - Ensure `room.flags()` returns an empty array in rooms with no flags, fixing a
   resource-balancing exception introduced by the room index refactor.
+- Record low-frequency CPU phase timings in `Memory.codeHealth.phases` so
+  optimization work targets measured runtime costs.
 
 ## v0.6.0 — Per-tick room indexes
 
@@ -29,6 +31,8 @@
   main lifecycle.
 - Remove the redundant full `JSON.stringify(Memory)`/`RawMemory.set` pass every
   127 ticks; the runtime already persists the assigned parsed Memory object.
+- Reuse the global Memory cache only across consecutive ticks, falling back to
+  the runtime Memory object after a tick gap.
 - Execute creep, Power Creep, room, and market batches through one guarded loop
   per group instead of allocating a new try/catch closure for every object.
 
