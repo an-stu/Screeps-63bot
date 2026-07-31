@@ -84,7 +84,7 @@ let pro = {
             room.creeps("worker").filter(e => !e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (StationHive.HiveNeedToFill(room)) {
                     creep.addTask(StationHive.generatorFillHiveTask(room, creep));
-                } else if (room.level > 1 && StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
+                } else if (StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
                     creep.addTask(StationWork.generatorBuildTask(creep))
                 }
                 else {

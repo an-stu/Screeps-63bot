@@ -9,9 +9,14 @@ Creep.prototype.clearClaimRoom = function () {
         return;
     }
 
-    let target = this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
-        filter: structure => structure.hits && structure.structureType != STRUCTURE_CONTROLLER,
-    });
+    let target = this.memory.claimCleanupTarget && Game.getObjectById(this.memory.claimCleanupTarget);
+    if (!target || !target.hits || target.room.name != this.room.name) {
+        target = this.pos.findClosestByRange(FIND_HOSTILE_STRUCTURES, {
+            filter: structure => structure.hits && structure.structureType != STRUCTURE_CONTROLLER,
+        });
+        if (target) this.memory.claimCleanupTarget = target.id;
+        else delete this.memory.claimCleanupTarget;
+    }
     if (target) {
         if (this.dismantle(target) == ERR_NOT_IN_RANGE) this.moveTo(target);
         return;
@@ -22,6 +27,7 @@ Creep.prototype.clearClaimRoom = function () {
         this.memory.roomName = this.room.name;
         this.memory.tasks = [];
         this.memory.dontPullMe = false;
+        delete this.memory.claimCleanupTarget;
     }
 };
 
@@ -39,12 +45,27 @@ let pro = {
         let tasks = [UtilsTask.taskOutView(undefined, flag.pos.roomName, 25, 25, "clearClaimRoom")];
         StationHive.trySpawn(spawnRoom, flag.pos.roomName, body, "claimCleaner", tasks);
     },
+    ensureConstructionSites(room) {
+        if (!room || !room.my || !room.memory.structMap || !global.ManagerAutoPlanner) return;
+        // Bootstrap in dependency order.  The spawn is always attempted first,
+        // while extensions and source containers are limited by the current RCL.
+        [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER].forEach(structureType => {
+            ManagerAutoPlanner.tryCreateStructs(room, room.memory.structMap, structureType);
+        });
+    },
     exec () {
         if(Game.time%3!=0)return;
         if(!ManagerFlags.hasPrefix("claim"))return;
         ManagerFlags.getFlagsByPrefix("claim").forEach(flag=>{
-            if (Game.rooms[flag.pos.roomName]&&Game.rooms[flag.pos.roomName].my&&Game.rooms[flag.pos.roomName].spawn.length>0) {
+            let targetRoom = Game.rooms[flag.pos.roomName];
+            if (targetRoom && targetRoom.my && targetRoom.spawn.length>0) {
                 flag.remove();
+                return;
+            }
+            if (targetRoom && targetRoom.my) {
+                pro.ensureConstructionSites(targetRoom);
+                let spawnRoom = pro.getSpawnRoom(flag);
+                if (spawnRoom) pro.spawnCleaner(flag, spawnRoom);
                 return;
             }
             if(!Memory.rooms[flag.pos.roomName]||!Memory.rooms[flag.pos.roomName][StationSources.stationName]){
@@ -67,7 +88,6 @@ let pro = {
                     if(Game.cpu.bucket<9500)return;
                     ManagerAutoPlanner.computeRoom(flag);
                 }else {
-                    if(Game.rooms[flag.pos.roomName]&&Game.rooms[flag.pos.roomName].my)return;
                     let spawnRoom = pro.getSpawnRoom(flag);
                     if(!spawnRoom){
                         log("no active able room");

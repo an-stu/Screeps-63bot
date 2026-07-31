@@ -544,3 +544,24 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   strategy only when hostile structures are visible.
 - After dismantling the old structure and gaining controller ownership, the
   cleaner automatically becomes a normal bootstrap worker in the new room.
+
+## v0.31.0 — Automatic claim bootstrap
+
+### Added
+
+- Keep the claim operation active after controller ownership and immediately
+  create the spawn, extension, and source-container construction sites allowed
+  by the current RCL from the saved room blueprint.
+- Complete the expansion as one workflow: scout, plan, claim, dismantle old
+  structures, create bootstrap sites, and reuse the cleaner as a local worker.
+
+### Optimized
+
+- Cache the current hostile structure ID and use a range lookup only when the
+  target changes, avoiding a full `findClosestByPath` search on every cleanup
+  tick.
+
+### Fixed
+
+- Allow RCL1 workers to build the first spawn construction site instead of
+  always upgrading the controller until RCL2.
