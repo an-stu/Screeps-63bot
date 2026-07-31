@@ -5,6 +5,7 @@ const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "deploy/core-modules.json"), "utf8"));
+const source = JSON.parse(fs.readFileSync(path.join(root, ".screeps-code.json"), "utf8"));
 const mounted = [...fs.readFileSync(path.join(root, "modules/main_mount.js"), "utf8").matchAll(/require\(["']([^"']+)["']\)/g)]
     .map(match => match[1]);
 
@@ -15,6 +16,9 @@ for (const moduleName of manifest) {
 for (const moduleName of mounted) {
     assert.ok(manifest.includes(moduleName), `main_mount loads ${moduleName}, but it is not in the core package`);
 }
+assert.ok(manifest.includes("algo_wasm_priorityqueue"), "PriorityQueue's lowercase WASM runtime must be packaged");
+assert.equal(typeof source.modules.algo_wasm_PriorityQueue, "string", "PriorityQueue wrapper must remain JavaScript");
+assert.equal(typeof source.modules.algo_wasm_priorityqueue.binary, "string", "PriorityQueue runtime must remain binary data");
 
 const context = {
     Game: {

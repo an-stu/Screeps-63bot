@@ -3,6 +3,7 @@
   "main_mount",
   "algo_algorithm",
   "algo_wasm_PriorityQueue",
+  "algo_wasm_priorityqueue",
   "class_RoomArray",
   "helper_cpuUsed",
   "helper_error",
