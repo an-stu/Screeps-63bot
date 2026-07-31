@@ -1,6 +1,8 @@
 deploy/core-payload.json
 .core-*.json
 .monitor-response.json
+.monitor-*.json
+.observe-*.json
 .memory-*.json
 .creeps*.json
 .clear-pb-response.json
