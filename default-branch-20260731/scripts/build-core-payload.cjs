@@ -26,7 +26,7 @@ for (const name of selected) {
         : fs.readFileSync(localPath, "utf8");
 }
 
-const payload = { branch: source.branch || "default", modules };
+const payload = { branch: process.env.SCREEPS_BRANCH || source.branch || "default", modules };
 const output = path.join(root, "deploy/core-payload.json");
 fs.writeFileSync(output, `${JSON.stringify(payload)}\n`);
 console.log(`Wrote ${Object.keys(modules).length} modules to ${output}`);
