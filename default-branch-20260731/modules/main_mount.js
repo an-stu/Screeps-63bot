@@ -11,6 +11,7 @@ global.CPU_FEATURES = {
     observer: true,
     outerHarvest: true,
     scouter: true,
+    claim: true,
 }
 global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual"])
 global.isCpuFeatureEnabled = name => {
@@ -74,6 +75,7 @@ require('strategy_outerHarvest');
 require('strategy_scouter');
 require('strategy_marketPrice');
 require('strategy_market');
+require('strategy_claim');
 require('team_raL1');
 // Optional modules are intentionally not loaded in the 20 CPU bootstrap
 // profile. Reintroduce only one group at a time after measuring its impact:

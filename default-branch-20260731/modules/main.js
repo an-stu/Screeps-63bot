@@ -80,7 +80,7 @@ let pro = {
             phaseStart = Game.cpu.getUsed();
         }
         if (global.StrategytradeCrossShard) HelperError.catchError(() => StrategytradeCrossShard.exec());
-        if (global.StrategyClaim) HelperError.catchError(() => StrategyClaim.exec());
+        if (global.StrategyClaim && isCpuFeatureEnabled("claim") && ManagerFlags.hasPrefix("claim")) HelperError.catchError(() => StrategyClaim.exec());
         if (global.StrategyClaimCrossShard) HelperError.catchError(() => StrategyClaimCrossShard.exec());
         if (global.StrategyScouter && isCpuFeatureEnabled("scouter") && ManagerFlags.hasPrefix("moveto")) HelperError.catchError(() => StrategyScouter.exec());
         if (global.StrategyFactoryPowerCreep) HelperError.catchError(() => StrategyFactoryPowerCreep.exec());

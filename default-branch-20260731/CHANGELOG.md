@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.15.0 — Flag-gated claim restoration
+
+### Added
+
+- Restore `strategy_claim` behind `Memory.cpuFeatures.claim` and an active
+  `claim` flag prefix.
+
+### Fixed
+
+- Guard empty scouter tasks, select claimers by their target flag, and stop
+  processing immediately after a completed claim flag is removed.
+- Defer the expensive first room blueprint until the CPU bucket exceeds 9500.
+
 ## v0.14.0 — Planner foundation
 
 ### Added
