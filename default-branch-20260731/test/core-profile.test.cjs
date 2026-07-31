@@ -33,6 +33,7 @@ assert.equal(typeof source.modules.algo_wasm_priorityqueue.binary, "string", "Pr
 assert.ok(mainMount.includes("global.LOCAL_SHARD_NAME = Game.shard.name"), "core mode must initialize its shard name");
 assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep Power Creeps alive and operating storage");
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
+assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be independently restorable");
 assert.ok(manifest.includes("station_lab"), "core mode must execute existing boost tasks");
 assert.ok(manifest.includes("station_factory"), "core mode must keep owned factories and OPF creeps functional");
 assert.ok(manifest.includes("station_observer"), "observer scanning must be independently restorable");
@@ -52,6 +53,7 @@ assert.ok(main.includes("room.controller.ticksToDowngrade < 20000"), "upgrader t
 assert.ok(main.includes(".filter(shouldRunCreep)"), "creep execution must apply the safe adaptive throttle");
 assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
 assert.ok(mainMount.includes("observer: true"), "observer scanning must be switchable without another upload");
+assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instrumentation must default to off");
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");

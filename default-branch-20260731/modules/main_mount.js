@@ -9,6 +9,7 @@ global.CPU_FEATURES = {
     autoPlanner: false,
     visual: false,
     observer: true,
+    outerHarvest: true,
 }
 global.isCpuFeatureEnabled = name => (Memory.cpuFeatures || {})[name] !== false && CPU_FEATURES[name] !== false
 // Cross-shard management is intentionally disabled in the core profile, but
@@ -60,6 +61,7 @@ require('strategy_highLevel');
 require('strategy_minSizeRoom');
 require('strategy_factoryPowerCreep');
 require('strategy_resourceBalance');
+require('strategy_outerHarvest');
 require('team_raL1');
 // Optional modules are intentionally not loaded in the 20 CPU bootstrap
 // profile. Reintroduce only one group at a time after measuring its impact:

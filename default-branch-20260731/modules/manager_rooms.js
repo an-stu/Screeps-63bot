@@ -80,7 +80,7 @@ let pro={
 
         if (global.StrategyResourceBalance) HelperError.catchError(()=>StrategyResourceBalance.exec(room))
 
-        if(global.StrategyOuterHarvest && !room.flags("stopRemote").length) //stopRemote_W8N8 用来停止外矿，进入战斗状态的
+        if(global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest") && !room.flags("stopRemote").length) //stopRemote_W8N8 用来停止外矿，进入战斗状态的
             HelperError.catchError(()=>StrategyOuterHarvest.exec(room))
 
         if (global.StrategyPillage) HelperError.catchError(()=>StrategyPillage.exec(room))

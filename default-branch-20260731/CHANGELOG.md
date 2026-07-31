@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.11.0 — Remote harvesting restoration
+
+### Added
+
+- Restore `strategy_outerHarvest` behind
+  `Memory.cpuFeatures.outerHarvest`; existing `stopRemote` flags still take
+  precedence.
+
+### Optimized
+
+- Return immediately in rooms with no `har` flags and process the cached flag
+  list only once per scheduling pass.
+- Guard scouter, reserver and defender task inspection against empty tasks.
+
 ## v0.10.0 — Observer restoration
 
 ### Added

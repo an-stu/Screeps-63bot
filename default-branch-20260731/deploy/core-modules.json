@@ -37,5 +37,6 @@
   "strategy_minSizeRoom",
   "strategy_factoryPowerCreep",
   "strategy_resourceBalance",
+  "strategy_outerHarvest",
   "team_raL1"
 ]
