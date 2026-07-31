@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.19.0 — Opt-in Deposit restoration
+
+### Added
+
+- Restore `strategy_deposits` as the explicit opt-in
+  `Memory.cpuFeatures.deposits` feature; observer scans and room execution share
+  the same gate.
+
+### Fixed
+
+- Prevent an undeclared combat-flag global and guard removed Deposit flags and
+  absent transfer targets.
+- Avoid creating stale `Memory.flags` entries before a suitable spawn room and
+  acceptable cooldown are known.
+
 ## v0.18.0 — Cross-shard strategies
 
 ### Added

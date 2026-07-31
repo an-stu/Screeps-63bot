@@ -52,5 +52,6 @@
   "strategy_cleanBuild",
   "strategy_blockRoom",
   "strategy_pillage",
+  "strategy_deposits",
   "team_raL1"
 ]

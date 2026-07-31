@@ -40,6 +40,7 @@ assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have t
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
 assert.ok(manifest.includes("strategy_claim"), "claim task handlers must ship with planner dependencies");
 assert.ok(manifest.includes("strategy_cleanBuild") && manifest.includes("strategy_blockRoom") && manifest.includes("strategy_pillage"), "flag utility task handlers must be restored together");
+assert.ok(manifest.includes("strategy_deposits"), "deposit task handlers must remain available behind their opt-in");
 assert.ok(manifest.includes("helper_visual") && manifest.includes("manager_planner") && manifest.includes("manager_autoPlanner"), "planner dependencies must ship together");
 assert.ok(manifest.includes("manager_missions") && manifest.includes("manager_crossShard"), "cross-shard requests must ship with local mission handlers");
 assert.ok(manifest.includes("strategy_tradeCrossShard") && manifest.includes("strategy_claimCrossShard"), "cross-shard strategies must ship with their manager");
@@ -67,12 +68,17 @@ assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies 
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("claim")'), "claim strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("cleanBuild")') && main.includes('ManagerFlags.hasPrefix("blockRoom")'), "global flag utilities must use prefix gates");
-assert.ok(mainMount.includes('CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard"])'), "expensive optional modules must require explicit online opt-in");
+for (const feature of ["market", "autoPlanner", "visual", "crossShard", "crossShardTrade", "claimCrossShard", "deposits"]) {
+    assert.ok(mainMount.includes(`"${feature}"`), `${feature} must remain explicitly gated`);
+}
 const crossShard = fs.readFileSync(path.join(root, "modules/manager_crossShard.js"), "utf8");
 assert.ok(!crossShard.includes("global.InterShardMemory = undefined"), "cross-shard manager must not shadow the game API");
 assert.ok(!crossShard.includes("init(){\n        return;"), "cross-shard manager must be restorable behind its feature gate");
 const crossShardClaim = fs.readFileSync(path.join(root, "modules/strategy_claimCrossShard.js"), "utf8");
 assert.ok(!crossShardClaim.includes("String, body:"), "cross-shard spawn data must not leak an accidental String field");
+const deposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js"), "utf8");
+assert.ok(deposits.includes("let flag1 = Game.flags"), "deposit combat flag lookup must not leak a global");
+assert.ok(mainMount.includes('"deposits"'), "deposit harvesting must require an explicit online opt-in");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
 assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");
 assert.ok(market.includes("MARKET_SELL_PRICE_TTL = 1000"), "commodity profit prices must be cached across ticks");

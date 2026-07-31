@@ -86,8 +86,8 @@ Creep.prototype.harvestDeposit = function () {
         }
         if (deposit && this.pos.isNearTo(deposit) && !this.memory.concated) this.concatDeposit()
         // add by an_w
-        flag1 = Game.flags[this.lastTask().flagName];
-        if (((Game.time % 50 == 0 && this.pos.findInRange(FIND_HOSTILE_CREEPS, 8).length && !this.pos.isNearTo(deposit)) || this.hits < this.hitsMax) && (!flag1.memory.beAttackTime || Game.time > flag1.memory.beAttackTime + 1700)) {
+        let flag1 = Game.flags[this.lastTask().flagName];
+        if (flag1 && ((Game.time % 50 == 0 && this.pos.findInRange(FIND_HOSTILE_CREEPS, 8).length && !this.pos.isNearTo(deposit)) || this.hits < this.hitsMax) && (!flag1.memory.beAttackTime || Game.time > flag1.memory.beAttackTime + 1700)) {
             const em = this.pos.findInRange(FIND_HOSTILE_CREEPS, 8).filter(e => e.getActiveBodyparts(RANGED_ATTACK) > 0)
             if (em.length) {
                 this.room.createFlag(this.pos, "raL3_" + this.memory.roomName, COLOR_RED)
@@ -98,7 +98,7 @@ Creep.prototype.harvestDeposit = function () {
             }
             flag1.memory.beAttackTime = Game.time
         }
-        if ((flag1.memory.beAttackTime && Game.time >= flag1.memory.beAttackTime + 1650) || !flag1.memory.beAttackTime) {
+        if (flag1 && ((flag1.memory.beAttackTime && Game.time >= flag1.memory.beAttackTime + 1650) || !flag1.memory.beAttackTime)) {
             if (Game.flags["raL4_"+this.memory.roomName]) Game.flags["raL4_"+this.memory.roomName].remove()
             if (Game.flags["raL3_"+this.memory.roomName]) Game.flags["raL3_"+this.memory.roomName].remove()
         }
@@ -113,6 +113,7 @@ Creep.prototype.carryDeposit = function () {
     } else {
         let flag = Game.flags[task.flagName];
         if (!flag) return;//
+        flag.memory.harvesters = flag.memory.harvesters || [];
         let deposit = Game.getObjectById(task["id"]);
         if (deposit) {
             flag.memory.lastCooldown = deposit.lastCooldown;
@@ -146,8 +147,8 @@ Creep.prototype.carryDeposit = function () {
         }
 
         let needTransferCreep = flag.memory.harvesters.map(id => Game.getObjectById(id)).filter(e => e && e.storeUsed() >= 20).head();
-        if (this.pos.isNearTo(needTransferCreep)) needTransferCreep.transfer(this, needTransferCreep.store.getResTypeList()[0]);
-        else this.moveTo(needTransferCreep)
+        if (needTransferCreep && this.pos.isNearTo(needTransferCreep)) needTransferCreep.transfer(this, needTransferCreep.store.getResTypeList()[0]);
+        else if(needTransferCreep)this.moveTo(needTransferCreep)
 
         if (!needTransferCreep && flag && this.pos.getRangeTo(flag) > 3) {
             this.moveTo(flag);
@@ -173,6 +174,7 @@ let pro = {
         //     }
         // }
         let spawnRoomName = StationObserver.getClosedMyRoomName(targetRoomName);
+        if (!spawnRoomName || depositData.lastCooldown > MAX_COOL_DOWM) return;
         let flagName = "deposit_" + spawnRoomName + "_" + targetRoomName + "_" + depositData.x + "_" + depositData.y;
         if (!Memory.flags[flagName]) Memory.flags[flagName] = {}
         let flagMemory = Memory.flags[flagName];
@@ -181,7 +183,6 @@ let pro = {
         for (let k in depositData) {
             flagMemory[k] = depositData[k];
         }
-        if (!spawnRoomName || depositData.lastCooldown > MAX_COOL_DOWM) return;
         if (!Game.flags[flagName]) {
             (new RoomPosition(depositData.x, depositData.y, targetRoomName)).createFlag(flagName)
         }

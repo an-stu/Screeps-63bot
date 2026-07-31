@@ -90,7 +90,7 @@ let pro={
 
         if(!MIN_CPU && global.StrategyPowerBank)HelperError.catchError(()=>StrategyPowerBank.exec(room))
 
-        if(!MIN_CPU && global.StrategyDeposits)HelperError.catchError(()=>StrategyDeposits.exec(room))
+        if(!MIN_CPU && global.StrategyDeposits && isCpuFeatureEnabled("deposits"))HelperError.catchError(()=>StrategyDeposits.exec(room))
 
 
         if(Game.time%30==0&&room.level>=7&&room.storage&&room.storage.store.getFreeCapacity()<=0){
