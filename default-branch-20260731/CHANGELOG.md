@@ -415,3 +415,9 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
 
 - Renamed tactical Room cache fields with a project-specific prefix so they
   cannot collide with Screeps engine internals.
+## v0.23.2 — Room Proxy compatibility hotfix
+
+### Fixed
+
+- Validate tactical cache values as arrays because the legacy structure-cache
+  Proxy returns `null`, rather than `undefined`, for unknown Room fields.

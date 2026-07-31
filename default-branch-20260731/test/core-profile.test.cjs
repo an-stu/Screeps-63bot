@@ -106,6 +106,7 @@ assert.ok(market.includes(".commodities;"), "market strategy must consume the pr
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 assert.ok(prototypeRoom.includes("getHostileCreeps") && prototypeRoom.includes("getHostileStructures"), "tactical room queries must be cached per tick");
 assert.ok(prototypeRoom.includes("_cpuHostileCreepCache") && !prototypeRoom.includes("this._hostileCreeps"), "tactical cache keys must not collide with engine Room internals");
+assert.ok(prototypeRoom.includes("Array.isArray(this._cpuHostileCreepCache)"), "Room tactical caches must tolerate the structure-cache prototype Proxy");
 assert.ok(stationDefense.includes("checkSafeMode(room, hostiles)"), "safe-mode detection must reuse the immediate hostile scan");
 assert.ok(warTeamCore.includes("hostileCreepsByRoom") && warTeamCore.includes("hostileTowersByRoom"), "team damage calculation must share tactical room scans");
 assert.ok(!highwayDefense.includes("log(code,PathFinder.search"), "highway flee must never repeat PathFinder just for logging");
