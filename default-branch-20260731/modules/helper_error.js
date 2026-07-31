@@ -4,15 +4,27 @@ let pro_err={
     // lastTick:-1,
     errList:[],
     print:0,
+    capture (error,message) {
+        let data = error && error.stack || String(error)
+        if(message)data = "\n"+message+"\n"+data
+        pro_err.errList.push(data+"\n\n**************\n")
+    },
     catchError (func,message){
         try{
             return func()
         }catch (e) {
             // if(Game.time!=pro_err.lastTick)pro_err.errList = []
             // if(Game.creeps[message])Game.creeps[message].suicide()
-            let data = e.stack
-            if(message)data = "\n"+message+"\n"+e.stack
-            pro_err.errList.push(data+"\n\n**************\n")
+            pro_err.capture(e,message)
+        }
+    },
+    runEach (list, func, getMessage = value => value && value.name) {
+        for (let value of list) {
+            try {
+                func(value)
+            } catch (error) {
+                pro_err.capture(error, getMessage(value))
+            }
         }
     },
     throwAllError () {

@@ -32,7 +32,7 @@ let pro={
     },
     getNormalRoom(){
         if(!Game._normal_room)
-            Game._normal_room = _.values(Game.rooms).filter(e=>e.my&&!e.find(FIND_FLAGS).find(e=>SPECIAL_ROOM.has(e.getPrefix())))
+            Game._normal_room = (Game._coreObjects ? Game._coreObjects.rooms : _.values(Game.rooms)).filter(e=>e.my&&!e.flags().find(flag=>SPECIAL_ROOM.has(flag.getPrefix())))
         return Game._normal_room
     },
     firstActive : true,
@@ -47,7 +47,7 @@ let pro={
             if (global.BetterMove) BetterMove.deletePathInRoom(room.name);
         }
         if(!room.my){
-            if(global.StrategyGCLRoom && room.find(FIND_FLAGS).filter(e=>e.getPrefix()=="GCLRoom").length)
+            if(global.StrategyGCLRoom && room.flags("GCLRoom").length)
                 HelperError.catchError(()=>StrategyGCLRoom.exec(room))
             return; //如果不是自己的房子则不动
         }
@@ -66,9 +66,9 @@ let pro={
         HelperError.catchError(()=>StationTower.exec(room));
         /** strategy */
 
-        if(room.find(FIND_FLAGS).filter(e=>e.getPrefix()=="blockRoom").length){
+        if(room.flags("blockRoom").length){
             return;
-        }if(global.StrategyGCLRoom && room.find(FIND_FLAGS).filter(e=>e.getPrefix()=="GCLRoom").length){
+        }if(global.StrategyGCLRoom && room.flags("GCLRoom").length){
             HelperError.catchError(()=>StrategyGCLRoom.exec(room))
         }else if(room.flags("minSizeRoom").length) //minSizeRoom_W8N8
             HelperError.catchError(()=>StrategyMinSizeRoom.exec(room))

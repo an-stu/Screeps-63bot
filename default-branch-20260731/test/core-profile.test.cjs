@@ -14,6 +14,9 @@ const powerCreepStrategy = fs.readFileSync(path.join(root, "modules/strategy_fac
 const powerCreepPrototype = fs.readFileSync(path.join(root, "modules/prototype_powerCreep.js"), "utf8");
 const utilsTask = fs.readFileSync(path.join(root, "modules/utils_task.js"), "utf8");
 const stationTower = fs.readFileSync(path.join(root, "modules/station_tower.js"), "utf8");
+const managerRooms = fs.readFileSync(path.join(root, "modules/manager_rooms.js"), "utf8");
+const managerFlags = fs.readFileSync(path.join(root, "modules/manager_flags.js"), "utf8");
+const main = fs.readFileSync(path.join(root, "modules/main.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -35,6 +38,10 @@ assert.ok(powerCreepPrototype.includes("effect.ticksRemaining < 100"), "storage 
 assert.ok(powerCreepPrototype.includes("return shouldOperate ? storage : false"), "storage operation must return a task target, not a boolean");
 assert.ok(utilsTask.includes("roomName:obj.pos.roomName"), "task targets must use their stable RoomPosition room name");
 assert.ok(stationTower.includes("pro.lastUpdateMap[room.name]=3"), "peaceful tower repair must be throttled");
+assert.ok(!managerRooms.includes("room.find(FIND_FLAGS)"), "room manager must use the per-tick flag index");
+assert.ok(managerFlags.includes("let prefixMap = Game._flagPerfixMap = {}"), "flag prefixes must be indexed during initialization");
+assert.ok(main.includes("Game._coreObjects"), "main loop must cache tick object arrays");
+assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop must not serialize all Memory manually");
 execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {

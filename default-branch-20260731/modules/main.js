@@ -32,7 +32,8 @@ let pro = {
         // to protect the 20 CPU baseline from a draining bucket.
         MIN_CPU = !!Memory.mincpu || Game.cpu.bucket < 2000;
         if (MIN_CPU && Game.time % 100 == 0) console.log("warning : min cpu on")
-        _.values(Game.rooms).forEach(room => room.used = {});
+        let objects = getTickObjects();
+        objects.rooms.forEach(room => room.used = {});
         if (global.ManagerCrossShard) HelperError.catchError(() => ManagerCrossShard.init());
         if (global.ManagerMissions) HelperError.catchError(() => ManagerMissions.init());// 依赖 ManagerCrossShard
         HelperError.catchError(() => ManagerCreeps.init());
@@ -40,14 +41,15 @@ let pro = {
         HelperError.catchError(() => ManagerFlags.init());
     },
     exec() {
+        let objects = getTickObjects();
         // _.values(Game.creeps).filter(e=>e.memory.role=="carrier").forEach(e=>e.memory.tasks = [])
         // _.values(Game.creeps).forEach(e=>e.sayHeadTask());
         // _.values(Game.creeps).forEach(e=>e.spawning||e.say(e.lastTask().taskName));
         // 注册
         // _.values(Game.creeps).forEach(e=>{try{e.execRegFun()}catch (exc) {log(e.memory.role)}});
         // _.values(Game.creeps).forEach(e=>{e.suicide()});
-        _.values(Game.creeps).forEach(e => HelperError.catchError(() => e.execRegFun(), e.name));
-        _.values(Game.powerCreeps).forEach(e => HelperError.catchError(() => e.ticksToLive && e.execRegFun(), e.name));
+        HelperError.runEach(objects.creeps, e => e.execRegFun());
+        HelperError.runEach(objects.powerCreeps, e => e.ticksToLive && e.execRegFun());
 
         // 出击！
         if (global.teamL2) HelperError.catchError(() => teamL2.exec());
@@ -59,7 +61,7 @@ let pro = {
         // 配置资源
         if (global.WarTeamFlag) HelperError.catchError(() => WarTeamFlag.exec());
         if (global.WarAttackRoom) HelperError.catchError(() => WarAttackRoom.exec());
-        _.values(Game.rooms).forEach(room => HelperError.catchError(() => (ManagerRooms.exec(room)), room.name));
+        HelperError.runEach(objects.rooms, room => ManagerRooms.exec(room));
         if (global.StrategytradeCrossShard) HelperError.catchError(() => StrategytradeCrossShard.exec());
         if (global.StrategyClaim) HelperError.catchError(() => StrategyClaim.exec());
         if (global.StrategyClaimCrossShard) HelperError.catchError(() => StrategyClaimCrossShard.exec());
@@ -70,16 +72,16 @@ let pro = {
 
         // 执行
         // _.values(Game.creeps).forEach(e=>{try{e.spawning||e.execLastTask()}catch (exc) {e.suicide()}});
-        _.values(Game.powerCreeps).forEach(e => e.spawning || HelperError.catchError(() => e.ticksToLive && e.execLastTask(), e.name));
-        if (!MIN_CPU) _.values(Game.creeps).forEach(e => e.spawning || HelperError.catchError(() => e.execLastTask(), e.name));
-        else _.values(Game.creeps).filter(e => ROLE_PRIORITY[e.memory.role] > 0).forEach(e => e.spawning || HelperError.catchError(() => e.execLastTask(), e.name));
+        HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
+        if (!MIN_CPU) HelperError.runEach(objects.creeps, e => e.spawning || e.execLastTask());
+        else HelperError.runEach(objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0), e => e.spawning || e.execLastTask());
 
         // These jobs do not keep creeps alive or defend a room. Spread them
         // over several ticks and make them independently switchable in Memory.
         let cpuFeatures = Memory.cpuFeatures || {};
         let featureEnabled = name => cpuFeatures[name] !== false && CPU_FEATURES[name] !== false;
         if (!MIN_CPU && global.StrategyMarket && featureEnabled("market") && HelperCpuUsed.shouldRun(5)) {
-            _.values(Game.rooms).forEach(room => HelperError.catchError(() => StrategyMarket.exec(room)));
+            HelperError.runEach(objects.rooms, room => StrategyMarket.exec(room));
             HelperError.catchError(() => StrategyMarket.autoBuy());
         }
         if (!MIN_CPU && global.ManagerAutoPlanner && featureEnabled("autoPlanner") && HelperCpuUsed.shouldRun(25))
@@ -197,10 +199,22 @@ let space_action = {
 
 let _global_memory = undefined
 
+let getTickObjects = function () {
+    if (!Game._coreObjects) {
+        Game._coreObjects = {
+            rooms: Object.values(Game.rooms),
+            creeps: Object.values(Game.creeps),
+            powerCreeps: Object.values(Game.powerCreeps),
+        };
+    }
+    return Game._coreObjects;
+}
+
 let updateCodeHealth = function () {
     if (Game.time % 20 != 0) return;
     let missingTaskHandlers = {};
-    let units = _.values(Game.creeps).concat(_.values(Game.powerCreeps).filter(e => e.ticksToLive));
+    let objects = getTickObjects();
+    let units = objects.creeps.concat(objects.powerCreeps.filter(e => e.ticksToLive));
     for (let unit of units) {
         for (let task of unit.memory.tasks || []) {
             if (task && task.taskName && typeof unit[task.taskName] != "function") {
@@ -213,8 +227,8 @@ let updateCodeHealth = function () {
         cpu: Game.cpu.getUsed(),
         averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),
         bucket: Game.cpu.bucket,
-        creeps: _.size(Game.creeps),
-        powerCreeps: _.values(Game.powerCreeps).filter(e => e.ticksToLive).length,
+        creeps: objects.creeps.length,
+        powerCreeps: objects.powerCreeps.filter(e => e.ticksToLive).length,
         missingTaskHandlers: missingTaskHandlers,
     });
 }
@@ -229,15 +243,16 @@ let main = function () {
     }
 
     if (!global.WHO_AM_I) {
-        let myRoom = _.values(Game.rooms).find(e => e.my);
+        let myRoom = getTickObjects().rooms.find(e => e.my);
         if (myRoom) global.WHO_AM_I = myRoom.controller.owner.username
     }
 
     pro.init();
     if (Game.cpu.bucket > 40 || !isSaveCpu) pro.exec();
     else {
-        _.values(Game.powerCreeps).forEach(e => e.spawning || HelperError.catchError(() => e.ticksToLive && e.execLastTask(), e.name));
-        _.values(Game.creeps).filter(e => ROLE_PRIORITY[e.memory.role] > 0).forEach(e => e.spawning || HelperError.catchError(() => e.execLastTask()));
+        let objects = getTickObjects();
+        HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
+        HelperError.runEach(objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0), e => e.spawning || e.execLastTask());
     }
     pro.afterWork();
 
@@ -254,8 +269,6 @@ let main = function () {
     // P0();
     // space_action.an_w();
 
-    if (Game.time % 127 == 0) RawMemory.set(JSON.stringify(Memory));
-    
     if (Game.time % 20) return;
   
     if (!Memory.stats) Memory.stats = {}
@@ -271,7 +284,7 @@ let main = function () {
     Memory.stats.bucket = Game.cpu.bucket
     if (!Memory.stats.RCL) Memory.stats.RCL = {};
     // 统计RCL的的百分比
-    _.values(Game.rooms).filter(e => e.my && e.level < 8).forEach(room => Memory.stats.RCL[room.name] = room.controller.progress / room.controller.progressTotal * 100);
+    getTickObjects().rooms.filter(e => e.my && e.level < 8).forEach(room => Memory.stats.RCL[room.name] = room.controller.progress / room.controller.progressTotal * 100);
 
     
 };

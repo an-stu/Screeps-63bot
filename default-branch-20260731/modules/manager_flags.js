@@ -12,22 +12,26 @@ let pro={
         }
 
         let flagRoomMap = {}
+        let prefixMap = Game._flagPerfixMap = {}
 
         for (let name in Game.flags) {
-            let strLs = name.split("_");
-            let prefix = strLs[0]
-            let roomName = strLs.length>=1?strLs[1]:undefined
+            let flag = Game.flags[name]
+            let prefix = flag.getPrefix()
+            let roomName = flag.pos.roomName
             let room = Game.rooms[roomName]
+
+            if(prefixMap[prefix]) prefixMap[prefix].push(flag)
+            else prefixMap[prefix] = [flag]
 
             if(room){
                 flagRoomMap[roomName] = flagRoomMap[roomName]||[]
-                flagRoomMap[roomName].push(Game.flags[name])
+                flagRoomMap[roomName].push(flag)
             }
-            let nextPos = Game.flags[name].memory.nextPos;
+            let nextPos = flag.memory.nextPos;
             if (nextPos) {
                 let rp = new RoomPosition(nextPos.x,nextPos.y,nextPos.roomName);
-                if(Game.flags[name].pos.isEqualTo(rp))delete Game.flags[name].memory.nextPos;
-                else Game.flags[name].setPosition(rp)
+                if(flag.pos.isEqualTo(rp))delete flag.memory.nextPos;
+                else flag.setPosition(rp)
             }
         }
 
@@ -38,14 +42,6 @@ let pro={
 
     },
     getFlagsByPrefix (prefix){
-        if(!Game._flagPerfixMap){
-            let map = Game._flagPerfixMap = {}
-            _.values(Game.flags).forEach(flag=>{
-                let p = flag.getPrefix();
-                if(map[p]) map[p].push(flag);
-                else map[p] = [flag]
-            })
-        }
         return Game._flagPerfixMap[prefix]||[]
     }
 

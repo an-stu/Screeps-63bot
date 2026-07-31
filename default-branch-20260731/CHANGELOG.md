@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.6.0 — Per-tick room indexes
+
+### Optimized
+
+- Build the global flag-prefix map during the existing flag initialization
+  pass instead of scanning all flags again on first use.
+- Index room flags by their actual position rather than assuming the second
+  name segment is always a room name.
+- Reuse the per-room flag cache in the room manager instead of repeatedly
+  calling `room.find(FIND_FLAGS)`.
+- Correct undefined cache initialization for room creep and flag lists.
+- Cache room, creep, and Power Creep arrays once per tick for reuse across the
+  main lifecycle.
+- Remove the redundant full `JSON.stringify(Memory)`/`RawMemory.set` pass every
+  127 ticks; the runtime already persists the assigned parsed Memory object.
+- Execute creep, Power Creep, room, and market batches through one guarded loop
+  per group instead of allocating a new try/catch closure for every object.
+
 ## v0.5.1 — Tower idle CPU reduction
 
 ### Optimized

@@ -8,7 +8,7 @@ Room.prototype.creeps=function (role,spawned=true) {
     if(this._creepsList == null)this._creepsList = []
     if(role){
         let creeps = this[role+"_creepsList"];
-        if(null === creeps){
+        if(creeps == null){
             creeps = this._creepsList.filter(e=>e.memory.role == role);
             this[role+"_creepsList"] = creeps;
         }
@@ -35,7 +35,7 @@ Room.prototype.flags=function (prefix) {
     if(prefix){
         this._flagList = this._flagList||[]
         let flags = this[prefix+"_flagList"];
-        if(null === flags){
+        if(flags == null){
             flags = this._flagList.filter(e=>e.getPrefix() == prefix);
             this[prefix+"_flagList"] = flags;
         }
@@ -85,4 +85,3 @@ Room.prototype.isDownGrade=function () {
     if(this.controller.progressTotal<this.controller.progress)return true
     if(this.extension.length>CONTROLLER_STRUCTURES[this.level])return true
 };
-
