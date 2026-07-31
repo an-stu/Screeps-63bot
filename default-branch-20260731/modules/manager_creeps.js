@@ -43,12 +43,17 @@ let pro={
         })
     },
     getAllAlivePowerCreeps(){
-        return _.values(Game.powerCreeps).filter(e=>e.ticksToLive&&LOCAL_SHARD_NAME==(e.shard||LOCAL_SHARD_NAME))
+        if (!Game._alivePowerCreeps) {
+            let powerCreeps = Game._coreObjects ? Game._coreObjects.powerCreeps : Object.values(Game.powerCreeps);
+            Game._alivePowerCreeps = powerCreeps.filter(pc => pc.ticksToLive && LOCAL_SHARD_NAME == (pc.shard || LOCAL_SHARD_NAME));
+        }
+        return Game._alivePowerCreeps;
     },
     init(){
 
         if(!Memory.powerCreeps)Memory.powerCreeps = {}
-        for(let pc of _.values(Game.powerCreeps))//清理pc内存 如果已经死了 或者跨shard了
+        let powerCreeps = Game._coreObjects ? Game._coreObjects.powerCreeps : Object.values(Game.powerCreeps);
+        for(let pc of powerCreeps)//清理pc内存 如果已经死了 或者跨shard了
             if(!pc.ticksToLive
                 ||LOCAL_SHARD_NAME!=(pc.shard||LOCAL_SHARD_NAME)) // 私服没有 pc.shard ，坑B dev
                 delete Memory.powerCreeps[pc.name];
@@ -60,33 +65,27 @@ let pro={
         pro.checkPowerCreepRoomPowered();
         pro.powerCreepsGenerateOps();
 
-        pro.otherCreeps = []
-
-        for(let name in Game.creeps){
-            if(!Memory.creeps[name]||!Memory.creeps[name].tasks)delete Game.creeps[name];//先删掉，之后跨shard要做处理
-        }
-
-        let creeps={};
+        pro.otherCreeps = [];
+        let creeps = {};
         for (let name in Memory.creeps) {
-            // if (Game.creeps[name]) Game.creeps[name].memory.dontPullMe = false;
-            if (!Game.creeps[name]) {
-                delete Memory.creeps[name];
-            }else {
-                let roomName = Memory.creeps[name].roomName;
-                if(!name.startsWith("!")&&roomName){
-                    creeps[roomName]=creeps[roomName]||[];
-                    creeps[roomName].push(Game.creeps[name])
-                }else{
-                    creeps['global']=creeps['global']||[];
-                    creeps['global'].push(Game.creeps[name])
-                }
-            }
+            if (!Game.creeps[name]) delete Memory.creeps[name];
         }
-
-
-        _.keys(creeps).forEach(e=>{if(e!='global'){ Game.rooms[e]&&Game.rooms[e].setCreepsList(creeps[e]) }else{ pro.otherCreeps=creeps[e]}})
-        // this.cacheCreeps = creeps ;
-        // return creeps;
+        for (let name in Game.creeps) {
+            let creep = Game.creeps[name];
+            let creepMemory = Memory.creeps[name];
+            if (!creepMemory || !creepMemory.tasks) {
+                // Cross-shard arrivals are initialized by the shard manager.
+                delete Game.creeps[name];
+                continue;
+            }
+            let roomName = creepMemory.roomName;
+            let groupName = !name.startsWith("!") && roomName ? roomName : "global";
+            (creeps[groupName] || (creeps[groupName] = [])).push(creep);
+        }
+        for (let groupName in creeps) {
+            if (groupName == "global") pro.otherCreeps = creeps[groupName];
+            else if (Game.rooms[groupName]) Game.rooms[groupName].setCreepsList(creeps[groupName]);
+        }
     },
     /**=
      * @param bodySet :{ [MOVE]: 8, [WORK]: 15, [CARRY]: 2} | [ [MOVE,8] ,[WORK,9] ,[MOVE,1] ]

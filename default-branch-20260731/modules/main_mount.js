@@ -32,8 +32,8 @@ global.isCpuFeatureEnabled = name => {
 // creep and spawn naming still require the local shard identifier.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.27.0",
-    uploadedModules: 68,
+    version: "0.28.0",
+    uploadedModules: 69,
     restoredSnapshotModules: 67,
     intentionallyExcluded: ["strategy_powerBank", "调用栈分析器", "闲聊 v1.0"]
 }
@@ -46,6 +46,7 @@ require("algo_algorithm")
 require('class_RoomArray');
 
 // helper
+require('helper_consoleLogger');
 require('helper_cpuUsed');
 require('helper_roomResource');
 require('helper_error');

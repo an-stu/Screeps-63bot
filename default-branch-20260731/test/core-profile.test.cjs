@@ -17,6 +17,7 @@ const stationTower = fs.readFileSync(path.join(root, "modules/station_tower.js")
 const stationHive = fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8");
 const managerRooms = fs.readFileSync(path.join(root, "modules/manager_rooms.js"), "utf8");
 const managerFlags = fs.readFileSync(path.join(root, "modules/manager_flags.js"), "utf8");
+const managerCreeps = fs.readFileSync(path.join(root, "modules/manager_creeps.js"), "utf8");
 const main = fs.readFileSync(path.join(root, "modules/main.js"), "utf8");
 const prototypeRoom = fs.readFileSync(path.join(root, "modules/prototype_room.js"), "utf8");
 const stationDefense = fs.readFileSync(path.join(root, "modules/station_defense.js"), "utf8");
@@ -30,6 +31,7 @@ const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化ho
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
 const marketPrice = fs.readFileSync(path.join(root, "modules/strategy_marketPrice.js"), "utf8");
 const consoleDashboard = fs.readFileSync(path.join(root, "modules/helper_consoleDashboard.js"), "utf8");
+const consoleLogger = fs.readFileSync(path.join(root, "modules/helper_consoleLogger.js"), "utf8");
 const roomResource = fs.readFileSync(path.join(root, "modules/helper_roomResource.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
@@ -57,6 +59,9 @@ for (const moduleName of ["war_damageCal", "war_cache", "war_teamCore", "war_tea
 }
 assert.ok(manifest.includes("helper_visual") && manifest.includes("manager_planner") && manifest.includes("manager_autoPlanner"), "planner dependencies must ship together");
 assert.ok(manifest.includes("helper_consoleDashboard"), "on-demand console dashboard must ship in the runtime package");
+assert.ok(manifest.includes("helper_consoleLogger"), "central colored logger must ship before runtime modules");
+assert.ok(consoleLogger.includes("[${definition.label}]") && consoleLogger.includes("colorizeResources"), "text logs must include colored levels and resource tokens");
+assert.ok(consoleLogger.includes("escapeHtml(text)"), "text logs must escape dynamic content before rich output");
 assert.ok(consoleDashboard.includes("global.dash"), "console dashboard must expose the short dash() command");
 assert.ok(consoleDashboard.includes("console.logUnsafe(output)"), "rich dashboard output must use the post-security-update console API");
 assert.ok(consoleDashboard.includes("Object.keys(object.store)"), "resource details must exclude enumerable Store prototype helpers");
@@ -93,6 +98,8 @@ assert.ok(mainMount.includes("observer: true"), "observer scanning must be switc
 assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");
 assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies must have an allocation-free gate");
 assert.ok(managerFlags.includes("hasAnyPrefix (prefixes)"), "combat dispatch must support a shared prefix gate");
+assert.ok(managerCreeps.includes("Game._alivePowerCreeps"), "Power Creep management must share one filtered tick list");
+assert.ok(!managerCreeps.includes("_.keys(creeps)"), "creep grouping must avoid a temporary Lodash key array");
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("claim")'), "claim strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("cleanBuild")') && main.includes('ManagerFlags.hasPrefix("blockRoom")'), "global flag utilities must use prefix gates");
@@ -132,7 +139,22 @@ const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), 
 assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longTermSummary()"), "CPU telemetry must persist exact long-window statistics");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
 assert.ok(marketPrice.includes("console.logUnsafe(htmlOutput)"), "market HTML reports must use the rich console API");
+
+const loggerOutput = [];
+const loggerContext = {
+    Game: {time: 123},
+    RESOURCES_ALL: ["energy", "power"],
+    console: {log() {}, logUnsafe(html) { loggerOutput.push(html); }},
+};
+loggerContext.global = loggerContext;
+vm.runInNewContext(consoleLogger, loggerContext);
+loggerContext.console.log("storage full", "energy");
+loggerContext.Logger.error("failed", "power");
+assert.ok(loggerOutput[0].includes("[WARNING]") && loggerOutput[0].includes("energy</span>"), "automatic warnings must color resource tokens");
+assert.ok(loggerOutput[1].includes("[ERROR]") && loggerOutput[1].includes("power</span>"), "explicit errors must render with resource colors");
+
 assert.ok(main.includes("HelperCpuUsed.recordLongTerm(Game.cpu.getUsed())"), "long-window CPU telemetry must record every completed tick");
+assert.equal((fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8").match(/Creep\.prototype\.headTask =/g) || []).length, 1, "headTask must have one canonical definition");
 assert.ok(!main.includes("space_action") && !main.includes("let P0"), "dead account-specific tick actions must stay removed");
 assert.ok(!main.includes("_.keys(WAKE_TASK)"), "wake tasks must not allocate a Lodash key array every tick");
 assert.ok(managerRooms.includes("let roomHash = room.hashCode()"), "room management must calculate its scheduling hash only once per room tick");

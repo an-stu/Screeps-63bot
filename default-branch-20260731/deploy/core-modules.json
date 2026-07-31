@@ -5,6 +5,7 @@
   "algo_wasm_PriorityQueue",
   "algo_wasm_priorityqueue",
   "class_RoomArray",
+  "helper_consoleLogger",
   "helper_cpuUsed",
   "helper_error",
   "helper_roomResource",

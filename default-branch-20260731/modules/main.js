@@ -1,5 +1,5 @@
-console.log("Script Reload In Time " + Game.time + " , bucket " + Game.cpu.bucket);
 require("main_mount");
+Logger.info("Script reload", "bucket", Game.cpu.bucket, "version", RUNTIME_PROFILE.version);
 
 
 let pro = {

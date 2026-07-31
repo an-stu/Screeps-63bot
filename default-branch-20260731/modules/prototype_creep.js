@@ -213,10 +213,6 @@ Creep.prototype.headTaskFlag = function () {
     if (head) return Game.flags[head.id] || Game.flags[head.flagName];
 };
 
-Creep.prototype.headTask = function () {
-    return this.memory.tasks.head()
-};
-
 Creep.prototype.addTask = function (task) {
     // log(this.memory.tasks.push(task))
     if (!task) return this;

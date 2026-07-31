@@ -493,3 +493,27 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   `console.logUnsafe`, with readable text fallbacks on older servers.
 - Correct empty Store SVG percentages and size each resource background bar
   to its requested width.
+
+## v0.28.0 — Unit-management allocation cleanup
+
+### Added
+
+- Add a central escaped rich-text logger that standardizes all ordinary
+  `console.log` output as green `INFO`, yellow `WARNING`, or red `ERROR` lines.
+- Highlight Screeps resource names with their mineral/commodity colors while
+  leaving explicit dashboards and charts on their raw rich-output path.
+
+### Optimized
+
+- Reuse one filtered alive-PowerCreep list across initialization, room-power
+  checks, and OPS generation instead of rebuilding it for each pass.
+- Merge live-Creep validation and room grouping into one traversal and replace
+  the temporary Lodash group-key array with a direct object iteration.
+- Cache main-room, station, body-part, and free-capacity values inside the two
+  highest-cost upgrader/harvester task handlers.
+
+### Fixed
+
+- Replace an accidental bitwise `&` in upgrader movement throttling with the
+  intended short-circuit boolean condition.
+- Remove the duplicate `Creep.prototype.headTask` definition.

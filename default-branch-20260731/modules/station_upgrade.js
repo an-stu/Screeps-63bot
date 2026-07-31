@@ -83,11 +83,11 @@ Creep.prototype.upgrade = function () {
 
 Creep.prototype.upgradeKeeper = function () {
     let obj = this.lastTaskObj();
-
-    let ms = this.mainRoom().memory[pro.stationName];
+    let mainRoom = this.mainRoom();
+    let ms = mainRoom.memory[pro.stationName];
     if (ms && this.ticksToLive < (ms.pathTime || 0) * 1.5) {// 如果寿命将近
         if (!this.memory.unboostCheck && this.memory.needUnboost) {
-            let tasks = StationLab.generatorUnboostTask(this.mainRoom());
+            let tasks = StationLab.generatorUnboostTask(mainRoom);
             if (tasks.length) {
                 this.drop(RESOURCE_ENERGY)
                 this.unregisterStationUpgrade();
@@ -106,7 +106,7 @@ Creep.prototype.upgradeKeeper = function () {
     if (this.store[RESOURCE_ENERGY] > 0) {
         if (!(this.memory.concated && this.room.storage && this.room.storage.store[RESOURCE_ENERGY] < 10000) || this.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) < 10000) { //少于 1w 的时候暂时不更新
             let code = this.upgradeController(obj);
-            if (code == ERR_NOT_IN_RANGE & this.ticksToLive % 3 == 0) this.moveTo(obj, { range: 3 });
+            if (code == ERR_NOT_IN_RANGE && this.ticksToLive % 3 == 0) this.moveTo(obj, { range: 3 });
             if (this.pos.inRangeTo(obj, 3)) {
                 if (this.memory.needUnboost === undefined) this.memory.needUnboost = this.body.filter(e => e.boost).length
                 if (!this.memory.concated) {
@@ -117,11 +117,13 @@ Creep.prototype.upgradeKeeper = function () {
         }
     }
 
-    let link = Game.getObjectById(this.mainRoom().memory[pro.stationName]["link"])//this.pos.findInRange(FIND_STRUCTURES,2,{filter:e=>e.structureType==STRUCTURE_LINK}).head();
-    let container = Game.getObjectById(this.mainRoom().memory[pro.stationName]["container"])//this.pos.findInRange(FIND_STRUCTURES,3,{filter:e=>e.structureType==STRUCTURE_CONTAINER&&e.store[RESOURCE_ENERGY]>0}).head();
-    let containerNotFull = container && container.store.getFreeCapacity(RESOURCE_ENERGY) > this.getPartCnt(CARRY) * 50 * 2;
+    let link = Game.getObjectById(ms["link"]);
+    let container = Game.getObjectById(ms["container"]);
+    let carryParts = this.getPartCnt(CARRY);
+    let workParts = this.getPartCnt(WORK);
+    let containerNotFull = container && container.store.getFreeCapacity(RESOURCE_ENERGY) > carryParts * 100;
     let moved = false
-    if (this.store.getUsedCapacity(RESOURCE_ENERGY) <= this.getPartCnt(WORK) * (containerNotFull ? 2000 : 1)) { //如果没满的情况下 拿全部的这样才能快速填满container
+    if (this.store.getUsedCapacity(RESOURCE_ENERGY) <= workParts * (containerNotFull ? 2000 : 1)) { //如果没满的情况下 拿全部的这样才能快速填满container
         let isWithdrawLink = false;
         if (link && (link._upgrade_used || 0) <= link.store[RESOURCE_ENERGY] && link.store[RESOURCE_ENERGY] > 0) {
             let result = this.withdraw(link, RESOURCE_ENERGY);
@@ -135,9 +137,9 @@ Creep.prototype.upgradeKeeper = function () {
         }
         if (isWithdrawLink) {
             if (containerNotFull) {
-                this.transfer(container, RESOURCE_ENERGY, this.getPartCnt(CARRY) * 50 - this.getPartCnt(WORK) * 2)
+                this.transfer(container, RESOURCE_ENERGY, carryParts * 50 - workParts * 2)
             }
-        } else if (!link || this.store.getUsedCapacity(RESOURCE_ENERGY) <= this.getPartCnt(WORK)) {
+        } else if (!link || this.store.getUsedCapacity(RESOURCE_ENERGY) <= workParts) {
             let result = this.withdraw(container, RESOURCE_ENERGY);
             if (result == ERR_NOT_IN_RANGE) {
                 this.moveTo(container, { visualizePathStyle: { stroke: '#ffffff' } });
@@ -146,7 +148,7 @@ Creep.prototype.upgradeKeeper = function () {
         }
     }
     if (!moved) {// 如果没有移动过就移到container上面，放置堵车，死掉直接掉container里面
-        if (container && !this.pos.isEqualTo(container) && this.mainRoom().memory[pro.stationName]["creeps"].length <= 1) {
+        if (container && !this.pos.isEqualTo(container) && ms["creeps"].length <= 1) {
             this.moveTo(container)
         }
     }
@@ -309,5 +311,4 @@ let pro = {
 
 
 global.StationUpgrade = pro;
-
 

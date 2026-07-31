@@ -125,8 +125,8 @@ Creep.prototype.harvestEnergyKeeper = function () {
     if (task.roomName != this.room.name) {
         this.goTo(task);
     } else {
-        let source = Game.getObjectById(task["id"]);
-        let station = Memory.rooms[this.headTask().roomName][pro.stationName][task["id"]];
+        let source = Game.getObjectById(task.id);
+        let station = Memory.rooms[task.roomName][pro.stationName][task.id];
         let container = Game.getObjectById(station["container"]);
 
         let link = Game.getObjectById(station["link"]);
@@ -145,9 +145,10 @@ Creep.prototype.harvestEnergyKeeper = function () {
         if ((source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
             this.harvest(source);
         }
+        let freeEnergyCapacity = this.store.getFreeCapacity(RESOURCE_ENERGY);
         let notLinkFull = link && link.store[RESOURCE_ENERGY] != 800;
-        if (this.ticksToLive % 3 == 0 || this.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) {
-            let nearFull = this.store.getFreeCapacity(RESOURCE_ENERGY) < this.getPartCnt(WORK) * 2;
+        if (this.ticksToLive % 3 == 0 || freeEnergyCapacity <= 0) {
+            let nearFull = freeEnergyCapacity < this.getPartCnt(WORK) * 2;
             if (nearFull) {
                 let constructionSite = this.room.constructionSite ? this.room.constructionSite.filter(e => e.pos.isNearTo(this)).head() : undefined;
 
