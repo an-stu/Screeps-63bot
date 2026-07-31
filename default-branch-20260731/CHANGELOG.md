@@ -606,3 +606,13 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   bootstrap workers cannot choose lower-priority construction first.
 - Spawn the reusable cleaner/bootstrap worker even in an already-empty target
   room, guaranteeing that the first spawn has a local builder after claiming.
+
+## v0.34.0 — Low-RCL blueprint construction recovery
+
+### Fixed
+
+- Treat construction from an already saved room blueprint as essential
+  low-level room maintenance rather than an optional auto-planning feature.
+- RCL1–3 rooms now continue creating their allowed spawn, extension,
+  container, tower, storage, and road sites on the staggered 150-tick cadence
+  even when expensive planner computation and visuals remain disabled.

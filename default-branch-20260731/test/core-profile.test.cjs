@@ -112,6 +112,8 @@ assert.ok(strategyClaim.includes("[WORK]: 5") && strategyClaim.includes("[CARRY]
 assert.ok(strategyClaim.includes("claimCleanupTarget") && strategyClaim.includes("findClosestByRange(FIND_STRUCTURES"), "claim cleanup must cache targets instead of path-searching every tick");
 assert.ok(strategyClaim.includes("ensureConstructionSites") && strategyClaim.includes("createConstructionSite(STRUCTURE_SPAWN)") && strategyClaim.includes("[STRUCTURE_EXTENSION, STRUCTURE_CONTAINER]"), "claim operations must create blueprint bootstrap sites automatically");
 assert.ok(!strategyLowLevel.includes("room.level > 1 && StationWork.constructionNeedBuild"), "RCL1 workers must be allowed to build the first spawn");
+assert.ok(strategyLowLevel.includes("if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel0(room)"), "saved low-RCL blueprints must build without the optional planner gate");
+assert.ok(strategyLowLevel.includes("if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel800(room)"), "RCL3 blueprint construction must remain essential room maintenance");
 assert.ok(strategyClaim.includes("StationObserver.requestRoom") && strategyClaim.includes("priorityVisibleTick == Game.time"), "claim operations must consume scheduled Observer vision automatically");
 assert.ok(stationObserver.includes("PriorityObserveRoomQueue") && stationObserver.includes("getRoomLinearDistance"), "claim observations must use a range-checked priority queue");
 assert.ok(strategyClaim.includes("room.find(FIND_MY_SPAWNS)") && !strategyClaim.includes("targetRoom.spawn.length>0"), "hostile spawns must never complete a claim operation");
