@@ -70,11 +70,13 @@ Creep.prototype.raL1=function () {
     // if(!flag)this.suicide();
     // let inner=pos=> pos.x>=2&&pos.x<=48&&pos.y>=2&&pos.y<=48;
     this.atk=function(){
-        let em=Game.getObjectById(raL1Target);//this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);//
-        let isHostileCreep = false;
+        let forcedTarget = Game.getObjectById(raL1Target);
+        let cachedTarget = this.memory.raL1TargetUntil >= Game.time ? Game.getObjectById(this.memory.raL1TargetId) : undefined;
+        if(cachedTarget && cachedTarget.pos.roomName != this.room.name)cachedTarget = undefined;
+        let em=forcedTarget || cachedTarget;//this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);//
+        let isHostileCreep = !!(em && em.body);
         let isHostileConstruction = false;
-        let isSite = false;
-        if (em) isHostileCreep = true;
+        let isSite = !!(em && em.progressTotal !== undefined && em.hits === undefined);
         if(!em)em = flag.room&&flag.pos.lookFor(LOOK_STRUCTURES).find(e=>!e.my && e.structureType !== STRUCTURE_CONTAINER)
         if(!em) em=this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES,{range:3,filter:e=>e.hits&&e.structureType!=STRUCTURE_WALL&&e.structureType!=STRUCTURE_POWER_BANK&&!e.pos.coverRampart()});
         if(!em){
@@ -103,6 +105,14 @@ Creep.prototype.raL1=function () {
 
         if(!em)em = this.pos.findInRange(FIND_HOSTILE_CREEPS,3,{filter:e=>!e.pos.coverRampart()}).head()
         if(!em)em = this.pos.findInRange(FIND_HOSTILE_STRUCTURES,3, {filter:e=>e.structureType!=STRUCTURE_POWER_BANK}).head()
+
+        if(em && !forcedTarget && !cachedTarget){
+            this.memory.raL1TargetId = em.id;
+            this.memory.raL1TargetUntil = Game.time + 3;
+        }else if(!em){
+            delete this.memory.raL1TargetId;
+            delete this.memory.raL1TargetUntil;
+        }
 
         if(em && global.HelperVisual && isCpuFeatureEnabled("visual"))HelperVisual.showText(em,"X")
         if(em&&em.structureType)isHostileConstruction=true

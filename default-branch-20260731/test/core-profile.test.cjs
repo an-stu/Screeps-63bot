@@ -23,6 +23,9 @@ const stationDefense = fs.readFileSync(path.join(root, "modules/station_defense.
 const warTeamCore = fs.readFileSync(path.join(root, "modules/war_teamCore.js"), "utf8");
 const highwayDefense = fs.readFileSync(path.join(root, "modules/strategy_defenserHighWay.js"), "utf8");
 const attackRoom = fs.readFileSync(path.join(root, "modules/war_attackRoom.js"), "utf8");
+const warCache = fs.readFileSync(path.join(root, "modules/war_cache.js"), "utf8");
+const teamRaL1 = fs.readFileSync(path.join(root, "modules/team_raL1.js"), "utf8");
+const strategyAtkL2 = fs.readFileSync(path.join(root, "modules/strategy_atkL2.js"), "utf8");
 const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
 const marketPrice = fs.readFileSync(path.join(root, "modules/strategy_marketPrice.js"), "utf8");
@@ -54,6 +57,8 @@ for (const moduleName of ["war_damageCal", "war_cache", "war_teamCore", "war_tea
 assert.ok(manifest.includes("helper_visual") && manifest.includes("manager_planner") && manifest.includes("manager_autoPlanner"), "planner dependencies must ship together");
 assert.ok(manifest.includes("helper_consoleDashboard"), "on-demand console dashboard must ship in the runtime package");
 assert.ok(consoleDashboard.includes("global.dash"), "console dashboard must expose the short dash() command");
+assert.ok(consoleDashboard.includes("console.logUnsafe(output)"), "rich dashboard output must use the post-security-update console API");
+assert.ok(consoleDashboard.includes("Object.keys(object.store)"), "resource details must exclude enumerable Store prototype helpers");
 assert.ok(!main.includes("ConsoleDashboard"), "console dashboard must never run from the tick loop");
 assert.ok(manifest.includes("manager_missions") && manifest.includes("manager_crossShard"), "cross-shard requests must ship with local mission handlers");
 assert.ok(manifest.includes("strategy_tradeCrossShard") && manifest.includes("strategy_claimCrossShard"), "cross-shard strategies must ship with their manager");
@@ -105,12 +110,15 @@ assert.ok(market.includes("MARKET_ORDER_TTL = 20"), "market order queries must b
 assert.ok(market.includes(".commodities;"), "market strategy must consume the pricing result payload correctly");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 assert.ok(prototypeRoom.includes("getHostileCreeps") && prototypeRoom.includes("getHostileStructures"), "tactical room queries must be cached per tick");
+assert.ok(prototypeRoom.includes("getStructures"), "combat cost matrices must share a per-tick structure scan");
 assert.ok(prototypeRoom.includes("_cpuHostileCreepCache") && !prototypeRoom.includes("this._hostileCreeps"), "tactical cache keys must not collide with engine Room internals");
 assert.ok(prototypeRoom.includes("Array.isArray(this._cpuHostileCreepCache)"), "Room tactical caches must tolerate the structure-cache prototype Proxy");
 assert.ok(stationDefense.includes("checkSafeMode(room, hostiles)"), "safe-mode detection must reuse the immediate hostile scan");
 assert.ok(warTeamCore.includes("hostileCreepsByRoom") && warTeamCore.includes("hostileTowersByRoom"), "team damage calculation must share tactical room scans");
 assert.ok(!highwayDefense.includes("log(code,PathFinder.search"), "highway flee must never repeat PathFinder just for logging");
 assert.ok(attackRoom.includes("attackRoomTargetUntil"), "attack-room creeps must keep a short-lived selected target");
+assert.ok(warCache.includes("cacheStructsTime[roomName] != Game.time"), "combat structure snapshots must refresh at most once per room per tick");
+assert.ok(teamRaL1.includes("raL1TargetUntil") && strategyAtkL2.includes("atkL2TargetUntil"), "legacy combat creeps must reuse selected targets briefly");
 assert.ok(betterMove.includes("let enableCpuStats = false"), "movement CPU instrumentation must default to off");
 assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, arguments)"), "normal moveTo calls must bypass analyzer timers");
 assert.ok(betterMove.includes('!isCpuFeatureEnabled("visual")'), "legacy moveTo styles must obey the global visual gate");

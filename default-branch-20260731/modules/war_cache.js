@@ -5,6 +5,7 @@
  */
 
 const cacheStructs = {} // 存储的是上一tick全部的建筑，object不会更新
+const cacheStructsTime = {}
 const cacheTowerRoomArray = {} // tower的 id 和 pos 会缓存到memory
 const cacheAbandonArray = {}
 const rampartAreaArray = {}
@@ -29,7 +30,7 @@ let pro={
         }
         else if(Game.rooms[roomName]){ // 如果房间看得见就刷新缓存
             cacheTowerRoomArray[roomName+'_time']=Game.time
-            let towers = Game.rooms[roomName].find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_TOWER})
+            let towers = Game.rooms[roomName].getStructures().filter(e=>e.structureType==STRUCTURE_TOWER)
             if(towers.length==0)return emptyRoomArray;
             let processed = towers.map(e=>{
                 let effect = 1;
@@ -90,8 +91,9 @@ let pro={
 
             arr.initRoomTerrainWalkAble(roomName)
 
-            let ramparts = Game.rooms[roomName].find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_RAMPART})
-            let walls = Game.rooms[roomName].find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_WALL})
+            let structures = Game.rooms[roomName].getStructures();
+            let ramparts = structures.filter(e=>e.structureType==STRUCTURE_RAMPART)
+            let walls = structures.filter(e=>e.structureType==STRUCTURE_WALL)
 
             ramparts.filter(e=>e.hits>30000).forEach(e=>arr.set(e.pos.x,e.pos.y,STRUCTURE_RAMPART))
             walls.filter(e=>e.hits>30000).forEach(e=>arr.set(e.pos.x,e.pos.y,STRUCTURE_WALL))
@@ -155,8 +157,9 @@ let pro={
 
             arr.initRoomTerrainWalkAble(roomName)
 
-            let ramparts = Game.rooms[roomName].find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_RAMPART})
-            let walls = Game.rooms[roomName].find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_WALL})
+            let structures = Game.rooms[roomName].getStructures();
+            let ramparts = structures.filter(e=>e.structureType==STRUCTURE_RAMPART)
+            let walls = structures.filter(e=>e.structureType==STRUCTURE_WALL)
 
             ramparts.filter(e=>e.hits>30000).forEach(e=>arr.set(e.pos.x,e.pos.y,1))
             walls.filter(e=>e.hits>30000).forEach(e=>arr.set(e.pos.x,e.pos.y,0))
@@ -186,8 +189,11 @@ let pro={
      * @param roomName
      */
     getRoomStructures(roomName){
-        let t = Game.rooms[roomName]&&Game.rooms[roomName].find(FIND_STRUCTURES)
-        if(t) cacheStructs[roomName] = t.map(e=>{return {pos:e.pos,my:e.my,owner:e.owner,structureType:e.structureType}})
+        let room = Game.rooms[roomName];
+        if(room && cacheStructsTime[roomName] != Game.time){
+            cacheStructsTime[roomName] = Game.time;
+            cacheStructs[roomName] = room.getStructures().map(e=>{return {pos:e.pos,my:e.my,owner:e.owner,structureType:e.structureType}})
+        }
         return cacheStructs[roomName] || []
     },
 

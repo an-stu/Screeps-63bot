@@ -62,7 +62,10 @@ Creep.prototype.attack2=function () {
     // if(healer)this.pull(healer)
     let walkAble = !this.fatigue&&(!healer||!healer.fatigue)&&this.pos.isCrossRoomNearTo(healer)
     this.atk=function(){
-        let em=Game.getObjectById(atkl2Target)//this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);//
+        let forcedTarget = Game.getObjectById(atkl2Target)
+        let cachedTarget = this.memory.atkL2TargetUntil >= Game.time ? Game.getObjectById(this.memory.atkL2TargetId) : undefined;
+        if(cachedTarget && cachedTarget.pos.roomName != this.room.name)cachedTarget = undefined;
+        let em=forcedTarget || cachedTarget//this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);//
         // if(!em)em=this.pos.findClosestByPath(FIND_HOSTILE_POWER_CREEPS);
         if(!em)em=this.pos.findClosestByPath(FIND_HOSTILE_CREEPS,{filter:e=>inner(e.pos)});
         if(!em)em=this.room.find(FIND_HOSTILE_STRUCTURES).filter(e=>e.structureType==STRUCTURE_INVADER_CORE).head();
@@ -80,6 +83,13 @@ Creep.prototype.attack2=function () {
             if(!em)em=this.pos.findClosestByPath(FIND_STRUCTURES,{filter:e=>!e.my&&e.structureType!=STRUCTURE_CONTROLLER
                     &&e.structureType!=STRUCTURE_POWER_BANK &&e.structureType!=STRUCTURE_SPAWN
             });
+        }
+        if(em && !forcedTarget && !cachedTarget){
+            this.memory.atkL2TargetId = em.id;
+            this.memory.atkL2TargetUntil = Game.time + 3;
+        }else if(!em){
+            delete this.memory.atkL2TargetId;
+            delete this.memory.atkL2TargetUntil;
         }
         // if(em&&(inner(em.pos))){
         if(em){

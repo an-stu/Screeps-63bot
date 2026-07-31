@@ -60,6 +60,11 @@ Room.prototype.getHostileStructures=function () {
     return this._cpuHostileStructureCache;
 };
 
+Room.prototype.getStructures=function () {
+    if(!Array.isArray(this._cpuStructureCache))this._cpuStructureCache = this.find(FIND_STRUCTURES);
+    return this._cpuStructureCache;
+};
+
 
 /** roomName 的哈希值 */
 Room.prototype.hashCode=function () {

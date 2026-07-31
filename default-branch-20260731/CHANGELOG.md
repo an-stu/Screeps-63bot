@@ -431,3 +431,21 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
   collapsed sections that can be expanded independently.
 - Added task tooltips with the full target, position, and registration handler,
   while truncating long IDs in the visible table.
+## v0.25.0 — Combat spatial and target reuse
+
+### Fixed
+
+- Switched the console dashboard to `console.logUnsafe`, the explicit rich
+  output API required after Screeps began escaping HTML in `console.log`.
+  Dynamic room, creep, task, and resource values remain HTML-escaped.
+- Limited resource enumeration to own Store keys so prototype helper methods
+  no longer appear as `NaN` resource rows.
+
+### Changed
+
+- Added a per-tick all-structure Room query cache and reused it in tower-damage,
+  rampart-area, permit-area, and combat CostMatrix generation.
+- Limited `WarCache.getRoomStructures` to one visible-room scan per tick even
+  when several teams or path searches request the same room.
+- Added three-tick selected-target caches to raL1 and atkL2 combat creeps while
+  preserving explicit console target overrides and all existing priorities.

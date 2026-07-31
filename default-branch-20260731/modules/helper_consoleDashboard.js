@@ -83,7 +83,9 @@ function roomResources(room) {
     let resources = {};
     for (let object of [room.storage, room.terminal, room.factory]) {
         if (!object) continue;
-        for (let resourceType in object.store) {
+        // Store prototypes contain enumerable helper methods in this codebase;
+        // own keys are the actual resource types.
+        for (let resourceType of Object.keys(object.store)) {
             resources[resourceType] = (resources[resourceType] || 0) + object.store[resourceType];
         }
     }
@@ -180,7 +182,11 @@ function roomDetail(roomName) {
 let dashboard = {
     show(roomName) {
         let output = roomName ? roomDetail(roomName) : overview();
-        console.log(output);
+        // Since the Screeps console security update, console.log escapes HTML.
+        // All dynamic values above are escaped before using the explicit rich
+        // output API. Older servers receive a compact readable text fallback.
+        if(typeof console.logUnsafe == "function")console.logUnsafe(output);
+        else console.log(output.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
         return `dashboard rendered${roomName ? ": " + roomName : ""}`;
     }
 };
