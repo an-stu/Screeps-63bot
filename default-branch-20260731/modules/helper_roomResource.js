@@ -142,11 +142,15 @@ myChart.setOption(option);
 
 function roomResTips(roomName,data){
 let divName= "a-"+roomName+"-6g3y-NB-"+Game.time;
-let divNameShow= "a-"+roomName+"-6g3y-NB-"+Game.time+"-";
+let detail = Object.entries(data).filter(entry=>entry[1]>0).sort((a,b)=>b[1]-a[1]).map(entry=>{
+    let color = RES_COLOR_MAP[entry[0]] || "#ccc";
+    return `<div style="display:flex;justify-content:space-between;gap:20px"><span style="color:${color}">${entry[0]}</span><span>${Math.round(entry[1]).toLocaleString()}</span></div>`;
+}).join("") || "<div>empty</div>";
 return`
-<t class="${divName}" onclick="gotoRoom('${roomName}')" style="color:#7c97ff" >[${roomName}]</t><script>
+<t class="${divName}" style="color:#7c97ff;position:relative;cursor:help" >[${roomName}]</t><script>
     (() => {
         const button = document.querySelector(".${divName}");
+        if(!button)return;
         let tip;
         button.addEventListener("pointerenter", () => {
             if(tip)return;
@@ -159,12 +163,18 @@ return`
             tip.style.zIndex=10;
             tip.style.color = "#ccc";
             tip.style.marginLeft = "0px";
-            tip.innerHTML = '<div id="${divNameShow}" onclick="" style="height: 600px;width:600px;color:#000"/>';
+            tip.style.padding = "7px";
+            tip.style.width = "300px";
+            tip.style.maxHeight = "420px";
+            tip.style.overflow = "auto";
+            tip.innerHTML = ${JSON.stringify(detail)};
             button.append(tip);
-            showRoomResEcharts(${JSON.stringify(data)},"${roomName}","${divNameShow}");
-            document.getElementById("${divNameShow}").onclick =function(e) {e.stopPropagation();return false;};
         });
         button.addEventListener("pointerleave", () => {tip && (tip.remove(), tip = undefined);});
+        button.addEventListener("click", e => {
+            e.stopPropagation();
+            window.location.href = window.location.href.substring(0,window.location.href.lastIndexOf("/")+1)+"${roomName}";
+        });
     })();
 </script>
 `.replace(/[\r\n]/g, "");
@@ -296,7 +306,7 @@ let pro = {
     },
     showRoomRes(){
         let time = Game.cpu.getUsed()
-        let result = roomResEcharts()
+        let result = ""
         result+=_.values(Game.rooms).filter(e=>e.my).map(room=>{
             let res = pro.getStorageTerminalRes(room)
             let storageCap = 0

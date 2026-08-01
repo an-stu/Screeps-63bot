@@ -36,6 +36,16 @@ function color(value, tone) {
     return `<span style="color:${COLORS[tone] || tone}">${escapeHtml(value)}</span>`;
 }
 
+let hoverSequence = 0;
+function hoverDetails(labelHtml, contentHtml, width = 420) {
+    let className = `codex-dash-tip-${Game.time}-${hoverSequence++}`;
+    let selector = "." + className;
+    return `<span class="${className}" style="position:relative;display:inline-block;cursor:help">${labelHtml}</span>`
+        + `<script>(()=>{const b=document.querySelector(${JSON.stringify(selector)});if(!b)return;let t;`
+        + `const open=()=>{if(t)return;t=document.createElement("div");t.style.cssText=${JSON.stringify(`position:absolute;left:0;top:100%;z-index:10000;width:${width}px;max-height:420px;overflow:auto;background:${COLORS.bg};color:${COLORS.text};border:1px solid ${COLORS.line};padding:7px;box-shadow:0 4px 14px #000;font:12px/1.45 monospace;text-align:left;white-space:normal`)};t.innerHTML=${JSON.stringify(contentHtml)};b.append(t)};`
+        + `const close=()=>{if(t){t.remove();t=undefined}};b.addEventListener("pointerenter",open);b.addEventListener("pointerleave",close);b.addEventListener("click",e=>{e.stopPropagation();t?close():open()})})()</script>`;
+}
+
 function bar(value, max, tone = "good") {
     let ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
     let width = Math.round(ratio * 10);
@@ -114,12 +124,13 @@ function moduleStatus() {
     let features = Object.keys(global.CPU_FEATURES || {});
     let enabled = features.filter(name => isCpuFeatureEnabled(name));
     let dormant = features.filter(name => !isCpuFeatureEnabled(name));
-    let detailsStyle = `background:${COLORS.panel};color:${COLORS.text};border:1px solid ${COLORS.line};padding:5px 8px;font:12px/1.5 monospace;max-width:900px`;
-    return `<details style="${detailsStyle}"><summary style="cursor:pointer;color:${COLORS.cyan}">▸ Modules & feature gates</summary>`
-        + `<div>uploaded ${color(profile.uploadedModules || "-", "blue")} · restored snapshot ${color(profile.restoredSnapshotModules || "-", "good")}</div>`
+    let content = `<div>uploaded ${color(profile.uploadedModules || "-", "blue")} · restored snapshot ${color(profile.restoredSnapshotModules || "-", "good")}</div>`
         + `<div>enabled: ${escapeHtml(enabled.join(", ") || "none")}</div>`
         + `<div style="color:${COLORS.dim}">dormant: ${escapeHtml(dormant.join(", ") || "none")}</div>`
-        + `<div style="color:${COLORS.warn}">excluded: ${escapeHtml((profile.intentionallyExcluded || []).join(", ") || "none")}</div></details>`;
+        + `<div style="color:${COLORS.warn}">excluded: ${escapeHtml((profile.intentionallyExcluded || []).join(", ") || "none")}</div>`;
+    return `<div style="background:${COLORS.panel};color:${COLORS.text};border:1px solid ${COLORS.line};padding:5px 8px;font:12px/1.5 monospace;max-width:900px">`
+        + hoverDetails(`<span style="color:${COLORS.cyan}">ⓘ Modules & feature gates</span>`, content, 760)
+        + `</div>`;
 }
 
 function overview() {
@@ -137,7 +148,7 @@ function overview() {
         let tasks = aggregate(units, taskName);
         let hover = `Terminal ${number(room.terminal && room.terminal.store.getUsedCapacity())} | Power ${number(sumStore(room, RESOURCE_POWER))} | OPS ${number(sumStore(room, RESOURCE_OPS))} | Roles ${plainPairs(roles)} | Tasks ${plainPairs(tasks)}`;
         return `<tr>`
-            + `<td style="${style.left};color:${COLORS[tone]}"><details><summary style="cursor:pointer"><b>${room.name}</b></summary><div style="color:${COLORS.dim};padding:4px 0;white-space:normal;max-width:360px">${escapeHtml(hover)}</div></details></td>`
+            + `<td style="${style.left};color:${COLORS[tone]}">${hoverDetails(`<b>${room.name} ⓘ</b>`, `<div style="color:${COLORS.dim}">${escapeHtml(hover)}</div>`, 420)}</td>`
             + `<td style="${style.td}">${room.controller.level} ${bar(rclProgress, 100, "purple")}</td>`
             + `<td style="${style.td}">${number(room.energyAvailable)}/${number(room.energyCapacityAvailable)}</td>`
             + `<td style="${style.td}">${number(sumStore(room, RESOURCE_ENERGY))}</td>`
@@ -152,7 +163,7 @@ function overview() {
             .map((name, index) => `<th style="${index ? style.th : style.th + ";text-align:left"}">${name}</th>`).join("")
         + `</tr></thead><tbody>${rows}</tbody></table>`;
     return header("Screeps Room Dashboard") + table + moduleStatus()
-        + `<div style="color:${COLORS.dim};font:11px monospace">click a room name for secondary resources/roles/tasks · detail: dash("ROOM") · profile CPU is the latest 100-tick sample</div>`;
+        + `<div style="color:${COLORS.dim};font:11px monospace">hover or click ⓘ for details · detail: dash("ROOM") · profile CPU is the latest 100-tick sample</div>`;
 }
 
 function roomDetail(roomName) {
@@ -174,7 +185,7 @@ function roomDetail(roomName) {
             return `<tr><td style="${style.left}">${escapeHtml(unit.name)}</td>`
                 + `<td style="${style.left}">${escapeHtml(unit.memory.role || "unknown")}</td>`
                 + `<td style="${style.td}">${color(unit.spawning ? "spawn" : unit.ticksToLive, ttlTone)}</td>`
-                + `<td style="${style.left}"><details><summary style="cursor:pointer">${escapeHtml(current.taskName || "idle")}</summary><div style="color:${COLORS.dim};white-space:normal;max-width:420px">${escapeHtml(taskDetail)}</div></details></td>`
+                + `<td style="${style.left}">${hoverDetails(escapeHtml(current.taskName || "idle") + " ⓘ", `<div style="color:${COLORS.dim}">${escapeHtml(taskDetail)}</div>`, 460)}</td>`
                 + `<td style="${style.left}">${escapeHtml(shortTarget)}</td>`
                 + `<td style="${style.td}">${number(unit.store.getUsedCapacity())}/${number(unit.store.getCapacity())}</td></tr>`;
         }).join("");
@@ -189,8 +200,8 @@ function roomDetail(roomName) {
         + ["Creep", "Role", "TTL", "Current task", "Target", "Store"].map((name, index) => `<th style="${index < 2 || index == 3 || index == 4 ? style.th + ";text-align:left" : style.th}">${name}</th>`).join("")
         + `</tr></thead><tbody>${unitRows || `<tr><td style="${style.left}" colspan="6">no creeps assigned to this room</td></tr>`}</tbody></table>`;
     let sectionStyle = `background:${COLORS.panel};color:${COLORS.cyan};border:1px solid ${COLORS.line};padding:5px 8px;font:12px monospace;max-width:880px`;
-    let collapsibleTasks = `<details style="${sectionStyle}"><summary style="cursor:pointer">▸ Creep task details (${units.length})</summary>${unitTable}</details>`;
-    let collapsibleResources = `<details style="${sectionStyle}"><summary style="cursor:pointer">▸ Resource details (${Object.keys(resources).length} types)</summary>${resourceTable}</details>`;
+    let collapsibleTasks = `<div style="${sectionStyle}">${hoverDetails(`ⓘ Creep task details (${units.length})`, unitTable, 920)}</div>`;
+    let collapsibleResources = `<div style="${sectionStyle}">${hoverDetails(`ⓘ Resource details (${Object.keys(resources).length} types)`, resourceTable, 480)}</div>`;
     return header(`Room ${roomName}`) + summary + collapsibleTasks + collapsibleResources
         + `<div style="color:${COLORS.dim};font:11px monospace">overview: dash()</div>`;
 }

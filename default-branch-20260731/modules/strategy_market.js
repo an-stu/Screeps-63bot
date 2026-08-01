@@ -96,6 +96,8 @@ let ON_SALE = {};
 let allRoomRes = { updateTime: 0 }
 let MARKET_SELL_PRICE_TTL = 1000;
 let MARKET_ORDER_TTL = 20;
+let MARKET_MAX_COMMODITY_DEAL = 10000;
+let MARKET_MIN_COMMODITY_DEAL = 100;
 let sellPriceCache = {updateTime:-1e9,prices:{},bestCommodities:{}};
 let orderCache = {};
 
@@ -574,11 +576,8 @@ let pro = {
     // 尝试卖出每个商品
     for (let item of sortedCommodities) {
         let resType = item.resType;
-        
-        // 检查房间是否有该资源
-        // if (!room.terminal.store[resType] || room.terminal.store[resType] < 1000) {
-        //     continue; // 资源太少，跳过
-        // }
+        let available = room.terminal.store[resType] || 0;
+        if (available < MARKET_MIN_COMMODITY_DEAL) continue;
         
         let maxPrice = sellPrice[resType];
         let buyList = pro.getAllOrdersCacheList(resType, ORDER_BUY);
@@ -587,27 +586,35 @@ let pro = {
         
         // 寻找最佳购买订单
         for (let order of buyList) {
-            if (maxOrder && !maxOrder.amount) continue;
-            
-            let energyNeed = Game.market.calcTransactionCost(order.amount, room.name, order.roomName);
-            let totalPrice = -energyNeed * energyPrice + order.amount * order.price;
-            let price = totalPrice / order.amount;
-            
-            if (price >= bestPrice && price >= maxPrice * 0.98) { // 允许10%的议价空间
+            if (!order.amount || !order.roomName || Game.market.orders[order.id]) continue;
+            let amount = Math.min(order.amount, available, MARKET_MAX_COMMODITY_DEAL);
+            if (amount < MARKET_MIN_COMMODITY_DEAL) continue;
+            let energyNeed = Game.market.calcTransactionCost(amount, room.name, order.roomName);
+            let totalPrice = -energyNeed * energyPrice + amount * order.price;
+            let price = totalPrice / amount;
+
+            if (price >= bestPrice && price >= maxPrice) {
                 maxOrder = order;
                 bestPrice = price;
             }
         }
         
         // 如果找到合适的订单且价格可接受
-        if (maxOrder && bestPrice >= maxPrice * 0.98) {
+        if (maxOrder && bestPrice >= maxPrice) {
             let sellAmount = Math.min(
                 maxOrder.amount,
                 room.terminal.store[resType],
-                Math.floor(room.terminal.store[resType]) 
+                MARKET_MAX_COMMODITY_DEAL
             );
-            
-            // if (sellAmount < 100) continue; // 卖太少不划算
+            let transactionEnergy = Game.market.calcTransactionCost(sellAmount, room.name, maxOrder.roomName);
+            let terminalEnergy = room.terminal.store[RESOURCE_ENERGY] || 0;
+            if (transactionEnergy > terminalEnergy && transactionEnergy > 0) {
+                sellAmount = Math.floor(sellAmount * terminalEnergy / transactionEnergy * 0.95);
+            }
+            if (sellAmount < MARKET_MIN_COMMODITY_DEAL) continue;
+            transactionEnergy = Game.market.calcTransactionCost(sellAmount, room.name, maxOrder.roomName);
+            bestPrice = (maxOrder.price * sellAmount - transactionEnergy * energyPrice) / sellAmount;
+            if (bestPrice < maxPrice) continue;
             
             let code = Game.market.deal(maxOrder.id, sellAmount, room.name);
             if (code == OK) {
@@ -666,7 +673,8 @@ pro.getBestCommoditiesToSell = function(showDetail = false) {
     let seriesMap = getSeriesMap();
     let bestCommodities = {};
     
-    // 按系列选出利润率最高的两种商品
+    let minimumMargin = Number(Memory.marketSettings&&Memory.marketSettings.commodityMinMargin||15);
+    // 按系列选出利润率最高的两种高级商品
     for (let seriesName in seriesMap) {
         let series = seriesMap[seriesName];
         let seriesItems = [];
@@ -679,6 +687,8 @@ pro.getBestCommoditiesToSell = function(showDetail = false) {
                     resType: resType,
                     profit: data.profit,
                     profitMargin: data.profitMargin,
+                    level: data.level,
+                    minimumSellPrice: data.minimumSellPrice,
                     suggestedPrice: data.suggestedPrice,
                     marketPrice: data.marketPrice
                 });
@@ -689,17 +699,15 @@ pro.getBestCommoditiesToSell = function(showDetail = false) {
         seriesItems.sort((a, b) => b.profitMargin - a.profitMargin);
         
         // 取前两种（如果有利润的话）
-        let topTwo = seriesItems.filter(item => item.profit > 0).slice(0, 2);
+        let topTwo = seriesItems.filter(item => item.level > 0 && item.profit > 0 && item.profitMargin >= minimumMargin).slice(0, 2);
         
         // 添加到最佳商品列表
         topTwo.forEach(item => {
-            // 使用建议售价和市场价中较高的一个，但不能低于成本
-            let cost = allCommodities[item.resType].totalCost;
-            let price = Math.max(item.suggestedPrice, item.marketPrice, cost * 1.1); // 至少10%利润
-            
             bestCommodities[item.resType] = {
-                price: price,
+                price: item.minimumSellPrice,
                 profitMargin: item.profitMargin,
+                marketPrice: item.marketPrice,
+                level: item.level,
                 series: seriesName
             };
             

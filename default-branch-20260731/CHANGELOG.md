@@ -616,3 +616,35 @@ Current feature switches are `market`, `autoPlanner`, and `visual`.
 - RCL1–3 rooms now continue creating their allowed spawn, extension,
   container, tower, storage, and road sites on the staggered 150-tick cadence
   even when expensive planner computation and visuals remain disabled.
+
+## v0.35.0 — Interactive reports and commodity economics
+
+### Added
+
+- Add local pointer/click tooltips to `dash()` and `dash("ROOM")`, matching the
+  interaction model that already works in `HelperRoomResource.showAllRes()`.
+- Add a cached deposit-commodity economics engine that recursively expands
+  every level of the factory reaction path into base deposits, minerals,
+  energy, and per-level factory OPS costs.
+- Persist a compact ranked result in `Memory.marketCommodityAnalysis` and
+  expose exact per-resource details through
+  `StrategyMarketPrice.getCommodityAnalysis(resourceType)`.
+
+### Changed
+
+- Replace the room-resource ECharts/CDN hover dependency with a self-contained
+  console tooltip, avoiding CSP, network, and external `eval` failures.
+- Select up to two profitable level-1+ commodities per deposit series for
+  automatic sales, using a configurable minimum margin (default 15%).
+- Evaluate current buy orders after transaction-energy cost and use bounded
+  100–10,000 unit deals; never deal with our own order or below reaction cost.
+- Cache full reaction-chain analysis for 5,000 ticks and derive all market
+  prices from one weighted history snapshot instead of one history request per
+  commodity.
+
+### CPU safety
+
+- Auto-planning may be enabled, but runs only with bucket at least 6,000 and a
+  recent 1,000-tick average below 95% of the account CPU limit. Without an
+  `autoBlueprint`, `saveBlueprint`, or `showBlueprint` flag its scheduled pass
+  is effectively a no-op.

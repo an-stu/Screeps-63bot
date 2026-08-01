@@ -69,9 +69,10 @@ assert.ok(consoleLogger.includes("escapeHtml(text)"), "text logs must escape dyn
 assert.ok(consoleDashboard.includes("global.dash"), "console dashboard must expose the short dash() command");
 assert.ok(consoleDashboard.includes("console.logUnsafe(output)"), "rich dashboard output must use the post-security-update console API");
 assert.ok(consoleDashboard.includes("Object.keys(object.store)"), "resource details must exclude enumerable Store prototype helpers");
-assert.ok(consoleDashboard.includes("click a room name") && consoleDashboard.includes("Modules & feature gates"), "dashboard details must use click-to-expand sections instead of hover-only hints");
+assert.ok(consoleDashboard.includes('addEventListener("pointerenter"') && consoleDashboard.includes('addEventListener("click"') && consoleDashboard.includes("Modules & feature gates"), "dashboard details must support both stable hover and click interactions");
 assert.ok(consoleDashboard.includes("global.dash.help"), "dashboard must explain its callable console syntax");
 assert.ok(roomResource.includes("console.logUnsafe(html)"), "resource reports must use the rich console API");
+assert.ok(roomResource.includes('addEventListener("pointerenter"') && roomResource.includes("tip.innerHTML"), "room resource details must use local console tooltips without an external chart dependency");
 assert.ok(!main.includes("ConsoleDashboard"), "console dashboard must never run from the tick loop");
 assert.ok(manifest.includes("manager_missions") && manifest.includes("manager_crossShard"), "cross-shard requests must ship with local mission handlers");
 assert.ok(manifest.includes("strategy_tradeCrossShard") && manifest.includes("strategy_claimCrossShard"), "cross-shard strategies must ship with their manager");
@@ -135,10 +136,16 @@ const deposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js")
 assert.ok(deposits.includes("let flag1 = Game.flags"), "deposit combat flag lookup must not leak a global");
 assert.ok(mainMount.includes('"deposits"'), "deposit harvesting must require an explicit online opt-in");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
+assert.ok(main.includes("plannerAverage < Game.cpu.limit * 0.95") && main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must stay behind average-CPU and bucket guards");
 assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");
 assert.ok(market.includes("MARKET_SELL_PRICE_TTL = 1000"), "commodity profit prices must be cached across ticks");
 assert.ok(market.includes("MARKET_ORDER_TTL = 20"), "market order queries must be cached across ticks");
 assert.ok(market.includes(".commodities;"), "market strategy must consume the pricing result payload correctly");
+assert.ok(market.includes("MARKET_MAX_COMMODITY_DEAL") && market.includes("MARKET_MIN_COMMODITY_DEAL"), "commodity sales must use bounded economical deal sizes");
+assert.ok(market.includes("item.level > 0") && market.includes("item.profitMargin >= minimumMargin"), "automatic sales must select profitable higher-level commodities");
+assert.ok(marketPrice.includes("COMMODITY_ANALYSIS_TTL = 5000") && marketPrice.includes("commodityAnalysisCache"), "reaction-chain pricing must be cached at a low-frequency interval");
+assert.ok(marketPrice.includes("reactionDepth") && marketPrice.includes("minimumSellPrice"), "commodity analysis must expose full reaction depth and cost-based sale floors");
+assert.ok(marketPrice.includes("Memory.marketCommodityAnalysis"), "commodity profitability summaries must remain inspectable in Memory");
 assert.ok(prototypeRoom.includes("this._flagList = this._flagList || []"), "rooms without flags must expose an empty list");
 assert.ok(prototypeRoom.includes("getHostileCreeps") && prototypeRoom.includes("getHostileStructures"), "tactical room queries must be cached per tick");
 assert.ok(prototypeRoom.includes("getStructures"), "combat cost matrices must share a per-tick structure scan");
@@ -158,7 +165,7 @@ assert.ok(betterMove.includes("Memory.betterMoveAvoidRooms"), "manual route excl
 const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
 assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longTermSummary()"), "CPU telemetry must persist exact long-window statistics");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
-assert.ok(marketPrice.includes("console.logUnsafe(htmlOutput)"), "market HTML reports must use the rich console API");
+assert.ok(marketPrice.includes('console.logUnsafe(html)') && marketPrice.includes("printCommodityAnalysis"), "market HTML reports must use the rich console API");
 
 const loggerOutput = [];
 const loggerContext = {

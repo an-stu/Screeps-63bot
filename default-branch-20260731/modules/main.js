@@ -85,7 +85,11 @@ let pro = {
             }
             if(HelperCpuUsed.shouldRun(100))HelperError.catchError(() => StrategyMarket.autoBuy());
         }
-        if (!MIN_CPU && global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner") && HelperCpuUsed.shouldRun(25))
+        let plannerAverage = Memory.codeHealth && Memory.codeHealth.cpuLongTerm
+            && Memory.codeHealth.cpuLongTerm.last1000 && Memory.codeHealth.cpuLongTerm.last1000.average || 0;
+        if (!MIN_CPU && global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")
+            && Game.cpu.bucket >= 6000 && (!plannerAverage || plannerAverage < Game.cpu.limit * 0.95)
+            && HelperCpuUsed.shouldRun(25))
             HelperError.catchError(() => ManagerAutoPlanner.exec());
         if (!MIN_CPU && global.HelperVisual && isCpuFeatureEnabled("visual") && HelperCpuUsed.shouldRun(10))
             HelperError.catchError(() => HelperVisual.exec());

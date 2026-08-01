@@ -43,6 +43,10 @@ let DEFAULT_PRICE = // 默认资源价格//如果不能从市场算的话//所�
 let MAX_DELAY = 86400/16 ; // 更新商品价格的延迟  大概6小时跟新一次
 let HISTORY_CACHE_TTL = 1000;
 let historyCache = {};
+let MARKET_PRICE_MAP_TTL = 1000;
+let COMMODITY_ANALYSIS_TTL = 5000;
+let marketPriceMapCache = {time:-1e9,prices:{}};
+let commodityAnalysisCache = {time:-1e9,result:null};
 
 
 
@@ -177,37 +181,31 @@ let pro = {
         // log(avgBaseDepoPrice);
 
     },
+    getMarketPriceMap(force=false){
+        if(!force && Game.time-marketPriceMapCache.time<MARKET_PRICE_MAP_TTL)return marketPriceMapCache.prices;
+        let totals = {}, volumes = {};
+        pro.getHistory().forEach(entry=>{
+            if(!entry.resourceType || !entry.avgPrice || entry.avgPrice<=0)return;
+            if(entry.stddevPrice>entry.avgPrice&&entry.stddevPrice>=1&&entry.resourceType!==RESOURCE_ENERGY)return;
+            let volume = Math.max(1,entry.volume||0);
+            totals[entry.resourceType] = (totals[entry.resourceType]||0)+entry.avgPrice*volume;
+            volumes[entry.resourceType] = (volumes[entry.resourceType]||0)+volume;
+        });
+        let prices = {};
+        for(let resourceType in totals)prices[resourceType]=totals[resourceType]/volumes[resourceType];
+        marketPriceMapCache={time:Game.time,prices:prices};
+        return prices;
+    },
     getBaseResTypeHistory  (){ // 基础资源的价格
-        let historyOrders =  pro.getHistory();
-        let history = {}
-        historyOrders.forEach(e=>{
-            if(!BASE_RESTYPE.has(e.resourceType))return;
-            if(e.stddevPrice>e.avgPrice&&e.stddevPrice>=1&&e.resourceType!==RESOURCE_ENERGY)return; // 排除有些人挂单换cr
-            // if(e.date==date)return;// 排除当天交易
-            if(!history[e.resourceType])
-                history[e.resourceType] = [];
-            history[e.resourceType].push(e)
-        })
-        let out = {}
+        let marketPrices = pro.getMarketPriceMap();
+        let out = {};
         for(let resType of BASE_RESTYPE){
-            let hisArr = history[resType];
-            if(hisArr){
-                let avg = _.sum(hisArr.map(e=>e.avgPrice))/hisArr.length
-                if(avg>DEFAULT_PRICE[resType])out[resType] = avg;
-                else out[resType] = DEFAULT_PRICE[resType];
-            }else {
-                out[resType] = DEFAULT_PRICE[resType]
-            }
+            out[resType]=Math.max(marketPrices[resType]||0,DEFAULT_PRICE[resType]||0);
         }
-
-        // Object.entries(priceSum).sort((a,b)=>a[1]-b[1]).map(e=>[e[0],e[1],e[1]/amount[e[0]],amount[e[0]]]).forEach(e=>console.log(e));
-        return out
+        return out;
     },
     getResTypeHistory  (resType){ // 资源平均价格价格
-        let list = pro.getHistory(resType);
-        let history = list.length&&list.filter(e=>!(e.stddevPrice>e.avgPrice&&e.stddevPrice>=1)||resType=='energy')// 排除有些人挂单换cr
-        if(!history)return 0
-        return _.sum(history.map(e => e.avgPrice)) / history.length ||10// 平均值
+        return pro.getMarketPriceMap()[resType]||DEFAULT_PRICE[resType]||0;
     },
     updateDepoPrice (){ // 计算合成的成本
         let price = pro.getBaseResTypeHistory();
@@ -270,150 +268,88 @@ let pro = {
 /**
  * 计算所有商品的价格和利润，并可视化打印
  */
-pro.calculateAllCommoditiesProfit = function(showDetail = false, outputToConsole = false) {
-    // 更新价格数据
-    pro.updatePrice();
-    
-    // 获取基础资源价格
-    let basePrices = pro.getBaseResTypeHistory();
-    
-    // 获取能量价格
-    let energyPrice = pro.getResTypeHistory(RESOURCE_ENERGY);
-    
-    // 存储所有商品的计算结果
-    let allCommodities = {};
-    
-    // 计算函数：递归计算商品所需基础资源
-    let calculateBaseComponents = function(resType, amount = 1, visited = new Set()) {
-        if (visited.has(resType)) return {}; // 防止循环依赖
-        visited.add(resType);
-        
-        let components = {};
-        
-        // 如果是基础资源
-        if (BASE_RESTYPE.has(resType) || BASE_DEPOSITS.includes(resType)) {
-            components[resType] = amount;
-            return components;
+pro.calculateAllCommoditiesProfit = function(showDetail = false, outputToConsole = false, force = false) {
+    if(!force&&commodityAnalysisCache.result&&Game.time-commodityAnalysisCache.time<COMMODITY_ANALYSIS_TTL){
+        if(outputToConsole)printCommodityAnalysis(commodityAnalysisCache.result.html);
+        return commodityAnalysisCache.result;
+    }
+    let marketPrices=pro.getMarketPriceMap(force);
+    let basePrices=pro.getBaseResTypeHistory();
+    let energyPrice=basePrices[RESOURCE_ENERGY]||marketPrices[RESOURCE_ENERGY]||0;
+    let depositFallback=DEFAULT_DEPO_MUL*energyPrice;
+    let minimumMargin=Math.max(0,Number(Memory.marketSettings&&Memory.marketSettings.commodityMinMargin||15))/100;
+    let allCommodities={};
+
+    let add=(map,key,amount)=>map[key]=(map[key]||0)+amount;
+    let expand=function(resourceType,amount,components,steps,visited,depth){
+        if(visited.has(resourceType))return depth;
+        let commodity=COMMODITIES[resourceType];
+        if(BASE_RESTYPE.has(resourceType)||BASE_DEPOSITS.includes(resourceType)||!commodity){
+            add(components,resourceType,amount);
+            return depth;
         }
-        
-        // 获取商品定义
-        let commodity = COMMODITIES[resType];
-        if (!commodity) {
-            console.log(`Warning: No definition for ${resType}`);
-            return {};
+        let nextVisited=new Set(visited);nextVisited.add(resourceType);
+        let cycles=amount/(commodity.amount||1);
+        add(steps,resourceType,cycles);
+        let maxDepth=depth;
+        for(let component in commodity.components){
+            maxDepth=Math.max(maxDepth,expand(component,commodity.components[component]*cycles,components,steps,nextVisited,depth+1));
         }
-        
-        // 如果有组件，递归计算
-        if (commodity.components) {
-            for (let comp in commodity.components) {
-                let compAmount = commodity.components[comp] * amount / (commodity.amount || 1);
-                let subComponents = calculateBaseComponents(comp, compAmount, new Set(visited));
-                
-                // 合并组件
-                for (let subComp in subComponents) {
-                    components[subComp] = (components[subComp] || 0) + subComponents[subComp];
-                }
-            }
+        if(commodity.level>0&&commodity.cooldown){
+            let cyclesPerPower=Math.max(1,Math.floor(1000/commodity.cooldown));
+            add(components,RESOURCE_OPS,cycles*100/cyclesPerPower);
         }
-        
-        // 添加ops成本
-        if (commodity.cooldown && commodity.level > 0) {
-            let batch = Math.ceil(1000 / commodity.cooldown); // 每1000 tick能反应几次
-            let opsAmount = (100 / batch) * amount / (commodity.amount || 1);
-            components["ops"] = (components["ops"] || 0) + opsAmount;
-        }
-        
-        return components;
+        return maxDepth;
     };
-    
-    // 计算所有商品
-    for (let resType in COMMODITIES) {
-        let commodity = COMMODITIES[resType];
-        
-        // 计算基础组件成本
-        let baseComponents = calculateBaseComponents(resType, 1);
-        
-        // 计算总成本
-        let totalCost = 0;
-        let componentDetails = {};
-        
-        for (let comp in baseComponents) {
-            let compPrice = 0;
-            
-            if (comp in basePrices) {
-                compPrice = basePrices[comp];
-            } else if (comp === "G") {
-                // G是特殊计算
-                compPrice = basePrices["L"] + basePrices["U"] + basePrices["O"] + basePrices["K"];
-            } else {
-                // 尝试获取历史价格
-                compPrice = pro.getResTypeHistory(comp) || 0;
-            }
-            
-            let compCost = baseComponents[comp] * compPrice;
-            totalCost += compCost;
-            componentDetails[comp] = {
-                amount: baseComponents[comp],
-                price: compPrice,
-                cost: compCost
-            };
+    let componentPrice=function(resourceType){
+        if(resourceType==RESOURCE_GHODIUM)return (basePrices[RESOURCE_LEMERGIUM]||0)+(basePrices[RESOURCE_UTRIUM]||0)+(basePrices[RESOURCE_OXYGEN]||0)+(basePrices[RESOURCE_KEANIUM]||0);
+        if(BASE_DEPOSITS.includes(resourceType))return marketPrices[resourceType]||depositFallback;
+        return basePrices[resourceType]||marketPrices[resourceType]||0;
+    };
+
+    for(let resourceType of BLUE.concat(YELLOW,PINK,GREEN)){
+        let commodity=COMMODITIES[resourceType];
+        if(!commodity)continue;
+        let components={},steps={};
+        let reactionDepth=expand(resourceType,1,components,steps,new Set(),0);
+        let totalCost=0,componentDetails={};
+        for(let component in components){
+            let price=componentPrice(component);
+            let cost=components[component]*price;
+            totalCost+=cost;
+            componentDetails[component]={amount:components[component],price:price,cost:cost};
         }
-        
-        // 获取市场价格
-        let marketPrice = 0;
-        if (DEPO_SET.has(resType) && pro._depoResPrice[resType]) {
-            marketPrice = pro._depoResPrice[resType];
-        } else {
-            // 尝试从市场历史获取
-            marketPrice = pro.getResTypeHistory(resType) || 0;
-        }
-        
-        // 计算利润
-        let profit = marketPrice - totalCost;
-        let profitMargin = totalCost > 0 ? (profit / totalCost * 100) : 0;
-        
-        // 计算建议售价（成本 + 20% 利润）
-        let suggestedPrice = marketPrice*1.05
-        
-        // 存储结果
-        allCommodities[resType] = {
-            level: commodity.level || 0,
-            totalCost: totalCost,
-            marketPrice: marketPrice,
-            profit: profit,
-            profitMargin: profitMargin,
-            suggestedPrice: suggestedPrice,
-            components: baseComponents,
-            componentDetails: componentDetails
+        let marketPrice=marketPrices[resourceType]||0;
+        let profit=marketPrice-totalCost;
+        let profitMargin=totalCost>0?profit/totalCost*100:0;
+        let minimumSellPrice=totalCost*(1+minimumMargin);
+        allCommodities[resourceType]={
+            level:commodity.level||0,totalCost:totalCost,marketPrice:marketPrice,
+            profit:profit,profitMargin:profitMargin,
+            minimumSellPrice:minimumSellPrice,
+            suggestedPrice:Math.max(marketPrice,minimumSellPrice),
+            components:components,componentDetails:componentDetails,
+            steps:steps,reactionDepth:reactionDepth
         };
     }
-    
-    // 按等级和利润排序
-    let sortedCommodities = Object.entries(allCommodities)
-        .sort((a, b) => {
-            // 先按等级排序
-            if (a[1].level !== b[1].level) {
-                return a[1].level - b[1].level;
-            }
-            // 再按利润排序（降序）
-            return b[1].profit - a[1].profit;
-        });
-    
-    // 生成HTML输出
-    let htmlOutput = generateCompactCommoditiesHTML(sortedCommodities, energyPrice);
-    
-    // 输出到控制台
-    if (outputToConsole) {
-        if (typeof console.logUnsafe == "function") console.logUnsafe(htmlOutput);
-        else console.log(htmlOutput.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
-    }
-    
-    // 保持返回值不变
-    return {
-        commodities: allCommodities,
-        html: htmlOutput
+    let sortedCommodities=Object.entries(allCommodities).sort((a,b)=>a[1].level-b[1].level||b[1].profitMargin-a[1].profitMargin);
+    let htmlOutput=generateCompactCommoditiesHTML(sortedCommodities,energyPrice);
+    let result={commodities:allCommodities,html:htmlOutput,updatedAt:Game.time,minimumMargin:minimumMargin*100};
+    commodityAnalysisCache={time:Game.time,result:result};
+    Memory.marketCommodityAnalysis={
+        tick:Game.time,minimumMargin:minimumMargin*100,
+        top:sortedCommodities.filter(entry=>entry[1].level>0&&entry[1].profitMargin>=minimumMargin*100)
+            .sort((a,b)=>b[1].profitMargin-a[1].profitMargin).slice(0,12)
+            .map(entry=>({resourceType:entry[0],level:entry[1].level,cost:entry[1].totalCost,market:entry[1].marketPrice,margin:entry[1].profitMargin}))
     };
+    if(outputToConsole)printCommodityAnalysis(htmlOutput);
+    return result;
 };
+
+function printCommodityAnalysis(html){
+    if(typeof console.logUnsafe=="function")console.logUnsafe(html);
+    else console.log(html.replace(/<[^>]*>/g," ").replace(/\s+/g," "));
+}
 /**
  * 生成紧凑的商品利润分析表格
  */
@@ -540,8 +476,11 @@ function generateSingleLineTable(items, status, statusIcon, statusText) {
 // 删除悬停脚本生成函数，因为不再需要
 
 // 添加一个更简洁的显示函数
-pro.showProfitAnalysis = function() {
-    let result = pro.calculateAllCommoditiesProfit(true,true);
+pro.getCommodityAnalysis = function(resourceType, force = false) {
+    return pro.calculateAllCommoditiesProfit(false,false,force).commodities[resourceType];
+};
+pro.showProfitAnalysis = function(force = false) {
+    let result = pro.calculateAllCommoditiesProfit(true,true,force);
     return result;
 };
 
