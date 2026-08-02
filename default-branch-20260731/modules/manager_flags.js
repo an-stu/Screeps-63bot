@@ -5,6 +5,23 @@ let pro={
         pro.globalFlags = []
 
         if(!Memory.flags)Memory.flags = {}
+        // `createFlag` can become visible one tick after its Memory entry is
+        // written. Keep short-lived spawn queues outside `Memory.flags` until
+        // the game exposes the flag, otherwise the generic orphan cleanup
+        // below deletes a valid newly-created Power Bank queue.
+        let pendingSpawnTeams = Memory.pendingSpawnTeams;
+        if (pendingSpawnTeams) {
+            for (let name in pendingSpawnTeams) {
+                let data = pendingSpawnTeams[name];
+                if (Game.flags[name]) {
+                    Memory.flags[name] = data;
+                    delete pendingSpawnTeams[name];
+                } else if (!data || Game.time - (data.createdAt || 0) > 10) {
+                    delete pendingSpawnTeams[name];
+                }
+            }
+            if (!Object.keys(pendingSpawnTeams).length) delete Memory.pendingSpawnTeams;
+        }
         for (let name in Memory.flags) {
             if (!Game.flags[name]) {
                 delete Memory.flags[name];

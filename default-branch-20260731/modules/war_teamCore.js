@@ -51,24 +51,39 @@ Creep.prototype.registerFlag1t=function () {
  * 生产时必须有3个以上的爬才会生产
  */
 global.SpawnTeam = {
+    getQueueMemory(flag) {
+        if (!flag) return undefined;
+        if (flag.memory && Array.isArray(flag.memory.spawnList)) return flag.memory;
+        return Memory.powerBankSpawnQueues && Memory.powerBankSpawnQueues[flag.name];
+    },
+    removeQueue(flag) {
+        if (Memory.powerBankSpawnQueues) delete Memory.powerBankSpawnQueues[flag.name];
+        flag.remove();
+    },
     hasSpawnList(flag) {
-        return !!(flag && flag.memory && Array.isArray(flag.memory.spawnList));
+        let memory = this.getQueueMemory(flag);
+        return !!(memory && Array.isArray(memory.spawnList));
     },
     exec (flag){
         if(!flag)return console.log("flag can not exit");
-        if (!this.hasSpawnList(flag) || !flag.memory.spawnList.length) {
+        let memory = this.getQueueMemory(flag);
+        if (!memory || !Array.isArray(memory.spawnList)) {
             Logger.warning("Removing invalid spawnTeam flag", flag.name);
-            flag.remove();
+            this.removeQueue(flag);
+            return;
+        }
+        if (!memory.spawnList.length) {
+            this.removeQueue(flag);
             return;
         }
         // Spawn queues are short-lived: once a request is blocked by an
         // unavailable spawn, keeping it forever turns one combat flag into a
         // permanent per-tick CPU cost. Old queues had no timestamp, so they
         // are deliberately treated as legacy state and discarded on reload.
-        if (!Number.isFinite(flag.memory.createdAt)
-            || Game.time - flag.memory.createdAt > SPAWN_TEAM_TTL) {
+        if (!Number.isFinite(memory.createdAt)
+            || Game.time - memory.createdAt > SPAWN_TEAM_TTL) {
             Logger.warning("Removing expired spawnTeam flag", flag.name);
-            flag.remove();
+            this.removeQueue(flag);
             return;
         }
         let room = Game.rooms[flag.pos.roomName];
@@ -77,7 +92,7 @@ global.SpawnTeam = {
             return console.log("room "+flag.pos.roomName+" is not yours");
         }
 
-        let list = flag.memory.spawnList;
+        let list = memory.spawnList;
         if(room.creeps("carrier",false).filter(e=>(e.ticksToLive||1500)>150).length<list.length+1)
             if(room.creeps("carrier").filter(e=>(e.ticksToLive||1500)>150).length>=1)StationHive.trySpawn(room,room.name,StationCarry.getCarrierBodyConfig(room),"carrier",[])
         if(room.creeps("carrier",false).filter(e=>(e.ticksToLive||1500)>150).length<list.length+1)
@@ -86,7 +101,7 @@ global.SpawnTeam = {
         let head = list.head();
         if(head){
             let result = StationHive.trySpawn(flag.room,flag.room.my?flag.room.name:"global",head.body,"team",head.tasks)
-            if(result)flag.memory.spawnList.shift();
+            if(result)list.shift();
         }
 
     }

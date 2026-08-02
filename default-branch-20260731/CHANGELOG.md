@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.45.0 — Durable Power Bank team queues
+
+### Fixed
+
+- Store Power Bank spawn queues in a dedicated Memory map and let the generic
+  spawn-team worker read it when Screeps exposes an empty flag Memory object.
+  This prevents the PB queue from being mistaken for an invalid manual flag.
+
+## v0.44.0 — Reliable Power Bank spawn-team handoff
+
+### Fixed
+
+- Fixed repeated `Removing invalid spawnTeam flag` logs from Power Bank rooms.
+  New PB queues are retained briefly outside `Memory.flags` and attached when
+  their newly created flag is visible, preventing orphan cleanup from erasing
+  `spawnList` during the creation boundary.
+
 ## v0.43.0 — Remove Deposit-triggered RaL combat
 
 ### Fixed

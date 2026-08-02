@@ -121,6 +121,7 @@ assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be s
 assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies must have an allocation-free gate");
 assert.ok(managerFlags.includes("hasAnyPrefix (prefixes)"), "combat dispatch must support a shared prefix gate");
 assert.ok(managerFlags.includes("getFlagsByPrefixAndRoom(prefix, roomName)"), "remote missions must be indexed by their encoded spawn room");
+assert.ok(managerFlags.includes("Memory.pendingSpawnTeams") && managerFlags.includes("Game.flags[name]"), "new spawn-team Memory must survive flag visibility delay");
 assert.ok(managerCreeps.includes("Game._alivePowerCreeps"), "Power Creep management must share one filtered tick list");
 assert.ok(!managerCreeps.includes("_.keys(creeps)"), "creep grouping must avoid a temporary Lodash key array");
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
@@ -161,6 +162,7 @@ assert.ok(managerRooms.includes('isCpuFeatureEnabled("powerBank")') && managerRo
 assert.ok(deposits.includes('ManagerFlags.getFlagsByPrefixAndRoom("deposit", room.name)'), "Deposit missions must execute in the spawn room encoded in their flag name");
 assert.ok(strategyPowerBank.includes('ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name)'), "Power Bank missions must execute in the spawn room encoded in their flag name");
 assert.ok(strategyPowerBank.includes("execSpawnTeams()") && strategyPowerBank.includes("AttackerPB") && strategyPowerBank.includes("HealerPB"), "Power Bank teams must spawn even when general combat is disabled");
+assert.ok(strategyPowerBank.includes("powerBankSpawnQueues") && warTeamCore.includes("getQueueMemory(flag)"), "Power Bank queues must survive flag Memory reset");
 assert.ok(main.includes("StrategyPowerBank.execSpawnTeams()"), "main loop must independently dispatch Power Bank spawn teams");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
 assert.ok(main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must keep the bucket safety guard");

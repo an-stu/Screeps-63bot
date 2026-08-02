@@ -229,8 +229,9 @@ let BOOST_L2 = 3
 
 let pro = {
     isPBSpawnFlag(flag) {
-        return !!(flag && flag.memory && Array.isArray(flag.memory.spawnList)
-            && flag.memory.spawnList.some(unit => (unit.tasks || []).some(task =>
+        let memory = global.SpawnTeam && SpawnTeam.getQueueMemory(flag);
+        return !!(memory && Array.isArray(memory.spawnList)
+            && memory.spawnList.some(unit => (unit.tasks || []).some(task =>
                 task && (task.taskName == "AttackerPB" || task.taskName == "HealerPB"))));
     },
     execSpawnTeams() {
@@ -315,13 +316,16 @@ let pro = {
         let name = "spawnTeam_" + room.name + "_" + randomId();
         let result = room.randomPosition().createFlag(name);
         if (typeof result != "string") return false;
-        Memory.flags[name] = {
+        let spawnMemory = {
             createdAt: Game.time,
             spawnList: [
                 pro.PBAttackSpawnData(room, flag.memory, boostLevel),
                 pro.PBHealSpawnData(room, flag.memory, boostLevel)
             ]
         };
+        Memory.flags[name] = spawnMemory;
+        let queues = Memory.powerBankSpawnQueues = Memory.powerBankSpawnQueues || {};
+        queues[name] = spawnMemory;
         return true;
     },
     cleanFlag() {
