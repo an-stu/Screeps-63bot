@@ -228,6 +228,15 @@ let BOOST_L1 = 2
 let BOOST_L2 = 3
 
 let pro = {
+    hasValidMissionData(flag) {
+        let memory = flag && flag.memory;
+        return !!(memory
+            && typeof memory.id == "string"
+            && Number.isFinite(memory.power)
+            && memory.power >= MIN_POWER
+            && Number.isFinite(memory.disappearTime)
+            && memory.disappearTime > Game.time);
+    },
     isPBSpawnFlag(flag) {
         let memory = global.SpawnTeam && SpawnTeam.getQueueMemory(flag);
         return !!(memory && Array.isArray(memory.spawnList)
@@ -353,16 +362,20 @@ let pro = {
     },
     exec(room) {
         pro.cleanFlag();
-        let powerBankFlags = ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name);
+        // Observer data can disappear while a mission flag remains in Memory.
+        // Validate it before creating a spawn queue: otherwise an empty legacy
+        // record can produce an attacker with no PB target.
+        let powerBankFlags = ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name)
+            .filter(flag => {
+                if (pro.hasValidMissionData(flag)) return true;
+                flag.remove();
+                return false;
+            });
         let activeQueues = {};
         powerBankFlags.forEach(flag => activeQueues[flag.name] = pro.dispatchPBSpawnQueue(room, flag));
         if ((Game.time + room.hashCode()) % 3 != 0) return;
         powerBankFlags.forEach(flag => {
             let queueActive = activeQueues[flag.name];
-            if (flag.memory.disappearTime - Game.time < 0 || flag.memory.power < MIN_POWER) {
-                flag.remove();
-                return;
-            }
             // HelperVisual.mapShowText(flag,flag.name)
             // flag.memory.lastSpawnTime = 0
             // flag.memory.index = 0

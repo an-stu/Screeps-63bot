@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.51.0 — PB mission validation
+
+### Fixed
+
+- Reject stale Power Bank flags lacking a target ID, amount, or expiry before
+  they enter the spawn queue. This prevents an obsolete Observer record from
+  creating a lone attacker with no valid Power Bank target.
+
 ## v0.50.0 — Persistent PB pair queue
 
 ### Fixed

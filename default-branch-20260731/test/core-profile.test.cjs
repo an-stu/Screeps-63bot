@@ -163,6 +163,7 @@ assert.ok(deposits.includes('ManagerFlags.getFlagsByPrefixAndRoom("deposit", roo
 assert.ok(strategyPowerBank.includes('ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name)'), "Power Bank missions must execute in the spawn room encoded in their flag name");
 assert.ok(strategyPowerBank.includes("execSpawnTeams()") && strategyPowerBank.includes("AttackerPB") && strategyPowerBank.includes("HealerPB"), "Power Bank teams must spawn even when general combat is disabled");
 assert.ok(strategyPowerBank.includes("flag.memory.directSpawnQueue") && strategyPowerBank.includes("dispatchPBSpawnQueue"), "Power Bank teams must keep their pair queue on the persistent PB mission flag");
+assert.ok(strategyPowerBank.includes("hasValidMissionData") && strategyPowerBank.includes("typeof memory.id == \"string\""), "stale PB flags must be rejected before they can create an orphaned attacker");
 assert.ok(strategyPowerBank.includes("flag.memory.lastSpawnTime = Game.time"), "Power Bank respawn requests must be throttled by persistent mission state");
 assert.ok(strategyPowerBank.includes("while (queue.spawnList.length)") && strategyPowerBank.includes("activeQueues[flag.name]"), "Power Bank attacker/healer queues must dispatch together when capacity permits");
 assert.ok(main.includes("StrategyPowerBank.execSpawnTeams()"), "main loop must independently dispatch Power Bank spawn teams");
