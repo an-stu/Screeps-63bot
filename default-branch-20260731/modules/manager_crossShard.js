@@ -107,6 +107,7 @@ let pro={
         }
         if(pro.localShardData){ //及时保存，防止丢内存
             pro.localShardData[id] = task
+            pro.dirty = true;
         }
         else pro.addDataList.push([id,task])
         return id;
@@ -114,28 +115,43 @@ let pro={
     applyRequest(id,req){
         // log(LOCAL_SHARD_NAME,id,req.data.func,req.data.data)
         if(pro.localShardData[id]){
-            pro.localShardData[id].createTime = Game.time;
+            if (Game.time - (pro.localShardData[id].createTime || 0) >= 100) {
+                pro.localShardData[id].createTime = Game.time;
+                pro.dirty = true;
+            }
             return;
         }
-        if(global.missionFunc[req.data.func](req.data.data)){//来自 mission ，相当于交叉依赖了
+        let handler = global.missionFunc && global.missionFunc[req.data && req.data.func];
+        if (typeof handler != "function") {
+            Logger.warning("Unknown cross-shard mission", req.data && req.data.func, id);
+            return;
+        }
+        if(handler(req.data.data)){//来自 mission ，相当于交叉依赖了
             pro.localShardData[id] = {from:req.from,createTime:Game.time}//, stat: RESPONSE}
+            pro.dirty = true;
         }
     },
     closeRequest(taskId,from){ //  转换成关闭状态
-        let task = pro.localShardData[taskId] = ( pro.localShardData[taskId] || {createTime:Game.time, stat: CLOSE} );
+        let existed = !!pro.localShardData[taskId];
+        let task = pro.localShardData[taskId] = (pro.localShardData[taskId] || {createTime:Game.time, stat:CLOSE});
+        let changed = !existed || task.stat != CLOSE || task.from != from || !!task.data;
         if(task.data&&task.data.callBack){
-            missionCallBack[task.data.callBack](task.data)
+            let callback = global.missionCallBack && global.missionCallBack[task.data.callBack];
+            if (typeof callback == "function") callback(task.data);
         }
         delete task.data;
         task.stat = CLOSE;
         task.from = from;
         if(!task.createTime)task.createTime = Game.time;
+        if (changed) pro.dirty = true;
     },
     addDataList : [],
     localShardData : {},
     shardData : {},
+    dirty: false,
     init(){
         if(!isCpuFeatureEnabled("crossShard")||typeof InterShardMemory=="undefined")return;
+        pro.dirty = false;
         let parse = value=>{try{return JSON.parse(value||"{}")||{}}catch(e){return {}}};
         // 获取所有 shard 的 InterShardMemory
         ALL_SHARD_NAME.forEach(name => {
@@ -169,11 +185,15 @@ let pro={
                 if (!pro.shardData[pro.localShardData[id].from]||!pro.shardData[pro.localShardData[id].from][id] //如果任务已经不存在了
                     ||  pro.shardData[pro.localShardData[id].from][id].stat == CLOSE ) {//或者是close状态
                     delete pro.localShardData[id]
+                    pro.dirty = true;
                 }
             }else if(!id.startsWith("shard") || Game.time-pro.localShardData[id].createTime>CORSS_SHARD_TIME_OUT){ // 任务超时
                 delete pro.localShardData[id]
-            }else if(pro.localShardData[id].stat==CLOSE && !pro.shardData[pro.localShardData[id].from][id]){ //自己是close 对面没数据的时候
+                pro.dirty = true;
+            }else if(pro.localShardData[id].stat==CLOSE
+                && (!pro.shardData[pro.localShardData[id].from] || !pro.shardData[pro.localShardData[id].from][id])){ //自己是close 对面没数据的时候
                 delete pro.localShardData[id]
+                pro.dirty = true;
             }
         })
 
@@ -184,9 +204,14 @@ let pro={
         // log(LOCAL_SHARD_NAME,pro.localShardData)
         while (pro.addDataList.length){ // 在初始化之前或者 tick提交的则 下一tick保存
             let t = pro.addDataList.pop();
+            if (!pro.localShardData) {
+                try { pro.localShardData = JSON.parse(InterShardMemory.getLocal() || "{}") || {}; }
+                catch (error) { pro.localShardData = {}; }
+            }
             pro.localShardData[t[0]] = t[1]
+            pro.dirty = true;
         }
-        if(pro.localShardData)InterShardMemory.setLocal(JSON.stringify(pro.localShardData))
+        if(pro.localShardData && pro.dirty)InterShardMemory.setLocal(JSON.stringify(pro.localShardData))
         pro.localShardData = undefined
     },
 

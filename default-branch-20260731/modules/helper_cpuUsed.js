@@ -175,6 +175,51 @@ let pro={
             last10000: aggregate(10000)
         };
     },
+    recordProfile(profile) {
+        if (!profile) return;
+        let telemetry = Memory.cpuModuleTelemetry;
+        if (!telemetry || telemetry.version != 1) {
+            telemetry = Memory.cpuModuleTelemetry = {
+                version: 1, startTick: Game.time, lastTick: 0, samples: 0,
+                phases: {}, roles: {}, rooms: {}
+            };
+        }
+        if (telemetry.lastTick == Game.time) return;
+        telemetry.lastTick = Game.time;
+        telemetry.samples++;
+        let add = (target, key, value) => {
+            if (typeof value != "number" || !Number.isFinite(value)) return;
+            let item = target[key] = target[key] || {sum:0, max:0, samples:0};
+            item.sum += value;
+            item.max = Math.max(item.max, value);
+            item.samples++;
+            item.last = value;
+        };
+        for (let key of ["init", "registration", "commands", "rooms", "flagStrategies", "unitTasks", "optional", "afterWork"])
+            add(telemetry.phases, key, profile[key]);
+        for (let key in profile.unitRoles || {}) add(telemetry.roles, key, profile.unitRoles[key]);
+        for (let key in profile.roomDetails || {}) add(telemetry.rooms, key, profile.roomDetails[key]);
+    },
+    profileSummary() {
+        let telemetry = Memory.cpuModuleTelemetry;
+        if (!telemetry || !telemetry.samples) return {};
+        let summarize = source => {
+            let output = {};
+            for (let key in source) {
+                let item = source[key];
+                output[key] = {average:item.sum / item.samples, max:item.max, last:item.last, samples:item.samples};
+            }
+            return output;
+        };
+        return {
+            startTick: telemetry.startTick,
+            lastTick: telemetry.lastTick,
+            samples: telemetry.samples,
+            phases: summarize(telemetry.phases),
+            roles: summarize(telemetry.roles),
+            rooms: summarize(telemetry.rooms),
+        };
+    },
     show(){
         let output = cpuEcharts(Game.time, this.series(this.cpu), this.series(this.bucket));
         if (typeof console.logUnsafe == "function") console.logUnsafe(output);

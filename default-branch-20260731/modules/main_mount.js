@@ -29,11 +29,11 @@ global.isCpuFeatureEnabled = name => {
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
     return value !== false && CPU_FEATURES[name] !== false;
 }
-// Cross-shard management is intentionally disabled in the core profile, but
-// creep and spawn naming still require the local shard identifier.
+// Creep and spawn naming always require the local shard identifier, even when
+// the online cross-shard feature gate is temporarily disabled.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.37.0",
+    version: "0.38.0",
     uploadedModules: 70,
     restoredSnapshotModules: 68,
     intentionallyExcluded: ["调用栈分析器", "闲聊 v1.0"]

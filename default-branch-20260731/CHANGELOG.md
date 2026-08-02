@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.38.0 — Full production gates and persistent CPU profiling
+
+### Added
+
+- Persist low-frequency CPU profiles for loop phases, creep roles, and owned
+  rooms in `Memory.codeHealth.moduleCpu`, including average, maximum, latest
+  sample, and sample count.
+- Include cross-shard `afterWork` serialization in the measured phase costs.
+
+### Optimized
+
+- Write `InterShardMemory` only when requests or acknowledgements actually
+  changed instead of serializing and publishing identical data every tick.
+
+### Fixed
+
+- Reject unknown cross-shard mission handlers without throwing and guard
+  optional callbacks.
+- Safely initialize local cross-shard data when a request is queued before the
+  manager has run in the current tick.
+
 ## v0.37.0 — Unique signs and highway harvesting
 
 ### Added

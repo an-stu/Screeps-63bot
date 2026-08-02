@@ -145,6 +145,8 @@ for (const feature of ["market", "autoPlanner", "visual", "crossShard", "crossSh
 const crossShard = fs.readFileSync(path.join(root, "modules/manager_crossShard.js"), "utf8");
 assert.ok(!crossShard.includes("global.InterShardMemory = undefined"), "cross-shard manager must not shadow the game API");
 assert.ok(!crossShard.includes("init(){\n        return;"), "cross-shard manager must be restorable behind its feature gate");
+assert.ok(crossShard.includes("pro.localShardData && pro.dirty"), "cross-shard state must only serialize after a material change");
+assert.ok(crossShard.includes("Unknown cross-shard mission"), "unknown remote handlers must be rejected without throwing");
 const crossShardClaim = fs.readFileSync(path.join(root, "modules/strategy_claimCrossShard.js"), "utf8");
 assert.ok(!crossShardClaim.includes("String, body:"), "cross-shard spawn data must not leak an accidental String field");
 const deposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js"), "utf8");
@@ -186,6 +188,7 @@ assert.ok(betterMove.includes("setCpuStats(bool)"), "movement CPU instrumentatio
 assert.ok(betterMove.includes("Memory.betterMoveAvoidRooms"), "manual route exclusions must survive global resets");
 const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
 assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longTermSummary()"), "CPU telemetry must persist exact long-window statistics");
+assert.ok(cpuHelper.includes("recordProfile(profile)") && cpuHelper.includes("profileSummary()"), "CPU telemetry must retain phase, role, and room profile averages");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
 assert.ok(marketPrice.includes('console.logUnsafe(html)') && marketPrice.includes("printCommodityAnalysis"), "market HTML reports must use the rich console API");
 
@@ -203,6 +206,8 @@ assert.ok(loggerOutput[0].includes("[WARNING]") && loggerOutput[0].includes("ene
 assert.ok(loggerOutput[1].includes("[ERROR]") && loggerOutput[1].includes("power</span>"), "explicit errors must render with resource colors");
 
 assert.ok(main.includes("HelperCpuUsed.recordLongTerm(Game.cpu.getUsed())"), "long-window CPU telemetry must record every completed tick");
+assert.ok(main.includes("HelperCpuUsed.recordProfile(Game._coreCpuProfile)"), "low-frequency profiles must feed persistent module telemetry");
+assert.ok(main.includes("moduleCpu: HelperCpuUsed.profileSummary()"), "module CPU averages must remain inspectable in code health");
 assert.equal((fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8").match(/Creep\.prototype\.headTask =/g) || []).length, 1, "headTask must have one canonical definition");
 assert.ok(!main.includes("space_action") && !main.includes("let P0"), "dead account-specific tick actions must stay removed");
 assert.ok(!main.includes("_.keys(WAKE_TASK)"), "wake tasks must not allocate a Lodash key array every tick");
@@ -211,6 +216,7 @@ assert.ok(!stationHive.includes("spawnFailue"), "spawn failure guard must use th
 execFileSync(process.execPath, [path.join(root, "scripts/audit-core-tasks.cjs")], { stdio: "inherit" });
 
 const context = {
+    Memory: {},
     Game: {
         time: 0,
         cpu: {
@@ -222,6 +228,16 @@ const context = {
 };
 context.global = context;
 vm.runInNewContext(fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8"), context);
+
+context.Game.time = 100;
+context.HelperCpuUsed.recordProfile({init:1, unitTasks:4, unitRoles:{carrier:2}, roomDetails:{E1S1:3}});
+context.Game.time = 200;
+context.HelperCpuUsed.recordProfile({init:3, unitTasks:6, unitRoles:{carrier:4}, roomDetails:{E1S1:1}});
+const moduleCpu = context.HelperCpuUsed.profileSummary();
+assert.equal(moduleCpu.samples, 2);
+assert.equal(moduleCpu.phases.init.average, 2);
+assert.equal(moduleCpu.roles.carrier.average, 3);
+assert.equal(moduleCpu.rooms.E1S1.average, 2);
 
 for (let time = 1; time < 5; time += 1) {
     context.Game.time = time;

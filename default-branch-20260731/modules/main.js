@@ -199,6 +199,7 @@ let updateCodeHealth = function () {
         upgraderInterval: Game._upgraderInterval || getUpgraderInterval(),
         missingTaskHandlers: missingTaskHandlers,
         phases: Game._coreCpuProfile || Memory.codeHealth.phases || {},
+        moduleCpu: HelperCpuUsed.profileSummary(),
     });
 }
 
@@ -226,7 +227,12 @@ let main = function () {
         HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
         HelperError.runEach(objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0), e => e.spawning || e.execLastTask());
     }
+    let afterWorkStart = Game._coreCpuProfile ? Game.cpu.getUsed() : 0;
     pro.afterWork();
+    if (Game._coreCpuProfile) {
+        Game._coreCpuProfile.afterWork = Game.cpu.getUsed() - afterWorkStart;
+        HelperCpuUsed.recordProfile(Game._coreCpuProfile);
+    }
 
     if (Game.time % 300 == 0) {
         console.log(LOCAL_SHARD_NAME + " bucket : " + Game.cpu.bucket)
