@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.50.0 — Persistent PB pair queue
+
+### Fixed
+
+- Store the pending attacker/healer pair directly on its Power Bank mission
+  flag. This preserves the second half of a pair until a Spawn becomes free.
+
 ## v0.49.0 — Synchronized PB attacker/healer dispatch
 
 ### Fixed

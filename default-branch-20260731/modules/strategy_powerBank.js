@@ -313,9 +313,8 @@ let pro = {
         return StationHive.trySpawn(room, room.name, body, "PBCarrier", tasks)
     },
     spawnPBTeam(room, flag, boostLevel) {
-        let queues = Memory.powerBankDirectSpawnQueues = Memory.powerBankDirectSpawnQueues || {};
-        if (queues[flag.name]) return false;
-        queues[flag.name] = {
+        if (flag.memory.directSpawnQueue) return false;
+        flag.memory.directSpawnQueue = {
             createdAt: Game.time,
             spawnList: [
                 pro.PBAttackSpawnData(room, flag.memory, boostLevel),
@@ -325,11 +324,10 @@ let pro = {
         return true;
     },
     dispatchPBSpawnQueue(room, flag) {
-        let queues = Memory.powerBankDirectSpawnQueues;
-        let queue = queues && queues[flag.name];
+        let queue = flag.memory.directSpawnQueue;
         if (!queue) return false;
         if (Game.time - queue.createdAt > 2000 || !queue.spawnList.length) {
-            delete queues[flag.name];
+            delete flag.memory.directSpawnQueue;
             return false;
         }
         // Spawn both halves in the same tick when the room has two idle
@@ -340,7 +338,7 @@ let pro = {
             if (!StationHive.trySpawn(room, room.name, head.body, "PBer", head.tasks)) break;
             queue.spawnList.shift();
         }
-        if (!queue.spawnList.length) delete queues[flag.name];
+        if (!queue.spawnList.length) delete flag.memory.directSpawnQueue;
         return true;
     },
     cleanFlag() {
@@ -373,8 +371,6 @@ let pro = {
 
             let respawnTime = 1500 - (50 + (flag.memory.pathTime || 0)) // 死掉 + spawn的时间+走路时间
             let needSpawn = (flag.memory.lastSpawnTime || 0) + respawnTime < Game.time
-            let cooldowns = Memory.powerBankSpawnCooldown = Memory.powerBankSpawnCooldown || {};
-            if ((cooldowns[flag.name] || 0) > Game.time) needSpawn = false;
             if (queueActive) needSpawn = false;
             // if (flag.pos.roomName == "W30N57" && Game.time % 10 == 0) needSpawn = true;
 
@@ -403,7 +399,6 @@ let pro = {
                 if (boostLevel == BOOST_L1) flag.memory.L1Boosted = true;
                 if (boostLevel == BOOST_L2) flag.memory.L2Boosted = true;
                 if (!pro.spawnPBTeam(room, flag, boostLevel)) return;
-                cooldowns[flag.name] = Game.time + respawnTime;
                 pro.dispatchPBSpawnQueue(room, flag);
                 flag.memory.boostModel = Math.max(boostLevel, flag.memory.boostModel || NO_BOOST)
                 flag.memory.index += 1
