@@ -162,8 +162,8 @@ assert.ok(managerRooms.includes('isCpuFeatureEnabled("powerBank")') && managerRo
 assert.ok(deposits.includes('ManagerFlags.getFlagsByPrefixAndRoom("deposit", room.name)'), "Deposit missions must execute in the spawn room encoded in their flag name");
 assert.ok(strategyPowerBank.includes('ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name)'), "Power Bank missions must execute in the spawn room encoded in their flag name");
 assert.ok(strategyPowerBank.includes("execSpawnTeams()") && strategyPowerBank.includes("AttackerPB") && strategyPowerBank.includes("HealerPB"), "Power Bank teams must spawn even when general combat is disabled");
-assert.ok(strategyPowerBank.includes("powerBankSpawnQueues") && warTeamCore.includes("getQueueMemory(flag)"), "Power Bank queues must survive flag Memory reset");
-assert.ok(strategyPowerBank.includes("Game._powerBankSpawnQueues") && strategyPowerBank.includes("Game._powerBankSpawnCooldown"), "Power Bank queues and respawn throttles must survive flag Memory reset");
+assert.ok(strategyPowerBank.includes("Game._powerBankDirectSpawnQueues") && strategyPowerBank.includes("dispatchPBSpawnQueue"), "Power Bank teams must not depend on spawnTeam flag Memory");
+assert.ok(strategyPowerBank.includes("Game._powerBankSpawnCooldown"), "Power Bank respawn requests must be throttled across flag Memory resets");
 assert.ok(main.includes("StrategyPowerBank.execSpawnTeams()"), "main loop must independently dispatch Power Bank spawn teams");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
 assert.ok(main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must keep the bucket safety guard");

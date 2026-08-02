@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.47.0 — Flag-free Power Bank team spawning
+
+### Fixed
+
+- Power Bank attack/heal pairs no longer create `spawnTeam` flags. They use a
+  PB-local runtime queue and direct spawn dispatch, removing the Flag Memory
+  reset path responsible for repeated invalid-team logs.
+
 ## v0.46.0 — PB queue cache independent of Flag Memory
 
 ### Fixed

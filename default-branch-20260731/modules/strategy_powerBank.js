@@ -313,21 +313,28 @@ let pro = {
         return StationHive.trySpawn(room, room.name, body, "PBCarrier", tasks)
     },
     spawnPBTeam(room, flag, boostLevel) {
-        let name = "spawnTeam_" + room.name + "_" + randomId();
-        let result = room.randomPosition().createFlag(name);
-        if (typeof result != "string") return false;
-        let spawnMemory = {
+        let queues = Game._powerBankDirectSpawnQueues = Game._powerBankDirectSpawnQueues || {};
+        if (queues[flag.name]) return false;
+        queues[flag.name] = {
             createdAt: Game.time,
             spawnList: [
                 pro.PBAttackSpawnData(room, flag.memory, boostLevel),
                 pro.PBHealSpawnData(room, flag.memory, boostLevel)
             ]
         };
-        Memory.flags[name] = spawnMemory;
-        let runtimeQueues = Game._powerBankSpawnQueues = Game._powerBankSpawnQueues || {};
-        runtimeQueues[name] = spawnMemory;
-        let queues = Memory.powerBankSpawnQueues = Memory.powerBankSpawnQueues || {};
-        queues[name] = spawnMemory;
+        return true;
+    },
+    dispatchPBSpawnQueue(room, flag) {
+        let queues = Game._powerBankDirectSpawnQueues;
+        let queue = queues && queues[flag.name];
+        if (!queue) return false;
+        if (Game.time - queue.createdAt > 2000 || !queue.spawnList.length) {
+            delete queues[flag.name];
+            return false;
+        }
+        let head = queue.spawnList[0];
+        if (StationHive.trySpawn(room, room.name, head.body, "PBer", head.tasks)) queue.spawnList.shift();
+        if (!queue.spawnList.length) delete queues[flag.name];
         return true;
     },
     cleanFlag() {
@@ -344,6 +351,7 @@ let pro = {
         pro.cleanFlag();
         if ((Game.time + room.hashCode()) % 3 != 0) return;
         ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name).forEach(flag => {
+            let queueActive = pro.dispatchPBSpawnQueue(room, flag);
             if (flag.memory.disappearTime - Game.time < 0 || flag.memory.power < MIN_POWER) {
                 flag.remove();
                 return;
@@ -358,6 +366,7 @@ let pro = {
             let needSpawn = (flag.memory.lastSpawnTime || 0) + respawnTime < Game.time
             let cooldowns = Game._powerBankSpawnCooldown = Game._powerBankSpawnCooldown || {};
             if ((cooldowns[flag.name] || 0) > Game.time) needSpawn = false;
+            if (queueActive) needSpawn = false;
             // if (flag.pos.roomName == "W30N57" && Game.time % 10 == 0) needSpawn = true;
 
             // if (Game.rooms[flag.pos.roomName] && flag.pos.findInRange(FIND_HOSTILE_CREEPS, 8).filter(e => e.body.find(b => b.type == ATTACK)).length) {
@@ -386,6 +395,7 @@ let pro = {
                 if (boostLevel == BOOST_L2) flag.memory.L2Boosted = true;
                 if (!pro.spawnPBTeam(room, flag, boostLevel)) return;
                 cooldowns[flag.name] = Game.time + respawnTime;
+                pro.dispatchPBSpawnQueue(room, flag);
                 flag.memory.boostModel = Math.max(boostLevel, flag.memory.boostModel || NO_BOOST)
                 flag.memory.index += 1
                 flag.memory.lastSpawnTime = Game.time
