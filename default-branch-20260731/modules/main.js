@@ -35,7 +35,11 @@ let pro = {
         if (global.WarPowerCreepOperator && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["disCtrl","OPSCarry","PCAtk","showDisSpawn"])) HelperError.catchError(() => WarPowerCreepOperator.exec());
 
         // 配置资源
-        if (global.WarTeamFlag && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["f4team","f2team","spawnTeam","target","team","r4","r1","a4","a2","w2"])) HelperError.catchError(() => WarTeamFlag.exec());
+        let warTeamEnabled = global.WarTeamFlag && isCpuFeatureEnabled("combat")
+            && ManagerFlags.hasAnyPrefix(["f4team","f2team","spawnTeam","target","team","r4","r1","a4","a2","w2"]);
+        if (warTeamEnabled) HelperError.catchError(() => WarTeamFlag.exec());
+        else if (global.StrategyPowerBank && isCpuFeatureEnabled("powerBank") && ManagerFlags.hasPrefix("spawnTeam"))
+            HelperError.catchError(() => StrategyPowerBank.execSpawnTeams());
         if (global.WarAttackRoom && isCpuFeatureEnabled("combat") && ManagerFlags.hasPrefix("warAttackRoom")) HelperError.catchError(() => WarAttackRoom.exec());
         if (cpuProfile) {
             cpuProfile.commands = Game.cpu.getUsed() - phaseStart;

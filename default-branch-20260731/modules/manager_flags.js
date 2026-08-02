@@ -13,6 +13,7 @@ let pro={
 
         let flagRoomMap = {}
         let prefixMap = Game._flagPerfixMap = {}
+        let prefixRoomMap = Game._flagPrefixRoomMap = {}
 
         for (let name in Game.flags) {
             let flag = Game.flags[name]
@@ -22,6 +23,13 @@ let pro={
 
             if(prefixMap[prefix]) prefixMap[prefix].push(flag)
             else prefixMap[prefix] = [flag]
+
+            let missionRoomName = flag.getRoomName();
+            if (missionRoomName) {
+                let roomKey = prefix + ":" + missionRoomName;
+                if (prefixRoomMap[roomKey]) prefixRoomMap[roomKey].push(flag);
+                else prefixRoomMap[roomKey] = [flag];
+            }
 
             if(room){
                 flagRoomMap[roomName] = flagRoomMap[roomName]||[]
@@ -43,6 +51,9 @@ let pro={
     },
     getFlagsByPrefix (prefix){
         return Game._flagPerfixMap[prefix]||[]
+    },
+    getFlagsByPrefixAndRoom(prefix, roomName) {
+        return Game._flagPrefixRoomMap[prefix + ":" + roomName] || [];
     },
     hasPrefix (prefix){
         let flags = Game._flagPerfixMap[prefix];

@@ -220,7 +220,7 @@ let pro = {
     exec(room) {
         pro.cleanFlag();
         if ((Game.time + room.hashCode()) % 3 != 0) return;
-        room.flags("deposit").forEach(flag => {
+        ManagerFlags.getFlagsByPrefixAndRoom("deposit", room.name).forEach(flag => {
             flag.memory.flagName = flag.name
             if (!flag.memory.harvesters) flag.memory.harvesters = []
             else flag.memory.harvesters = flag.memory.harvesters.filter(id => Game.getObjectById(id))

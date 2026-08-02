@@ -107,7 +107,8 @@ let pro={
         let sm=room.memory[pro.stationName]=room.memory[pro.stationName]||{};
         sm.lastUpdateTime= Game.time
         let deposits = global.StrategyDeposits && isCpuFeatureEnabled("deposits") ? room.find(FIND_DEPOSITS) : [];
-        let powerBanks = global.StrategyPowerBank ? room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_POWER_BANK}) : [];
+        let powerBanks = global.StrategyPowerBank && isCpuFeatureEnabled("powerBank")
+            ? room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_POWER_BANK}) : [];
         deposits.filter(e=>!pro.inNovice(room,e)).map(e=>{return {id:e.id,x:e.pos.x,y:e.pos.y,disappearTime:Game.time+e.ticksToDecay,depositType:e.depositType,lastCooldown:e.lastCooldown}})
             .forEach(data=> StrategyDeposits.createOrUpdateDepositMission(room.name,data));
         // if(Game.shard.name == "shard3")return;

@@ -102,9 +102,11 @@ const managerRooms = {
         if (!MIN_CPU && global.StationObserver && isCpuFeatureEnabled("observer") && Game.shard.name != "shard1") {
             HelperError.catchError(() => StationObserver.obOverRooms(room), room.name);
         }
-        // Power Bank harvesting remains deliberately unloaded/paused.
-        if (!MIN_CPU && global.StrategyDeposits && isCpuFeatureEnabled("deposits")) {
+        if (!MIN_CPU && global.StrategyDeposits && isCpuFeatureEnabled("deposits") && ManagerFlags.hasPrefix("deposit")) {
             HelperError.catchError(() => StrategyDeposits.exec(room), room.name);
+        }
+        if (!MIN_CPU && global.StrategyPowerBank && isCpuFeatureEnabled("powerBank") && ManagerFlags.hasPrefix("powerBank")) {
+            HelperError.catchError(() => StrategyPowerBank.exec(room), room.name);
         }
         if (global.StrategyDefenserHighWay && isCpuFeatureEnabled("combat") && room.flags("defenserHighWay").length) {
             HelperError.catchError(() => StrategyDefenserHighWay.exec(room), room.name);

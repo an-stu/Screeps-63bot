@@ -92,7 +92,8 @@ Creep.prototype.AttackerPB = function () {
         this.moveTo(powerBank)
     }
     else if (!powerBank && task.roomName == this.room.name) {
-        this.suicide()
+        this.suicide();
+        return;
     }
     if (this.hits == this.hitsMax) {
         this.attack(powerBank)
@@ -123,9 +124,9 @@ Creep.prototype.PBAttackBorder = function () {
 Creep.prototype.HealerPB = function () {
     let task = this.headTask();
 
-    let hc = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS)
-    if (this.pos.isNearTo(hc)) this.rangedMassAttack()
-    else this.rangedAttack(hc)
+    let hc = this.getActiveBodyparts(RANGED_ATTACK) && this.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+    if (hc && this.pos.isNearTo(hc)) this.rangedMassAttack();
+    else if (hc) this.rangedAttack(hc);
 
     // if(task.roomName!=this.room.name){
     //     this.goTo(task);
@@ -167,7 +168,7 @@ Creep.prototype.HealerPB = function () {
             this.moveTo(attacker);
             this.rangedHeal(attacker);
         }
-        else if (attacker.pos.isNearTo(flag) || attacker.hits != attacker.hitsMax) this.heal(attacker)
+        else if ((flag && attacker.pos.isNearTo(flag)) || attacker.hits != attacker.hitsMax) this.heal(attacker)
 
         if (attacker.hits == attacker.hitsMax)//如果攻击的奶是满的优先奶搬运工
             healCarrier()
@@ -211,8 +212,8 @@ Creep.prototype.carrierPB = function () {
                     }
                 } else {
                     // 如果血没满找人帮忙
-                    let healer = _.values(flag.memory.healer).map(e => Game.getObjectById(e)).find(e => e);
-                    if (!this.pos.isNearTo(healer)) this.moveTo(healer);
+                    let healer = _.values(flag.memory.healer || {}).map(e => Game.getObjectById(e)).find(e => e);
+                    if (healer && !this.pos.isNearTo(healer)) this.moveTo(healer);
                     else this.memory.dontPullMe = this.ticksToLive % 4 != 0;
                 }
             }
@@ -227,12 +228,24 @@ let BOOST_L1 = 2
 let BOOST_L2 = 3
 
 let pro = {
+    isPBSpawnFlag(flag) {
+        return !!(flag && flag.memory && Array.isArray(flag.memory.spawnList)
+            && flag.memory.spawnList.some(unit => (unit.tasks || []).some(task =>
+                task && (task.taskName == "AttackerPB" || task.taskName == "HealerPB"))));
+    },
+    execSpawnTeams() {
+        if (!global.SpawnTeam) return;
+        ManagerFlags.getFlagsByPrefix("spawnTeam")
+            .filter(pro.isPBSpawnFlag)
+            .forEach(flag => SpawnTeam.exec(flag));
+    },
     createOrUpdatePowerBankMission(targetRoomName, powerBankData) {
         if (avoidRoom.contains(targetRoomName)) return;
         let spawnRoomName = StationObserver.getClosedMyRoomName(targetRoomName);
         let spawnRoom = Game.rooms[spawnRoomName]
         if (!spawnRoom || !spawnRoom.storage || spawnRoom.storage.store[RESOURCE_POWER] > ROOM_MAX_POWER_CNT) return;
         if (isSaveCpu && powerBankData.power < Math.min((10000 - Game.cpu.bucket), 5000)) return;//s3如果cpu太少默认放弃
+        if (powerBankData.power < MIN_POWER || powerBankData.disappearTime - Game.time <= MIN_DECAY) return;
         let flagName = "powerBank_" + spawnRoomName + "_" + targetRoomName + "_" + powerBankData.x + "_" + powerBankData.y;
         if (!Memory.flags[flagName]) Memory.flags[flagName] = {}
         let flagMemory = Memory.flags[flagName];
@@ -241,9 +254,9 @@ let pro = {
         for (let k in powerBankData) {
             flagMemory[k] = powerBankData[k];
         }
-        if (!spawnRoomName || powerBankData.power <= MIN_POWER || powerBankData.disappearTime - Game.time <= MIN_DECAY) return;
         if (!Game.flags[flagName]) {
-            (new RoomPosition(powerBankData.x, powerBankData.y, powerBankData.roomName)).createFlag(flagName)
+            let result = (new RoomPosition(powerBankData.x, powerBankData.y, powerBankData.roomName)).createFlag(flagName);
+            if (typeof result != "string") delete Memory.flags[flagName];
         }
     },
     PBAttackSpawnData(room, memory, boostType) {
@@ -300,13 +313,15 @@ let pro = {
     },
     spawnPBTeam(room, flag, boostLevel) {
         let name = "spawnTeam_" + room.name + "_" + randomId();
-        room.randomPosition().createFlag(name)
+        let result = room.randomPosition().createFlag(name);
+        if (typeof result != "string") return false;
         Memory.flags[name] = {
             spawnList: [
                 pro.PBAttackSpawnData(room, flag.memory, boostLevel),
                 pro.PBHealSpawnData(room, flag.memory, boostLevel)
             ]
-        }
+        };
+        return true;
     },
     cleanFlag() {
         if (Game._powerBankCleanFlag) return;
@@ -321,8 +336,11 @@ let pro = {
     exec(room) {
         pro.cleanFlag();
         if ((Game.time + room.hashCode()) % 3 != 0) return;
-        room.flags("powerBank").forEach(flag => {
-            if (flag.memory.disappearTime - Game.time < 0 || flag.memory.power < MIN_POWER) flag.remove()
+        ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name).forEach(flag => {
+            if (flag.memory.disappearTime - Game.time < 0 || flag.memory.power < MIN_POWER) {
+                flag.remove();
+                return;
+            }
             // HelperVisual.mapShowText(flag,flag.name)
             // flag.memory.lastSpawnTime = 0
             // flag.memory.index = 0
@@ -357,7 +375,7 @@ let pro = {
                 if (flag.memory.beingAttack && boostLevel != BOOST_L1 && boostLevel != BOOST_L2) return flag.remove();// 被打了，并且出不了t2就直接不出兵了
                 if (boostLevel == BOOST_L1) flag.memory.L1Boosted = true;
                 if (boostLevel == BOOST_L2) flag.memory.L2Boosted = true;
-                pro.spawnPBTeam(room, flag, boostLevel)
+                if (!pro.spawnPBTeam(room, flag, boostLevel)) return;
                 flag.memory.boostModel = Math.max(boostLevel, flag.memory.boostModel || NO_BOOST)
                 flag.memory.index += 1
                 flag.memory.lastSpawnTime = Game.time
@@ -366,8 +384,14 @@ let pro = {
             }
             let powerBank = Game.getObjectById(flag.memory.id);
             if (Game.rooms[flag.pos.roomName]) {
-                if (!powerBank) flag.remove();
-            } else if (flag.memory.disappearTime < Game.time) flag.remove();
+                if (!powerBank) {
+                    flag.remove();
+                    return;
+                }
+            } else if (flag.memory.disappearTime < Game.time) {
+                flag.remove();
+                return;
+            }
 
             if (!flag.memory.needCarry) {
                 flag.memory.needCarry = powerBank && powerBank.hits < (CARRY_WAIT_HITS * (BOOST_L1 == flag.memory.boostModel ? 3 : 1))

@@ -19,10 +19,11 @@ global.CPU_FEATURES = {
     crossShardTrade: true,
     claimCrossShard: true,
     deposits: true,
+    powerBank: true,
     GCLRoom: true,
     combat: true,
 }
-global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits","GCLRoom","combat"])
+global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits","powerBank","GCLRoom","combat"])
 global.isCpuFeatureEnabled = name => {
     let value = (Memory.cpuFeatures || {})[name];
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
@@ -32,10 +33,10 @@ global.isCpuFeatureEnabled = name => {
 // creep and spawn naming still require the local shard identifier.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.36.0",
-    uploadedModules: 69,
-    restoredSnapshotModules: 67,
-    intentionallyExcluded: ["strategy_powerBank", "调用栈分析器", "闲聊 v1.0"]
+    version: "0.37.0",
+    uploadedModules: 70,
+    restoredSnapshotModules: 68,
+    intentionallyExcluded: ["调用栈分析器", "闲聊 v1.0"]
 }
 
 // 数据结构
@@ -113,6 +114,7 @@ require('strategy_cleanBuild');
 require('strategy_blockRoom');
 require('strategy_pillage');
 require('strategy_deposits');
+require('strategy_powerBank');
 require('strategy_GCLRoom');
 require('strategy_atkL2');
 require('strategy_defenserHighWay');

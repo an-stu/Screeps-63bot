@@ -32,6 +32,7 @@ const strategyAtkL2 = fs.readFileSync(path.join(root, "modules/strategy_atkL2.js
 const strategyClaim = fs.readFileSync(path.join(root, "modules/strategy_claim.js"), "utf8");
 const strategyLowLevel = fs.readFileSync(path.join(root, "modules/strategy_lowLevel.js"), "utf8");
 const stationObserver = fs.readFileSync(path.join(root, "modules/station_observer.js"), "utf8");
+const strategyPowerBank = fs.readFileSync(path.join(root, "modules/strategy_powerBank.js"), "utf8");
 const strategyCleanBuild = fs.readFileSync(path.join(root, "modules/strategy_cleanBuild.js"), "utf8");
 const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
@@ -59,6 +60,7 @@ assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strate
 assert.ok(manifest.includes("strategy_claim"), "claim task handlers must ship with planner dependencies");
 assert.ok(manifest.includes("strategy_cleanBuild") && manifest.includes("strategy_blockRoom") && manifest.includes("strategy_pillage"), "flag utility task handlers must be restored together");
 assert.ok(manifest.includes("strategy_deposits"), "deposit task handlers must remain available behind their opt-in");
+assert.ok(manifest.includes("strategy_powerBank"), "Power Bank task handlers must remain available behind their opt-in");
 assert.ok(manifest.includes("strategy_GCLRoom"), "GCL room task handlers must remain available behind their opt-in");
 for (const moduleName of ["war_damageCal", "war_cache", "war_teamCore", "war_teamControl", "war_teamFlag", "war_attackRoom", "war_defenseCore", "war_powerCreepOperator", "teamL2", "strategy_atkL2", "strategy_defenserHighWay"]) {
     assert.ok(manifest.includes(moduleName), `combat package must include ${moduleName}`);
@@ -103,6 +105,11 @@ assert.ok(main.includes("Game.cpu.bucket >= 6000") && !main.includes("plannerAve
 assert.ok(main.includes("health.autoPlanner"), "auto planner CPU must be measured online");
 assert.ok(stationUpgrade.includes("getUpgradePosition(creep, controller") && stationUpgrade.includes("upgradePosition"), "upgraders must reserve independent controller positions");
 assert.ok(stationUpgrade.includes("CONTROLLER_SIGNS") && stationUpgrade.includes("trySignController(creep)"), "owned controllers must receive the curated sign set");
+const signArraySource = stationUpgrade.match(/let CONTROLLER_SIGNS = (\[[\s\S]*?\n\]);/)[1];
+const controllerSigns = vm.runInNewContext(signArraySource);
+assert.equal(new Set(controllerSigns).size, controllerSigns.length, "controller sign source texts must be unique");
+assert.ok(controllerSigns.every(sign => !sign.includes("—") && sign.length <= 100), "controller signs must omit authors and fit the API limit");
+assert.ok(stationUpgrade.includes("Memory.controllerSignAssignments") && stationUpgrade.includes("used.has(sign)"), "owned rooms must reserve unique controller signs");
 assert.ok(prototypeCreep.includes("StationUpgrade.trySignController(this)"), "all owned rooms need a creep-independent signing hook");
 assert.ok(main.includes(".filter(shouldRunCreep)"), "creep execution must apply the safe adaptive throttle");
 assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
@@ -110,6 +117,7 @@ assert.ok(mainMount.includes("observer: true"), "observer scanning must be switc
 assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");
 assert.ok(managerFlags.includes("hasPrefix (prefix)"), "dormant flag strategies must have an allocation-free gate");
 assert.ok(managerFlags.includes("hasAnyPrefix (prefixes)"), "combat dispatch must support a shared prefix gate");
+assert.ok(managerFlags.includes("getFlagsByPrefixAndRoom(prefix, roomName)"), "remote missions must be indexed by their encoded spawn room");
 assert.ok(managerCreeps.includes("Game._alivePowerCreeps"), "Power Creep management must share one filtered tick list");
 assert.ok(!managerCreeps.includes("_.keys(creeps)"), "creep grouping must avoid a temporary Lodash key array");
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
@@ -131,7 +139,7 @@ assert.ok(strategyClaim.includes("operation.history.length > 40"), "claim diagno
 assert.ok(strategyCleanBuild.includes("FIND_HOSTILE_STRUCTURES") && strategyCleanBuild.includes("!structure.my"), "claim cleanup must remove hostile structures that block a new spawn");
 assert.ok(main.includes('ManagerFlags.hasPrefix("cleanBuild")') && main.includes('ManagerFlags.hasPrefix("blockRoom")'), "global flag utilities must use prefix gates");
 assert.ok(main.includes('isCpuFeatureEnabled("combat")') && main.includes("ManagerFlags.hasAnyPrefix"), "advanced combat must remain dormant without its opt-in and flags");
-for (const feature of ["market", "autoPlanner", "visual", "crossShard", "crossShardTrade", "claimCrossShard", "deposits", "GCLRoom", "combat"]) {
+for (const feature of ["market", "autoPlanner", "visual", "crossShard", "crossShardTrade", "claimCrossShard", "deposits", "powerBank", "GCLRoom", "combat"]) {
     assert.ok(mainMount.includes(`"${feature}"`), `${feature} must remain explicitly gated`);
 }
 const crossShard = fs.readFileSync(path.join(root, "modules/manager_crossShard.js"), "utf8");
@@ -142,6 +150,13 @@ assert.ok(!crossShardClaim.includes("String, body:"), "cross-shard spawn data mu
 const deposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js"), "utf8");
 assert.ok(deposits.includes("let flag1 = Game.flags"), "deposit combat flag lookup must not leak a global");
 assert.ok(mainMount.includes('"deposits"'), "deposit harvesting must require an explicit online opt-in");
+assert.ok(mainMount.includes('"powerBank"'), "Power Bank harvesting must require an explicit online opt-in");
+assert.ok(stationObserver.includes('isCpuFeatureEnabled("powerBank")'), "Observer Power Bank scans must share the feature gate");
+assert.ok(managerRooms.includes('isCpuFeatureEnabled("powerBank")') && managerRooms.includes('ManagerFlags.hasPrefix("powerBank")'), "Power Bank room dispatch must remain dormant without missions");
+assert.ok(deposits.includes('ManagerFlags.getFlagsByPrefixAndRoom("deposit", room.name)'), "Deposit missions must execute in the spawn room encoded in their flag name");
+assert.ok(strategyPowerBank.includes('ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name)'), "Power Bank missions must execute in the spawn room encoded in their flag name");
+assert.ok(strategyPowerBank.includes("execSpawnTeams()") && strategyPowerBank.includes("AttackerPB") && strategyPowerBank.includes("HealerPB"), "Power Bank teams must spawn even when general combat is disabled");
+assert.ok(main.includes("StrategyPowerBank.execSpawnTeams()"), "main loop must independently dispatch Power Bank spawn teams");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
 assert.ok(main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must keep the bucket safety guard");
 assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");

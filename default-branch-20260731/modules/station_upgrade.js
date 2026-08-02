@@ -3,24 +3,24 @@
  */
 
 let MAX_GCL = 150;
-let CONTROLLER_SIGN_VERSION = 1;
+let CONTROLLER_SIGN_VERSION = 2;
 let CONTROLLER_SIGNS = [
-    "明月松间照，清泉石上流。— 王维",
-    "海上生明月，天涯共此时。— 张九龄",
-    "落霞与孤鹜齐飞，秋水共长天一色。— 王勃",
-    "行到水穷处，坐看云起时。— 王维",
-    "大鹏一日同风起，扶摇直上九万里。— 李白",
-    "山重水复疑无路，柳暗花明又一村。— 陆游",
-    "长风破浪会有时，直挂云帆济沧海。— 李白",
-    "星垂平野阔，月涌大江流。— 杜甫",
-    "Hope is the thing with feathers. — Emily Dickinson",
-    "A thing of beauty is a joy for ever. — John Keats",
-    "To see a World in a Grain of Sand. — William Blake",
-    "The woods are lovely, dark and deep. — Robert Frost",
-    "I wandered lonely as a cloud. — William Wordsworth",
-    "The Child is father of the Man. — William Wordsworth",
-    "Beauty is truth, truth beauty. — John Keats",
-    "The moon was a ghostly galleon. — Alfred Noyes"
+    "明月松间照，清泉石上流。",
+    "海上生明月，天涯共此时。",
+    "落霞与孤鹜齐飞，秋水共长天一色。",
+    "行到水穷处，坐看云起时。",
+    "大鹏一日同风起，扶摇直上九万里。",
+    "山重水复疑无路，柳暗花明又一村。",
+    "长风破浪会有时，直挂云帆济沧海。",
+    "星垂平野阔，月涌大江流。",
+    "Hope is the thing with feathers.",
+    "A thing of beauty is a joy for ever.",
+    "To see a World in a Grain of Sand.",
+    "The woods are lovely, dark and deep.",
+    "I wandered lonely as a cloud.",
+    "The Child is father of the Man.",
+    "Beauty is truth, truth beauty.",
+    "The moon was a ghostly galleon."
 ];
 
 function textHash(text) {
@@ -30,7 +30,19 @@ function textHash(text) {
 }
 
 function controllerSignFor(roomName) {
-    return CONTROLLER_SIGNS[textHash(roomName) % CONTROLLER_SIGNS.length];
+    let assignments = Memory.controllerSignAssignments = Memory.controllerSignAssignments || {};
+    let ownedRooms = Object.values(Game.rooms).filter(room => room.my).map(room => room.name);
+    let current = assignments[roomName];
+    let duplicated = current && ownedRooms.some(name => name != roomName && assignments[name] == current);
+    if (current && !duplicated && (CONTROLLER_SIGNS.includes(current) || current.endsWith(" · " + roomName))) return current;
+
+    let used = new Set(ownedRooms.filter(name => name != roomName).map(name => assignments[name]).filter(Boolean));
+    let start = textHash(roomName) % CONTROLLER_SIGNS.length;
+    for (let offset = 0; offset < CONTROLLER_SIGNS.length; offset++) {
+        let sign = CONTROLLER_SIGNS[(start + offset) % CONTROLLER_SIGNS.length];
+        if (!used.has(sign)) return assignments[roomName] = sign;
+    }
+    return assignments[roomName] = CONTROLLER_SIGNS[start] + " · " + roomName;
 }
 
 function isWalkableUpgradePosition(position, controller) {
@@ -265,6 +277,7 @@ let pro = {
         let result = creep.signController(controller, desired);
         if (result == OK) {
             room.memory.controllerSignVersion = CONTROLLER_SIGN_VERSION;
+            room.memory.controllerSignText = desired;
             Logger.info("Controller signed", room.name, desired);
         }
         return true;

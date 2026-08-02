@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.37.0 — Unique signs and highway harvesting
+
+### Added
+
+- Restore Power Bank discovery, mission creation, attack/heal teams, and power
+  carriers behind `Memory.cpuFeatures.powerBank`.
+- Allow PB-only spawn teams to run independently when the general combat
+  feature is disabled.
+
+### Changed
+
+- Replace controller signs with sixteen author-free poetic lines and persist a
+  unique assignment for every currently owned room. More than sixteen rooms
+  receive a room-name suffix so uniqueness remains guaranteed.
+- Keep Deposit and Power Bank room strategies dormant unless matching mission
+  flags exist; Observer scans use the same online feature gates.
+
+### Fixed
+
+- Guard missing PB targets, flags, attackers, healers, and carrier-heal targets.
+- Avoid stale PB mission Memory when flag creation fails and only advance team
+  counters after a spawn-team flag was created successfully.
+- Dispatch remote Deposit and PB flags through the spawn room encoded in their
+  names instead of the remote room containing the flag; index this mapping once
+  per tick to avoid repeated scans.
+
 ## v0.36.0 — Full planner, fixed upgrader positions, poetic signs
 
 ### Changed

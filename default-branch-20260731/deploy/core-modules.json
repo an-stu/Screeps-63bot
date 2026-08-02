@@ -64,6 +64,7 @@
   "strategy_blockRoom",
   "strategy_pillage",
   "strategy_deposits",
+  "strategy_powerBank",
   "strategy_GCLRoom",
   "strategy_atkL2",
   "strategy_defenserHighWay",
