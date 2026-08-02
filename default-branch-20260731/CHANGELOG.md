@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.36.0 — Full planner, fixed upgrader positions, poetic signs
+
+### Changed
+
+- Allow the complete automatic-planning pipeline whenever the feature is
+  enabled and the CPU bucket is at least 6000. The manual planner dispatcher
+  remains staggered at 25 ticks; low-level blueprint checks run every 150 ticks
+  and high-level construction checks every 600 ticks.
+- Record planner CPU cost in `Memory.codeHealth.autoPlanner` (`last`, `average`,
+  `max`, `samples`, and `lastTick`).
+- Give every controller upgrader a persistent, independently reserved walkable
+  position within range three. Keeper positions prefer access to the controller
+  link or container.
+- Add sixteen short Chinese and English poetry signatures. Each owned room
+  deterministically selects one and is re-signed once by a nearby upgrader or
+  worker before normal work resumes.
+
 ## v0.20.0 — GCL room restoration
 
 ### Added

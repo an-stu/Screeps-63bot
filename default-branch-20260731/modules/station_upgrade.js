@@ -3,6 +3,65 @@
  */
 
 let MAX_GCL = 150;
+let CONTROLLER_SIGN_VERSION = 1;
+let CONTROLLER_SIGNS = [
+    "明月松间照，清泉石上流。— 王维",
+    "海上生明月，天涯共此时。— 张九龄",
+    "落霞与孤鹜齐飞，秋水共长天一色。— 王勃",
+    "行到水穷处，坐看云起时。— 王维",
+    "大鹏一日同风起，扶摇直上九万里。— 李白",
+    "山重水复疑无路，柳暗花明又一村。— 陆游",
+    "长风破浪会有时，直挂云帆济沧海。— 李白",
+    "星垂平野阔，月涌大江流。— 杜甫",
+    "Hope is the thing with feathers. — Emily Dickinson",
+    "A thing of beauty is a joy for ever. — John Keats",
+    "To see a World in a Grain of Sand. — William Blake",
+    "The woods are lovely, dark and deep. — Robert Frost",
+    "I wandered lonely as a cloud. — William Wordsworth",
+    "The Child is father of the Man. — William Wordsworth",
+    "Beauty is truth, truth beauty. — John Keats",
+    "The moon was a ghostly galleon. — Alfred Noyes"
+];
+
+function textHash(text) {
+    let hash = 0;
+    for (let index = 0; index < text.length; index++) hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+    return hash;
+}
+
+function controllerSignFor(roomName) {
+    return CONTROLLER_SIGNS[textHash(roomName) % CONTROLLER_SIGNS.length];
+}
+
+function isWalkableUpgradePosition(position, controller) {
+    if (!position || position.roomName != controller.pos.roomName || !position.inRangeTo(controller, 3)) return false;
+    if (Game.map.getRoomTerrain(position.roomName).get(position.x, position.y) == TERRAIN_MASK_WALL) return false;
+    return !position.lookFor(LOOK_STRUCTURES).some(structure =>
+        structure.structureType == STRUCTURE_CONTROLLER
+        || (OBSTACLE_OBJECT_TYPES.includes(structure.structureType) && structure.structureType != STRUCTURE_RAMPART));
+}
+
+function isControllerUpgradeTask(creep, controller) {
+    let task = creep.memory.tasks && creep.memory.tasks.last();
+    return task && task.id == controller.id && (task.taskName == "upgrade" || task.taskName == "upgradeKeeper");
+}
+
+function getUpgradeReservations(room, controller) {
+    if (room._upgradePositionReservations) return room._upgradePositionReservations;
+    let reservations = {};
+    room.find(FIND_MY_CREEPS).filter(creep => isControllerUpgradeTask(creep, controller))
+        .sort((left, right) => left.name.localeCompare(right.name)).forEach(creep => {
+            let data = creep.memory.upgradePosition;
+            if (!data || data.controllerId != controller.id) return;
+            let position = new RoomPosition(data.x, data.y, room.name);
+            let key = position.x + ":" + position.y;
+            let structurallyValid = Game.time % 100 != 0 || isWalkableUpgradePosition(position, controller);
+            if (position.inRangeTo(controller, 3) && structurallyValid && !reservations[key]) reservations[key] = creep.name;
+            else delete creep.memory.upgradePosition;
+        });
+    room._upgradePositionReservations = reservations;
+    return reservations;
+}
 
 Creep.prototype.registerStationUpgrade = function () {
     let rm = Memory.rooms[this.memory["roomName"]];
@@ -53,9 +112,13 @@ Creep.prototype.upgrade = function () {
         this.popTask()
     }
     let obj = this.lastTaskObj();
+    let upgradePosition = obj && pro.getUpgradePosition(this, obj);
     let code = this.upgradeController(obj);
     if (code == ERR_NOT_IN_RANGE) {
-        this.moveTo(obj, { visualizePathStyle: { stroke: '#fffa00' } }, { range: 3 });
+        if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20, visualizePathStyle:{stroke:'#fffa00'}});
+        else this.moveTo(obj, { visualizePathStyle: { stroke: '#fffa00' } }, { range: 3 });
+    } else if (upgradePosition && !this.pos.isEqualTo(upgradePosition)) {
+        this.moveTo(upgradePosition, {range:0, reusePath:20, visualizePathStyle:{stroke:'#fffa00'}});
     }
     if (this.store.getFreeCapacity(RESOURCE_ENERGY) >= 50) {
         let store = this.pos.findInRange(FIND_STRUCTURES, 4, { filter: e => e.structureType == STRUCTURE_LINK }).head();
@@ -77,6 +140,7 @@ Creep.prototype.upgrade = function () {
     }
     if (this.ticksToLive % 3 == 0)
         this.memory.dontPullMe = false;
+    if (upgradePosition && this.pos.isEqualTo(upgradePosition)) this.memory.dontPullMe = true;
 }
 
 
@@ -103,10 +167,17 @@ Creep.prototype.upgradeKeeper = function () {
 
     // if(Game.shard.name=="shard3"&&Game.cpu.bucket<300&&(Game.cpu.bucket&1))return;
 
+    let link = Game.getObjectById(ms["link"]);
+    let container = Game.getObjectById(ms["container"]);
+    let upgradePosition = pro.getUpgradePosition(this, obj, [link, container].filter(Boolean));
+
     if (this.store[RESOURCE_ENERGY] > 0) {
         if (!(this.memory.concated && this.room.storage && this.room.storage.store[RESOURCE_ENERGY] < 10000) || this.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) < 10000) { //少于 1w 的时候暂时不更新
             let code = this.upgradeController(obj);
-            if (code == ERR_NOT_IN_RANGE && this.ticksToLive % 3 == 0) this.moveTo(obj, { range: 3 });
+            if (code == ERR_NOT_IN_RANGE && this.ticksToLive % 3 == 0) {
+                if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20});
+                else this.moveTo(obj, { range: 3 });
+            }
             if (this.pos.inRangeTo(obj, 3)) {
                 if (this.memory.needUnboost === undefined) this.memory.needUnboost = this.body.filter(e => e.boost).length
                 if (!this.memory.concated) {
@@ -117,8 +188,6 @@ Creep.prototype.upgradeKeeper = function () {
         }
     }
 
-    let link = Game.getObjectById(ms["link"]);
-    let container = Game.getObjectById(ms["container"]);
     let carryParts = this.getPartCnt(CARRY);
     let workParts = this.getPartCnt(WORK);
     let containerNotFull = container && container.store.getFreeCapacity(RESOURCE_ENERGY) > carryParts * 100;
@@ -147,11 +216,12 @@ Creep.prototype.upgradeKeeper = function () {
             }
         }
     }
-    if (!moved) {// 如果没有移动过就移到container上面，放置堵车，死掉直接掉container里面
-        if (container && !this.pos.isEqualTo(container) && ms["creeps"].length <= 1) {
-            this.moveTo(container)
-        }
+    if (!moved && upgradePosition && !this.pos.isEqualTo(upgradePosition)) {
+        this.moveTo(upgradePosition, {range:0, reusePath:20});
+    } else if (!moved && container && !this.pos.isEqualTo(container) && ms["creeps"].length <= 1) {
+        this.moveTo(container);
     }
+    if (upgradePosition && this.pos.isEqualTo(upgradePosition)) this.memory.dontPullMe = true;
     if (this.ticksToLive % 7 == 0) {
         //修理container
         let container = this.pos.findInRange(FIND_STRUCTURES, 3, { filter: e => e.structureType == STRUCTURE_CONTAINER && e.hits / e.hitsMax < 0.9 }).head();
@@ -159,7 +229,7 @@ Creep.prototype.upgradeKeeper = function () {
 
     }
     if (this.ticksToLive % 2 > 0)
-        this.memory.dontPullMe = false;
+        this.memory.dontPullMe = !!(upgradePosition && this.pos.isEqualTo(upgradePosition));
     // if(this.store[RESOURCE_ENERGY]==0||this.mainRoom().controller.upgradeBlocked){
     //     this.popTask();
     //     this.execLastTask();
@@ -167,6 +237,74 @@ Creep.prototype.upgradeKeeper = function () {
 }
 
 let pro = {
+    controllerSignVersion: CONTROLLER_SIGN_VERSION,
+    controllerSigns: CONTROLLER_SIGNS,
+    getControllerSign(roomName) {
+        return controllerSignFor(roomName);
+    },
+    trySignController(creep) {
+        let room = creep.room;
+        let controller = room.controller;
+        let desired = room._controllerSignText || (room._controllerSignText = controllerSignFor(room.name));
+        if (controller.sign && controller.sign.username == WHO_AM_I && controller.sign.text == desired) return false;
+        if (!room._controllerSignerId) {
+            let candidates = room.find(FIND_MY_CREEPS).filter(unit => !unit.spawning && unit.getActiveBodyparts(MOVE) > 0);
+            candidates.sort((left, right) => {
+                let leftRole = left.memory.role == "upgrader" ? 0 : left.memory.role == "worker" ? 1 : 2;
+                let rightRole = right.memory.role == "upgrader" ? 0 : right.memory.role == "worker" ? 1 : 2;
+                return leftRole - rightRole || left.pos.getRangeTo(controller) - right.pos.getRangeTo(controller)
+                    || left.name.localeCompare(right.name);
+            });
+            room._controllerSignerId = candidates.length ? candidates[0].id : "none";
+        }
+        if (room._controllerSignerId != creep.id) return false;
+        if (!creep.pos.isNearTo(controller)) {
+            creep.moveTo(controller, {range:1, reusePath:20, visualizePathStyle:{stroke:'#a78bfa'}});
+            return true;
+        }
+        let result = creep.signController(controller, desired);
+        if (result == OK) {
+            room.memory.controllerSignVersion = CONTROLLER_SIGN_VERSION;
+            Logger.info("Controller signed", room.name, desired);
+        }
+        return true;
+    },
+    getUpgradePosition(creep, controller, supplyTargets = []) {
+        if (!controller) return undefined;
+        let reservations = getUpgradeReservations(creep.room, controller);
+        let stored = creep.memory.upgradePosition;
+        if (stored && stored.controllerId == controller.id) {
+            let position = new RoomPosition(stored.x, stored.y, creep.room.name);
+            let key = position.x + ":" + position.y;
+            if (reservations[key] == creep.name) return position;
+        }
+
+        let candidates = [];
+        for (let x = Math.max(1, controller.pos.x - 3); x <= Math.min(48, controller.pos.x + 3); x++) {
+            for (let y = Math.max(1, controller.pos.y - 3); y <= Math.min(48, controller.pos.y + 3); y++) {
+                let position = new RoomPosition(x, y, creep.room.name);
+                let key = x + ":" + y;
+                if (reservations[key] || !isWalkableUpgradePosition(position, controller)) continue;
+                let supplyRanges = supplyTargets.map(target => position.getRangeTo(target));
+                let supplyPenalty = supplyRanges.filter(range => range > 1).length;
+                let supplyRange = supplyRanges.reduce((sum, range) => sum + range, 0);
+                let structures = position.lookFor(LOOK_STRUCTURES);
+                let paved = structures.some(structure => structure.structureType == STRUCTURE_CONTAINER || structure.structureType == STRUCTURE_ROAD);
+                candidates.push({position:position, supplyPenalty:supplyPenalty, supplyRange:supplyRange, paved:paved ? 0 : 1,
+                    travel:creep.pos.getRangeTo(position), order:(x * 53 + y * 97 + textHash(creep.name)) % 997});
+            }
+        }
+        candidates.sort((left, right) => left.supplyPenalty - right.supplyPenalty || left.supplyRange - right.supplyRange || left.paved - right.paved
+            || left.travel - right.travel || left.order - right.order);
+        if (!candidates.length) {
+            delete creep.memory.upgradePosition;
+            return undefined;
+        }
+        let selected = candidates[0].position;
+        reservations[selected.x + ":" + selected.y] = creep.name;
+        creep.memory.upgradePosition = {x:selected.x, y:selected.y, controllerId:controller.id};
+        return selected;
+    },
     trySpawnUpgrader(room) {
         let getBodyLowLevel = function () { //低等级的part 无限多
             let current = 0;

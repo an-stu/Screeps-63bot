@@ -232,6 +232,11 @@ Creep.prototype.addTaskAndExec = function (task) {
 };
 
 Creep.prototype.execLastTask = function () {
+    // One nearby creep re-signs each owned controller after a sign-set update.
+    // StationUpgrade caches the selected signer per room, so the other creeps
+    // only pay for a couple of property checks after the room is signed.
+    if (global.StationUpgrade && this.room.my && this.room.controller
+        && StationUpgrade.trySignController(this)) return this;
     // this.memory.tasks = this.memory.tasks.flat()
     if (this.memory.tasks.length) {
         // if(!this.memory.tasks.last().taskName)

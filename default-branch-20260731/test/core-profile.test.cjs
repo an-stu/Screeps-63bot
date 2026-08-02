@@ -20,6 +20,8 @@ const managerFlags = fs.readFileSync(path.join(root, "modules/manager_flags.js")
 const managerCreeps = fs.readFileSync(path.join(root, "modules/manager_creeps.js"), "utf8");
 const main = fs.readFileSync(path.join(root, "modules/main.js"), "utf8");
 const prototypeRoom = fs.readFileSync(path.join(root, "modules/prototype_room.js"), "utf8");
+const prototypeCreep = fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8");
+const stationUpgrade = fs.readFileSync(path.join(root, "modules/station_upgrade.js"), "utf8");
 const stationDefense = fs.readFileSync(path.join(root, "modules/station_defense.js"), "utf8");
 const warTeamCore = fs.readFileSync(path.join(root, "modules/war_teamCore.js"), "utf8");
 const highwayDefense = fs.readFileSync(path.join(root, "modules/strategy_defenserHighWay.js"), "utf8");
@@ -97,6 +99,11 @@ assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache m
 assert.ok(main.includes("Game.time % 100 == 0"), "detailed CPU profiling must remain low frequency");
 assert.ok(main.includes("room.controller.ticksToDowngrade < 20000"), "upgrader throttling must preserve controllers near downgrade");
 assert.ok(main.includes("Game.cpu.bucket < 9950) return 2"), "near-full buckets must ramp upgrader CPU smoothly");
+assert.ok(main.includes("Game.cpu.bucket >= 6000") && !main.includes("plannerAverage <"), "auto planner must stay enabled above the bucket safety floor");
+assert.ok(main.includes("health.autoPlanner"), "auto planner CPU must be measured online");
+assert.ok(stationUpgrade.includes("getUpgradePosition(creep, controller") && stationUpgrade.includes("upgradePosition"), "upgraders must reserve independent controller positions");
+assert.ok(stationUpgrade.includes("CONTROLLER_SIGNS") && stationUpgrade.includes("trySignController(creep)"), "owned controllers must receive the curated sign set");
+assert.ok(prototypeCreep.includes("StationUpgrade.trySignController(this)"), "all owned rooms need a creep-independent signing hook");
 assert.ok(main.includes(".filter(shouldRunCreep)"), "creep execution must apply the safe adaptive throttle");
 assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
 assert.ok(mainMount.includes("observer: true"), "observer scanning must be switchable without another upload");
@@ -136,7 +143,7 @@ const deposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js")
 assert.ok(deposits.includes("let flag1 = Game.flags"), "deposit combat flag lookup must not leak a global");
 assert.ok(mainMount.includes('"deposits"'), "deposit harvesting must require an explicit online opt-in");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
-assert.ok(main.includes("plannerAverage < Game.cpu.limit * 0.95") && main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must stay behind average-CPU and bucket guards");
+assert.ok(main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must keep the bucket safety guard");
 assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");
 assert.ok(market.includes("MARKET_SELL_PRICE_TTL = 1000"), "commodity profit prices must be cached across ticks");
 assert.ok(market.includes("MARKET_ORDER_TTL = 20"), "market order queries must be cached across ticks");

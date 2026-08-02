@@ -85,12 +85,22 @@ let pro = {
             }
             if(HelperCpuUsed.shouldRun(100))HelperError.catchError(() => StrategyMarket.autoBuy());
         }
-        let plannerAverage = Memory.codeHealth && Memory.codeHealth.cpuLongTerm
-            && Memory.codeHealth.cpuLongTerm.last1000 && Memory.codeHealth.cpuLongTerm.last1000.average || 0;
         if (!MIN_CPU && global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")
-            && Game.cpu.bucket >= 6000 && (!plannerAverage || plannerAverage < Game.cpu.limit * 0.95)
+            && Game.cpu.bucket >= 6000
             && HelperCpuUsed.shouldRun(25))
-            HelperError.catchError(() => ManagerAutoPlanner.exec());
+            HelperError.catchError(() => {
+                let plannerStart = Game.cpu.getUsed();
+                ManagerAutoPlanner.exec();
+                let used = Game.cpu.getUsed() - plannerStart;
+                let health = Memory.codeHealth = Memory.codeHealth || {};
+                let stats = health.autoPlanner = health.autoPlanner || {samples:0,total:0,max:0};
+                stats.samples++;
+                stats.total += used;
+                stats.average = stats.total / stats.samples;
+                stats.last = used;
+                stats.max = Math.max(stats.max, used);
+                stats.lastTick = Game.time;
+            });
         if (!MIN_CPU && global.HelperVisual && isCpuFeatureEnabled("visual") && HelperCpuUsed.shouldRun(10))
             HelperError.catchError(() => HelperVisual.exec());
         if (cpuProfile) cpuProfile.optional = Game.cpu.getUsed() - phaseStart;
