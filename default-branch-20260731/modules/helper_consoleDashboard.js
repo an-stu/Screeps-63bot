@@ -134,7 +134,9 @@ function moduleStatus() {
 }
 
 function overview() {
-    let profile = (Memory.codeHealth && Memory.codeHealth.phases && Memory.codeHealth.phases.roomDetails) || {};
+    // The old value was a single 97-tick snapshot and could catch a pathing
+    // spike. The persisted aggregate gives a stable room-level value.
+    let profile = (Memory.codeHealth && Memory.codeHealth.moduleCpu && Memory.codeHealth.moduleCpu.rooms) || {};
     let rooms = Object.values(Game.rooms).filter(room => room.controller && room.controller.my)
         .sort((a, b) => a.name.localeCompare(b.name));
     let rows = rooms.map(room => {
@@ -155,15 +157,15 @@ function overview() {
             + `<td style="${style.td}">${number(storageUsed)}/${number(storageCap)}</td>`
             + `<td style="${style.td}">${units.length} <span style="color:${COLORS.dim}">(+${units.filter(unit => unit.spawning).length})</span></td>`
             + `<td style="${style.td};color:${hostiles ? COLORS.bad : COLORS.good}">${hostiles}</td>`
-            + `<td style="${style.td}">${profile[room.name] === undefined ? "-" : Number(profile[room.name]).toFixed(3)}</td>`
+            + `<td style="${style.td}">${profile[room.name] === undefined ? "-" : Number(profile[room.name].average).toFixed(3)}</td>`
             + `</tr>`;
     }).join("");
     let table = `<table style="${style.table};min-width:760px"><thead><tr>`
-        + ["Room ⓘ", "RCL", "Hive energy", "Total energy", "Storage", "Creeps (+spawn)", "Hostiles", "profile CPU"]
+            + ["Room ⓘ", "RCL", "Hive energy", "Total energy", "Storage", "Creeps (+spawn)", "Hostiles", "avg profile CPU"]
             .map((name, index) => `<th style="${index ? style.th : style.th + ";text-align:left"}">${name}</th>`).join("")
         + `</tr></thead><tbody>${rows}</tbody></table>`;
     return header("Screeps Room Dashboard") + table + moduleStatus()
-        + `<div style="color:${COLORS.dim};font:11px monospace">hover or click ⓘ for details · detail: dash("ROOM") · profile CPU is the latest 100-tick sample</div>`;
+        + `<div style="color:${COLORS.dim};font:11px monospace">hover or click ⓘ for details · detail: dash("ROOM") · profile CPU is the persisted sampled average</div>`;
 }
 
 function roomDetail(roomName) {

@@ -61,7 +61,9 @@ let spawn_pro = {
     rangeAttackKeeper(){
         let r4 = Game.flags.r4;
         if(r4&&Game.flags.targetRoom){
-            if(Game.time%300 == 0){
+            // r4 is intentionally persistent. Do not enqueue another squad
+            // while its prior spawn request is still waiting.
+            if(Game.time%300 == 0 && !pro.hasPendingSpawnTeam(r4.room.name)){
                 let name = "spawnTeam_"+r4.room.name+"_"+Game.time;
                 let name2 = "f4team_"+Game.time+"_"+Math.random();
                 r4.pos.createFlag(name)
@@ -231,6 +233,12 @@ global.FLAG_TTL = 1500*2
 
 
 let pro = {
+    hasPendingSpawnTeam(roomName) {
+        return ManagerFlags.getFlagsByPrefix("spawnTeam").some(flag =>
+            flag.pos.roomName == roomName
+            && Array.isArray(flag.memory && flag.memory.spawnList)
+            && flag.memory.spawnList.length > 0);
+    },
     /**
      *
      * @param flagName

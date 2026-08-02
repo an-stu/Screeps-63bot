@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.42.0 — Stable room CPU display and combat queue back-pressure
+
+### Optimized
+
+- Dashboard room CPU now shows the persisted sampled average rather than a
+  single profiling tick that can exaggerate transient pathing spikes.
+- A persistent `r4` combat flag now waits for its existing spawn queue before
+  requesting another squad, preventing queue accumulation when spawning stalls.
+
+### Maintenance
+
+- Removed obsolete claim diagnostic snapshots from live Memory; active claim
+  operation state, room state, creeps, market data, and CPU telemetry remain.
+
 ## v0.41.0 — Bounded combat spawn queues
 
 ### Fixed

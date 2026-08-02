@@ -24,6 +24,7 @@ const prototypeCreep = fs.readFileSync(path.join(root, "modules/prototype_creep.
 const stationUpgrade = fs.readFileSync(path.join(root, "modules/station_upgrade.js"), "utf8");
 const stationDefense = fs.readFileSync(path.join(root, "modules/station_defense.js"), "utf8");
 const warTeamCore = fs.readFileSync(path.join(root, "modules/war_teamCore.js"), "utf8");
+const warTeamFlag = fs.readFileSync(path.join(root, "modules/war_teamFlag.js"), "utf8");
 const highwayDefense = fs.readFileSync(path.join(root, "modules/strategy_defenserHighWay.js"), "utf8");
 const attackRoom = fs.readFileSync(path.join(root, "modules/war_attackRoom.js"), "utf8");
 const warCache = fs.readFileSync(path.join(root, "modules/war_cache.js"), "utf8");
@@ -181,6 +182,8 @@ assert.ok(warTeamCore.includes("hostileCreepsByRoom") && warTeamCore.includes("h
 assert.ok(warTeamCore.includes("hasSpawnList(flag)") && warTeamCore.includes("Removing invalid spawnTeam flag"), "invalid spawn-team flags must be removed before reading spawnList");
 assert.ok(warTeamCore.includes("SPAWN_TEAM_TTL") && warTeamCore.includes("Removing expired spawnTeam flag"), "spawn-team queues expire instead of becoming permanent CPU work");
 assert.ok(main.includes("global.TeamRaL1 && isCpuFeatureEnabled(\"combat\")"), "RaL combat spawning honours the emergency combat switch");
+assert.ok(warTeamFlag.includes("hasPendingSpawnTeam") && warTeamFlag.includes("!pro.hasPendingSpawnTeam(r4.room.name)"), "persistent r4 flags cannot accumulate spawn queues");
+assert.ok(consoleDashboard.includes("moduleCpu && Memory.codeHealth.moduleCpu.rooms") && consoleDashboard.includes("avg profile CPU"), "dashboard uses stable room CPU aggregates instead of a single spike");
 assert.ok(!highwayDefense.includes("log(code,PathFinder.search"), "highway flee must never repeat PathFinder just for logging");
 assert.ok(attackRoom.includes("attackRoomTargetUntil"), "attack-room creeps must keep a short-lived selected target");
 assert.ok(warCache.includes("cacheStructsTime[roomName] != Game.time"), "combat structure snapshots must refresh at most once per room per tick");
