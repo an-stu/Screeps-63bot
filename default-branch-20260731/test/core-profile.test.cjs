@@ -34,6 +34,7 @@ const strategyClaim = fs.readFileSync(path.join(root, "modules/strategy_claim.js
 const strategyLowLevel = fs.readFileSync(path.join(root, "modules/strategy_lowLevel.js"), "utf8");
 const stationObserver = fs.readFileSync(path.join(root, "modules/station_observer.js"), "utf8");
 const strategyPowerBank = fs.readFileSync(path.join(root, "modules/strategy_powerBank.js"), "utf8");
+const strategyDeposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js"), "utf8");
 const strategyCleanBuild = fs.readFileSync(path.join(root, "modules/strategy_cleanBuild.js"), "utf8");
 const betterMove = fs.readFileSync(path.join(root, "modules/超级移动优化hotfix 0.9.4.js"), "utf8");
 const market = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
@@ -152,7 +153,7 @@ assert.ok(crossShard.includes("Unknown cross-shard mission"), "unknown remote ha
 const crossShardClaim = fs.readFileSync(path.join(root, "modules/strategy_claimCrossShard.js"), "utf8");
 assert.ok(!crossShardClaim.includes("String, body:"), "cross-shard spawn data must not leak an accidental String field");
 const deposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js"), "utf8");
-assert.ok(deposits.includes("let flag1 = Game.flags"), "deposit combat flag lookup must not leak a global");
+assert.ok(!deposits.includes('"raL3_"') && !deposits.includes("raL3_E49S31_1"), "Deposit harvesting must not create unrelated RaL combat flags");
 assert.ok(mainMount.includes('"deposits"'), "deposit harvesting must require an explicit online opt-in");
 assert.ok(mainMount.includes('"powerBank"'), "Power Bank harvesting must require an explicit online opt-in");
 assert.ok(stationObserver.includes('isCpuFeatureEnabled("powerBank")'), "Observer Power Bank scans must share the feature gate");
@@ -182,6 +183,7 @@ assert.ok(warTeamCore.includes("hostileCreepsByRoom") && warTeamCore.includes("h
 assert.ok(warTeamCore.includes("hasSpawnList(flag)") && warTeamCore.includes("Removing invalid spawnTeam flag"), "invalid spawn-team flags must be removed before reading spawnList");
 assert.ok(warTeamCore.includes("SPAWN_TEAM_TTL") && warTeamCore.includes("Removing expired spawnTeam flag"), "spawn-team queues expire instead of becoming permanent CPU work");
 assert.ok(main.includes("global.TeamRaL1 && isCpuFeatureEnabled(\"combat\")"), "RaL combat spawning honours the emergency combat switch");
+assert.ok(teamRaL1.includes("if (!flag) {") && teamRaL1.includes("this.suicide()"), "orphaned RaL creeps must stop safely when their flag is removed");
 assert.ok(warTeamFlag.includes("hasPendingSpawnTeam") && warTeamFlag.includes("!pro.hasPendingSpawnTeam(r4.room.name)"), "persistent r4 flags cannot accumulate spawn queues");
 assert.ok(consoleDashboard.includes("moduleCpu && Memory.codeHealth.moduleCpu.rooms") && consoleDashboard.includes("avg profile CPU"), "dashboard uses stable room CPU aggregates instead of a single spike");
 assert.ok(!highwayDefense.includes("log(code,PathFinder.search"), "highway flee must never repeat PathFinder just for logging");

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.43.0 — Remove Deposit-triggered RaL combat
+
+### Fixed
+
+- Removed the legacy Deposit hostile-response code that created `raL3`/`raL4`
+  combat flags, including the obsolete `raL3_E49S31_1` experiment.
+- Orphaned RaL creeps now retire safely when their control flag is removed.
+- Power Bank attack and hauling logic remains enabled and independent.
+
 ## v0.42.0 — Stable room CPU display and combat queue back-pressure
 
 ### Optimized

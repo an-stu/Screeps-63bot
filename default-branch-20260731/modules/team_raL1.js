@@ -66,8 +66,11 @@ let funChangePos = (flag,creep)=>{
 
 Creep.prototype.raL1=function () {
     let flag= Game.flags[this.headTask().id];
+    if (!flag) {
+        this.suicide();
+        return;
+    }
     if(flag&&flag.memory.roundRoom)funChangePos(flag,this);
-    // if(!flag)this.suicide();
     // let inner=pos=> pos.x>=2&&pos.x<=48&&pos.y>=2&&pos.y<=48;
     this.atk=function(){
         let forcedTarget = Game.getObjectById(raL1Target);

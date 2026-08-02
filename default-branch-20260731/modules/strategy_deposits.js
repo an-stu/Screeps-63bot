@@ -85,24 +85,6 @@ Creep.prototype.harvestDeposit = function () {
                 this.goTo(deposit)
         }
         if (deposit && this.pos.isNearTo(deposit) && !this.memory.concated) this.concatDeposit()
-        // add by an_w
-        let flag1 = Game.flags[this.lastTask().flagName];
-        if (flag1 && ((Game.time % 50 == 0 && this.pos.findInRange(FIND_HOSTILE_CREEPS, 8).length && !this.pos.isNearTo(deposit)) || this.hits < this.hitsMax) && (!flag1.memory.beAttackTime || Game.time > flag1.memory.beAttackTime + 1700)) {
-            const em = this.pos.findInRange(FIND_HOSTILE_CREEPS, 8).filter(e => e.getActiveBodyparts(RANGED_ATTACK) > 0)
-            if (em.length) {
-                this.room.createFlag(this.pos, "raL3_" + this.memory.roomName, COLOR_RED)
-            }
-            // create attack flag if no attack flag in this room
-            else {
-                this.room.createFlag(this.pos, "raL4_"+this.memory.roomName, COLOR_RED)
-            }
-            flag1.memory.beAttackTime = Game.time
-        }
-        if (flag1 && ((flag1.memory.beAttackTime && Game.time >= flag1.memory.beAttackTime + 1650) || !flag1.memory.beAttackTime)) {
-            if (Game.flags["raL4_"+this.memory.roomName]) Game.flags["raL4_"+this.memory.roomName].remove()
-            if (Game.flags["raL3_"+this.memory.roomName]) Game.flags["raL3_"+this.memory.roomName].remove()
-        }
-        
     }
 };
 
@@ -160,19 +142,6 @@ let pro = {
 
     createOrUpdateDepositMission(targetRoomName, depositData) {//
         if (AVOID_ROOMS.indexOf(targetRoomName) !== -1) return;
-        // if (ATTACK_ROOMS.indexOf(targetRoomName) !== -1) {
-        //     if (depositData.lastCooldown < 10 && !Game.flags['raL2_E49S31_keeper']) {
-        //         (new RoomPosition(25, 24, targetRoomName)).createFlag('raL3_E49S31_1', COLOR_BLUE);
-        //         (new RoomPosition(25, 6, 'E50S27')).createFlag('raL2_E49S31_keeper', COLOR_BLUE);
-        //     }
-        //     else if (depositData.lastCooldown > 67 && depositData.lastCooldown < 70) {
-        //         console.log(depositData.lastCooldown)
-        //         if (Game.flags['raL2_E49S31_keeper']) {
-        //             Game.flags['raL2_E49S31_keeper'].remove()
-        //         }
-        //         if (Game.flags['raL3_E49S31_1']) Game.flags['raL3_E49S31_1'].remove()
-        //     }
-        // }
         let spawnRoomName = StationObserver.getClosedMyRoomName(targetRoomName);
         if (!spawnRoomName || depositData.lastCooldown > MAX_COOL_DOWM) return;
         let flagName = "deposit_" + spawnRoomName + "_" + targetRoomName + "_" + depositData.x + "_" + depositData.y;
