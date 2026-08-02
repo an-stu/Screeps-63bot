@@ -269,6 +269,20 @@ let pro = {
             if (typeof result != "string") delete Memory.flags[flagName];
         }
     },
+    taskData(flag, index) {
+        // Do not copy the Flag Memory proxy into a creep task. Its enumerable
+        // fields can be an incomplete cache during the flag creation tick,
+        // leaving the new pair without a room, target id, or flag name.
+        let memory = flag.memory;
+        return {
+            flagName: flag.name,
+            id: memory.id,
+            roomName: memory.roomName,
+            x: memory.x,
+            y: memory.y,
+            index: index
+        };
+    },
     PBAttackSpawnData(room, memory, boostType) {
         let tasks = [UtilsTask.taskData("AttackerPB", "registerAttackerPB", memory)]
         let body;
@@ -326,8 +340,8 @@ let pro = {
         flag.memory.directSpawnQueue = {
             createdAt: Game.time,
             spawnList: [
-                pro.PBAttackSpawnData(room, flag.memory, boostLevel),
-                pro.PBHealSpawnData(room, flag.memory, boostLevel)
+                pro.PBAttackSpawnData(room, pro.taskData(flag, flag.memory.index || 0), boostLevel),
+                pro.PBHealSpawnData(room, pro.taskData(flag, flag.memory.index || 0), boostLevel)
             ]
         };
         return true;

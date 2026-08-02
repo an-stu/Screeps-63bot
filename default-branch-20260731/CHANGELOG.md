@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.52.0 — PB target task snapshots
+
+### Fixed
+
+- Build explicit, immutable attacker/healer task data from the PB flag instead
+  of enumerating its transient Memory proxy. New PB pairs always retain their
+  flag name, target ID, and destination room after boosting.
+
 ## v0.51.0 — PB mission validation
 
 ### Fixed
