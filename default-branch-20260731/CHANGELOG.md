@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.48.0 — Persistent PB direct-queue state
+
+### Fixed
+
+- Store PB direct spawn queues and per-mission cooldowns in ordinary Memory,
+  not `Game` globals, so the throttle remains effective across runtime resets.
+
 ## v0.47.0 — Flag-free Power Bank team spawning
 
 ### Fixed

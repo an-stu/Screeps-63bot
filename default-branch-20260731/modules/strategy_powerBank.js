@@ -313,7 +313,7 @@ let pro = {
         return StationHive.trySpawn(room, room.name, body, "PBCarrier", tasks)
     },
     spawnPBTeam(room, flag, boostLevel) {
-        let queues = Game._powerBankDirectSpawnQueues = Game._powerBankDirectSpawnQueues || {};
+        let queues = Memory.powerBankDirectSpawnQueues = Memory.powerBankDirectSpawnQueues || {};
         if (queues[flag.name]) return false;
         queues[flag.name] = {
             createdAt: Game.time,
@@ -325,7 +325,7 @@ let pro = {
         return true;
     },
     dispatchPBSpawnQueue(room, flag) {
-        let queues = Game._powerBankDirectSpawnQueues;
+        let queues = Memory.powerBankDirectSpawnQueues;
         let queue = queues && queues[flag.name];
         if (!queue) return false;
         if (Game.time - queue.createdAt > 2000 || !queue.spawnList.length) {
@@ -364,7 +364,7 @@ let pro = {
 
             let respawnTime = 1500 - (50 + (flag.memory.pathTime || 0)) // 死掉 + spawn的时间+走路时间
             let needSpawn = (flag.memory.lastSpawnTime || 0) + respawnTime < Game.time
-            let cooldowns = Game._powerBankSpawnCooldown = Game._powerBankSpawnCooldown || {};
+            let cooldowns = Memory.powerBankSpawnCooldown = Memory.powerBankSpawnCooldown || {};
             if ((cooldowns[flag.name] || 0) > Game.time) needSpawn = false;
             if (queueActive) needSpawn = false;
             // if (flag.pos.roomName == "W30N57" && Game.time % 10 == 0) needSpawn = true;
