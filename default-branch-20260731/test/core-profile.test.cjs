@@ -164,6 +164,7 @@ assert.ok(strategyPowerBank.includes('ManagerFlags.getFlagsByPrefixAndRoom("powe
 assert.ok(strategyPowerBank.includes("execSpawnTeams()") && strategyPowerBank.includes("AttackerPB") && strategyPowerBank.includes("HealerPB"), "Power Bank teams must spawn even when general combat is disabled");
 assert.ok(strategyPowerBank.includes("Memory.powerBankDirectSpawnQueues") && strategyPowerBank.includes("dispatchPBSpawnQueue"), "Power Bank teams must not depend on spawnTeam flag Memory");
 assert.ok(strategyPowerBank.includes("Memory.powerBankSpawnCooldown"), "Power Bank respawn requests must be throttled across runtime resets");
+assert.ok(strategyPowerBank.includes("while (queue.spawnList.length)") && strategyPowerBank.includes("activeQueues[flag.name]"), "Power Bank attacker/healer queues must dispatch together when capacity permits");
 assert.ok(main.includes("StrategyPowerBank.execSpawnTeams()"), "main loop must independently dispatch Power Bank spawn teams");
 assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual: true"), "opt-in features must remain enableable without another upload");
 assert.ok(main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must keep the bucket safety guard");

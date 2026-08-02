@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.49.0 — Synchronized PB attacker/healer dispatch
+
+### Fixed
+
+- Dispatch PB queues every tick. Two idle Spawns launch attacker and healer in
+  the same tick; a single Spawn launches the second half on the next tick.
+
 ## v0.48.0 — Persistent PB direct-queue state
 
 ### Fixed

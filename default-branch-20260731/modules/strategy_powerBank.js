@@ -332,8 +332,14 @@ let pro = {
             delete queues[flag.name];
             return false;
         }
-        let head = queue.spawnList[0];
-        if (StationHive.trySpawn(room, room.name, head.body, "PBer", head.tasks)) queue.spawnList.shift();
+        // Spawn both halves in the same tick when the room has two idle
+        // spawns. With only one spawn, retry on the very next tick instead of
+        // waiting for the three-tick PB strategy cadence.
+        while (queue.spawnList.length) {
+            let head = queue.spawnList[0];
+            if (!StationHive.trySpawn(room, room.name, head.body, "PBer", head.tasks)) break;
+            queue.spawnList.shift();
+        }
         if (!queue.spawnList.length) delete queues[flag.name];
         return true;
     },
@@ -349,9 +355,12 @@ let pro = {
     },
     exec(room) {
         pro.cleanFlag();
+        let powerBankFlags = ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name);
+        let activeQueues = {};
+        powerBankFlags.forEach(flag => activeQueues[flag.name] = pro.dispatchPBSpawnQueue(room, flag));
         if ((Game.time + room.hashCode()) % 3 != 0) return;
-        ManagerFlags.getFlagsByPrefixAndRoom("powerBank", room.name).forEach(flag => {
-            let queueActive = pro.dispatchPBSpawnQueue(room, flag);
+        powerBankFlags.forEach(flag => {
+            let queueActive = activeQueues[flag.name];
             if (flag.memory.disappearTime - Game.time < 0 || flag.memory.power < MIN_POWER) {
                 flag.remove();
                 return;
