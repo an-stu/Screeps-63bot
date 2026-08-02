@@ -98,7 +98,8 @@ assert.ok(managerFlags.includes("let prefixMap = Game._flagPerfixMap = {}"), "fl
 assert.ok(main.includes("Game._coreObjects"), "main loop must cache tick object arrays");
 assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop must not serialize all Memory manually");
 assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache must only span consecutive ticks");
-assert.ok(main.includes("Game.time % 100 == 0"), "detailed CPU profiling must remain low frequency");
+assert.ok(main.includes("CPU_PROFILE_INTERVAL = 97"), "detailed CPU profiling must use a low-frequency prime interval to avoid aliasing");
+assert.ok(main.includes("OPTIONAL_CPU_OFFSETS") && main.includes("marketAutoBuy:19") && main.includes("autoPlanner:7") && main.includes("visual:3"), "optional jobs must use separate CPU schedule offsets");
 assert.ok(main.includes("room.controller.ticksToDowngrade < 20000"), "upgrader throttling must preserve controllers near downgrade");
 assert.ok(main.includes("Game.cpu.bucket < 9950) return 2"), "near-full buckets must ramp upgrader CPU smoothly");
 assert.ok(main.includes("Game.cpu.bucket >= 6000") && !main.includes("plannerAverage <"), "auto planner must stay enabled above the bucket safety floor");

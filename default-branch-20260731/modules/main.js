@@ -1,6 +1,9 @@
 require("main_mount");
 Logger.info("Script reload", "bucket", Game.cpu.bucket, "version", RUNTIME_PROFILE.version);
 
+const CPU_PROFILE_INTERVAL = 97;
+const OPTIONAL_CPU_OFFSETS = {marketAutoBuy:19, autoPlanner:7, visual:3};
+
 
 let pro = {
     init() {
@@ -87,11 +90,13 @@ let pro = {
             for(let index=batch;index<objects.rooms.length;index+=4){
                 HelperError.catchError(() => StrategyMarket.exec(objects.rooms[index]), objects.rooms[index].name);
             }
-            if(HelperCpuUsed.shouldRun(100))HelperError.catchError(() => StrategyMarket.autoBuy());
         }
+        if (!MIN_CPU && global.StrategyMarket && isCpuFeatureEnabled("market")
+            && HelperCpuUsed.shouldRun(100, OPTIONAL_CPU_OFFSETS.marketAutoBuy))
+            HelperError.catchError(() => StrategyMarket.autoBuy());
         if (!MIN_CPU && global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")
             && Game.cpu.bucket >= 6000
-            && HelperCpuUsed.shouldRun(25))
+            && HelperCpuUsed.shouldRun(25, OPTIONAL_CPU_OFFSETS.autoPlanner))
             HelperError.catchError(() => {
                 let plannerStart = Game.cpu.getUsed();
                 ManagerAutoPlanner.exec();
@@ -105,7 +110,8 @@ let pro = {
                 stats.max = Math.max(stats.max, used);
                 stats.lastTick = Game.time;
             });
-        if (!MIN_CPU && global.HelperVisual && isCpuFeatureEnabled("visual") && HelperCpuUsed.shouldRun(10))
+        if (!MIN_CPU && global.HelperVisual && isCpuFeatureEnabled("visual")
+            && HelperCpuUsed.shouldRun(10, OPTIONAL_CPU_OFFSETS.visual))
             HelperError.catchError(() => HelperVisual.exec());
         if (cpuProfile) cpuProfile.optional = Game.cpu.getUsed() - phaseStart;
     },
@@ -218,9 +224,10 @@ let main = function () {
         if (myRoom) global.WHO_AM_I = myRoom.controller.owner.username
     }
 
-    let profileStart = Game.time % 100 == 0 ? Game.cpu.getUsed() : 0;
+    let profileTick = HelperCpuUsed.shouldRun(CPU_PROFILE_INTERVAL);
+    let profileStart = profileTick ? Game.cpu.getUsed() : 0;
     pro.init();
-    if (profileStart) Game._coreCpuProfile = {init: Game.cpu.getUsed() - profileStart};
+    if (profileTick) Game._coreCpuProfile = {init: Game.cpu.getUsed() - profileStart};
     if (Game.cpu.bucket > 40 || !isSaveCpu) pro.exec();
     else {
         let objects = getTickObjects();

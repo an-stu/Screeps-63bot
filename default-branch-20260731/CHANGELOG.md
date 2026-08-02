@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.39.0 — Staggered optional CPU scheduling
+
+### Optimized
+
+- Move market auto-buy, automatic planning, and room visuals onto separate tick
+  offsets so their periodic peaks no longer coincide every 100 ticks.
+- Sample detailed module CPU every 97 ticks. The prime interval rotates across
+  normal task schedules and produces representative long-term averages instead
+  of repeatedly measuring the same worst-case tick.
+- Keep market room batches and auto-buy independently scheduled so moving the
+  low-frequency order scan cannot accidentally disable it.
+
 ## v0.38.0 — Full production gates and persistent CPU profiling
 
 ### Added
