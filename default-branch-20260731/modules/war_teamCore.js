@@ -54,9 +54,11 @@ global.SpawnTeam = {
     getQueueMemory(flag) {
         if (!flag) return undefined;
         if (flag.memory && Array.isArray(flag.memory.spawnList)) return flag.memory;
+        if (Game._powerBankSpawnQueues && Game._powerBankSpawnQueues[flag.name]) return Game._powerBankSpawnQueues[flag.name];
         return Memory.powerBankSpawnQueues && Memory.powerBankSpawnQueues[flag.name];
     },
     removeQueue(flag) {
+        if (Game._powerBankSpawnQueues) delete Game._powerBankSpawnQueues[flag.name];
         if (Memory.powerBankSpawnQueues) delete Memory.powerBankSpawnQueues[flag.name];
         flag.remove();
     },

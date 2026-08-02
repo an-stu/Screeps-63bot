@@ -324,6 +324,8 @@ let pro = {
             ]
         };
         Memory.flags[name] = spawnMemory;
+        let runtimeQueues = Game._powerBankSpawnQueues = Game._powerBankSpawnQueues || {};
+        runtimeQueues[name] = spawnMemory;
         let queues = Memory.powerBankSpawnQueues = Memory.powerBankSpawnQueues || {};
         queues[name] = spawnMemory;
         return true;
@@ -354,6 +356,8 @@ let pro = {
 
             let respawnTime = 1500 - (50 + (flag.memory.pathTime || 0)) // 死掉 + spawn的时间+走路时间
             let needSpawn = (flag.memory.lastSpawnTime || 0) + respawnTime < Game.time
+            let cooldowns = Game._powerBankSpawnCooldown = Game._powerBankSpawnCooldown || {};
+            if ((cooldowns[flag.name] || 0) > Game.time) needSpawn = false;
             // if (flag.pos.roomName == "W30N57" && Game.time % 10 == 0) needSpawn = true;
 
             // if (Game.rooms[flag.pos.roomName] && flag.pos.findInRange(FIND_HOSTILE_CREEPS, 8).filter(e => e.body.find(b => b.type == ATTACK)).length) {
@@ -381,6 +385,7 @@ let pro = {
                 if (boostLevel == BOOST_L1) flag.memory.L1Boosted = true;
                 if (boostLevel == BOOST_L2) flag.memory.L2Boosted = true;
                 if (!pro.spawnPBTeam(room, flag, boostLevel)) return;
+                cooldowns[flag.name] = Game.time + respawnTime;
                 flag.memory.boostModel = Math.max(boostLevel, flag.memory.boostModel || NO_BOOST)
                 flag.memory.index += 1
                 flag.memory.lastSpawnTime = Game.time

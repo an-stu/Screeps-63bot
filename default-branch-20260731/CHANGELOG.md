@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.46.0 — PB queue cache independent of Flag Memory
+
+### Fixed
+
+- Moved short-lived PB spawn queues to a tick-persistent `Game` cache and
+  added a per-PB respawn cooldown. This stops repeated empty `spawnTeam`
+  creation even when the game resets the flag's Memory object.
+
 ## v0.45.0 — Durable Power Bank team queues
 
 ### Fixed
