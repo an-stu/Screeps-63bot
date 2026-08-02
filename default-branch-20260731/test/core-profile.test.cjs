@@ -178,6 +178,9 @@ assert.ok(prototypeRoom.includes("_cpuHostileCreepCache") && !prototypeRoom.incl
 assert.ok(prototypeRoom.includes("Array.isArray(this._cpuHostileCreepCache)"), "Room tactical caches must tolerate the structure-cache prototype Proxy");
 assert.ok(stationDefense.includes("checkSafeMode(room, hostiles)"), "safe-mode detection must reuse the immediate hostile scan");
 assert.ok(warTeamCore.includes("hostileCreepsByRoom") && warTeamCore.includes("hostileTowersByRoom"), "team damage calculation must share tactical room scans");
+assert.ok(warTeamCore.includes("hasSpawnList(flag)") && warTeamCore.includes("Removing invalid spawnTeam flag"), "invalid spawn-team flags must be removed before reading spawnList");
+assert.ok(warTeamCore.includes("SPAWN_TEAM_TTL") && warTeamCore.includes("Removing expired spawnTeam flag"), "spawn-team queues expire instead of becoming permanent CPU work");
+assert.ok(main.includes("global.TeamRaL1 && isCpuFeatureEnabled(\"combat\")"), "RaL combat spawning honours the emergency combat switch");
 assert.ok(!highwayDefense.includes("log(code,PathFinder.search"), "highway flee must never repeat PathFinder just for logging");
 assert.ok(attackRoom.includes("attackRoomTargetUntil"), "attack-room creeps must keep a short-lived selected target");
 assert.ok(warCache.includes("cacheStructsTime[roomName] != Game.time"), "combat structure snapshots must refresh at most once per room per tick");

@@ -67,7 +67,7 @@ let spawn_pro = {
                 r4.pos.createFlag(name)
                 r4.pos.createFlag(name2)
                 if(Game.flags[name2])Game.flags[name2].setPosition(r4.pos);
-                Memory.flags[name] = {
+                Memory.flags[name] = { createdAt: Game.time,
                     spawnList:[
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostBalanceRangeAttack(),true),
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostBalanceRangeAttack(),true),
@@ -91,7 +91,7 @@ let spawn_pro = {
                 r1.pos.createFlag(name)
                 r1.pos.createFlag(name2)
                 if(Game.flags[name2])Game.flags[name2].setPosition(r1.pos);
-                Memory.flags[name] = {
+                Memory.flags[name] = { createdAt: Game.time,
                     spawnList:[
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostSingleRangeAttack(),true),
                     ]
@@ -109,7 +109,7 @@ let spawn_pro = {
                 a4.pos.createFlag(name)
                 a4.pos.createFlag(name2)
                 if(Game.flags[name2])Game.flags[name2].setPosition(a4.pos);
-                Memory.flags[name] = {
+                Memory.flags[name] = { createdAt: Game.time,
                     spawnList:[
                         // pro.getCreepSpawn(name2,pro.getBoostRangeAttack(),true),
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostAttack(),true),
@@ -132,7 +132,7 @@ let spawn_pro = {
                 a2.pos.createFlag(name)
                 a2.pos.createFlag(name2)
                 if(Game.flags[name2])Game.flags[name2].setPosition(a2.pos);
-                Memory.flags[name] = {
+                Memory.flags[name] = { createdAt: Game.time,
                     spawnList:[
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostAttack(),true),
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostHeal(),true)
@@ -153,7 +153,7 @@ let spawn_pro = {
                 w4.pos.createFlag(name)
                 w4.pos.createFlag(name2)
                 if(Game.flags[name2])Game.flags[name2].setPosition(w4.pos);
-                Memory.flags[name] = {
+                Memory.flags[name] = { createdAt: Game.time,
                     spawnList:[
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostWork(),true),
                         spawn_pro.getCreepSpawn(name2,spawn_pro.getBoostHeal(),true)
@@ -264,6 +264,7 @@ let pro = {
         }
         let name = "spawnTeam_"+targetRoomName+"_"+randomId();
         room.randomPosition().createFlag(name)
+        memory.createdAt = Game.time;
         Memory.flags[name] = memory
     },
     exec (){

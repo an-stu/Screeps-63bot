@@ -33,7 +33,13 @@ let pro = {
         // 出击！
         if (global.teamL2 && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["teamL1","teamL2","teamL4"])) HelperError.catchError(() => teamL2.exec());
         if (global.StrategyAtkl2 && isCpuFeatureEnabled("combat") && ManagerFlags.hasPrefix("l2")) HelperError.catchError(() => StrategyAtkl2.exec());
-        if (global.TeamRaL1) HelperError.catchError(() => TeamRaL1.exec());
+        // RaL teams are offensive actions. They used to bypass the combat
+        // switch, so an emergency combat pause could still enqueue combat
+        // creeps every three ticks.
+        if (global.TeamRaL1 && isCpuFeatureEnabled("combat")
+            && ManagerFlags.hasAnyPrefix(["raL1", "raL2", "raL3", "raL4", "raL5"])) {
+            HelperError.catchError(() => TeamRaL1.exec());
+        }
         if (global.WarDefenseCore && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["defense","defenseAH","defenseRA"])) HelperError.catchError(() => WarDefenseCore.exec());
         if (global.WarPowerCreepOperator && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["disCtrl","OPSCarry","PCAtk","showDisSpawn"])) HelperError.catchError(() => WarPowerCreepOperator.exec());
 

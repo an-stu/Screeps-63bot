@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.41.0 — Bounded combat spawn queues
+
+### Fixed
+
+- Added a creation timestamp and a bounded 2,000-tick lifetime to every combat
+  spawn-team request, preventing blocked queues from becoming permanent CPU work.
+- Made RaL combat spawning honour `Memory.cpuFeatures.combat`, so the emergency
+  combat pause stops both team execution and new combat spawn requests.
+
+## v0.40.0 — Safe spawn-team validation
+
+### Fixed
+
+- Validate the `spawnList` contract before combat spawn-team logic reads it.
+  Invalid legacy or manually created `spawnTeam` flags are logged once and
+  removed instead of throwing every tick and draining the CPU bucket.
+
 ## v0.39.0 — Staggered optional CPU scheduling
 
 ### Optimized

@@ -23,6 +23,7 @@ const POS_MARK = ['↖', '↗', '↘', '↙'];
 const POS_MARK_INDEX = {['↖']:0, ['↗']:1, ['↘']:2, ['↙']:3};
 const POS_MARK_MAP = {['↖']:[0, 0], ['↗']:[1, 0], ['↙']:[0, 1], ['↘']:[1, 1]};
 const MASK_POS_MAP = [['↖','↗'],['↙', '↘']];
+const SPAWN_TEAM_TTL = 2000;
 
 
 Creep.prototype.doNothing=function () {
@@ -50,24 +51,39 @@ Creep.prototype.registerFlag1t=function () {
  * 生产时必须有3个以上的爬才会生产
  */
 global.SpawnTeam = {
+    hasSpawnList(flag) {
+        return !!(flag && flag.memory && Array.isArray(flag.memory.spawnList));
+    },
     exec (flag){
         if(!flag)return console.log("flag can not exit");
+        if (!this.hasSpawnList(flag) || !flag.memory.spawnList.length) {
+            Logger.warning("Removing invalid spawnTeam flag", flag.name);
+            flag.remove();
+            return;
+        }
+        // Spawn queues are short-lived: once a request is blocked by an
+        // unavailable spawn, keeping it forever turns one combat flag into a
+        // permanent per-tick CPU cost. Old queues had no timestamp, so they
+        // are deliberately treated as legacy state and discarded on reload.
+        if (!Number.isFinite(flag.memory.createdAt)
+            || Game.time - flag.memory.createdAt > SPAWN_TEAM_TTL) {
+            Logger.warning("Removing expired spawnTeam flag", flag.name);
+            flag.remove();
+            return;
+        }
         let room = Game.rooms[flag.pos.roomName];
         if(!room||!room.my){
             flag.remove();
             return console.log("room "+flag.pos.roomName+" is not yours");
         }
 
-        if(room.creeps("carrier",false).filter(e=>(e.ticksToLive||1500)>150).length<flag.memory.spawnList.length+1)
+        let list = flag.memory.spawnList;
+        if(room.creeps("carrier",false).filter(e=>(e.ticksToLive||1500)>150).length<list.length+1)
             if(room.creeps("carrier").filter(e=>(e.ticksToLive||1500)>150).length>=1)StationHive.trySpawn(room,room.name,StationCarry.getCarrierBodyConfig(room),"carrier",[])
-        if(room.creeps("carrier",false).filter(e=>(e.ticksToLive||1500)>150).length<flag.memory.spawnList.length+1)
+        if(room.creeps("carrier",false).filter(e=>(e.ticksToLive||1500)>150).length<list.length+1)
             return;
 
-        let list = flag.memory.spawnList
-        if(!list||!list.length){
-            flag.remove();
-        }
-        let head = flag.memory.spawnList.head();
+        let head = list.head();
         if(head){
             let result = StationHive.trySpawn(flag.room,flag.room.my?flag.room.name:"global",head.body,"team",head.tasks)
             if(result)flag.memory.spawnList.shift();

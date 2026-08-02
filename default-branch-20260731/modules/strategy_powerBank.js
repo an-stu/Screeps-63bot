@@ -316,6 +316,7 @@ let pro = {
         let result = room.randomPosition().createFlag(name);
         if (typeof result != "string") return false;
         Memory.flags[name] = {
+            createdAt: Game.time,
             spawnList: [
                 pro.PBAttackSpawnData(room, flag.memory, boostLevel),
                 pro.PBHealSpawnData(room, flag.memory, boostLevel)
