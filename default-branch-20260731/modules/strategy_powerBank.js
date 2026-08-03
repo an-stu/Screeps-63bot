@@ -298,10 +298,15 @@ let pro = {
             return;
         }
         let flagName = "powerBank_" + spawnRoomName + "_" + targetRoomName + "_" + powerBankData.x + "_" + powerBankData.y;
-        if (!Memory.flags[flagName]) Memory.flags[flagName] = {}
-        let flagMemory = Memory.flags[flagName];
         powerBankData.flagName = flagName;
         powerBankData.roomName = targetRoomName;
+        // Do not put a newly-created Flag directly into Memory.flags. The
+        // generic orphan cleanup runs before the Flag becomes visible on some
+        // ticks and would delete its mission data. ManagerFlags promotes this
+        // compact pending record once Game.flags exposes the Flag.
+        let pending = Memory.pendingPowerBanks = Memory.pendingPowerBanks || {};
+        let flagMemory = Game.flags[flagName] && Game.flags[flagName].memory
+            || pending[flagName] || (pending[flagName] = {createdAt: Game.time});
         for (let k in powerBankData) {
             flagMemory[k] = powerBankData[k];
         }
@@ -312,6 +317,10 @@ let pro = {
                 pro.recordMissionDecision(targetRoomName, powerBankData, "skip:flag-create-" + result, spawnRoomName);
                 return;
             }
+        }
+        if (Game.flags[flagName]) {
+            delete pending[flagName];
+            if (!Object.keys(pending).length) delete Memory.pendingPowerBanks;
         }
         pro.recordMissionDecision(targetRoomName, powerBankData, "mission-created", spawnRoomName);
     },

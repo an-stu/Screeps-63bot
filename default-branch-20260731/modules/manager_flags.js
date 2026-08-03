@@ -22,6 +22,25 @@ let pro={
             }
             if (!Object.keys(pendingSpawnTeams).length) delete Memory.pendingSpawnTeams;
         }
+        // `RoomPosition.createFlag` may return its name one tick before the
+        // Flag is available through `Game.flags`. PB missions used to write
+        // straight into Memory.flags and were then erased by the orphan pass
+        // below. Promote their short pending record only after the Flag is
+        // visible, matching the spawn-team handoff above.
+        let pendingPowerBanks = Memory.pendingPowerBanks;
+        if (pendingPowerBanks) {
+            for (let name in pendingPowerBanks) {
+                let data = pendingPowerBanks[name];
+                if (Game.flags[name]) {
+                    delete data.createdAt;
+                    Memory.flags[name] = data;
+                    delete pendingPowerBanks[name];
+                } else if (!data || Game.time - (data.createdAt || 0) > 10) {
+                    delete pendingPowerBanks[name];
+                }
+            }
+            if (!Object.keys(pendingPowerBanks).length) delete Memory.pendingPowerBanks;
+        }
         for (let name in Memory.flags) {
             if (!Game.flags[name]) {
                 delete Memory.flags[name];

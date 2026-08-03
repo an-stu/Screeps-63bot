@@ -209,6 +209,7 @@ assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longT
 assert.ok(cpuHelper.includes("recordProfile(profile)") && cpuHelper.includes("profileSummary()"), "CPU telemetry must retain phase, role, and room profile averages");
 assert.ok(cpuHelper.includes("room && room.my") && cpuHelper.includes("lastRoomPrune"), "CPU telemetry must ignore observer-only room samples and prune old snapshots");
 assert.ok(strategyPowerBank.includes("recordMissionDecision") && strategyPowerBank.includes("skip:insufficient-decay"), "PB observation must retain one compact mission-decision diagnostic");
+assert.ok(strategyPowerBank.includes("Memory.pendingPowerBanks") && managerFlags.includes("pendingPowerBanks"), "PB Flag data must survive createFlag's delayed visibility");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
 assert.ok(marketPrice.includes('console.logUnsafe(html)') && marketPrice.includes("printCommodityAnalysis"), "market HTML reports must use the rich console API");
 

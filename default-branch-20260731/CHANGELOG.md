@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.56.0 — Durable Power Bank Flag handoff
+
+### Fixed
+
+- Keep a newly created Power Bank mission in a ten-tick pending handoff until
+  its Flag is visible. This closes the delayed-Flag race where generic orphan
+  cleanup could erase a valid PB mission immediately after discovery.
+
 ## v0.55.0 — Compact persistent diagnostics
 
 ### Optimized
