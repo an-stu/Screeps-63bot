@@ -23,9 +23,15 @@ let pro = {
             let task = StationLab.generatorBoostResTask(boostRes, room)
             StationHive.trySpawn(room, room.name, body, "worker", task)
         }
-        // log((room.storage.store[RESOURCE_ENERGY]-100000)/50000)
-        let EnergyOver = (room.storage.store[RESOURCE_ENERGY] - 250000) / 50000 > room.creeps("worker", false).length //能量溢出，可以多生爬来修
-        let noWorker = room.creeps("worker", false).length < 1;
+        let workerCount = room.creeps("worker", false).length;
+        // Construction and rampart repair are background jobs, not a reason
+        // to consume every idle Spawn in a high-stock room. Keep them bounded
+        // so critical creeps and CPU remain available.
+        let workerLimit = room.constructionSite.length
+            ? 3
+            : StationDefense.getRepairWorkerLimit(room);
+        let EnergyOver = workerCount < workerLimit;
+        let noWorker = workerCount < 1;
 
         if (room.creeps("worker", false).length + room.creeps("carrier", false).length == 0) {// 或者爬都死光了
             spawnWorker();
@@ -38,15 +44,13 @@ let pro = {
                 spawnWorker();
             }
         } else if (StationDefense.needBuildWall(room) && !MIN_CPU) {//如果需要修墙
-            if (room.level < 8 && (noWorker || EnergyOver)) { // 8前 级优先修墙 如果一个都没有就生一个（保证有人去修工地,如果能量够可以多生几个
+            if (room.level < 8 && (noWorker || EnergyOver)) { // 8前优先修墙，但受维修编制上限约束
                 spawnWorker();
             } else if (((room.storage.store[RESOURCE_ENERGY] > 180000) && noWorker) || EnergyOver) {
                 if (isSaveCpu) spawnHighLevelWorker();
                 else spawnWorker();
                 // spawnWorker();
             }
-        } else if ((room.storage.store[RESOURCE_ENERGY] - 350000) / 50000 > room.creeps("worker", false).length && room.controller.level == 8 && StationDefense.needBuildWall(room) && !MIN_CPU && !isSaveCpu) { //如果能量还是太多了，就拼命修墙
-            spawnWorker();
         }
 
         let minWorkerCnt = 0;

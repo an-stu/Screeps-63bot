@@ -27,6 +27,15 @@ let pro = {
         1: 5000, 2: 5000, 3: 5000, 4: 5000, 5: 5000, 6: 500000, 7: 5000000, 8: (Game.shard.name == "shard3" ? 300 : 150) * 1000000
     },
     HitsCPUSave: 100 * 1000000,
+    getRepairWorkerLimit(room) {
+        // Rampart work is intentionally bounded. A large storage used to turn
+        // every extra 50k energy into another Worker, which starved normal
+        // spawn traffic and made all of those repair creeps path every tick.
+        let energy = room.storage ? room.storage.store[RESOURCE_ENERGY] || 0 : 0;
+        if (room.level < 7 || energy < 500000) return 1;
+        if (room.level < 8 || energy < 1500000) return 2;
+        return 3;
+    },
     // wallListMap:{},
     needBuildWall(room) {
         if (!pro.needRepairWallMap[room.name]) return false;

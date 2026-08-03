@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.53.0 — Bounded rampart repair staffing
+
+### Optimized
+
+- Cap background construction and rampart-repair Workers at three per room.
+  Repair staffing now scales only from one to three at meaningful energy
+  thresholds, preventing large storage reserves from monopolizing Spawns and
+  creep CPU.
+
 ## v0.52.0 — PB target task snapshots
 
 ### Fixed

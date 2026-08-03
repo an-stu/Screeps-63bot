@@ -32,6 +32,7 @@ const teamRaL1 = fs.readFileSync(path.join(root, "modules/team_raL1.js"), "utf8"
 const strategyAtkL2 = fs.readFileSync(path.join(root, "modules/strategy_atkL2.js"), "utf8");
 const strategyClaim = fs.readFileSync(path.join(root, "modules/strategy_claim.js"), "utf8");
 const strategyLowLevel = fs.readFileSync(path.join(root, "modules/strategy_lowLevel.js"), "utf8");
+const strategyHighLevel = fs.readFileSync(path.join(root, "modules/strategy_highLevel.js"), "utf8");
 const stationObserver = fs.readFileSync(path.join(root, "modules/station_observer.js"), "utf8");
 const strategyPowerBank = fs.readFileSync(path.join(root, "modules/strategy_powerBank.js"), "utf8");
 const strategyDeposits = fs.readFileSync(path.join(root, "modules/strategy_deposits.js"), "utf8");
@@ -185,6 +186,8 @@ assert.ok(prototypeRoom.includes("getStructures"), "combat cost matrices must sh
 assert.ok(prototypeRoom.includes("_cpuHostileCreepCache") && !prototypeRoom.includes("this._hostileCreeps"), "tactical cache keys must not collide with engine Room internals");
 assert.ok(prototypeRoom.includes("Array.isArray(this._cpuHostileCreepCache)"), "Room tactical caches must tolerate the structure-cache prototype Proxy");
 assert.ok(stationDefense.includes("checkSafeMode(room, hostiles)"), "safe-mode detection must reuse the immediate hostile scan");
+assert.ok(stationDefense.includes("getRepairWorkerLimit(room)") && stationDefense.includes("return 3;"), "rampart repair workers must have a bounded room-level cap");
+assert.ok(strategyHighLevel.includes("workerLimit") && !strategyHighLevel.includes("(room.storage.store[RESOURCE_ENERGY] - 250000) / 50000"), "high-stock rooms must not scale worker spawning without limit");
 assert.ok(warTeamCore.includes("hostileCreepsByRoom") && warTeamCore.includes("hostileTowersByRoom"), "team damage calculation must share tactical room scans");
 assert.ok(warTeamCore.includes("hasSpawnList(flag)") && warTeamCore.includes("Removing invalid spawnTeam flag"), "invalid spawn-team flags must be removed before reading spawnList");
 assert.ok(warTeamCore.includes("SPAWN_TEAM_TTL") && warTeamCore.includes("Removing expired spawnTeam flag"), "spawn-team queues expire instead of becoming permanent CPU work");
