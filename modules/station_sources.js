@@ -320,26 +320,46 @@ Creep.prototype.registerStationSourcesDefenseOutRoom = function () {
 Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     let task = this.lastTask();
     let target = this.lastTaskObj();
+    let data = task.mineRoom && Memory.rooms[task.mineRoom]
+        && Memory.rooms[task.mineRoom][pro.stationName]
+        && Memory.rooms[task.mineRoom][pro.stationName][task.stationId];
+    let complete = !data || pro.outerRoadComplete(data);
+    // 到达端点：修完（或非 keepBuilding 模式）则结束；未修完则掉头继续修
     if (this.pos.isNearTo(target) || this.store[RESOURCE_ENERGY] == 0) {
         this.popTask();
+        if (task.keepBuilding && this.store[RESOURCE_ENERGY] > 0 && data) {
+            // 确定完成后再退出：端点强制刷新完成度检查
+            complete = pro.outerRoadComplete(data, true);
+            if (!complete) {
+                let nextTarget = task.roadDir == 1 ? pro.getOuterMineTarget(data) : this.mainRoom().storage;
+                if (nextTarget) this.addTask(UtilsTask.task(nextTarget, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                    mineRoom: task.mineRoom,
+                    stationId: task.stationId,
+                    keepBuilding: true,
+                    roadDir: task.roadDir == 1 ? -1 : 1,
+                }));
+            }
+        }
         this.execLastTask();
         return;
     }
     let canBuild = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
-    // 规划路径：一次性寻路得到固定路线，沿路径修路而非走到哪修到哪
-    let data = task.mineRoom && Memory.rooms[task.mineRoom]
-        && Memory.rooms[task.mineRoom][pro.stationName]
-        && Memory.rooms[task.mineRoom][pro.stationName][task.stationId];
-    let roadPath = data && data.roadPath;
+    // 规划路径：固定路线修路，路点索引增量推进（O(1)，不每 tick 全路径扫描）
+    let roadPath = data && pro.getOuterRoadPath(data);
     if (roadPath && roadPath.length) {
-        let nearest = pro.nextRoadPathIndex(roadPath, this.pos);
-        let index = nearest.dist == 0 ? nearest.index + 1 : nearest.index;
-        if (index >= roadPath.length - 1) {
-            this.popTask();
-            this.execLastTask();
-            return;
+        let pathIndex = task.pathIndex;
+        if (pathIndex == undefined) pathIndex = task.roadDir == 1 ? 0 : roadPath.length - 1;
+        let wp = roadPath[Math.max(0, Math.min(pathIndex, roadPath.length - 1))];
+        let dist = wp.roomName == this.pos.roomName ? Math.max(Math.abs(wp.x - this.pos.x), Math.abs(wp.y - this.pos.y)) : 999;
+        if (dist > 2) {
+            // 偏离路径（或路径刚重算）：重新定位到最近路点
+            pathIndex = pro.nextRoadPathIndex(roadPath, this.pos).index;
+        } else if (dist <= 1) {
+            pathIndex += task.roadDir; // 到达当前路点，前进
         }
-        let wp = roadPath[index];
+        pathIndex = Math.max(0, Math.min(pathIndex, roadPath.length - 1));
+        task.pathIndex = pathIndex;
+        wp = roadPath[pathIndex];
         // 修当前脚下的路
         if (canBuild && !this.pos.isBorder()) {
             let blocked = this.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType != STRUCTURE_ROAD);
@@ -353,7 +373,8 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
                     let cs = this.pos.lookFor(LOOK_CONSTRUCTION_SITES).filter(e => e.structureType == STRUCTURE_ROAD).head();
                     if (cs) {
                         this.$build(cs)
-                    } else if (this.ticksToLive > 300 && !pro.roadBlockedByBlueprint(this.pos)) {
+                    } else if (this.ticksToLive > 300 && !pro.roadBlockedByBlueprint(this.pos)
+                        && !this.pos.lookFor(LOOK_CONSTRUCTION_SITES).length) {
                         this.pos.createConstructionSite(STRUCTURE_ROAD)
                     }
                 }
@@ -363,7 +384,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         if (code == ERR_NO_PATH || code == ERR_NO_BODYPART) {
             // 应急：路径不可达（被建筑堵死等），失效缓存退回旧逻辑
             if (data) {
-                delete data.roadPath;
+                delete data.roadPathStr;
                 delete data.roadPathTick;
             }
             this.moveTo(target, { visualizePathStyle: { stroke: '#fffa00' } })
@@ -437,11 +458,21 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         }
     }
     if (this.store[RESOURCE_ENERGY] * 2 > this.store.getCapacity(RESOURCE_ENERGY)) {
-        let roadTask = [
-            UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
-            UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, { mineRoom: task.roomName, stationId: task.id }) //想致富先修路
-        ]
-        this.addTask(roadTask);
+        let data = task.roomName && task.id
+            ? (Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
+                && Memory.rooms[task.roomName][pro.stationName][task.id]) : undefined;
+        if (data && !pro.outerRoadComplete(data)) {
+            // 道路未修好：只修路不搬运，沿路径来回修整直到完整
+            this.addTask(UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                mineRoom: task.roomName, stationId: task.id, keepBuilding: true, roadDir: 1,
+            }));
+        } else {
+            let roadTask = [
+                UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
+                UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, { mineRoom: task.roomName, stationId: task.id }) //想致富先修路
+            ]
+            this.addTask(roadTask);
+        }
         // this.execLastTask();
     }
 }
@@ -549,10 +580,11 @@ let pro = {
     },
     /**
      * 外矿修路路径：从矿区容器到主房间 storage 一次性寻路，
-     * 主房间按蓝图路网走（规划的其他建筑不可走），结果缓存 1000 tick
+     * 主房间按蓝图路网走（规划的其他建筑不可走），结果以 serializePath
+     * 紧凑序列化存储，1000 tick 重算一次
      */
     ensureOuterRoadPath(data, spawnRoom) {
-        if (data.roadPath && data.roadPathTick && Game.time - data.roadPathTick < 1000) return data.roadPath;
+        if (data.roadPathStr && data.roadPathTick && Game.time - data.roadPathTick < 1000) return pro.getOuterRoadPath(data);
         let from = Game.getObjectById(data.container);
         from = from ? from.pos : new RoomPosition(data.x, data.y, data.roomName);
         let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
@@ -596,11 +628,29 @@ let pro = {
             },
         });
         if (ret && ret.path && ret.path.length > 1) {
-            data.roadPath = ret.path.map(p => ({ x: p.x, y: p.y, roomName: p.roomName }));
+            data.roadPathStr = Room.serializePath(ret.path);
             data.roadPathTick = Game.time;
-            return data.roadPath;
+            delete data.roadPath;
+            return pro.getOuterRoadPath(data);
         }
         return undefined;
+    },
+    /** 读取外矿路径：反序列化结果按 tick 全局缓存，多只爬共享 */
+    getOuterRoadPath(data) {
+        let str = data.roadPathStr;
+        if (!str && data.roadPath) {
+            // 旧格式（对象数组）迁移为序列化字符串
+            try { str = data.roadPathStr = Room.serializePath(data.roadPath.map(p => new RoomPosition(p.x, p.y, p.roomName))); } catch (e) {}
+            delete data.roadPath;
+        }
+        if (!str) return undefined;
+        let cache = global._outerRoadPathCache = global._outerRoadPathCache || {};
+        let key = data.roomName + ":" + data.id;
+        let c = cache[key];
+        if (!c || c.tick != Game.time) {
+            cache[key] = c = { tick: Game.time, path: Room.deserializePath(str) };
+        }
+        return c.path;
     },
     /** 路径上离当前位置最近的路点 */
     nextRoadPathIndex(roadPath, pos) {
@@ -616,6 +666,32 @@ let pro = {
         }
         return { index: best, dist: bestDist };
     },
+    /** 矿区目标（修路端点）：容器优先，否则源点 */
+    getOuterMineTarget(data) {
+        let container = Game.getObjectById(data.container);
+        return container ? container : new RoomPosition(data.x, data.y, data.roomName);
+    },
+    /**
+     * 外矿道路是否完整：路径上每个可修路的位置都已有 road。
+     * 每 10 tick 检查一次并缓存；force 强制刷新；有房间不可见时视为未完成（不搬运）。
+     */
+    outerRoadComplete(data, force) {
+        if (!force && data.roadCompleteTick && Game.time - data.roadCompleteTick < 10) return data.roadComplete;
+        data.roadCompleteTick = Game.time;
+        let path = pro.getOuterRoadPath(data);
+        if (!path || !path.length) { data.roadComplete = false; return false; }
+        for (let p of path) {
+            let room = Game.rooms[p.roomName];
+            if (!room) { data.roadComplete = false; return false; }
+            let structures = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
+            if (structures.find(s => s.structureType == STRUCTURE_ROAD)) continue; // 已有路
+            if (structures.find(s => s.structureType != STRUCTURE_ROAD)) continue; // 被建筑占位（容器等），无需修路
+            data.roadComplete = false;
+            return false;
+        }
+        data.roadComplete = true;
+        return true;
+    },
     /** 蓝图保护：该位置规划了非道路建筑则不修路 */
     roadBlockedByBlueprint(pos) {
         let room = Game.rooms[pos.roomName];
@@ -630,6 +706,46 @@ let pro = {
             }
         }
         return room._plannedBlockedSet.has(pos.x + ":" + pos.y);
+    },
+    /**
+     * 外矿道路维护：只保留路径上的一条路，删除历史遗留的多余道路
+     * - 矿区房间：删除所有不在路径上的己方 road（该房间没有蓝图，路都是我们建的）
+     * - 主房间：只删除紧邻路径走廊（range<=2）且不在蓝图路网里的己方 road，
+     *   避免误删通向其他建筑/其他外矿的路
+     */
+    maintainOuterRoads(data, spawnRoom) {
+        if (data.lastRoadMaintain && Game.time - data.lastRoadMaintain < 100) return;
+        data.lastRoadMaintain = Game.time;
+        let path = pro.getOuterRoadPath(data);
+        if (!path || !path.length) return;
+        let pathRoads = new Set();
+        let pathTilesByRoom = {};
+        path.forEach(p => {
+            pathRoads.add(p.roomName + ":" + p.x + ":" + p.y);
+            (pathTilesByRoom[p.roomName] = pathTilesByRoom[p.roomName] || []).push(p);
+        });
+        let mineRoomName = data.roomName;
+        [mineRoomName, spawnRoom.name].forEach(roomName => {
+            let room = Game.rooms[roomName];
+            if (!room) return;
+            let plannedRoads = new Set();
+            let structMap = room.memory && room.memory.structMap;
+            if (structMap) {
+                pro.structMapPositions(structMap.road).forEach(p => plannedRoads.add((p.x != undefined ? p.x : p[0]) + ":" + (p.y != undefined ? p.y : p[1])));
+            }
+            let pathTiles = pathTilesByRoom[roomName];
+            let isMainRoom = roomName == spawnRoom.name;
+            room.getStructures().filter(s => s.structureType == STRUCTURE_ROAD && s.my).forEach(road => {
+                let key = road.pos.roomName + ":" + road.pos.x + ":" + road.pos.y;
+                if (pathRoads.has(key)) return; // 路径上的路保留
+                if (plannedRoads.has(road.pos.x + ":" + road.pos.y)) return; // 蓝图里的路保留
+                if (isMainRoom && pathTiles) {
+                    let near = pathTiles.some(t => Math.max(Math.abs(t.x - road.pos.x), Math.abs(t.y - road.pos.y)) <= 2);
+                    if (!near) return; // 远离走廊的路不动
+                }
+                road.destroy();
+            });
+        });
     },
     generatorOuterHarDefenseTask(data) {
         return [
