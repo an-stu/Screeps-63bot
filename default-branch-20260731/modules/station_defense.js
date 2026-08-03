@@ -28,13 +28,19 @@ let pro = {
     },
     HitsCPUSave: 100 * 1000000,
     getRepairWorkerLimit(room) {
-        // Rampart work is intentionally bounded. A large storage used to turn
-        // every extra 50k energy into another Worker, which starved normal
-        // spawn traffic and made all of those repair creeps path every tick.
+        // Rampart work is intentionally sparse near the target. Once a wall
+        // reaches the 99.9% maintenance threshold, no replacement is made;
+        // the remaining worker expires naturally and a later small deficit
+        // starts one new maintenance worker. This avoids permanent repair
+        // traffic just to keep RCL8 ramparts near 300M hits.
         let energy = room.storage ? room.storage.store[RESOURCE_ENERGY] || 0 : 0;
-        if (room.level < 7 || energy < 500000) return 1;
-        if (room.level < 8 || energy < 1500000) return 2;
-        return 3;
+        let wall = pro.needRepairWallMap[room.name]
+            && Game.getObjectById(pro.needRepairWallMap[room.name].head());
+        let target = pro.levelWallHits[room.level] || 0;
+        if (!wall || !target || energy < 1000000) return 1;
+        // Two workers are reserved for a material defensive deficit, never
+        // merely because the storage is large. Three are construction-only.
+        return wall.hits < target * 0.6 ? 2 : 1;
     },
     // wallListMap:{},
     needBuildWall(room) {

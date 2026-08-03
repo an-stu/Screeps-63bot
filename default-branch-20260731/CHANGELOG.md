@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.54.0 — Sparse near-cap rampart maintenance
+
+### Optimized
+
+- Near the RCL8 300M rampart target, maintain only one repair Worker and let
+  it expire once the threshold is reached. Two Workers are allowed only when
+  the weakest defense falls below 60% of its target.
+- Construction staffing now grows with site count: one for small batches, two
+  after five sites, and three only after ten sites.
+
 ## v0.53.0 — Bounded rampart repair staffing
 
 ### Optimized

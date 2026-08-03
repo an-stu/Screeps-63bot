@@ -28,7 +28,9 @@ let pro = {
         // to consume every idle Spawn in a high-stock room. Keep them bounded
         // so critical creeps and CPU remain available.
         let workerLimit = room.constructionSite.length
-            ? 3
+            // More builders are useful only for a genuinely large batch of
+            // sites. Small incremental planner sites stay with one Worker.
+            ? Math.min(3, 1 + Math.floor((room.constructionSite.length - 1) / 5))
             : StationDefense.getRepairWorkerLimit(room);
         let EnergyOver = workerCount < workerLimit;
         let noWorker = workerCount < 1;
