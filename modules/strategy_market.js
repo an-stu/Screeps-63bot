@@ -473,28 +473,35 @@ let pro = {
     }
     
     // 计算价格
+    // 获取房间中该资源的存量
+    let resCnt = StationCarry.roomMassStoreCnt(room, resType);
     let maxPrice;
     if (resType == RESOURCE_ENERGY) {
-        // 获取所有购买能量订单，取最大单价-2
+        // 能量卖价：超量越多折扣越大（最高 25%），但设硬底价防止与别人互相破价
         let buyOrders = Game.market.getAllOrders({type: ORDER_BUY, resourceType: RESOURCE_ENERGY});
-        
-        if (buyOrders.length > 0) {
-            // 找出最高出价
-            let highestPrice = _.max(buyOrders, 'price').price;
-            maxPrice = highestPrice - 5;
-            // 确保价格不低于2
-            maxPrice = Math.max(maxPrice, 2);
-        } else {
-            // 如果没有购买订单，使用历史价格
-            maxPrice = StrategyMarketPrice.getResTypeHistory(resType) || 0.1;
-        }
+        // 他人卖单（排除自己的订单），用于"贴单不砸盘"
+        let sellOrders = Game.market.getAllOrders({type: ORDER_SELL, resourceType: RESOURCE_ENERGY})
+            .filter(e => !Game.market.orders[e.id]);
+        let historyAvg = StrategyMarketPrice.getResTypeHistory(resType) || 0;
+
+        // 参考价：市场最高买价优先，无买价时用历史均价
+        let reference = buyOrders.length > 0 ? _.max(buyOrders, 'price').price : historyAvg;
+        // 他人最低卖价（若有）
+        let lowestSell = sellOrders.length > 0 ? sellOrders.minBy(e => e.price).price : undefined;
+
+        // 超量越多折扣越大（最高 25%），超量 200 万时打满折扣
+        let excess = Math.max(0, resCnt - 400000);
+        let discount = Math.min(0.25, excess / 2000000 * 0.25);
+        maxPrice = Math.max(reference * (1 - discount), 0.001);
+
+        // 不主动破价：计算价低于他人最低卖单时贴单价，不做砸盘者
+        if (lowestSell !== undefined && maxPrice < lowestSell) maxPrice = lowestSell;
+        // 硬底价：不低于历史均价的 85%（且不低于 2），防止双方互踩导致价格无限下跌
+        maxPrice = Math.max(maxPrice, historyAvg * 0.85, 2);
     } else {
         // 其他资源使用历史价格
         maxPrice = StrategyMarketPrice.getResTypeHistory(resType) || 0.1;
     }
-    
-    // 获取房间中该资源的存量
-    let resCnt = StationCarry.roomMassStoreCnt(room, resType);
     
     // 检查是否需要创建/修改订单
     if (resCnt >= 600000) {

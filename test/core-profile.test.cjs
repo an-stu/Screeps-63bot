@@ -116,7 +116,7 @@ assert.equal(new Set(controllerSigns).size, controllerSigns.length, "controller 
 assert.ok(controllerSigns.every(sign => !sign.includes("—") && sign.length <= 100), "controller signs must omit authors and fit the API limit");
 assert.ok(stationUpgrade.includes("Memory.controllerSignAssignments") && stationUpgrade.includes("used.has(sign)"), "owned rooms must reserve unique controller signs");
 assert.ok(prototypeCreep.includes("StationUpgrade.trySignController(this)"), "all owned rooms need a creep-independent signing hook");
-assert.ok(main.includes(".filter(shouldRunCreep)"), "creep execution must apply the safe adaptive throttle");
+assert.ok(main.includes("&& shouldRunCreep(e)"), "creep execution must apply the safe adaptive throttle");
 assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
 assert.ok(mainMount.includes("observer: true"), "observer scanning must be switchable without another upload");
 assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");

@@ -23,7 +23,7 @@ Store.prototype.getLabReactionEmpty = function () {
 
 Store.prototype.getLabReactionCnt = function () {
     let cnt = 0
-    for(let k in this){
+    for(let k of Object.keys(this)){
         if(this[k]>0&&k!=RESOURCE_ENERGY){
             cnt += this[k]
         }
@@ -32,7 +32,7 @@ Store.prototype.getLabReactionCnt = function () {
 }
 
 Store.prototype.getLabReactionResType = function () {
-    for(let k in this){
+    for(let k of Object.keys(this)){
         if(this[k]>0&&k!=RESOURCE_ENERGY){
             return k
         }
@@ -42,7 +42,7 @@ Store.prototype.getLabReactionResType = function () {
 
 Store.prototype.getResTypeList = function () {
     let t = []
-    for(let k in this){
+    for(let k of Object.keys(this)){
         if(this[k]>0){
             t.push(k)
         }
@@ -52,7 +52,7 @@ Store.prototype.getResTypeList = function () {
 
 Store.prototype.getAllResTypeCount = function () {
     let sum = 0
-    for(let k in this){
+    for(let k of Object.keys(this)){
         if(this[k]>0){
             sum += this[k]
         }

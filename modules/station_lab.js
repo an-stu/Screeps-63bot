@@ -397,12 +397,13 @@ let pro={
         return obj["centerLabs"].length==2&&obj["otherLabs"].length
     },
     generatorOperatorBoostTask (room){
-        let boostLabMap = room.memory[pro.stationName].boostLabMap; // 使用中的lab
+        let stationMemory = room.memory[pro.stationName];
+        let boostLabMap = stationMemory && stationMemory.boostLabMap; // 使用中的lab
         // if(room.name =="W5N3")log(room.carryLabs)
         let tasks = [];
         if(!room._boost_requires||!boostLabMap||room.carryLabs)return tasks;
         for(let resType in room._boost_requires){
-            for(let v of boostLabMap[resType]){
+            for(let v of (boostLabMap[resType]||[])){
                 let lab = Game.getObjectById(v)
                 let currentResType = lab.store.getLabReactionResType()
                 if(currentResType&&currentResType!=resType) { // 清理垃圾
@@ -413,7 +414,7 @@ let pro={
         }
         if(tasks.length)return tasks;
         for(let resType in room._boost_requires){
-            for(let v of boostLabMap[resType]){
+            for(let v of (boostLabMap[resType]||[])){
                 let lab = Game.getObjectById(v)
                 let fillAbleCnt = 3000 - lab.store.getUsedCapacity(resType)
                 if(fillAbleCnt){

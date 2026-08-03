@@ -74,8 +74,7 @@ let pro = {
             phaseStart = Game.cpu.getUsed();
         }
 
-        let activeCreeps = (!MIN_CPU ? objects.creeps : objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0))
-            .filter(shouldRunCreep);
+        let activeCreeps = objects.creeps.filter(e => (!MIN_CPU || ROLE_PRIORITY[e.memory.role] > 0) && shouldRunCreep(e));
         if (cpuProfile) {
             cpuProfile.unitRoles = {};
             HelperError.runEachProfiled(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()), e => "power:" + (e.memory.role || "unknown"), cpuProfile.unitRoles);

@@ -344,11 +344,11 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
 Creep.prototype.harvestEnergyOuterCarry = function () {
     let task = this.headTask();
     let rm = Memory.rooms[this.headTask().roomName];
-    if (rm && rm[pro.stationName][this.headTask().id]) {
+    if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
         if (task.roomName != this.room.name) {
             this.goTo(task);
         } else {
-            sm = rm[pro.stationName][this.headTask().id];
+            let sm = rm[pro.stationName][this.headTask().id];
             let harCreep = Game.getObjectById(sm["creeps"][0])
             let container = Game.getObjectById(sm[STRUCTURE_CONTAINER]);
             if (harCreep && container && harCreep.pos.isNearTo(container) || this.pos.isBorder()) { // 挖矿爬就位才动，避免堵路 ，如果自己在边界的地方也不能停下，两个在一起直接堵路
@@ -372,13 +372,15 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         }
     }
 
-    let tombstone = this.pos.lookFor(LOOK_TOMBSTONES).filter(e => e.store[RESOURCE_ENERGY] > 0).head();
-    if (tombstone) {
-        this.withdraw(tombstone, RESOURCE_ENERGY)
-    }
-    let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
-    if (dropEnergy) {
-        this.pickup(dropEnergy);
+    if (this.ticksToLive % 4 == 0) {
+        let tombstone = this.pos.lookFor(LOOK_TOMBSTONES).filter(e => e.store[RESOURCE_ENERGY] > 0).head();
+        if (tombstone) {
+            this.withdraw(tombstone, RESOURCE_ENERGY)
+        }
+        let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
+        if (dropEnergy) {
+            this.pickup(dropEnergy);
+        }
     }
     if (this.store[RESOURCE_ENERGY] * 2 > this.store.getCapacity(RESOURCE_ENERGY)) {
         let task = [
