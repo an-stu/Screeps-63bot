@@ -597,8 +597,13 @@ let pro = {
         let from = Game.getObjectById(data.container);
         from = from ? from.pos : new RoomPosition(data.x, data.y, data.roomName);
         let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
-        if (!from || !to) return undefined;
-        let ret = PathFinder.search(from, to, {
+        if (!from || !to) {
+            data.roadPathError = "no endpoints: from=" + (from || "none") + " to=" + (to || "none") + " tick=" + Game.time;
+            return undefined;
+        }
+        let ret;
+        try {
+            ret = PathFinder.search(from, to, {
             plainCost: 1,
             swampCost: 5,
             maxRooms: 4,
@@ -636,12 +641,19 @@ let pro = {
                 return cm;
             },
         });
+        } catch (e) {
+            data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
+            return undefined;
+        }
         if (ret && ret.path && ret.path.length > 1) {
             data.roadPathStr = pro.serializeOuterRoadPath(ret.path);
             data.roadPathTick = Game.time;
             delete data.roadPath;
+            delete data.roadPathError;
             return pro.getOuterRoadPath(data);
         }
+        data.roadPathError = "no path: ret=" + (ret ? "pathLen=" + (ret.path || []).length + " incomplete=" + ret.incomplete + " ops=" + ret.ops : "undefined")
+            + " from=" + from.roomName + ":" + from.x + "," + from.y + " to=" + to.roomName + ":" + to.x + "," + to.y + " tick=" + Game.time;
         return undefined;
     },
     /** 读取外矿路径：反序列化结果按 tick 全局缓存，多只爬共享 */
