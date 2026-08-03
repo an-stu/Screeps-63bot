@@ -211,6 +211,7 @@ assert.ok(cpuHelper.includes("room && room.my") && cpuHelper.includes("lastRoomP
 assert.ok(strategyPowerBank.includes("recordMissionDecision") && strategyPowerBank.includes("skip:insufficient-decay"), "PB observation must retain one compact mission-decision diagnostic");
 assert.ok(strategyPowerBank.includes("Memory.pendingPowerBanks") && managerFlags.includes("pendingPowerBanks"), "PB Flag data must survive createFlag's delayed visibility");
 assert.ok(strategyPowerBank.includes("let MIN_DECAY = 3400"), "PB launches must accept viable 3,400-tick banks");
+assert.ok(strategyPowerBank.includes("!Game.flags[flagName]") && !strategyPowerBank.includes("delete Memory.flags[flagName]"), "PB Flag creation must trust visible Flags even when createFlag returns undefined");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
 assert.ok(marketPrice.includes('console.logUnsafe(html)') && marketPrice.includes("printCommodityAnalysis"), "market HTML reports must use the rich console API");
 

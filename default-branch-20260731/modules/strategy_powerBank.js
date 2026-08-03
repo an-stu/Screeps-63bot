@@ -315,9 +315,11 @@ let pro = {
         }
         if (!Game.flags[flagName]) {
             let result = (new RoomPosition(powerBankData.x, powerBankData.y, powerBankData.roomName)).createFlag(flagName);
-            if (typeof result != "string") {
-                delete Memory.flags[flagName];
-                pro.recordMissionDecision(targetRoomName, powerBankData, "skip:flag-create-" + result, spawnRoomName);
+            // Some shard runtimes create the Flag immediately but return
+            // undefined instead of its name. Game.flags is authoritative;
+            // otherwise leave the pending record intact for the next tick.
+            if (typeof result != "string" && !Game.flags[flagName]) {
+                pro.recordMissionDecision(targetRoomName, powerBankData, "mission-pending", spawnRoomName);
                 return;
             }
         }

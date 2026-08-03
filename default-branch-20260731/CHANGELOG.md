@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.58.0 — Correct Power Bank Flag creation result
+
+### Fixed
+
+- Treat a visible newly-created PB Flag as success even when this shard's
+  `createFlag` call returns `undefined`. The prior string-only check removed
+  its mission Memory and explains the E50S42 discovery failure.
+
 ## v0.57.0 — Wider Power Bank launch window
 
 ### Changed
