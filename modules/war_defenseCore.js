@@ -25,7 +25,7 @@ Creep.prototype.defenseAttacker=function () {
     // let healer = flag&&flag.memory.healer
     // healer = Game.getObjectById(healer)
     // this.room.tower.forEach(e=>e.heal(this))
-    if(flag && (flag.memory.changeTime||0)+300<Game.time && this.pos!=flag.pos){
+    if(flag && (flag.memory.changeTime||0)+300<Game.time && !this.pos.isEqualTo(flag.pos)){
         flag.setPosition(this.pos)
         flag.memory.changeTime=Game.time
     }
@@ -107,7 +107,7 @@ let pro={
 
             if (!room.find(FIND_HOSTILE_CREEPS).length&&(flag.memory.lastHostileTime||0)+200>Game.time)
                 return flag.remove();
-            flag.lastHostileTime = Game.time
+            flag.memory.lastHostileTime = Game.time
 
             if((flag.memory.lastSpawnTime||0)+300>Game.time)return;
 

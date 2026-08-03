@@ -174,7 +174,7 @@ assert.ok(mainMount.includes("autoPlanner: true") && mainMount.includes("visual:
 assert.ok(main.includes("Game.cpu.bucket >= 6000"), "optional auto-planning must keep the bucket safety guard");
 assert.ok(!marketPrice.includes("pro.updatePrice()\nglobal.StrategyMarketPrice"), "market pricing must not run during script initialization");
 assert.ok(market.includes("MARKET_SELL_PRICE_TTL = 1000"), "commodity profit prices must be cached across ticks");
-assert.ok(market.includes("MARKET_ORDER_TTL = 20"), "market order queries must be cached across ticks");
+assert.ok(market.includes("MARKET_ORDER_TTL = 100"), "market order queries must be cached across ticks");
 assert.ok(market.includes(".commodities;"), "market strategy must consume the pricing result payload correctly");
 assert.ok(market.includes("MARKET_MAX_COMMODITY_DEAL") && market.includes("MARKET_MIN_COMMODITY_DEAL"), "commodity sales must use bounded economical deal sizes");
 assert.ok(market.includes("item.level > 0") && market.includes("item.profitMargin >= minimumMargin"), "automatic sales must select profitable higher-level commodities");

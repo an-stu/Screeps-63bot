@@ -51,8 +51,9 @@ Creep.prototype.testEnd = function(){
 Creep.prototype.moveCrossShardByPath = function(){
 
     this.autoHeal()
-    this.rangedAttack(this.pos.findClosestByRange(FIND_HOSTILE_CREEPS))
-    this.attack(this.pos.findClosestByRange(FIND_HOSTILE_CREEPS))
+    let hostile = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS)
+    this.rangedAttack(hostile)
+    this.attack(hostile)
 
     let path = this.lastTask().path
     let task = this.lastTask()

@@ -30,8 +30,9 @@ Creep.prototype.cleanBuild=function () {
         if(struct)this.addTaskAndExec(UtilsTask.task(struct,"collectStructEnergy"))
     }
     else{
-        if(this.ticksToLive<600&&mainRoom&&mainRoom.find(FIND_MY_SPAWNS).filter(e=>e.my&&!e.spawning&&!e._renew_used).length){
-            let spawn = mainRoom.find(FIND_MY_SPAWNS).filter(e=>e.my&&!e.spawning).head()
+        let spawns = mainRoom && mainRoom.find(FIND_MY_SPAWNS);
+        if(this.ticksToLive<600&&mainRoom&&spawns.filter(e=>e.my&&!e.spawning&&!e._renew_used).length){
+            let spawn = spawns.filter(e=>e.my&&!e.spawning).head()
             if(spawn)return this.addTaskAndExec(UtilsTask.task(spawn,"renewWithEnergy"));
         }
         let cs = this.pos.findClosestByPath(FIND_MY_CONSTRUCTION_SITES,{filter:e=>e,range:3,ignoreCreeps:true})

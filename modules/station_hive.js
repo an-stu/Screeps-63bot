@@ -33,8 +33,9 @@ Creep.prototype.fillHive = function () {
     // Owned spawn/extension targets are already cached by room. Range
     // selection is sufficient here because BetterMove handles the actual
     // route, avoiding a PathFinder search every time a carrier gets work.
-    let targets = room.spawn.concat(room.extension).filter(e =>
-        e.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !room.hiveEnergySendingUsed[e.id]);
+    if(!room._hiveTargetsCache)room._hiveTargetsCache = room.spawn.concat(room.extension).filter(e =>
+        e.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+    let targets = room._hiveTargetsCache.filter(e => !room.hiveEnergySendingUsed[e.id]);
     let target = this.pos.findClosestByRange(targets);
     if (target) {
         room.hiveEnergySendingUsed[target.id] = true

@@ -111,6 +111,7 @@ let pro = {
         if (room.spawnFailure) return null;
         if (room.mineral.ticksToRegeneration > 0) return; // 如果已经生了，就不生了
         let data = room.memory[StationMineral.stationName]
+        if(!data||!data["creeps"])return;// update 尚未执行时（新占领房间）直接返回
         // 如果两个多个连在一起死掉一个
         let allCreeps = data["creeps"].map(e => Game.getObjectById(e)).filter(e => e && e.ticksToLive)
         allCreeps.forEach(a => {

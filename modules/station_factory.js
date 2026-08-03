@@ -353,7 +353,9 @@ let pro={
                         sm.lastCooldown = Game.time ;
                         sm.stat = STAT_CLEAR
                     }
-                }else if(code!=ERR_TIRED){
+                }else if(code==ERR_TIRED){
+                    sm.lastCooldown = Game.time + 20;// 冷却中，过 20 tick 再试，避免每 tick 空转
+                }else{
                     sm.stat = STAT_CLEAR
                 }
 

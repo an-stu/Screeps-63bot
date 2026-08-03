@@ -180,7 +180,7 @@ let spawn_pro = {
             if(flag.room&&flag.room.my&&ManageTeam.checkSquare(flag)&&Game.flags.targetRoom){
                 flag.setPosition(Game.flags.targetRoom.pos)
             }
-            ManageTeam.exec(flag)
+            ManageTeam.execCalTarget(flag)
             if (flag.memory.creeps) {
                 if (flag.memory.creeps.length == 4 && !flag.memory.creeps.find(id => Game.getObjectById(id))) {
                     flag.remove();
@@ -194,7 +194,7 @@ let spawn_pro = {
             if(flag.room&&flag.room.my&&ManageTeam.checkSquare(flag)&&Game.flags.targetRoom){
                 flag.setPosition(Game.flags.targetRoom.pos)
             }
-            ManageTeam.exec(flag)
+            ManageTeam.execCalTarget(flag)
             if (flag.memory.creeps) {
                 if (flag.memory.creeps.length == 2 && !flag.memory.creeps.find(id => Game.getObjectById(id))) {
                     flag.remove();

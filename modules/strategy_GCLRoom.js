@@ -31,7 +31,7 @@ Creep.prototype.GCLCenterCarrier = function(){
         this.memory.dontPullMe = true;
         if(this.ticksToLive<1200&&this.room.level>=6){
             let sps = this.pos.findInRange(FIND_MY_SPAWNS,1,{filter:e=>!e._renew})
-            sps.forEach(sp=>{if(sp.renewCreep(this)==OK){sp._renew==1}})
+            sps.forEach(sp=>{if(sp.renewCreep(this)==OK){sp._renew=1}})
         }
         let storage = this.room.storage
         let terminal = this.room.terminal
@@ -160,9 +160,10 @@ Creep.prototype.GCLUpgraderNoStorage = function(){
         if(this.ticksToLive<1495&&this.memory.renewAble){
             let renewCnt = (flag.memory.upgrader||[]).map(e=>Game.getObjectById(e)).filter(e=>e&&e.memory.renewAble).length
             let carrierBlock = flag.centerCarrier&&flag.centerCarrier.ticksToLive<200
-            if(!carrierBlock)this.pos.findInRange(FIND_MY_SPAWNS,1,{filter:e=>!e._renew}).take(renewCnt>=2?1:3)
+            if(!carrierBlock)this.pos.findInRange(FIND_MY_SPAWNS,1,{filter:e=>!e._renew})
                 .sort((a,b)=>b.pos.getRangeTo(flag.pos)-a.pos.getRangeTo(flag.pos))
-                .forEach(sp=>{if(sp.renewCreep(this)==OK){sp._renew==1}})
+                .take(renewCnt>=2?1:3)
+                .forEach(sp=>{if(sp.renewCreep(this)==OK){sp._renew=1}})
         }else if(this.memory.renewAble){
             let lab = flag.room.lab.head()
             if(lab)lab.boostCreep(this);
@@ -523,9 +524,9 @@ let pro = {
     upgraderRole:"GCLUpgrader",
     ClaimerRole:"GCLClaimer",
     exec (room) {
-        let flag = room.find(FIND_FLAGS).find(e=>e.getPrefix()=="GCLRoom")
+        let flag = room.flags("GCLRoom").head()
         let fromRoom = Game.rooms[flag.getRoomName()];
-        if(!fromRoom)console.log("命名错误,GCLRoom_{主房间,从哪里生爬的}_{PC/带有storage的(3M以上的)}")
+        if(!fromRoom){console.log("命名错误,GCLRoom_{主房间,从哪里生爬的}_{PC/带有storage的(3M以上的)}");return;}
         if((Game.time+fromRoom.hashCode())%3!=0)return;
         pro.createStructs(flag)
         pro.movePos(flag)

@@ -95,7 +95,7 @@ let ON_SALE = {};
 
 let allRoomRes = { updateTime: 0 }
 let MARKET_SELL_PRICE_TTL = 1000;
-let MARKET_ORDER_TTL = 20;
+let MARKET_ORDER_TTL = 100;
 let MARKET_MAX_COMMODITY_DEAL = 10000;
 let MARKET_MIN_COMMODITY_DEAL = 100;
 let sellPriceCache = {updateTime:-1e9,prices:{},bestCommodities:{}};
@@ -187,7 +187,7 @@ let pro = {
         let minOrder = undefined;
         let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
         for (let order of sellList) {
-            if (Game.market.dealed[order.id]) break;
+            if (Game.market.dealed[order.id]) continue;
             let energyNeed = Game.market.calcTransactionCost(order.amount, room.name, order.roomName);
             let totalPrice = energyNeed * energyPrice + order.amount * order.price;
             let price = totalPrice / order.amount;
@@ -251,7 +251,7 @@ let pro = {
             }
         })
         for (let roomName in Memory.market) {
-            if (!Game.rooms[roomName]) delete Game.rooms[roomName]
+            if (!Game.rooms[roomName]) delete Memory.market[roomName]
         }
         ManagerRooms.getNormalRoom().filter(e => !myRooms.has(e.name) && e.terminal).map(room => {
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY)
@@ -284,7 +284,7 @@ let pro = {
         let minOrder = undefined;
         let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
         for (let order of sellList) {
-            if (Game.market.dealed[order.id]) break;
+            if (Game.market.dealed[order.id]) continue;
             let energyNeed = Game.market.calcTransactionCost(order.amount, room.name, order.roomName);
             let totalPrice = energyNeed * energyPrice + order.amount * order.price;
             let price = totalPrice / order.amount;
@@ -364,9 +364,13 @@ let pro = {
         });
     },
     autoBuyMineral(resType) {
-        if (Game._resCnt === undefined) Game._resCnt = {};
-        if (Game._resCnt[resType] == null) Game._resCnt[resType] = ManagerRooms.getNormalRoom().map(e => StationCarry.roomMassStoreCnt(e, resType)).sum();
-        if (Game._resCnt[resType] >= ManagerRooms.getNormalRoom().length * 6000 + 10000) return;//如果资源有剩下就不买,从别的房间拿
+        // Game.* 每 tick 重置，缓存必须放在 global 并按 tick 校验
+        if (!global._resCnt) global._resCnt = { tick: -1 };
+        if (global._resCnt.tick != Game.time || global._resCnt[resType] == null) {
+            global._resCnt[resType] = ManagerRooms.getNormalRoom().map(e => StationCarry.roomMassStoreCnt(e, resType)).sum();
+            global._resCnt.tick = Game.time;
+        }
+        if (global._resCnt[resType] >= ManagerRooms.getNormalRoom().length * 6000 + 10000) return;//如果资源有剩下就不买,从别的房间拿
 
         let buyCnt = 6000
         let myRoomSet = ManagerRooms.getNormalRoom().map(e => e.name).toSet()
@@ -478,9 +482,9 @@ let pro = {
     let maxPrice;
     if (resType == RESOURCE_ENERGY) {
         // 能量卖价：超量越多折扣越大（最高 25%），但设硬底价防止与别人互相破价
-        let buyOrders = Game.market.getAllOrders({type: ORDER_BUY, resourceType: RESOURCE_ENERGY});
+        let buyOrders = pro.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_BUY);
         // 他人卖单（排除自己的订单），用于"贴单不砸盘"
-        let sellOrders = Game.market.getAllOrders({type: ORDER_SELL, resourceType: RESOURCE_ENERGY})
+        let sellOrders = pro.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_SELL)
             .filter(e => !Game.market.orders[e.id]);
         let historyAvg = StrategyMarketPrice.getResTypeHistory(resType) || 0;
 
@@ -566,6 +570,13 @@ let pro = {
     let sellPrice = pro.getOnSellPrice();
     let bestCommodities = sellPriceCache.bestCommodities || {};
     let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
+    // 交易成本只与距离、数量线性相关，同一目标房间按单位成本缓存一次
+    let txCostCache = {};
+    let txCost = function (amount, toRoom) {
+        let unit = txCostCache[toRoom];
+        if (unit === undefined) unit = txCostCache[toRoom] = Game.market.calcTransactionCost(100, room.name, toRoom) / 100;
+        return unit * amount;
+    };
     
     // 按利润率排序，优先卖出利润率高的商品
     let sortedCommodities = Object.keys(sellPrice)
@@ -596,7 +607,7 @@ let pro = {
             if (!order.amount || !order.roomName || Game.market.orders[order.id]) continue;
             let amount = Math.min(order.amount, available, MARKET_MAX_COMMODITY_DEAL);
             if (amount < MARKET_MIN_COMMODITY_DEAL) continue;
-            let energyNeed = Game.market.calcTransactionCost(amount, room.name, order.roomName);
+            let energyNeed = txCost(amount, order.roomName);
             let totalPrice = -energyNeed * energyPrice + amount * order.price;
             let price = totalPrice / amount;
 
@@ -613,13 +624,13 @@ let pro = {
                 room.terminal.store[resType],
                 MARKET_MAX_COMMODITY_DEAL
             );
-            let transactionEnergy = Game.market.calcTransactionCost(sellAmount, room.name, maxOrder.roomName);
+            let transactionEnergy = txCost(sellAmount, maxOrder.roomName);
             let terminalEnergy = room.terminal.store[RESOURCE_ENERGY] || 0;
             if (transactionEnergy > terminalEnergy && transactionEnergy > 0) {
                 sellAmount = Math.floor(sellAmount * terminalEnergy / transactionEnergy * 0.95);
             }
             if (sellAmount < MARKET_MIN_COMMODITY_DEAL) continue;
-            transactionEnergy = Game.market.calcTransactionCost(sellAmount, room.name, maxOrder.roomName);
+            transactionEnergy = txCost(sellAmount, maxOrder.roomName);
             bestPrice = (maxOrder.price * sellAmount - transactionEnergy * energyPrice) / sellAmount;
             if (bestPrice < maxPrice) continue;
             
@@ -646,8 +657,8 @@ let pro = {
                     let minPrice = 1e30;
                     let minOrder = undefined;
                     for (let order of sellList) {
-                        if (dealed[order.id]) break;
-                        let energyNeed = Game.market.calcTransactionCost(order.amount, room.name, order.roomName);
+                        if (dealed[order.id]) continue;
+                        let energyNeed = txCost(order.amount, order.roomName);
                         let totalPrice = energyNeed * energyPrice + order.amount * order.price;
                         let price = totalPrice / order.amount;
                         if (price < minPrice) {

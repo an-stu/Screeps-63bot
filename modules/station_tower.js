@@ -65,7 +65,7 @@ let pro={
 
                 if(injured){
                     tower.heal(injured)
-                    pro.lastUpdateMap[room.name]=0
+                    pro.lastUpdateMap[room.name]=1
                     return;
                 }
 
