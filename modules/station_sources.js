@@ -578,13 +578,22 @@ let pro = {
         if (Array.isArray(value)) return value;
         return [];
     },
+    /** 按房间分段 serializePath（serializePath 不支持跨房间路径） */
+    serializeOuterRoadPath(path) {
+        let rooms = {};
+        path.forEach(p => { (rooms[p.roomName] = rooms[p.roomName] || []).push(p); });
+        let parts = [];
+        for (let roomName in rooms) parts.push(roomName + ":" + Room.serializePath(rooms[roomName]));
+        return parts.join(";");
+    },
     /**
      * 外矿修路路径：从矿区容器到主房间 storage 一次性寻路，
-     * 主房间按蓝图路网走（规划的其他建筑不可走），结果以 serializePath
-     * 紧凑序列化存储，1000 tick 重算一次
+     * 主房间按蓝图路网走（规划的其他建筑不可走），结果按房间
+     * serializePath 紧凑序列化存储，1000 tick 重算一次
      */
     ensureOuterRoadPath(data, spawnRoom) {
-        if (data.roadPathStr && data.roadPathTick && Game.time - data.roadPathTick < 1000) return pro.getOuterRoadPath(data);
+        if (data.roadPathStr && data.roadPathStr.indexOf("undefined") < 0
+            && data.roadPathTick && Game.time - data.roadPathTick < 1000) return pro.getOuterRoadPath(data);
         let from = Game.getObjectById(data.container);
         from = from ? from.pos : new RoomPosition(data.x, data.y, data.roomName);
         let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
@@ -628,7 +637,7 @@ let pro = {
             },
         });
         if (ret && ret.path && ret.path.length > 1) {
-            data.roadPathStr = Room.serializePath(ret.path);
+            data.roadPathStr = pro.serializeOuterRoadPath(ret.path);
             data.roadPathTick = Game.time;
             delete data.roadPath;
             return pro.getOuterRoadPath(data);
@@ -638,9 +647,15 @@ let pro = {
     /** 读取外矿路径：反序列化结果按 tick 全局缓存，多只爬共享 */
     getOuterRoadPath(data) {
         let str = data.roadPathStr;
+        if (str && str.indexOf("undefined") >= 0) {
+            // 无效序列化（旧的多房间直接序列化格式），清除待重算
+            delete data.roadPathStr;
+            delete data.roadPathTick;
+            str = undefined;
+        }
         if (!str && data.roadPath) {
-            // 旧格式（对象数组）迁移为序列化字符串
-            try { str = data.roadPathStr = Room.serializePath(data.roadPath.map(p => new RoomPosition(p.x, p.y, p.roomName))); } catch (e) {}
+            // 旧格式（对象数组）迁移为按房间序列化字符串
+            try { str = data.roadPathStr = pro.serializeOuterRoadPath(data.roadPath); } catch (e) {}
             delete data.roadPath;
         }
         if (!str) return undefined;
@@ -648,7 +663,13 @@ let pro = {
         let key = data.roomName + ":" + data.id;
         let c = cache[key];
         if (!c || c.tick != Game.time) {
-            cache[key] = c = { tick: Game.time, path: Room.deserializePath(str) };
+            let path = [];
+            str.split(";").forEach(part => {
+                let idx = part.indexOf(":");
+                let roomName = part.slice(0, idx);
+                Room.deserializePath(part.slice(idx + 1)).forEach(p => path.push(new RoomPosition(p.x, p.y, roomName)));
+            });
+            cache[key] = c = { tick: Game.time, path: path };
         }
         return c.path;
     },
