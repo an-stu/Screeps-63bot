@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.57.0 — Wider Power Bank launch window
+
+### Changed
+
+- Lower the first-observation PB lifetime threshold from 4,200 to 3,400
+  ticks. This still reserves a 300-tick travel budget while accepting viable
+  nearby 2M-hit banks such as E50S42.
+
 ## v0.56.0 — Durable Power Bank Flag handoff
 
 ### Fixed
