@@ -5,10 +5,7 @@ let avoidRoom = ["W35N50", "W34N50", "W33N50", "W33N60", "W32N60", "W31N60", "E4
 let hostileRoom = ['W30N53', "W30N51", "W30N52", "W30N54", "W30N55", 'W36N50', 'W37N50']
 
 let MIN_POWER = 5000 // 少于这个量的不去挖
-// A 3,400-tick launch window leaves room for a 300-tick approach, one PB
-// attacker/healer cycle and carrier dispatch, while accepting viable banks
-// that the previous 4,200-tick gate rejected.
-let MIN_DECAY = 3400 // 第一次看到的消失时间少于此值不采集
+let MIN_DECAY = 4200 // 第一次看到的消失时间少于此值不采集
 let ROOM_MAX_POWER_CNT = 300000 // 房间抛瓦大于这么多就不挖了
 
 // 600/tick 伤害 *（150生爬+(2组 +1）) = 450 ，移动时间最高为300 ，750 * 600 = 450000

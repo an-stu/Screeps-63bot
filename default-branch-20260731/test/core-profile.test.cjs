@@ -210,8 +210,10 @@ assert.ok(cpuHelper.includes("recordProfile(profile)") && cpuHelper.includes("pr
 assert.ok(cpuHelper.includes("room && room.my") && cpuHelper.includes("lastRoomPrune"), "CPU telemetry must ignore observer-only room samples and prune old snapshots");
 assert.ok(strategyPowerBank.includes("recordMissionDecision") && strategyPowerBank.includes("skip:insufficient-decay"), "PB observation must retain one compact mission-decision diagnostic");
 assert.ok(strategyPowerBank.includes("Memory.pendingPowerBanks") && managerFlags.includes("pendingPowerBanks"), "PB Flag data must survive createFlag's delayed visibility");
-assert.ok(strategyPowerBank.includes("let MIN_DECAY = 3400"), "PB launches must accept viable 3,400-tick banks");
+assert.ok(strategyPowerBank.includes("let MIN_DECAY = 4200"), "PB launches must reserve the safe 4,200-tick lifetime window");
 assert.ok(strategyPowerBank.includes("!Game.flags[flagName]") && !strategyPowerBank.includes("delete Memory.flags[flagName]"), "PB Flag creation must trust visible Flags even when createFlag returns undefined");
+assert.ok(managerRooms.indexOf("let powerBankActive") < managerRooms.indexOf("StrategyHighLevel.exec(room)"), "PB healer queues must dispatch before background room spawning");
+assert.ok(managerFlags.includes("_flagPendingAt") && strategyDeposits.includes("Memory.flags[flagName]"), "Deposit and dynamic Flag Memory must survive delayed Flag visibility");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
 assert.ok(marketPrice.includes('console.logUnsafe(html)') && marketPrice.includes("printCommodityAnalysis"), "market HTML reports must use the rich console API");
 

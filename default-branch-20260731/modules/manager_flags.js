@@ -42,7 +42,21 @@ let pro={
             if (!Object.keys(pendingPowerBanks).length) delete Memory.pendingPowerBanks;
         }
         for (let name in Memory.flags) {
-            if (!Game.flags[name]) {
+            let flagMemory = Memory.flags[name];
+            if (Game.flags[name]) {
+                // Drop the transient handoff marker as soon as the engine
+                // exposes the Flag normally.
+                if (flagMemory) delete flagMemory._flagPendingAt;
+                continue;
+            }
+            // createFlag can be visible a tick later on this shard. Keep all
+            // newly written Flag Memory briefly, so Deposit and dynamic combat
+            // flags get the same protection as PB queues before orphan cleanup.
+            if (flagMemory && !flagMemory._flagPendingAt) {
+                flagMemory._flagPendingAt = Game.time;
+                continue;
+            }
+            if (!flagMemory || Game.time - flagMemory._flagPendingAt > 10) {
                 delete Memory.flags[name];
             }
         }

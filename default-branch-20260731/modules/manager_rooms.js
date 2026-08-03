@@ -79,6 +79,13 @@ const managerRooms = {
         }
         HelperError.catchError(() => StationTower.exec(room), room.name);
 
+        // A live Power Bank attacker is unsafe without its healer. Dispatch
+        // its queue before background worker/upgrader management can consume
+        // the only newly-idle Spawn this tick.
+        let powerBankActive = !MIN_CPU && global.StrategyPowerBank
+            && isCpuFeatureEnabled("powerBank") && ManagerFlags.hasPrefix("powerBank");
+        if (powerBankActive) HelperError.catchError(() => StrategyPowerBank.exec(room), room.name);
+
         if (room.flags("blockRoom").length) return;
         if (global.StrategyGCLRoom && isCpuFeatureEnabled("GCLRoom") && room.flags("GCLRoom").length) {
             HelperError.catchError(() => StrategyGCLRoom.exec(room), room.name);
@@ -104,9 +111,6 @@ const managerRooms = {
         }
         if (!MIN_CPU && global.StrategyDeposits && isCpuFeatureEnabled("deposits") && ManagerFlags.hasPrefix("deposit")) {
             HelperError.catchError(() => StrategyDeposits.exec(room), room.name);
-        }
-        if (!MIN_CPU && global.StrategyPowerBank && isCpuFeatureEnabled("powerBank") && ManagerFlags.hasPrefix("powerBank")) {
-            HelperError.catchError(() => StrategyPowerBank.exec(room), room.name);
         }
         if (global.StrategyDefenserHighWay && isCpuFeatureEnabled("combat") && room.flags("defenserHighWay").length) {
             HelperError.catchError(() => StrategyDefenserHighWay.exec(room), room.name);

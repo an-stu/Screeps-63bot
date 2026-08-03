@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.59.0 — Reliable mission Flag handoff
+
+### Fixed
+
+- Dispatch active PB queues before ordinary room staffing. A freshly idle
+  Spawn now creates the waiting healer before optional workers can consume it.
+- Give all newly-created Flag Memory a ten-tick visibility grace period.
+  Deposit and dynamic combat Flags are now protected from the same delayed
+  `createFlag` handoff race as Power Banks.
+- Restore the normal conservative PB first-observation lifetime threshold to
+  4,200 ticks after resolving the creation bug.
+
 ## v0.58.0 — Correct Power Bank Flag creation result
 
 ### Fixed
