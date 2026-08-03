@@ -81,7 +81,11 @@ Creep.prototype.harvestDeposit = function () {
 
         }
         else if (deposit && this.harvest(deposit) == ERR_NOT_IN_RANGE) {
-            if (!this.pos.inRangeTo(deposit, 2) || deposit.pos.walkableAroundCnt(true) > 0) // 如果沒得走的時候就放棄，免得消耗太多cpu
+            // walkableAroundCnt ≈ 16-24 次 lookFor，按 tick 缓存，避免每 tick 重复计算
+            if (!this._walkableCache || this._walkableCache.tick != Game.time || this._walkableCache.id != deposit.id) {
+                this._walkableCache = { tick: Game.time, id: deposit.id, value: deposit.pos.walkableAroundCnt(true) };
+            }
+            if (!this.pos.inRangeTo(deposit, 2) || this._walkableCache.value > 0) // 如果沒得走的時候就放棄，免得消耗太多cpu
                 this.goTo(deposit)
         }
         if (deposit && this.pos.isNearTo(deposit) && !this.memory.concated) this.concatDeposit()

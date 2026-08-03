@@ -46,7 +46,24 @@ global.missionFunc = { //被crossShard引用 ，相当于交叉依赖了
      * @param data
      */
     setMemoryWithPath(data){
-        eval("Memory."+data.path+"="+JSON.stringify(data.data))
+        // 安全写入：不再使用 eval 执行远端可控字符串
+        let segments = [];
+        (data.path || "").split(".").forEach(part => {
+            let m = part.match(/^\["([^"]+)"\]$/);
+            if (m) segments.push(m[1]);
+            else if (part) segments.push(part);
+        });
+        if (!segments.length) return false;
+        let node = Memory;
+        for (let i = 0; i < segments.length - 1; i++) {
+            let key = segments[i];
+            if (key == "__proto__" || key == "constructor" || key == "prototype") return false;
+            if (node[key] === undefined || node[key] === null) node[key] = {};
+            node = node[key];
+        }
+        let last = segments[segments.length - 1];
+        if (last == "__proto__" || last == "constructor" || last == "prototype") return false;
+        node[last] = data.data;
         return true;
     },
     // /**
@@ -83,11 +100,11 @@ global.missionCallBack = { //被crossShard引用 ，相当于交叉依赖了
     testCallBack(data){
         log("testCallBack",data)
     },
-    setFlagMemory (data) { //todo 测试失败
+    setFlagMemory (data) {
         let flag = Game.flags[data.flagName]
         if(flag){
             for(let t in data.flagMemory){
-                flag.memory[t] = data.flagMemory;
+                flag.memory[t] = data.flagMemory[t];
             }
             return true;
         }

@@ -4,14 +4,17 @@
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
     let rm = Memory.rooms[this.headTask().roomName];
-    if (rm && rm[pro.stationName][this.headTask().id]) {
+    if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
         let source = rm[pro.stationName][this.headTask().id];
         if (this.spawning) {
             source["spawnTime"] = Game.time
         }
-        let rmHarList = source["creeps"];
-        if (!rmHarList.contains(this.id))
-            rmHarList.push(this.id)
+        let rmHarList = source["creeps"] || [];
+        // 清理已死亡的爬，避免列表无限膨胀
+        let alive = rmHarList.filter(id => Game.getObjectById(id));
+        if (alive.length != rmHarList.length) source["creeps"] = alive;
+        if (!alive.contains(this.id))
+            alive.push(this.id)
     }
 };
 
@@ -245,11 +248,13 @@ Creep.prototype.registerStationSourcesCarryOutRoom = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
     let headTask = this.headTask();
     let rm = Memory.rooms[headTask.roomName];
-    if (rm && rm[pro.stationName][headTask.id]) {
+    if (rm && rm[pro.stationName] && rm[pro.stationName][headTask.id]) {
         let source = rm[pro.stationName][headTask.id];
         let rmHarList = source["carryCreeps"] || [];
-        if (!rmHarList.contains(this.id))
-            rmHarList.push(this.id)
+        let alive = rmHarList.filter(id => Game.getObjectById(id));
+        if (alive.length != rmHarList.length) source["carryCreeps"] = alive;
+        if (!alive.contains(this.id))
+            alive.push(this.id)
     }
 };
 
@@ -300,11 +305,13 @@ Creep.prototype.outerDefense = function () {
 Creep.prototype.registerStationSourcesDefenseOutRoom = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
     let rm = Memory.rooms[this.headTask().roomName];
-    if (rm && rm[pro.stationName][this.headTask().id]) {
+    if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
         let source = rm[pro.stationName][this.headTask().id];
         let rmHarList = source["defenseCreeps"] || [];
-        if (!rmHarList.contains(this.id))
-            rmHarList.push(this.id)
+        let alive = rmHarList.filter(id => Game.getObjectById(id));
+        if (alive.length != rmHarList.length) source["defenseCreeps"] = alive;
+        if (!alive.contains(this.id))
+            alive.push(this.id)
     }
 };
 

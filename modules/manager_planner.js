@@ -1082,7 +1082,7 @@ let pro={
         //         new RoomVisual(roomName).text(costs.get(i,j),new RoomPosition(i,j,roomName))
         //     }
         // }
-        structMap["container"].sort(e=>Math.sqrt((e[0]-storageX)*(e[0]-storageX)+(e[1]-storageY)*(e[1]-storageY)))
+        structMap["container"].sort((a,b)=>Math.sqrt((a[0]-storageX)*(a[0]-storageX)+(a[1]-storageY)*(a[1]-storageY))-Math.sqrt((b[0]-storageX)*(b[0]-storageX)+(b[1]-storageY)*(b[1]-storageY)))
         structMap["container"].forEach(e=>{
             let ret = PathFinder.search(
                 new RoomPosition(centerX,centerY,roomName),

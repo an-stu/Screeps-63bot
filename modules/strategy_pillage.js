@@ -32,9 +32,10 @@ Creep.prototype.pillage=function () {
         },ignoreCreeps:true}); 
     if (!target && this.room.storage) target = this.room.storage.store.getUsedCapacity()?this.room.storage:0;
     if(!target) target = this.pos.findClosestByPath(FIND_STRUCTURES,{filter:e=>{
-            return e.store&&e.store.getAllResTypeCount()
+            return e.store
+                &&e.structureType==STRUCTURE_TERMINAL// nuker搬不动，先判断类型避免对无关建筑做昂贵的检查
+                &&e.store.getAllResTypeCount()
                 &&!e.pos.coverRampart()
-                &&e.structureType==STRUCTURE_TERMINAL// nuker搬不动
                 &&(!this.room.my||!e.my) // 如果房间是我的，就搬一下不是我的建筑里面的东西（好像只剩下terminal了）
         },ignoreCreeps:true});
     // if (!target) target=this.pos.findClosestByPath(FIND_TOMBSTONES,{filter:e=>{

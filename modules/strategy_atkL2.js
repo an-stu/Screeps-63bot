@@ -60,7 +60,7 @@ Creep.prototype.attack2=function () {
     let inner=pos=> pos.x>=2&&pos.x<=48&&pos.y>=2&&pos.y<=48;
     let healer=flag&&Game.creeps[flag.memory.healerName];
     // if(healer)this.pull(healer)
-    let walkAble = !this.fatigue&&(!healer||!healer.fatigue)&&this.pos.isCrossRoomNearTo(healer)
+    let walkAble = !this.fatigue&&(!healer||(!healer.fatigue&&this.pos.isCrossRoomNearTo(healer)))
     this.atk=function(){
         let forcedTarget = Game.getObjectById(atkl2Target)
         let cachedTarget = this.memory.atkL2TargetUntil >= Game.time ? Game.getObjectById(this.memory.atkL2TargetId) : undefined;

@@ -89,8 +89,33 @@
 
 ---
 
-## 四、验证与部署
+## 五、第二轮优化（2026-08-03 追加）
+
+### 已实施（9 项，全部通过测试）
+
+| # | 位置 | 问题 | 修复 |
+| --- | --- | --- | --- |
+| 1 | `manager_missions.js:49` | `setMemoryWithPath` 用 `eval()` 执行跨 shard 可控字符串——任意代码执行风险 + 慢 | 改为安全路径写入（支持 `a.b.c` 与 `["x"]` 两种格式，拦截 `__proto__`/`constructor`/`prototype` 原型污染） |
+| 2 | `manager_missions.js:90` | `setFlagMemory` 把整个对象赋给每个键（应为单键值） | 改为 `flag.memory[t] = data.flagMemory[t]` |
+| 3 | `strategy_atkL2.js:63` | flag/healer 消失时 `isCrossRoomNearTo(undefined)` 每 tick 抛 TypeError | 加 `(!healer \|\| (...))` 短路 |
+| 4 | `manager_planner.js:1085` / `manager_autoPlanner.js:156` | `sort(e=>Math.sqrt(...))` 传距离函数而非比较器，"按距 storage 排序"从未生效 | 改为 `(a,b)=>dist(a)-dist(b)` |
+| 5 | `station_sources.js` 注册函数 ×3 | `creeps`/`carryCreeps`/`defenseCreeps` 列表只 push 不清理，死 creep id 随任务重生成无限累积 | 注册时过滤已死亡 id（长度变化才写回） |
+| 6 | `strategy_pillage.js:34` | `coverRampart()`（每次 lookFor）在 `structureType==TERMINAL` 判断之前执行，无关建筑白付成本 | 类型判断提前短路 |
+| 7 | `strategy_deposits.js:84` | deposit 贴脸失败时每 tick `walkableAroundCnt(true)` ≈ 16-24 次 lookFor | 按 (creep,deposit,tick) 缓存，每 tick 只算一次 |
+| 8 | `strategy_tradeCrossShard.js:18,24` | 穿门期间每 tick 全房 find(FIND_STRUCTURES) 找 portal | portal 坐标全局缓存（portal 不移动），未找到才重扫 |
+| 9 | `war_cache.js:212-306` | `getMoveAbleCostMatrix` 每次调用全量重建（2500 格地形 + 全房建筑 forEach），战斗多队多旗每 tick 多次 | 静态层（地形+建筑+hasSpawn）按房间缓存 20 tick，每次 clone 后叠加动态层（creep/伤害圈），塔伤走已有每 tick 缓存 |
+
+### 评估后跳过（附理由）
+
+- `helper_cpuUsed.js` recordLongTerm 每 tick 写 Memory：Memory 每 tick 本来就序列化一次（bot 常写），多一个字段无额外成本——不必要。
+- `strategy_marketPrice.js` HTML 生成：每 5000 tick 一次，摊薄成本可忽略——不必要。
+- `war_teamCore.js` canHoldHeal 跨 tick 缓存：伤害模拟依赖实时位置/血量，缓存会改变战斗决策——跳过。
+- `war_teamCore.js` flag._targets 重建：缓存游戏对象跨 tick 会引用过期对象——需重构为 id 列表，风险高——跳过。
+- `teamL2.js` 小队无限再生产检查：改动 spawn 行为，需在实战验证——暂缓。
+
+## 六、验证与部署
 
 - `node --check`：全部修改文件通过
-- 回归测试：`test/core-profile.test.cjs`、`test/claim-flow.test.cjs` 全部通过（market TTL 断言同步更新为 100）
-- 本轮 12 项修改将在提交后随构建部署到 `default` 分支（shard3 实际运行分支）
+- 回归测试：`test/core-profile.test.cjs`、`test/claim-flow.test.cjs` 全部通过
+- 第一轮 12 项 + 第二轮 9 项修改已提交 GitHub，随构建部署到 `default` 分支（shard3 实际运行分支）
+- 外矿 E52S21 流程已上线验证：scouter → 站数据注册 → reserver + 外矿 keeper，能量回运 E53S21 storage

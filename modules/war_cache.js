@@ -210,37 +210,46 @@ let pro={
      * @param swampCost 是否专注spawn
      */
     getMoveAbleCostMatrix(roomName,myCreeps,damageLimit = 0,avoidObjects=undefined,damageRangePlus=0,avoidHostile=false,isFourTeam = false,forceSpawn = true,swampCost=5){
-        let cm = new PathFinder.CostMatrix
-        let terrain = new Room.Terrain(roomName)
         let room = Game.rooms[roomName];
+        // 静态层缓存：地形+建筑（结构变化不频繁，20 tick 内复用，clone 后叠加动态层）
+        let staticKey = roomName + ":" + swampCost + ":" + (forceSpawn?1:0);
+        let staticCache = global._warMatrixCache = global._warMatrixCache || {};
+        let stat = staticCache[staticKey];
+        if(!stat || Game.time - stat.tick > 20){
+            let base = new PathFinder.CostMatrix
+            let terrain = new Room.Terrain(roomName)
+            for (let y = 0; y < 50; y++) {
+                for (let x = 0; x < 50; x++) {
+                    const t = terrain.get(x, y);
+                    base.set(x, y, t == TERRAIN_MASK_WALL?255:(t==TERRAIN_MASK_SWAMP?swampCost:1)); // 不可移动
+                }
+            }
+            let myName = myCreeps[0].owner.username;
+            let structs = pro.getRoomStructures(roomName).filter(e=>e&&e.structureType!=STRUCTURE_ROAD)
+            let hasSpawn = false;
+            if(forceSpawn&&room&&room.controller&&room.controller.owner&&!room.my&&structs.find(e=>e.structureType==STRUCTURE_SPAWN))hasSpawn = true;// 如果不是我的房间启动阀清理spawn模式
+            structs.forEach(e=>{
+                if (e.structureType == 'container' || (e.structureType == 'rampart' && e.owner.username== myName)) {
+                } else {// 不能穿过无法行走的建筑
+                    if(hasSpawn&&e.hits>100000)base.set(e.pos.x, e.pos.y, Math.ceil(e.hits/2000000)+100);
+                    else if(hasSpawn&&e.hits)base.set(e.pos.x, e.pos.y, 10);
+                    else base.set(e.pos.x, e.pos.y, 255);
+                }
+            })
+            staticCache[staticKey] = { tick: Game.time, cm: base };
+            stat = staticCache[staticKey];
+        }
+        let cm = stat.cm.clone();
+
         let towerDamage = (damageLimit>0&&(!room||!room.my))?
             pro.getTowerDamageRoomArray(roomName):undefined
-        for (let y = 0; y < 50; y++) {
-            for (let x = 0; x < 50; x++) {
-                const t = terrain.get(x, y);
-                cm.set(x, y, t == TERRAIN_MASK_WALL?255:(t==TERRAIN_MASK_SWAMP?swampCost:1)); // 不可移动
-                if(towerDamage&&towerDamage.get(x,y)>damageLimit)cm.set(x,y,255); // 算伤,如果超过伤害默认几乎不可移动
+        if(towerDamage){
+            for (let y = 0; y < 50; y++) {
+                for (let x = 0; x < 50; x++) {
+                    if(towerDamage.get(x,y)>damageLimit)cm.set(x,y,255); // 算伤,如果超过伤害默认几乎不可移动
+                }
             }
         }
-
-        let hasSpawn = false;
-        let myName = myCreeps[0].owner.username;
-        let structs = pro.getRoomStructures(roomName).filter(e=>e&&e.structureType!=STRUCTURE_ROAD)
-        if(forceSpawn&&room&&room.controller&&room.controller.owner&&!room.my&&structs.find(e=>e.structureType==STRUCTURE_SPAWN))hasSpawn = true;// 如果不是我的房间启动阀清理spawn模式
-
-
-        structs.forEach(e=> {
-            if (e.structureType == 'road') cm.set(e.pos.x, e.pos.y, 1);
-        })
-
-        structs.forEach(e=>{
-            if (e.structureType == 'container' || (e.structureType == 'rampart' && e.owner.username== myName)) {
-            } else {// 不能穿过无法行走的建筑
-                if(hasSpawn&&e.hits>100000)cm.set(e.pos.x, e.pos.y, Math.ceil(e.hits/2000000)+100);
-                else if(hasSpawn&&e.hits)cm.set(e.pos.x, e.pos.y, 10);
-                else cm.set(e.pos.x, e.pos.y, 255);
-            }
-        })
 
         let inited = false
         let myCreepsIdSet = (myCreeps||[]).map(e=>e.id).toSet()

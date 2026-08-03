@@ -15,10 +15,22 @@ Creep.prototype.moveCrossShardByRoomName = function(){
 
     let pos = new RoomPosition(25,25,current.roomName)
     if(this.pos.roomName==current.roomName){
-        let tmp = this.room.find(FIND_STRUCTURES).find(e=>e.structureType==STRUCTURE_PORTAL&&e.destination.shard==current.toShard&&
-            (!current.toRoomName||e.destination.room==current.toRoomName))
-        if(tmp) pos = tmp.pos
-        else console.log(this.name+" moveCrossShardByRoomName path error : "+JSON.stringify(current))
+        // portal 不会移动，全局缓存坐标避免每 tick 全房扫描
+        let portalCache = global._portalCache = global._portalCache || {};
+        let cacheKey = current.roomName + ":" + current.toShard + ":" + (current.toRoomName||"");
+        let cached = portalCache[cacheKey];
+        if(!cached || !cached.found){
+            let tmp = this.room.find(FIND_STRUCTURES).find(e=>e.structureType==STRUCTURE_PORTAL&&e.destination.shard==current.toShard&&
+                (!current.toRoomName||e.destination.room==current.toRoomName))
+            portalCache[cacheKey] = {
+                found: !!tmp,
+                x: tmp ? tmp.pos.x : 25,
+                y: tmp ? tmp.pos.y : 25,
+            };
+            if(!tmp) console.log(this.name+" moveCrossShardByRoomName path error : "+JSON.stringify(current))
+            cached = portalCache[cacheKey];
+        }
+        if(cached.found) pos = new RoomPosition(cached.x, cached.y, current.roomName)
     }
     if(pos.isNearTo(this)){
         let portal = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_PORTAL).head()

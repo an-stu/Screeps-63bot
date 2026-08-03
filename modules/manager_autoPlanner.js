@@ -153,7 +153,7 @@ let pro={
         structMap["road"].forEach(e=>{
             costs.set(e.x,e.y,1)
         })
-        structMap["container"].sort(e=>Math.sqrt((e.x-storageX)*(e.x-storageX)+(e.y-storageY)*(e.y-storageY)))
+        structMap["container"].sort((a,b)=>Math.sqrt((a.x-storageX)*(a.x-storageX)+(a.y-storageY)*(a.y-storageY))-Math.sqrt((b.x-storageX)*(b.x-storageX)+(b.y-storageY)*(b.y-storageY)))
         structMap["container"].forEach(e=>{
             let ret = PathFinder.search(
                 new RoomPosition(storageX,storageY,room.name),
