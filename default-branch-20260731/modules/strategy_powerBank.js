@@ -228,6 +228,23 @@ let BOOST_L1 = 2
 let BOOST_L2 = 3
 
 let pro = {
+    recordMissionDecision(targetRoomName, powerBankData, decision, spawnRoomName) {
+        // A PB is only visible for the Observer tick in which it was scanned.
+        // Keep one compact, replace-in-place decision record so `dash` can
+        // explain why a visible bank did or did not become a mission without
+        // retaining an ever-growing observation history.
+        Memory.rooms[targetRoomName] = Memory.rooms[targetRoomName] || {};
+        let observerMemory = Memory.rooms[targetRoomName].stationObserver
+            = Memory.rooms[targetRoomName].stationObserver || {};
+        observerMemory.lastPowerBank = {
+            tick: Game.time,
+            id: powerBankData.id,
+            power: powerBankData.power,
+            remaining: Math.max(0, powerBankData.disappearTime - Game.time),
+            spawnRoom: spawnRoomName,
+            decision: decision,
+        };
+    },
     hasValidMissionData(flag) {
         let memory = flag && flag.memory;
         return !!(memory
@@ -250,12 +267,36 @@ let pro = {
             .forEach(flag => SpawnTeam.exec(flag));
     },
     createOrUpdatePowerBankMission(targetRoomName, powerBankData) {
-        if (avoidRoom.contains(targetRoomName)) return;
+        if (avoidRoom.contains(targetRoomName)) {
+            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:avoid-room");
+            return;
+        }
         let spawnRoomName = StationObserver.getClosedMyRoomName(targetRoomName);
-        let spawnRoom = Game.rooms[spawnRoomName]
-        if (!spawnRoom || !spawnRoom.storage || spawnRoom.storage.store[RESOURCE_POWER] > ROOM_MAX_POWER_CNT) return;
-        if (isSaveCpu && powerBankData.power < Math.min((10000 - Game.cpu.bucket), 5000)) return;//s3如果cpu太少默认放弃
-        if (powerBankData.power < MIN_POWER || powerBankData.disappearTime - Game.time <= MIN_DECAY) return;
+        let spawnRoom = Game.rooms[spawnRoomName];
+        if (!spawnRoom) {
+            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:no-rcl8-observer", spawnRoomName);
+            return;
+        }
+        if (!spawnRoom.storage) {
+            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:no-storage", spawnRoomName);
+            return;
+        }
+        if (spawnRoom.storage.store[RESOURCE_POWER] > ROOM_MAX_POWER_CNT) {
+            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:power-stock-cap", spawnRoomName);
+            return;
+        }
+        if (isSaveCpu && powerBankData.power < Math.min((10000 - Game.cpu.bucket), 5000)) {
+            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:cpu-power-threshold", spawnRoomName);
+            return;
+        }
+        if (powerBankData.power < MIN_POWER) {
+            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:low-power", spawnRoomName);
+            return;
+        }
+        if (powerBankData.disappearTime - Game.time <= MIN_DECAY) {
+            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:insufficient-decay", spawnRoomName);
+            return;
+        }
         let flagName = "powerBank_" + spawnRoomName + "_" + targetRoomName + "_" + powerBankData.x + "_" + powerBankData.y;
         if (!Memory.flags[flagName]) Memory.flags[flagName] = {}
         let flagMemory = Memory.flags[flagName];
@@ -266,8 +307,13 @@ let pro = {
         }
         if (!Game.flags[flagName]) {
             let result = (new RoomPosition(powerBankData.x, powerBankData.y, powerBankData.roomName)).createFlag(flagName);
-            if (typeof result != "string") delete Memory.flags[flagName];
+            if (typeof result != "string") {
+                delete Memory.flags[flagName];
+                pro.recordMissionDecision(targetRoomName, powerBankData, "skip:flag-create-" + result, spawnRoomName);
+                return;
+            }
         }
+        pro.recordMissionDecision(targetRoomName, powerBankData, "mission-created", spawnRoomName);
     },
     taskData(flag, index) {
         // Do not copy the Flag Memory proxy into a creep task. Its enumerable

@@ -190,6 +190,16 @@ let shouldRunCreep = function (creep) {
 
 let updateCodeHealth = function () {
     if (Game.time % 20 != 0) return;
+    let previousHealth = Memory.codeHealth || {};
+    // Keep the newest failure available for diagnosis, but do not preserve an
+    // old stack and a cumulative counter forever after it has stopped being
+    // actionable. This also prevents serialized error text from growing the
+    // long-lived Memory payload.
+    if (previousHealth.lastErrorTick && Game.time - previousHealth.lastErrorTick > 5000) {
+        delete previousHealth.lastError;
+        delete previousHealth.lastErrorTick;
+        delete previousHealth.errorCount;
+    }
     let missingTaskHandlers = {};
     let objects = getTickObjects();
     let units = objects.creeps.concat(objects.powerCreeps.filter(e => e.ticksToLive));
@@ -200,7 +210,7 @@ let updateCodeHealth = function () {
             }
         }
     }
-    Memory.codeHealth = Object.assign(Memory.codeHealth || {}, {
+    Memory.codeHealth = Object.assign(previousHealth, {
         time: Game.time,
         cpu: Game.cpu.getUsed(),
         averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.55.0 — Compact persistent diagnostics
+
+### Optimized
+
+- Retain long-term room CPU telemetry only for owned rooms. One-tick Observer
+  vision no longer accumulates remote-room timing records in Memory.
+- Prune legacy remote CPU timing records periodically and expire stale error
+  stacks/counters after 5,000 ticks, while preserving current diagnostics.
+- Record one compact PB mission decision per observed target, including its
+  remaining lifetime and selected spawn room, so rejected targets are
+  diagnosable without retaining scan histories.
+
 ## v0.54.0 — Sparse near-cap rampart maintenance
 
 ### Optimized

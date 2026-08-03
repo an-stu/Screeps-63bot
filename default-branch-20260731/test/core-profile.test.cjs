@@ -43,6 +43,7 @@ const marketPrice = fs.readFileSync(path.join(root, "modules/strategy_marketPric
 const consoleDashboard = fs.readFileSync(path.join(root, "modules/helper_consoleDashboard.js"), "utf8");
 const consoleLogger = fs.readFileSync(path.join(root, "modules/helper_consoleLogger.js"), "utf8");
 const roomResource = fs.readFileSync(path.join(root, "modules/helper_roomResource.js"), "utf8");
+const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -204,9 +205,10 @@ assert.ok(betterMove.includes("if (!enableCpuStats) return fn.apply(this, argume
 assert.ok(betterMove.includes('!isCpuFeatureEnabled("visual")'), "legacy moveTo styles must obey the global visual gate");
 assert.ok(betterMove.includes("setCpuStats(bool)"), "movement CPU instrumentation must remain explicitly switchable");
 assert.ok(betterMove.includes("Memory.betterMoveAvoidRooms"), "manual route exclusions must survive global resets");
-const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
 assert.ok(cpuHelper.includes("recordLongTerm(cpu)") && cpuHelper.includes("longTermSummary()"), "CPU telemetry must persist exact long-window statistics");
 assert.ok(cpuHelper.includes("recordProfile(profile)") && cpuHelper.includes("profileSummary()"), "CPU telemetry must retain phase, role, and room profile averages");
+assert.ok(cpuHelper.includes("room && room.my") && cpuHelper.includes("lastRoomPrune"), "CPU telemetry must ignore observer-only room samples and prune old snapshots");
+assert.ok(strategyPowerBank.includes("recordMissionDecision") && strategyPowerBank.includes("skip:insufficient-decay"), "PB observation must retain one compact mission-decision diagnostic");
 assert.ok(cpuHelper.includes("console.logUnsafe(output)"), "CPU charts must use the rich console API");
 assert.ok(marketPrice.includes('console.logUnsafe(html)') && marketPrice.includes("printCommodityAnalysis"), "market HTML reports must use the rich console API");
 
@@ -226,6 +228,7 @@ assert.ok(loggerOutput[1].includes("[ERROR]") && loggerOutput[1].includes("power
 assert.ok(main.includes("HelperCpuUsed.recordLongTerm(Game.cpu.getUsed())"), "long-window CPU telemetry must record every completed tick");
 assert.ok(main.includes("HelperCpuUsed.recordProfile(Game._coreCpuProfile)"), "low-frequency profiles must feed persistent module telemetry");
 assert.ok(main.includes("moduleCpu: HelperCpuUsed.profileSummary()"), "module CPU averages must remain inspectable in code health");
+assert.ok(main.includes("Game.time - previousHealth.lastErrorTick > 5000"), "stale code-health errors must expire from Memory");
 assert.equal((fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8").match(/Creep\.prototype\.headTask =/g) || []).length, 1, "headTask must have one canonical definition");
 assert.ok(!main.includes("space_action") && !main.includes("let P0"), "dead account-specific tick actions must stay removed");
 assert.ok(!main.includes("_.keys(WAKE_TASK)"), "wake tasks must not allocate a Lodash key array every tick");
@@ -237,6 +240,7 @@ const context = {
     Memory: {},
     Game: {
         time: 0,
+        rooms: {E1S1: {my: true}, E9S9: {my: false}},
         cpu: {
             bucket: 9000,
             getUsed() { return context.Game.time / 5; },
@@ -256,6 +260,9 @@ assert.equal(moduleCpu.samples, 2);
 assert.equal(moduleCpu.phases.init.average, 2);
 assert.equal(moduleCpu.roles.carrier.average, 3);
 assert.equal(moduleCpu.rooms.E1S1.average, 2);
+context.Game.time = 1200;
+context.HelperCpuUsed.recordProfile({roomDetails:{E9S9:9}});
+assert.equal(context.HelperCpuUsed.profileSummary().rooms.E9S9, undefined, "observer-only room timings must not enter persistent telemetry");
 
 for (let time = 1; time < 5; time += 1) {
     context.Game.time = time;

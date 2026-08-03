@@ -181,7 +181,7 @@ let pro={
         if (!telemetry || telemetry.version != 1) {
             telemetry = Memory.cpuModuleTelemetry = {
                 version: 1, startTick: Game.time, lastTick: 0, samples: 0,
-                phases: {}, roles: {}, rooms: {}
+                lastRoomPrune: 0, phases: {}, roles: {}, rooms: {}
             };
         }
         if (telemetry.lastTick == Game.time) return;
@@ -198,7 +198,23 @@ let pro={
         for (let key of ["init", "registration", "commands", "rooms", "flagStrategies", "unitTasks", "optional", "afterWork"])
             add(telemetry.phases, key, profile[key]);
         for (let key in profile.unitRoles || {}) add(telemetry.roles, key, profile.unitRoles[key]);
-        for (let key in profile.roomDetails || {}) add(telemetry.rooms, key, profile.roomDetails[key]);
+
+        // Observer vision can make a different highway room visible every
+        // profile tick. Persisting all of those one-shot timings bloats
+        // Memory and makes the dashboard less useful. Owned rooms are always
+        // visible and are the only rooms whose long-term management CPU is
+        // actionable.
+        for (let key in profile.roomDetails || {}) {
+            let room = Game.rooms && Game.rooms[key];
+            if (room && room.my) add(telemetry.rooms, key, profile.roomDetails[key]);
+        }
+        if (Game.time - (telemetry.lastRoomPrune || 0) >= 1000) {
+            for (let key in telemetry.rooms) {
+                let room = Game.rooms && Game.rooms[key];
+                if (!room || !room.my) delete telemetry.rooms[key];
+            }
+            telemetry.lastRoomPrune = Game.time;
+        }
     },
     profileSummary() {
         let telemetry = Memory.cpuModuleTelemetry;
