@@ -540,6 +540,14 @@ let pro = {
         ]
     },
     /**
+     * 蓝图位置归一化：structMap 值为编码字符串或 [[x,y]] 数组
+     */
+    structMapPositions(value) {
+        if (typeof value == 'string') return Utils.decodePosArray(value);
+        if (Array.isArray(value)) return value;
+        return [];
+    },
+    /**
      * 外矿修路路径：从矿区容器到主房间 storage 一次性寻路，
      * 主房间按蓝图路网走（规划的其他建筑不可走），结果缓存 1000 tick
      */
@@ -570,7 +578,11 @@ let pro = {
                     if (structMap) {
                         for (let type in structMap) {
                             let cost = (type == 'road' || type == 'container') ? 1 : 255;
-                            (structMap[type] || []).forEach(p => { if (cm.get(p[0], p[1]) < 254) cm.set(p[0], p[1], cost); });
+                            pro.structMapPositions(structMap[type]).forEach(p => {
+                                let x = p.x != undefined ? p.x : p[0];
+                                let y = p.y != undefined ? p.y : p[1];
+                                if (cm.get(x, y) < 254) cm.set(x, y, cost);
+                            });
                         }
                     }
                     // 已有建筑：路/容器/己方墙/链接可走，其余不可走
@@ -612,7 +624,9 @@ let pro = {
             room._plannedBlockedSet = new Set();
             for (let type in room.memory.structMap) {
                 if (type == 'road' || type == 'container') continue;
-                (room.memory.structMap[type] || []).forEach(p => room._plannedBlockedSet.add(p[0] + ":" + p[1]));
+                pro.structMapPositions(room.memory.structMap[type]).forEach(p => {
+                    room._plannedBlockedSet.add((p.x != undefined ? p.x : p[0]) + ":" + (p.y != undefined ? p.y : p[1]));
+                });
             }
         }
         return room._plannedBlockedSet.has(pos.x + ":" + pos.y);
