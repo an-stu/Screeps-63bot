@@ -437,11 +437,11 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         }
     }
     if (this.store[RESOURCE_ENERGY] * 2 > this.store.getCapacity(RESOURCE_ENERGY)) {
-        let task = [
+        let roadTask = [
             UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
             UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, { mineRoom: task.roomName, stationId: task.id }) //想致富先修路
         ]
-        this.addTask(task);
+        this.addTask(roadTask);
         // this.execLastTask();
     }
 }
