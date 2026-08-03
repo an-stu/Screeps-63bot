@@ -578,13 +578,27 @@ let pro = {
         if (Array.isArray(value)) return value;
         return [];
     },
-    /** 按房间分段 serializePath（serializePath 不支持跨房间路径） */
+    /** 路径坐标编码：0-49 → 单字符（与房间索引共用 62 字符字母表） */
+    rc(n) { return "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"[n]; },
+    dc(c) { return "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".indexOf(c); },
+    /**
+     * 外矿路径紧凑序列化：房间名表 + 每路点 3 字符（房间索引 + x + y）。
+     * 不依赖 Room.serializePath（其对 PathFinder 路径的房间跨界步编码不稳定）
+     */
     serializeOuterRoadPath(path) {
-        let rooms = {};
-        path.forEach(p => { (rooms[p.roomName] = rooms[p.roomName] || []).push(p); });
-        let parts = [];
-        for (let roomName in rooms) parts.push(roomName + ":" + Room.serializePath(rooms[roomName]));
-        return parts.join(";");
+        let rooms = [];
+        let roomIndex = {};
+        path.forEach(p => {
+            if (roomIndex[p.roomName] === undefined) {
+                roomIndex[p.roomName] = rooms.length;
+                rooms.push(p.roomName);
+            }
+        });
+        let code = rooms.join(",") + ";";
+        path.forEach(p => {
+            code += pro.rc(roomIndex[p.roomName]) + pro.rc(p.x) + pro.rc(p.y);
+        });
+        return code;
     },
     /**
      * 外矿修路路径：从矿区容器到主房间 storage 一次性寻路，
@@ -660,13 +674,13 @@ let pro = {
     getOuterRoadPath(data) {
         let str = data.roadPathStr;
         if (str && str.indexOf("undefined") >= 0) {
-            // 无效序列化（旧的多房间直接序列化格式），清除待重算
+            // 无效序列化（旧格式残留），清除待重算
             delete data.roadPathStr;
             delete data.roadPathTick;
             str = undefined;
         }
         if (!str && data.roadPath) {
-            // 旧格式（对象数组）迁移为按房间序列化字符串
+            // 旧格式（对象数组）迁移为紧凑字符串
             try { str = data.roadPathStr = pro.serializeOuterRoadPath(data.roadPath); } catch (e) {}
             delete data.roadPath;
         }
@@ -676,11 +690,13 @@ let pro = {
         let c = cache[key];
         if (!c || c.tick != Game.time) {
             let path = [];
-            str.split(";").forEach(part => {
-                let idx = part.indexOf(":");
-                let roomName = part.slice(0, idx);
-                Room.deserializePath(part.slice(idx + 1)).forEach(p => path.push(new RoomPosition(p.x, p.y, roomName)));
-            });
+            let sep = str.indexOf(";");
+            if (sep < 0) return undefined;
+            let rooms = str.slice(0, sep).split(",");
+            let body = str.slice(sep + 1);
+            for (let i = 0; i + 2 < body.length; i += 3) {
+                path.push(new RoomPosition(pro.dc(body[i + 1]), pro.dc(body[i + 2]), rooms[pro.dc(body[i])]));
+            }
             cache[key] = c = { tick: Game.time, path: path };
         }
         return c.path;
