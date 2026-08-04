@@ -938,7 +938,7 @@ let pro = {
                 let code = creep.move(creep.pos.getDirectionTo(point));
                 // 单步 move 不经过 BetterMove，手动更新 lastPos 便于诊断
                 if (code == OK) {
-                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
+                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
                 }
                 return code;
             }
@@ -953,7 +953,7 @@ let pro = {
             if (exit >= TOP && exit <= TOP_LEFT) {
                 let code = creep.move(exit);
                 if (code == OK) {
-                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
+                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
                 }
                 return code;
             }
