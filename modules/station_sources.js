@@ -945,20 +945,17 @@ let pro = {
                     creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
                     return code;
                 }
-                // 目标格被占/暂时不可走：不误判为路径失效（返回 OK 原地等待）。
-                // 边界格被堵则退回房间内让出出口，避免爬占住唯一出口导致死锁。
-                if (creep.pos.isBorder()) {
-                    let back = creep.pos.getDirectionTo(new RoomPosition(25, 25, creep.pos.roomName));
-                    return creep.move(back);
-                }
+                // 目标格被占/暂时不可走：持续向目标方向尝试（返回 OK 原地等待，
+                // 不退回不误删路径——退回会造成边界来回弹跳互相卡住）
                 return OK;
             }
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
-        // 跨房：边界格上直接 move(exit) 一步位移到对面房间（无需 moveTo，
-        // 不受 BetterMove 出口避让影响）；对面格被占则退回房间内让出出口。
-        if (point.roomName != creep.pos.roomName && creep.pos.isBorder()) {
+        // 跨房：边界格直接 move(exit) 一步位移到对面房间（无需 moveTo，
+        // 不受 BetterMove 出口避让影响）。对面格被占时持续等待重试，
+        // 不退回房间内（退回会造成边界来回弹跳/互相卡住）。
+        if (creep.pos.isBorder()) {
             let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
             if (exit >= TOP && exit <= TOP_LEFT) {
                 let code = creep.move(exit);
@@ -966,9 +963,7 @@ let pro = {
                     creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
                     return code;
                 }
-                // 对面出口格被占：退回房间内让出，稍后再试（不删除路径）
-                let back = creep.pos.getDirectionTo(new RoomPosition(25, 25, creep.pos.roomName));
-                return creep.move(back);
+                return OK;
             }
         }
         return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
