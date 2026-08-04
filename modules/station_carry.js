@@ -40,13 +40,17 @@ let pro = {
     },
     getCarrierBodyConfig(room) {
         let totalEnergy = room.getEnergyCapacityAvailable(room);
+        // 按实际可用能量定身体（最小 300 能量）：低能量房间也能产出 carrier，
+        // 避免按容量定出 1200 能量的身体却永远凑不齐能量而卡死
+        let budget = Math.max(300, Math.min(totalEnergy, room.energyAvailable));
         let body = [CARRY, CARRY, MOVE];
         let bodyEnergy = Utils.getBodyEnergyNeed(body)
         let num = 0
-        for (let i = 1; i * bodyEnergy <= totalEnergy; i++) {
+        for (let i = 1; i * bodyEnergy <= budget; i++) {
             if (num >= 17) break;
             num += 1
         }
+        num = Math.max(2, num); // 最小 2 组 = 300 能量
         return ManagerCreeps.calcBodyPart({ [CARRY]: num < 17 ? num * 2 : num * 2 - 1, [MOVE]: num });//
     },
     generatorCarryStorageEnergyTask(room, energyCnt = 6600) {
