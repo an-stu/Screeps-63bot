@@ -247,6 +247,11 @@ let pro = {
     },
     hasValidMissionData(flag) {
         let memory = flag && flag.memory;
+        if (!memory || !memory.id) {
+            // 旗子刚创建：任务数据还在 pendingPowerBanks 记录里，
+            // 下一 tick 由 ManagerFlags.init 提升进 Memory.flags[flag.name]
+            memory = Memory.pendingPowerBanks && Memory.pendingPowerBanks[flag.name];
+        }
         return !!(memory
             && typeof memory.id == "string"
             && Number.isFinite(memory.power)
@@ -321,8 +326,12 @@ let pro = {
             }
         }
         if (Game.flags[flagName]) {
-            delete pending[flagName];
-            if (!Object.keys(pending).length) delete Memory.pendingPowerBanks;
+            // 不要把 pending 记录在创建 tick 删除：旗子自身内存此刻还是空的，
+            // 立即删除会让 exec 的 hasValidMissionData 校验在下一 tick 移除旗子。
+            // 数据保留在 pending，下一 tick ManagerFlags.init 会把它提升进
+            // Memory.flags[flagName] 并顺手删除 pending。
+            // delete pending[flagName];
+            // if (!Object.keys(pending).length) delete Memory.pendingPowerBanks;
         }
         pro.recordMissionDecision(targetRoomName, powerBankData, "mission-created", spawnRoomName);
     },
