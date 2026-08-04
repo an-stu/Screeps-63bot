@@ -350,18 +350,22 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         return;
     }
     let canBuild = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
+    // 旧任务没有 roadDir 时曾使 pathIndex += undefined 变成 NaN。外矿路径
+    // 由 source 指向 storage，默认正向即可兼容历史任务并保持路线唯一。
+    let roadDir = task.roadDir == -1 ? -1 : 1;
+    task.roadDir = roadDir;
     // 规划路径：固定路线修路，路点索引增量推进（O(1)，不每 tick 全路径扫描）
     let roadPath = data && pro.getOuterRoadPath(data);
     if (roadPath && roadPath.length) {
         let pathIndex = task.pathIndex;
-        if (pathIndex == undefined) pathIndex = task.roadDir == 1 ? 0 : roadPath.length - 1;
+        if (pathIndex == undefined) pathIndex = roadDir == 1 ? 0 : roadPath.length - 1;
         let wp = roadPath[Math.max(0, Math.min(pathIndex, roadPath.length - 1))];
         let dist = wp.roomName == this.pos.roomName ? Math.max(Math.abs(wp.x - this.pos.x), Math.abs(wp.y - this.pos.y)) : 999;
         if (dist > 2) {
             // 偏离路径（或路径刚重算）：重新定位到最近路点
             pathIndex = pro.nextRoadPathIndex(roadPath, this.pos).index;
         } else if (dist <= 1) {
-            pathIndex += task.roadDir; // 到达当前路点，前进
+            pathIndex += roadDir; // 到达当前路点，前进
         }
         pathIndex = Math.max(0, Math.min(pathIndex, roadPath.length - 1));
         task.pathIndex = pathIndex;
@@ -475,7 +479,9 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         } else {
             let roadTask = [
                 UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
-                UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, { mineRoom: task.roomName, stationId: task.id }) //想致富先修路
+                UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                    mineRoom: task.roomName, stationId: task.id, roadDir: 1,
+                }) // 想致富先修路：source -> storage
             ]
             this.addTask(roadTask);
         }
@@ -984,7 +990,10 @@ let pro = {
     trySpawnOuterDefenser(roomName, spawnRoom, isInvader) {
         if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
-        let data = Memory.rooms[roomName.name || roomName][StationMineral.stationName];
+        let sourceMemory = Memory.rooms[roomName.name || roomName];
+        let data = sourceMemory && sourceMemory[pro.stationName]
+            && _.values(sourceMemory[pro.stationName]).find(e => e && e.id);
+        if (!data) return;
         if (isInvader) {
             let defensers = spawnRoom.creeps("outerHarvestDefenser", false).filter(e => e.headTask().roomName == (roomName.name || roomName))
             let defenser = defensers.head()
@@ -992,7 +1001,7 @@ let pro = {
             let carrierBody = pro.getOuterHarDefenseBodyConfig(isInvader)
             let tasks = pro.generatorOuterHarDefenseTask(data)
             StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestDefenser", tasks)
-            defenser.memory.hasSendSpawn = true
+            if (defenser) defenser.memory.hasSendSpawn = true
             return;
         }
         if (!harRoom) return;

@@ -28,7 +28,12 @@ let pro = {
                 let isInvader = flag.name.includes('invader');
                 StationSources.trySpawnOuterDefenser(targetRoomName, spawnRoom, isInvader);
             }
-            if (!Memory.rooms[targetRoomName] || !Memory.rooms[targetRoomName][StationSources.stationName]) {
+            // 外矿没有常驻视野时，旧的房间 Memory 会一直存在，但 keeper 死亡后
+            // 不会再进入后续孵化逻辑，形成“有缓存、无人采”的死锁。必须把失去
+            // 视野也视为需要 scout 的状态；已有同目标 scout 时不会重复孵化。
+            if (!Game.rooms[targetRoomName]
+                || !Memory.rooms[targetRoomName]
+                || !Memory.rooms[targetRoomName][StationSources.stationName]) {
                 let scouter = spawnRoom.creeps("scouter", false).filter(e => {
                     let task = e.headTask();
                     return task && task.roomName == targetRoomName;

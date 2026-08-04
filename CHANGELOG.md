@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.60.0 — Recoverable remote harvesting
+
+### Fixed
+
+- Treat a remote room without current vision as requiring its scoped scout,
+  even when historical room Memory exists. This prevents a dead keeper from
+  leaving an external source permanently idle after vision expires.
+- Dispatch external harvesting before ordinary local staffing so a one-Spawn
+  supply room can actually launch its scout, keeper, and road-capable carrier.
+- Make legacy external road-builder tasks default to the source-to-storage
+  direction. Their previous missing direction turned the cached route index
+  into `NaN` and stranded road construction.
+- Use source-station data for external defence tasks and safely handle a
+  newly queued defender, preventing a null-memory error during hostile scans.
+
 ## v0.59.0 — Reliable mission Flag handoff
 
 ### Fixed

@@ -44,6 +44,8 @@ const consoleDashboard = fs.readFileSync(path.join(root, "modules/helper_console
 const consoleLogger = fs.readFileSync(path.join(root, "modules/helper_consoleLogger.js"), "utf8");
 const roomResource = fs.readFileSync(path.join(root, "modules/helper_roomResource.js"), "utf8");
 const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
+const strategyOuterHarvest = fs.readFileSync(path.join(root, "modules/strategy_outerHarvest.js"), "utf8");
+const stationSources = fs.readFileSync(path.join(root, "modules/station_sources.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -59,6 +61,9 @@ assert.ok(mainMount.includes("global.LOCAL_SHARD_NAME = Game.shard.name"), "core
 assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep Power Creeps alive and operating storage");
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be independently restorable");
+assert.ok(strategyOuterHarvest.includes("!Game.rooms[targetRoomName]"), "lost remote vision must respawn a scoped scout instead of trusting stale Memory");
+assert.ok(managerRooms.indexOf("StrategyOuterHarvest.exec(room)") < managerRooms.indexOf("StrategyHighLevel.exec(room)"), "remote economy must request Spawn capacity before background high-level workers");
+assert.ok(stationSources.includes("let roadDir = task.roadDir == -1 ? -1 : 1"), "legacy road-builder tasks must default to a valid route direction");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
 assert.ok(manifest.includes("strategy_claim"), "claim task handlers must ship with planner dependencies");
