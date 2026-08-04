@@ -117,6 +117,7 @@ let pro = {
                     creep.addTask(lowEnergyCarry.pop())
                 }
             } else {
+                // 无 carrier 时，能量优先填 spawn 和 extension，而不是拿去修东西
                 if (room.creeps("carrier", false).length == 0 && !isCarryFree && StationHive.HiveNeedToFill(room)) {
                     creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 } else if (StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
