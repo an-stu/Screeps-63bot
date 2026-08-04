@@ -956,15 +956,20 @@ let pro = {
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
-        // 跨房（含边界）：moveTo 寻路到目标房间的路点。出口格被占导致
-        // ERR_NO_PATH 时退回房间内让出出口，稍后再试（不删除路径）。
-        if (creep.pos.isBorder()) {
-            let code = creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
-            if (code == ERR_NO_PATH) {
+        // 跨房：边界格上直接 move(exit) 一步位移到对面房间（无需 moveTo，
+        // 不受 BetterMove 出口避让影响）；对面格被占则退回房间内让出出口。
+        if (point.roomName != creep.pos.roomName && creep.pos.isBorder()) {
+            let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
+            if (exit >= TOP && exit <= TOP_LEFT) {
+                let code = creep.move(exit);
+                if (code == OK) {
+                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
+                    return code;
+                }
+                // 对面出口格被占：退回房间内让出，稍后再试（不删除路径）
                 let back = creep.pos.getDirectionTo(new RoomPosition(25, 25, creep.pos.roomName));
                 return creep.move(back);
             }
-            return code;
         }
         return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
     },
