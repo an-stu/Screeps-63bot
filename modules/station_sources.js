@@ -40,7 +40,10 @@ Creep.prototype.concatStationSources = function () {
 Creep.prototype.harvestEnergyOuterKeeper = function () {
     let task = this.headTask();
     if (task.roomName != this.room.name) {
-        this.goTo(task);
+        // 去程沿缓存路径走（路径方向 source→storage，去程是反向 -1），不脱离路线
+        let data = Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
+            && Memory.rooms[task.roomName][pro.stationName][task["id"]];
+        if (!pro.moveOuterCarrierOnRoad(this, task, data, -1)) this.goTo(task);
     } else {
         let source = Game.getObjectById(task["id"]);
         let station = Memory.rooms[this.headTask().roomName][pro.stationName][task["id"]];
@@ -237,7 +240,7 @@ Creep.prototype.harvestEnergy = function () {
 Creep.prototype.reserveOuterHar = function () {
     let task = this.headTask();
     if (task.roomName != this.room.name) {
-        this.goTo(task);
+        this.goTo(task); // reserver 目标是控制器，不走矿区道路
     } else {
         let controller = this.headTaskObj();
         if (controller && controller.reservation && controller.reservation.username != WHO_AM_I) {
@@ -334,18 +337,29 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // Older deployments put every carrier (including pure CARRY/MOVE haulers)
     // into the keepBuilding loop. They can never make progress there, so they
     // kept returning to the source instead of delivering to Storage. Let such
-    // legacy haulers immediately resume the normal delivery task.
+    // legacy haulers immediately resume the normal delivery task, still on the
+    // cached road (the builder task moves along it even without WORK parts).
     if (task.keepBuilding && !canBuild && this.store[RESOURCE_ENERGY] > 0) {
         this.popTask();
-        this.addTask(UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }));
+        this.addTask([
+            UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
+            UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                mineRoom: task.mineRoom, stationId: task.stationId, roadDir: 1,
+            }),
+        ]);
         return this.execLastTask();
     }
     // Once the final road site has become a road, do not keep a WORK carrier
     // shuttling empty-handed. Deliver its remaining load before returning to
-    // the source container.
+    // the source container, still walking the cached road.
     if (task.keepBuilding && complete && this.store[RESOURCE_ENERGY] > 0) {
         this.popTask();
-        this.addTask(UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }));
+        this.addTask([
+            UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
+            UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                mineRoom: task.mineRoom, stationId: task.stationId, roadDir: 1,
+            }),
+        ]);
         return this.execLastTask();
     }
     // 到达端点：修完（或非 keepBuilding 模式）则结束；未修完则掉头继续修
