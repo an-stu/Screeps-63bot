@@ -177,7 +177,13 @@ let pro = {
         room.creeps("carrier").filter(e => e.isFree() && !e.storeContainsEnergyOtherResType()).forEach(creep => {
             if (StationHive.HiveNeedToFill(room)) {
                 creep.addTask(StationHive.generatorFillHiveTask(room, creep));
-                if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
+                if (creep.storeEmpty()) {
+                    // 空手：先从 container 取能量（放宽到 300，避免 container 有货却因 1200 门槛拿不到），
+                    // 取不到再从 storage 取
+                    let sourceTasks = StationSources.generatorCarryEnergyTask(room, 300);
+                    if (!sourceTasks.length && StorageCarryEnergyTasks.length) sourceTasks = StorageCarryEnergyTasks;
+                    if (sourceTasks.length) creep.addTask(sourceTasks);
+                }
             } else if (fillTowerTasks.length) {
                 creep.addTask(fillTowerTasks.shift())
                 if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
