@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.71.0 — External carrier delivery and road-build priority
+
+### Fixed
+
+- Keep ordinary `outerHarvestEnergyCarrier` units delivering energy to Storage
+  while the dedicated WORK carrier repairs the external route.
+- Use the cached external-road waypoints in both directions; ordinary movement
+  is now a fallback only when that cached route is missing or blocked.
+- Repair the nearest route-bound road construction site to completion before
+  moving on; legacy non-WORK carriers caught in a repair task now resume
+  delivery immediately.
+- Once the last route site is complete, the WORK carrier delivers its remaining
+  energy rather than making another empty repair shuttle.
+
 ## v0.70.0 — On-demand external road visual
 
 ### Added

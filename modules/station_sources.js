@@ -330,6 +330,24 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         && Memory.rooms[task.mineRoom][pro.stationName]
         && Memory.rooms[task.mineRoom][pro.stationName][task.stationId];
     let complete = !data || pro.outerRoadComplete(data);
+    let canBuild = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
+    // Older deployments put every carrier (including pure CARRY/MOVE haulers)
+    // into the keepBuilding loop. They can never make progress there, so they
+    // kept returning to the source instead of delivering to Storage. Let such
+    // legacy haulers immediately resume the normal delivery task.
+    if (task.keepBuilding && !canBuild && this.store[RESOURCE_ENERGY] > 0) {
+        this.popTask();
+        this.addTask(UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }));
+        return this.execLastTask();
+    }
+    // Once the final road site has become a road, do not keep a WORK carrier
+    // shuttling empty-handed. Deliver its remaining load before returning to
+    // the source container.
+    if (task.keepBuilding && complete && this.store[RESOURCE_ENERGY] > 0) {
+        this.popTask();
+        this.addTask(UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }));
+        return this.execLastTask();
+    }
     // 到达端点：修完（或非 keepBuilding 模式）则结束；未修完则掉头继续修
     if (this.pos.isNearTo(target) || this.store[RESOURCE_ENERGY] == 0) {
         this.popTask();
@@ -349,7 +367,6 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         this.execLastTask();
         return;
     }
-    let canBuild = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
     // 旧任务没有 roadDir 时曾使 pathIndex += undefined 变成 NaN。外矿路径
     // 由 source 指向 storage，默认正向即可兼容历史任务并保持路线唯一。
     let roadDir = task.roadDir == -1 ? -1 : 1;
@@ -357,6 +374,21 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // 规划路径：固定路线修路，路点索引增量推进（O(1)，不每 tick 全路径扫描）
     let roadPath = data && pro.getOuterRoadPath(data);
     if (roadPath && roadPath.length) {
+        // A road builder must finish the nearest existing road site before
+        // continuing along the route. This prevents a single carrier from
+        // walking past several sites, spreading a tiny amount of progress
+        // across all of them, and then starving Storage indefinitely.
+        let pendingSite = canBuild && this.store[RESOURCE_ENERGY] > 0
+            ? pro.nearestOuterRoadSite(roadPath, this.pos) : undefined;
+        if (pendingSite) {
+            task.pathIndex = pendingSite.index;
+            if (!this.pos.inRangeTo(pendingSite.site, 3)) {
+                this.moveTo(pendingSite.site, { range: 3, reusePath: 10, visualizePathStyle: { stroke: '#fffa00' } });
+            } else {
+                this.build(pendingSite.site);
+            }
+            return;
+        }
         let pathIndex = task.pathIndex;
         if (pathIndex == undefined) pathIndex = roadDir == 1 ? 0 : roadPath.length - 1;
         let wp = roadPath[Math.max(0, Math.min(pathIndex, roadPath.length - 1))];
@@ -417,7 +449,11 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
     let rm = Memory.rooms[this.headTask().roomName];
     if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
         if (task.roomName != this.room.name) {
-            this.goTo(task);
+            let data = rm[pro.stationName][task.id];
+            // Return trips use the same cached road in reverse. Apart from
+            // keeping roads unique, this avoids a fresh cross-room PathFinder
+            // search whenever a carrier leaves Storage for the source.
+            if (!pro.moveOuterCarrierOnRoad(this, task, data, -1)) this.goTo(task);
         } else {
             let sm = rm[pro.stationName][this.headTask().id];
             let harCreep = Game.getObjectById(sm["creeps"][0])
@@ -460,8 +496,10 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         let data = task.roomName && task.id
             ? (Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
                 && Memory.rooms[task.roomName][pro.stationName][task.id]) : undefined;
-        if (data && !pro.outerRoadComplete(data)) {
-            // 道路未修好：只修路不搬运，沿路径来回修整直到完整
+        let isRoadBuilder = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
+        if (data && !pro.outerRoadComplete(data) && isRoadBuilder) {
+            // 道路未修好时只让带 WORK 的专职 carrier 修路。普通搬运爬
+            // 仍然沿缓存路线把能量送入 Storage，不能让修路任务饿死主房。
             this.addTask(UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                 mineRoom: task.roomName, stationId: task.id, keepBuilding: true, roadDir: 1,
             }));
@@ -775,6 +813,69 @@ let pro = {
             }
         }
         return { index: best, dist: bestDist };
+    },
+    /**
+     * Advance a normal outer carrier one waypoint along its cached road.
+     * `direction` is +1 for mine -> Storage and -1 for Storage -> mine.
+     * Returns false only when the cache cannot be used, allowing the caller
+     * to take one native-path fallback and trigger a later route rebuild.
+     */
+    moveOuterCarrierOnRoad(creep, task, data, direction) {
+        let path = data && pro.getOuterRoadPath(data);
+        if (!path || !path.length) return false;
+        let index = task.returnPathIndex;
+        if (index == undefined || index < 0 || index >= path.length) {
+            let nearest = pro.nextRoadPathIndex(path, creep.pos);
+            if (nearest.dist >= 999) return false;
+            index = nearest.index;
+        }
+        let point = path[index];
+        let range = point.roomName == creep.pos.roomName
+            ? Math.max(Math.abs(point.x - creep.pos.x), Math.abs(point.y - creep.pos.y)) : 999;
+        if (range > 2) {
+            let nearest = pro.nextRoadPathIndex(path, creep.pos);
+            if (nearest.dist >= 999) return false;
+            index = nearest.index;
+        } else if (range <= 1) {
+            index += direction;
+        }
+        index = Math.max(0, Math.min(index, path.length - 1));
+        task.returnPathIndex = index;
+        point = path[index];
+        let code = creep.moveTo(new RoomPosition(point.x, point.y, point.roomName), {
+            range: 0,
+            reusePath: 20,
+            visualizePathStyle: { stroke: '#fffa00' },
+        });
+        if (code != ERR_NO_PATH && code != ERR_NO_BODYPART) return true;
+        delete data.roadPathStr;
+        delete data.roadPathTick;
+        delete task.returnPathIndex;
+        return false;
+    },
+    /**
+     * Return the closest route-bound road construction site in the creep's
+     * current room. Scanning the room's small site list is much cheaper than
+     * PathFinder and avoids selecting a site behind an unseen room border.
+     */
+    nearestOuterRoadSite(roadPath, pos) {
+        let room = Game.rooms[pos.roomName];
+        if (!room) return undefined;
+        let routeIndex = {};
+        roadPath.forEach((point, index) => {
+            if (point.roomName == pos.roomName) routeIndex[point.x + ":" + point.y] = index;
+        });
+        let best;
+        room.find(FIND_MY_CONSTRUCTION_SITES).forEach(site => {
+            if (site.structureType != STRUCTURE_ROAD) return;
+            let index = routeIndex[site.pos.x + ":" + site.pos.y];
+            if (index == undefined) return;
+            let range = pos.getRangeTo(site);
+            if (!best || range < best.range || (range == best.range && index < best.index)) {
+                best = { site: site, index: index, range: range };
+            }
+        });
+        return best;
     },
     /** 矿区目标（修路端点）：容器优先，否则源点 */
     getOuterMineTarget(data) {
