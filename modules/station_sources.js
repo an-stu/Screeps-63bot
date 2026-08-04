@@ -883,8 +883,9 @@ let pro = {
      * Walk an external route exactly one cached waypoint at a time. Adjacent
      * route points deliberately use `move`, not `moveTo`, so Screeps never
      * spends PathFinder CPU or cuts a parallel road. A creep displaced from
-     * the road first heads to its nearest point; only after repeated failure
-     * does it use a short native-path recovery search.
+     * the road force-moves back to its nearest cached point with `moveTo`
+     * (a single-step move would be blocked by walls/buildings and get
+     * misreported as an invalid path).
      */
     moveToOuterRoadPoint(creep, task, point) {
         let positionKey = creep.pos.roomName + ":" + creep.pos.x + ":" + creep.pos.y;
@@ -896,16 +897,12 @@ let pro = {
         }
         task.outerRoadMovePos = positionKey;
         task.outerRoadMoveTarget = targetKey;
-        if (task.outerRoadStuck >= 3) {
-            return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
-        }
         if (creep.pos.roomName == point.roomName) {
             let range = creep.pos.getRangeTo(point);
             if (range == 0) return OK;
             if (range == 1) return creep.move(creep.pos.getDirectionTo(point));
-            // This creep has been pushed off the road. Move directly back to
-            // the selected nearest cached point before resuming one-step mode.
-            return creep.move(creep.pos.getDirectionTo(point));
+            // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
+            return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
         // A room transition always occurs at a border. `findExit` returns the
         // same direction constants accepted by Creep.move, so no path search
@@ -914,7 +911,8 @@ let pro = {
             let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
             if (exit >= TOP && exit <= TOP_LEFT) return creep.move(exit);
         }
-        return ERR_NO_PATH;
+        // 非边界跨房（偏离到房间内部）：寻路到目标房间的路点
+        return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
     },
     /** Move exactly from one cached route point to its next point. */
     stepFromOuterRoadPoint(creep, roadPath, index, direction) {
