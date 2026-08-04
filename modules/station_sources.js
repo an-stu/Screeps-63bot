@@ -60,6 +60,11 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
         if ((source.energy + 100) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
             this.harvest(source);
         }
+        // 满载且相邻 container：直接把能量放进 container（供外矿 carrier 取走），
+        // 否则能量滞留 keeper 身上、container 一直空、carrier 空跑往返
+        if (container && this.pos.isNearTo(container) && this.store[RESOURCE_ENERGY] > 0) {
+            this.transfer(container, RESOURCE_ENERGY)
+        }
         if (!container && this.ticksToLive % 7 == 0) {
             this.pos.createConstructionSite(STRUCTURE_CONTAINER)
         }
@@ -229,7 +234,16 @@ Creep.prototype.harvestEnergy = function () {
         this.harvest(source);
         // }
 
-        if (this.ticksToLive % 4 == 0) {
+    // 满载且相邻主房 storage/terminal（或矿区 container）：直接填充，
+    // 不依赖 fillRes 任务链——路径终点若未紧贴 storage，任务链可能永不触发填充
+    if (this.store[RESOURCE_ENERGY] > 0 && this.room.my) {
+        let storage = this.mainRoom().storage;
+        if (storage && this.pos.isNearTo(storage)) {
+            this.transfer(storage, RESOURCE_ENERGY);
+        }
+    }
+
+    if (this.ticksToLive % 4 == 0) {
             //捡起掉落的能量
             let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
             if (dropEnergy) this.pickup(dropEnergy);
