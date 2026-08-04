@@ -505,12 +505,16 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         } else {
             let sm = rm[pro.stationName][this.headTask().id];
             let container = Game.getObjectById(sm[STRUCTURE_CONTAINER]);
-            // 从 source 旁边的 container / 地上掉落取能量：只要相邻且自身空手
-            // 就直接取，不依赖 keeper 是否就位、不限最低能量
             if (container) {
                 if (!this.pos.isNearTo(container)) {
-                    this.goTo(container)
+                    // 矿区内部也沿缓存路径反向走到 container，避免 BetterMove
+                    // 走出与缓存路径不同的新路线（如 18,40 vs 路径 18,39）
+                    let data = rm[pro.stationName][task.id];
+                    if (!pro.moveOuterCarrierOnRoad(this, task, data, -1)) this.goTo(container);
+                    return;
                 }
+                // 从 source 旁边的 container / 地上掉落取能量：只要相邻且自身空手
+                // 就直接取，不依赖 keeper 是否就位、不限最低能量
                 if (this.storeEmpty()) {
                     if (container.store[RESOURCE_ENERGY] > 0) {
                         let code = this.withdraw(container, RESOURCE_ENERGY)
