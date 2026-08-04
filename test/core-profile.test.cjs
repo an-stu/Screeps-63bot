@@ -81,6 +81,7 @@ assert.ok(!stationSources.includes("maintainOuterRoads") && !stationSources.incl
 assert.ok(stationSources.includes("moveToOuterRoadPoint") && stationSources.includes("return creep.move(creep.pos.getDirectionTo(point))"), "external carriers must step exactly between cached road points before any recovery path search");
 assert.ok(stationSources.includes("if (dist > 1)") && stationSources.includes("if (range > 1)"), "an external carrier that leaves its route must reacquire the nearest cached point immediately");
 assert.ok(stationSources.includes("stepFromOuterRoadPoint") && stationSources.includes("this.pos.isBorder() && borderIndex.dist == 0"), "cached border waypoints must advance rather than repeatedly target themselves");
+assert.ok(stationSources.includes("let nextIndex = borderIndex.index + roadDir") && stationSources.includes("task.pathIndex = nextIndex"), "a boundary move must persist its next cached waypoint index");
 assert.ok(main.includes("Game.flags.showBlueprint") && main.includes("ManagerAutoPlanner.showRoom()"), "a requested blueprint visual must render every tick rather than only with planner work");
 assert.ok(managerAutoPlanner.includes("extensionFailure") && managerAutoPlanner.includes("pruneOutOfTierExtensionSites"), "extension construction failures must be diagnosed without using future-RCL blueprint slots");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");

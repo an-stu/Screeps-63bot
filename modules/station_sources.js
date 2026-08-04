@@ -380,7 +380,8 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         // border as its own movement target and never enter the next tile.
         let borderIndex = pro.nextRoadPathIndex(roadPath, this.pos);
         if (this.pos.isBorder() && borderIndex.dist == 0) {
-            task.pathIndex = borderIndex.index;
+            let nextIndex = borderIndex.index + roadDir;
+            if (nextIndex >= 0 && nextIndex < roadPath.length) task.pathIndex = nextIndex;
             let borderCode = pro.stepFromOuterRoadPoint(this, roadPath, borderIndex.index, roadDir);
             if (borderCode != ERR_NO_PATH) return;
         }

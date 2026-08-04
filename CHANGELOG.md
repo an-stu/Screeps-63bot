@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.76.0 — Border waypoint index synchronization
+
+### Fixed
+
+- Persist the next cached-path index while advancing from a border point. The
+  prior border fix moved the creep one tile but retained the old index, causing
+  the following tick to return it to the border in a two-tile loop.
+
 ## v0.75.0 — Cached route border progression
 
 ### Fixed
