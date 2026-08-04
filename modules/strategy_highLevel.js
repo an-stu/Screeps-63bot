@@ -182,7 +182,11 @@ let pro = {
                 }
             })
         }
-        room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).forEach(e => e.fillAllMainRoomStorage())
+        // hive（spawn/extension）不需要能量时，才把 carrier 的剩余能量放回 storage；
+        // 否则能量优先喂 hive，避免 spawn/ext 饥饿导致无法产爬
+        if (!StationHive.HiveNeedToFill(room)) {
+            room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).forEach(e => e.fillAllMainRoomStorage())
+        }
 
         // container 能量
         freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.ticksToLive > 50); // 从这里开始下面的任务最好大于150ttl
