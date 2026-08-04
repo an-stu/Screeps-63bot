@@ -766,11 +766,19 @@ let pro = {
         let reachesDestination = end && to && end.roomName == to.roomName
             && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1;
         if (ret && !ret.incomplete && reachesDestination && ret.path.length > 1) {
-            data.roadPathStr = pro.serializeOuterRoadPath(ret.path);
-            data.roadPathTick = Game.time;
-            delete data.roadPath;
-            delete data.roadPathError;
-            return pro.getOuterRoadPath(data);
+            let roadPath = ret.path;
+            // 剔除终点=storage/terminal 自身的位置：被建筑占位，爬永远走不上去会卡死。
+            // PathFinder 会把被阻挡的 goal（range>0）也放进 path。
+            if (end && end.roomName == to.roomName && end.x == to.x && end.y == to.y) {
+                roadPath = ret.path.slice(0, -1);
+            }
+            if (roadPath.length > 1) {
+                data.roadPathStr = pro.serializeOuterRoadPath(roadPath);
+                data.roadPathTick = Game.time;
+                delete data.roadPath;
+                delete data.roadPathError;
+                return pro.getOuterRoadPath(data);
+            }
         }
         data.roadPathError = "no path: ret=" + (ret ? "pathLen=" + (ret.path || []).length + " incomplete=" + ret.incomplete + " ops=" + ret.ops : "undefined")
             + " from=" + from.roomName + ":" + from.x + "," + from.y + " to=" + to.roomName + ":" + to.x + "," + to.y + " tick=" + Game.time;
@@ -897,6 +905,11 @@ let pro = {
         }
         task.outerRoadMovePos = positionKey;
         task.outerRoadMoveTarget = targetKey;
+        // 同一路点反复无法到达（如路点被建筑永久占据）：返回 ERR_NO_PATH，
+        // 让调用方失效缓存路径并触发重算（重算已剔除 storage/terminal 终点）
+        if (task.outerRoadStuck >= 10) {
+            return ERR_NO_PATH;
+        }
         if (creep.pos.roomName == point.roomName) {
             let range = creep.pos.getRangeTo(point);
             if (range == 0) return OK;
