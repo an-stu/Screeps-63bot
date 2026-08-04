@@ -945,16 +945,25 @@ let pro = {
                     creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
                     return code;
                 }
-                // 目标格被占/暂时不可走：持续向目标方向尝试（返回 OK 原地等待，
-                // 不退回不误删路径——退回会造成边界来回弹跳互相卡住）
+                // 目标格被占/不可走：向目标方向的邻近方向（±45°）试探，
+                // 持续向目标靠拢，避免多个爬互相占住对方目标格而死锁
+                let dir = creep.pos.getDirectionTo(point);
+                for (let i = 1; i <= 7; i += 2) {
+                    let d = ((dir - 1 + i + 8) % 8) + 1;
+                    code = creep.move(d);
+                    if (code == OK) {
+                        creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
+                        return code;
+                    }
+                }
                 return OK;
             }
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
         // 跨房：边界格直接 move(exit) 一步位移到对面房间（无需 moveTo，
-        // 不受 BetterMove 出口避让影响）。对面格被占时持续等待重试，
-        // 不退回房间内（退回会造成边界来回弹跳/互相卡住）。
+        // 不受 BetterMove 出口避让影响）。对面被占时沿边界横向挪动到相邻
+        // 出口格继续尝试（持续向目标方向移动，不退回不等待死锁）。
         if (creep.pos.isBorder()) {
             let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
             if (exit >= TOP && exit <= TOP_LEFT) {
@@ -962,6 +971,14 @@ let pro = {
                 if (code == OK) {
                     creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
                     return code;
+                }
+                for (let i = 1; i <= 7; i += 2) {
+                    let d = ((exit - 1 + i + 8) % 8) + 1;
+                    code = creep.move(d);
+                    if (code == OK) {
+                        creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
+                        return code;
+                    }
                 }
                 return OK;
             }
