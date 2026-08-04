@@ -173,17 +173,16 @@ let pro = {
         let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
 
-        if (StorageCarryEnergyTasks.length) {
-            room.creeps("carrier").filter(e => e.isFree() && !e.storeContainsEnergyOtherResType()).forEach(creep => {
-                if (StationHive.HiveNeedToFill(room)) {
-                    creep.addTask(StationHive.generatorFillHiveTask(room, creep));
-                    if (creep.storeEmpty()) creep.addTask(StorageCarryEnergyTasks);
-                } else if (fillTowerTasks.length) {
-                    creep.addTask(fillTowerTasks.shift())
-                    if (creep.storeEmpty()) creep.addTask(StorageCarryEnergyTasks);
-                }
-            })
-        }
+        // 填 hive 不依赖 storage 是否有货：carrier 自己已带能量（从 container 取的）也要去填
+        room.creeps("carrier").filter(e => e.isFree() && !e.storeContainsEnergyOtherResType()).forEach(creep => {
+            if (StationHive.HiveNeedToFill(room)) {
+                creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+                if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
+            } else if (fillTowerTasks.length) {
+                creep.addTask(fillTowerTasks.shift())
+                if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
+            }
+        })
         // hive（spawn/extension）不需要能量时，才把 carrier 的剩余能量放回 storage；
         // 否则能量优先喂 hive，避免 spawn/ext 饥饿导致无法产爬
         if (!StationHive.HiveNeedToFill(room)) {
