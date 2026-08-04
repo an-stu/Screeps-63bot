@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.68.0 — Sufficient external-route search budget
+
+### Fixed
+
+- Raise the one-time cached external-route search budget to 8,000 operations.
+  The default 2,000 operations was returning an incomplete route at the home
+  room entrance; no incomplete result is cached.
+
 ## v0.67.0 — Spawn-independent route refresh
 
 ### Fixed

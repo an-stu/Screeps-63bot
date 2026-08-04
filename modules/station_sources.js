@@ -632,6 +632,9 @@ let pro = {
             plainCost: 1,
             swampCost: 5,
             maxRooms: 4,
+            // 两房路线叠加主房蓝图代价时，默认 2,000 ops 会在刚进主房
+            // 就提前结束。此搜索仅在缓存失效时运行，允许一次完整求解。
+            maxOps: 8000,
             range: 1,
             roomCallback(roomName) {
                 let room = Game.rooms[roomName];
