@@ -194,6 +194,15 @@ Creep.prototype.harvestEnergyKeeper = function () {
 Creep.prototype.harvestEnergy = function () {
     let task = this.lastTask();
     if (this.store.getFreeCapacity(RESOURCE_ENERGY) <= this.getActiveBodyparts(WORK) * 2) {
+        // 满载：有 carrier 且源旁有 container 时先放进 container 让 carrier 搬运，
+        // 否则自己带回去（worker 自给自足路径，避免 carrier 挂机）
+        let station = this.room.memory[pro.stationName] && this.room.memory[pro.stationName][task.id];
+        let container = station && Game.getObjectById(station.container);
+        if (container && this.pos.isNearTo(container) && this.room.creeps("carrier", false).length > 0) {
+            let code = this.transfer(container, RESOURCE_ENERGY);
+            if (code == ERR_FULL || this.store[RESOURCE_ENERGY] == 0) this.popTask();
+            return;
+        }
         this.popTask()
     }
     if (task.roomName != this.room.name) {
