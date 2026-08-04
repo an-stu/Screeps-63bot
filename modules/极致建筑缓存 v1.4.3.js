@@ -63,6 +63,16 @@ const additionalList = new Set([
 
 const local = {};
 
+// 每房间每 tick 一次性 find(FIND_STRUCTURES) 建立 id→对象映射，
+// 替代多个 getter 对缓存里的每个 id 逐个 Game.getObjectById（引擎 find 结果按 tick 缓存，很便宜）
+function getRoomResolvedStructures(room) {
+    if (room._structureResolvedTick == Game.time) return room._structureResolved;
+    room._structureResolvedTick = Game.time;
+    let map = room._structureResolved = {};
+    room.find(FIND_STRUCTURES).forEach(s => { map[s.id] = s; });
+    return map;
+}
+
 function Hub(room) {
     this.name = room.name;
 
@@ -143,8 +153,9 @@ multipleList.forEach((type) => {
                 let cache = local[this.name] ? local[this.name][type] : new Hub(this)[type];
                 this[bindstring] = [];
                 if (cache) {
+                    let resolved = getRoomResolvedStructures(this);
                     for (let id of cache) {
-                        let o = Game.getObjectById(id);
+                        let o = resolved[id];
                         if (o) {
                             this[bindstring].push(o);
                         } else {
@@ -253,8 +264,9 @@ Object.defineProperty(Room.prototype, 'mass_stores', {
         } else {
             let cache = local[this.name] ? local[this.name].mass_stores : new Hub(this).mass_stores;
             this._mass_stores = [];
+            let resolved = getRoomResolvedStructures(this);
             for (let id of cache) {
-                let o = Game.getObjectById(id);
+                let o = resolved[id];
                 if (o) {
                     this._mass_stores.push(o);
                 } else {

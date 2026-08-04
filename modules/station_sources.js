@@ -155,8 +155,12 @@ Creep.prototype.harvestEnergyKeeper = function () {
         if (this.ticksToLive % 3 == 0 || freeEnergyCapacity <= 0) {
             let nearFull = freeEnergyCapacity < this.getPartCnt(WORK) * 2;
             if (nearFull) {
-                let constructionSite = this.room.constructionSite ? this.room.constructionSite.filter(e => e.pos.isNearTo(this)).head() : undefined;
-
+                // 工地扫描按 9 tick 节流（附近工地几乎不变），避免每 tick filter 全房工地
+                if (this.ticksToLive % 9 == 0 || !this.memory.keeperCsId) {
+                    let cs = this.room.constructionSite ? this.room.constructionSite.filter(e => e.pos.isNearTo(this)).head() : undefined;
+                    this.memory.keeperCsId = cs ? cs.id : undefined;
+                }
+                let constructionSite = this.memory.keeperCsId ? Game.getObjectById(this.memory.keeperCsId) : undefined;
                 if (constructionSite) {
                     this.build(constructionSite);
                 } else if (container && container.hits / container.hitsMax < 0.9) {
@@ -187,7 +191,8 @@ Creep.prototype.harvestEnergyKeeper = function () {
             }
             //捡起container的能量
         }
-        this.memory.dontPullMe = this.ticksToLive % 40 != 0 // add by an_w
+        let dontPullMe = this.ticksToLive % 40 != 0 // add by an_w
+        if (this.memory.dontPullMe != dontPullMe) this.memory.dontPullMe = dontPullMe
     }
 };
 

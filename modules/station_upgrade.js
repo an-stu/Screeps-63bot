@@ -133,8 +133,17 @@ Creep.prototype.upgrade = function () {
         this.moveTo(upgradePosition, {range:0, reusePath:20, visualizePathStyle:{stroke:'#fffa00'}});
     }
     if (this.store.getFreeCapacity(RESOURCE_ENERGY) >= 50) {
-        let store = this.pos.findInRange(FIND_STRUCTURES, 4, { filter: e => e.structureType == STRUCTURE_LINK }).head();
-        if (!store || store.store[RESOURCE_ENERGY] == 0) store = this.pos.findInRange(FIND_STRUCTURES, 3, { filter: e => e.structureType == STRUCTURE_CONTAINER && e.store[RESOURCE_ENERGY] > 0 }).head();
+        // 能量补给点（link/container）几乎不变：缓存 id，10 tick 重扫一次
+        let store = undefined;
+        if (this.memory.upgradeStoreId && (this.memory.upgradeStoreRefresh || 0) > Game.time) {
+            store = Game.getObjectById(this.memory.upgradeStoreId);
+        }
+        if (!store || store.store[RESOURCE_ENERGY] == 0 || (this.memory.upgradeStoreRefresh || 0) <= Game.time) {
+            store = this.pos.findInRange(FIND_STRUCTURES, 4, { filter: e => e.structureType == STRUCTURE_LINK }).head();
+            if (!store || store.store[RESOURCE_ENERGY] == 0) store = this.pos.findInRange(FIND_STRUCTURES, 3, { filter: e => e.structureType == STRUCTURE_CONTAINER && e.store[RESOURCE_ENERGY] > 0 }).head();
+            this.memory.upgradeStoreId = store ? store.id : undefined;
+            this.memory.upgradeStoreRefresh = Game.time + 10;
+        }
         if (store && store.store[RESOURCE_ENERGY] > 0) {
             let result = this.withdraw(store, RESOURCE_ENERGY);
             if (result == ERR_NOT_IN_RANGE) {
