@@ -314,17 +314,30 @@ let pro={
             let queued = room.constructionSite.filter(e => e.structureType == struct).length;
             let missing = structCnt - built - queued;
             if(missing > 0){
-                // 不能只检查蓝图前 N 个点：其中某个点被地形或旧建筑堵住时，会
-                // 导致 extension 永远少一两个。遍历全部候选位置直到补足数量。
+                // RCL 分级蓝图是有序的：只能使用当前等级的前 N 个槽位，不能
+                // 为了补数量提前占用后续 RCL 的 extension 位置。
                 let str2Pos = Utils.decodePosArray(structMap[struct]);
-                for(let e of str2Pos){
-                    if(missing <= 0) break;
-                    if(pro.tryCreateCons(new RoomPosition(e.x,e.y,room.name),struct)) missing--;
-                }
+                str2Pos.take(structCnt).forEach(e => {
+                    if(missing > 0 && pro.tryCreateCons(new RoomPosition(e.x,e.y,room.name),struct)) missing--;
+                });
             }
             // if(structCnt)
             // if(structMap[struct].length<structCnt)
         }
+    },
+    /** 删除当前 RCL 之外的 Extension 工地，保持严格的分级蓝图。 */
+    pruneOutOfTierExtensionSites(room){
+        let encoded = room.memory.structMap && room.memory.structMap[STRUCTURE_EXTENSION];
+        if(!encoded) return;
+        let limit = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.level];
+        let allowed = {};
+        Utils.decodePosArray(encoded).take(limit).forEach(pos => {
+            allowed[pos.x + ":" + pos.y] = true;
+        });
+        room.constructionSite
+            .filter(site => site.structureType == STRUCTURE_EXTENSION
+                && !allowed[site.pos.x + ":" + site.pos.y])
+            .forEach(site => site.remove());
     },
     showRoomStructures  (roomName,structMap){
         let roomStructs = new RoomArray().init()
@@ -367,6 +380,7 @@ let pro={
         // Extension 是 Spawn 能力的一部分。只要有缺口，每次经济调度（5 tick）
         // 都立即尝试；满额后才退回零成本的 150-tick 检查。这样升级不会因
         // 时间槽或全局工地上限暂满而长时间少两座 extension。
+        if(room.memory.structMap) pro.pruneOutOfTierExtensionSites(room);
         let extensionLimit = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.level];
         let extensionQueued = room.constructionSite.filter(e => e.structureType == STRUCTURE_EXTENSION).length;
         let extensionMissing = room.extension.length + extensionQueued < extensionLimit;

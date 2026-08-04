@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.63.0 — Strict RCL blueprint tiers
+
+### Fixed
+
+- Restrict Extension construction to the first blueprint slots unlocked by
+  the current RCL. Missing slots remain diagnostics, never a reason to place
+  an Extension in a future-RCL position.
+- Remove Extension construction sites outside the current RCL tier, including
+  sites created by the prior fallback implementation.
+
 ## v0.62.0 — Immediate extension placement diagnostics
 
 ### Fixed

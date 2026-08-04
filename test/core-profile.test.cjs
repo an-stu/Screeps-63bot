@@ -67,7 +67,7 @@ assert.ok(managerRooms.indexOf("StrategyOuterHarvest.exec(room)") < managerRooms
 assert.ok(stationSources.includes("let roadDir = task.roadDir == -1 ? -1 : 1"), "legacy road-builder tasks must default to a valid route direction");
 assert.ok(stationSources.includes("cleanupOuterRoadSites") && stationSources.includes("onRoadPath"), "outer roads must be cached-route-only and reclaim off-route road sites");
 assert.ok(prototypeCreep.includes("repairFreshRampart") && prototypeCreep.includes("completesRampart"), "a completed rampart site must keep its builder on immediate repair");
-assert.ok(managerAutoPlanner.includes("extensionFailure") && managerAutoPlanner.includes("Game.constructionSites"), "extension construction failures must retain a compact actionable diagnostic");
+assert.ok(managerAutoPlanner.includes("extensionFailure") && managerAutoPlanner.includes("pruneOutOfTierExtensionSites"), "extension construction failures must be diagnosed without using future-RCL blueprint slots");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
 assert.ok(manifest.includes("strategy_claim"), "claim task handlers must ship with planner dependencies");
