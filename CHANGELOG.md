@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.70.0 — On-demand external road visual
+
+### Added
+
+- `Memory.visualOuterRoad` enables a temporary, persistent RoomVisual of one
+  cached external route: cyan route, green source marker, amber destination,
+  and ten-step labels. It auto-expires at `until`.
+
 ## v0.69.0 — Reachable external-road fallback
 
 ### Fixed

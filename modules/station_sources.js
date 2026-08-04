@@ -1082,6 +1082,31 @@ let pro = {
         if (source.id && !tmp[source.id]) tmp[source.id] = {};
         return tmp[source.id]["pathTime"] || 50;
     },
+    /** 仅在 Memory.visualOuterRoad 配置时绘制缓存外矿路线，零常驻开销。 */
+    drawOuterRoadDebug() {
+        let debug = Memory.visualOuterRoad;
+        if (!debug) return;
+        if (debug.until && debug.until < Game.time) {
+            delete Memory.visualOuterRoad;
+            return;
+        }
+        let stations = Memory.rooms[debug.roomName] && Memory.rooms[debug.roomName][pro.stationName];
+        let data = stations && (debug.stationId ? stations[debug.stationId] : _.values(stations).find(e => e && e.roadPathStr));
+        let path = data && pro.getOuterRoadPath(data);
+        if (!path || !path.length) return;
+        path.forEach((pos, index) => {
+            let previous = path[index - 1];
+            let visual = new RoomVisual(pos.roomName);
+            if (previous && previous.roomName == pos.roomName) {
+                visual.line(previous.x, previous.y, pos.x, pos.y, { color: "#00e5ff", width: 0.16, opacity: 0.8 });
+            }
+            if (index % 10 == 0) visual.text(index, pos.x, pos.y, { color: "#ffffff", font: 0.45, opacity: 0.9 });
+        });
+        let start = path[0];
+        let end = path.last();
+        new RoomVisual(start.roomName).circle(start.x, start.y, { radius: 0.42, fill: "#22c55e", opacity: 0.85 });
+        new RoomVisual(end.roomName).circle(end.x, end.y, { radius: 0.42, fill: "#f59e0b", opacity: 0.85 });
+    },
     update(room) {
         let sources = room[LOOK_SOURCES];
         let usedContainer = {};

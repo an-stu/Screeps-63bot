@@ -62,6 +62,9 @@ let pro = {
             cpuProfile.rooms = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();
         }
+        if (global.StationSources && Memory.visualOuterRoad) {
+            HelperError.catchError(() => StationSources.drawOuterRoadDebug());
+        }
         if (global.StrategyTradeCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("crossShardTrade")) HelperError.catchError(() => StrategyTradeCrossShard.exec());
         if (global.StrategyClaim && isCpuFeatureEnabled("claim") && ManagerFlags.hasPrefix("claim")) HelperError.catchError(() => StrategyClaim.exec());
         if (global.StrategyClaimCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("claimCrossShard") && ManagerFlags.hasPrefix("claimCrossShard")) HelperError.catchError(() => StrategyClaimCrossShard.exec());
