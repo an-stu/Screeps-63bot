@@ -943,26 +943,17 @@ let pro = {
                 // 单步 move 不经过 BetterMove，手动更新 lastPos 便于诊断
                 if (code == OK) {
                     creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
+                    return code;
                 }
-                return code;
+                // 单步失败（目标格被占、墙等）：降级 moveTo，交给原生寻路处理拥堵/避让
+                return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
             }
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
-        // A room transition always occurs at a border. `findExit` returns the
-        // same direction constants accepted by Creep.move, so no path search
-        // is needed to cross the cached route's room boundary.
-        if (creep.pos.isBorder()) {
-            let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
-            if (exit >= TOP && exit <= TOP_LEFT) {
-                let code = creep.move(exit);
-                if (code == OK) {
-                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
-                }
-                return code;
-            }
-        }
-        // 非边界跨房（偏离到房间内部）：寻路到目标房间的路点
+        // 跨房（含边界）：统一 moveTo 寻路到目标房间的路点。多个外矿爬挤在
+        // 单一边界出口格时，单步 move(exit) 会因格子被占而失败卡死；moveTo
+        // 由原生引擎处理边界拥堵与排队。
         return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
     },
     /** Move exactly from one cached route point to its next point. */
