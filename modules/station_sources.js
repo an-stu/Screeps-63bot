@@ -370,8 +370,13 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         pathIndex = Math.max(0, Math.min(pathIndex, roadPath.length - 1));
         task.pathIndex = pathIndex;
         wp = roadPath[pathIndex];
-        // 修当前脚下的路
-        if (canBuild && !this.pos.isBorder()) {
+        // 只操作缓存路线的当前/相邻路点。Creep 在被挤开或跨房转向时不能
+        // 顺手在偏离路线的格子铺路，否则会消耗全局 construction site 配额。
+        let onRoadPath = [pathIndex - 1, pathIndex, pathIndex + 1].some(i => {
+            let p = roadPath[i];
+            return p && p.roomName == this.pos.roomName && p.x == this.pos.x && p.y == this.pos.y;
+        });
+        if (canBuild && onRoadPath && !this.pos.isBorder()) {
             let blocked = this.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType != STRUCTURE_ROAD);
             if (!blocked) {
                 let road = this.pos.lookFor(LOOK_STRUCTURES).filter(e => e.structureType == STRUCTURE_ROAD).head();
@@ -401,28 +406,9 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         }
         return;
     }
-    // 无规划路径（应急）：旧行为，走到哪修到哪
-    if (canBuild && !this.pos.isBorder()) {
-        let road = this.pos.lookFor(LOOK_STRUCTURES).filter(e => e.structureType == STRUCTURE_ROAD).head();
-        if (!road) {
-            road = this.pos.lookFor(LOOK_CONSTRUCTION_SITES).filter(e => e.structureType == STRUCTURE_ROAD).head();
-            if (!road && this.ticksToLive > 300) {
-                this.pos.createConstructionSite(STRUCTURE_ROAD)
-            } else if (road) {
-                this.$build(road)
-            } else {
-                this.moveTo(target, { visualizePathStyle: { stroke: '#fffa00' } })
-            }
-        } else if (road) {
-            if (road.hits < road.hitsMax / 10 * 9) {
-                this.$repair(road)
-            }
-            if (road.hits > road.hitsMax / 10 * 8)
-                this.moveTo(target, { visualizePathStyle: { stroke: '#fffa00' } })
-        }
-    } else {
-        this.moveTo(target, { visualizePathStyle: { stroke: '#fffa00' } })
-    }
+    // 还没有可用缓存时只移动，不临时铺一条随机路线；下一次路径计算会
+    // 生成唯一的 source → storage 路径后再开始建设。
+    this.moveTo(target, { visualizePathStyle: { stroke: '#fffa00' } })
 }
 
 /** 搬运策略 */
@@ -713,6 +699,29 @@ let pro = {
         }
         return c.path;
     },
+    /** 清除外矿房中不在缓存路线上的旧 road 工地，释放全局工地配额。 */
+    cleanupOuterRoadSites(data, spawnRoom) {
+        if (data.roadSiteCleanupTick && Game.time - data.roadSiteCleanupTick < 250) return;
+        data.roadSiteCleanupTick = Game.time;
+        let path = pro.getOuterRoadPath(data);
+        if (!path || !path.length) return;
+        let route = {};
+        let rooms = {};
+        path.forEach(p => {
+            route[p.roomName + ":" + p.x + ":" + p.y] = true;
+            rooms[p.roomName] = true;
+        });
+        Object.keys(rooms).forEach(roomName => {
+            // 主房蓝图中的道路由本地规划器维护，绝不在这里移除。
+            if (roomName == spawnRoom.name) return;
+            let room = Game.rooms[roomName];
+            if (!room) return;
+            room.find(FIND_MY_CONSTRUCTION_SITES)
+                .filter(site => site.structureType == STRUCTURE_ROAD
+                    && !route[roomName + ":" + site.pos.x + ":" + site.pos.y])
+                .forEach(site => site.remove());
+        });
+    },
     /** 路径上离当前位置最近的路点 */
     nextRoadPathIndex(roadPath, pos) {
         let best = 0;
@@ -959,14 +968,18 @@ let pro = {
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
         if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
-        if (!harRoom) return;
-        let sm = harRoom.memory[pro.stationName]
+        let memoryRoom = Memory.rooms[roomName.name || roomName];
+        let sm = harRoom ? harRoom.memory[pro.stationName] : memoryRoom && memoryRoom[pro.stationName];
+        if (!sm) return;
         _.values(sm).forEach(data => {
             let pathTime = data["pathTime"];
             let container = Game.getObjectById(data["container"]);
             // 预先计算并缓存固定修路路径（一次性寻路，避免多个修路爬各走各的路线）
             pro.ensureOuterRoadPath(data, spawnRoom);
-            if (pathTime && container) {
+            pro.cleanupOuterRoadSites(data, spawnRoom);
+            // container 不可见时仍可按缓存 ID / 坐标孵化；carrier 抵达矿区后
+            // 再解析对象即可。否则 keeper 死后失去视野会再次把外矿锁死。
+            if (pathTime && data["container"]) {
                 data["carryCreeps"] = data["carryCreeps"] || []
                 data["carryCreeps"] = data["carryCreeps"].filter(e => Game.getObjectById(e))
                 let carrierCreeps = data["carryCreeps"].map(e => Game.getObjectById(e)).filter(e => e && (!e.ticksToLive || e.ticksToLive > e.body.length * 3))

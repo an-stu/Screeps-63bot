@@ -61,9 +61,11 @@ assert.ok(mainMount.includes("global.LOCAL_SHARD_NAME = Game.shard.name"), "core
 assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep Power Creeps alive and operating storage");
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be independently restorable");
-assert.ok(strategyOuterHarvest.includes("!Game.rooms[targetRoomName]"), "lost remote vision must respawn a scoped scout instead of trusting stale Memory");
+assert.ok(strategyOuterHarvest.includes("!Memory.rooms[targetRoomName]"), "only unknown remotes must require a scoped scout; remembered sources launch directly");
 assert.ok(managerRooms.indexOf("StrategyOuterHarvest.exec(room)") < managerRooms.indexOf("StrategyHighLevel.exec(room)"), "remote economy must request Spawn capacity before background high-level workers");
 assert.ok(stationSources.includes("let roadDir = task.roadDir == -1 ? -1 : 1"), "legacy road-builder tasks must default to a valid route direction");
+assert.ok(stationSources.includes("cleanupOuterRoadSites") && stationSources.includes("onRoadPath"), "outer roads must be cached-route-only and reclaim off-route road sites");
+assert.ok(prototypeCreep.includes("repairFreshRampart") && prototypeCreep.includes("completesRampart"), "a completed rampart site must keep its builder on immediate repair");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
 assert.ok(manifest.includes("strategy_claim"), "claim task handlers must ship with planner dependencies");

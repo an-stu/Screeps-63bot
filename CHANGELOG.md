@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.61.0 — Deterministic construction and remote roads
+
+### Fixed
+
+- A remembered external source now launches its keeper and carrier directly
+  without waiting for a new scout to restore vision. Scouts remain first-use
+  discovery only.
+- Restrict external road build/repair to the cached source-to-storage route
+  and periodically remove off-route road construction sites in remote rooms.
+- Retry extension placement every 150 ticks, count queued extension sites,
+  and search all blueprint candidates so blocked early positions cannot leave
+  a room permanently two extensions short.
+- When a rampart construction site completes, keep that builder on a targeted
+  repair task on the next tick, immediately lifting it above the 1-hit decay
+  floor before ordinary maintenance resumes.
+
 ## v0.60.0 — Recoverable remote harvesting
 
 ### Fixed

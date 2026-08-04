@@ -285,22 +285,28 @@ let pro={
         let room = Game.rooms[pos.roomName];
         if(room.constructionSite.length+(room._construct_builed||0)<10){
             let head = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType == struct).head()
-            if(!head){
+            let site = pos.lookFor(LOOK_CONSTRUCTION_SITES).filter(e=>e.structureType == struct).head()
+            if(!head&&!site){
                 room._construct_builed=(room._construct_builed||0)+1
-                pos.createConstructionSite(struct)
+                return pos.createConstructionSite(struct) == OK;
             }
         }
+        return false;
     },
     tryCreateStructs(room,structMap,struct,structCnt=2500){
         structCnt = Math.min(structCnt,CONTROLLER_STRUCTURES[struct][room.level])
         if(structMap[struct]){
-            let needBuild = false
-            if(room[struct]&&room[struct].length>-1){ // 如果是数组类型
-                if(structCnt>room[struct].length)needBuild=true
-            }else if(!room[struct])needBuild=true //不是数组类型或者没建筑过
-            if(needBuild){
+            let built = room[struct] && room[struct].length > -1 ? room[struct].length : (room[struct] ? 1 : 0);
+            let queued = room.constructionSite.filter(e => e.structureType == struct).length;
+            let missing = structCnt - built - queued;
+            if(missing > 0){
+                // 不能只检查蓝图前 N 个点：其中某个点被地形或旧建筑堵住时，会
+                // 导致 extension 永远少一两个。遍历全部候选位置直到补足数量。
                 let str2Pos = Utils.decodePosArray(structMap[struct]);
-                str2Pos.take(structCnt).forEach(e=>{pro.tryCreateCons(new RoomPosition(e.x,e.y,room.name),struct)})
+                for(let e of str2Pos){
+                    if(missing <= 0) break;
+                    if(pro.tryCreateCons(new RoomPosition(e.x,e.y,room.name),struct)) missing--;
+                }
             }
             // if(structCnt)
             // if(structMap[struct].length<structCnt)
@@ -344,10 +350,16 @@ let pro={
         }
     },
     tryAutoBuildHighLevel (room){
+        // Extension 是 Spawn 能力的一部分，不应和道路/实验室等 600-tick 背景
+        // 建筑一起等待。一次 decode 每 150 tick 的代价很小，且会重试全局工地
+        // 上限暂满时失败的两个位置。
+        if((Game.time+room.hashCode()) % 150 == 0 && Game.cpu.bucket>500&&room.memory.structMap){
+            pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
+        }
         if((Game.time+room.hashCode()) % 600 == 0 && Game.cpu.bucket>500&&room.memory.structMap){ // 4级后600tick更新一次
             // 开始建 road 和 container
             _.keys(CONTROLLER_STRUCTURES).forEach(struct=>{
-                if(struct == STRUCTURE_RAMPART || struct == STRUCTURE_WALL)return;
+                if(struct == STRUCTURE_RAMPART || struct == STRUCTURE_WALL || struct == STRUCTURE_EXTENSION)return;
                 pro.tryCreateStructs(room,room.memory.structMap,struct);
                 // room.memory.structMap[struct].take(CONTROLLER_STRUCTURES[struct][room.level]).forEach(e=>{
                 //     let pos = new RoomPosition(e[0],e[1],room.name);

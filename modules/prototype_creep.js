@@ -546,14 +546,43 @@ Creep.prototype.fillRes = function () {
 
 Creep.prototype.buildConst = function () {
     let obj = this.lastTaskObj();
+    let completesRampart = obj && obj.structureType == STRUCTURE_RAMPART
+        && obj.progress + this.getActiveBodyparts(WORK) * BUILD_POWER >= obj.progressTotal;
     let code = this.build(obj);
     if (code == ERR_NOT_IN_RANGE) {
         this.moveTo(obj, { visualizePathStyle: { stroke: '#00f3ff', ignoreCreeps: false }, range: 3 });
+    }
+    if (completesRampart && code == OK) {
+        // 新 rampart 建成时只有 1 hits。不要把 builder 释放给普通升级任务：
+        // 下一 tick 继续对同一格 repair，避免它在维护扫描前就自然消失。
+        this.popTask();
+        this.addTask(UtilsTask.taskOutView(undefined, obj.pos.roomName, obj.pos.x, obj.pos.y,
+            "repairFreshRampart", undefined, { expire: Game.time + 3 }));
+        return this.execLastTask();
     }
     if (!obj || this.storeEmpty()) {
         this.popTask()
         this.execLastTask()
     }
+}
+
+Creep.prototype.repairFreshRampart = function () {
+    let task = this.lastTask();
+    let room = Game.rooms[task.roomName];
+    let rampart = room && room.lookForAt(LOOK_STRUCTURES, task.x, task.y)
+        .find(e => e.structureType == STRUCTURE_RAMPART && e.my);
+    // Structure intent becomes visible next tick. Keep this targeted task for
+    // a short grace period, then yield normally if construction was cancelled.
+    if (!rampart) {
+        if (Game.time <= task.expire) return;
+        return this.popTask().execLastTask();
+    }
+    if (this.store[RESOURCE_ENERGY] == 0) return this.popTask().execLastTask();
+    let code = this.repair(rampart);
+    if (code == ERR_NOT_IN_RANGE) this.moveTo(rampart, { range: 3, reusePath: 10 });
+    // One successful repair is enough to lift a new rampart beyond the
+    // decay floor; StationDefense then continues normal target-level repair.
+    if (code == OK) this.popTask().execLastTask();
 }
 
 Creep.prototype.fillAllTask = function () {

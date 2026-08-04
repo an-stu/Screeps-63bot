@@ -28,11 +28,10 @@ let pro = {
                 let isInvader = flag.name.includes('invader');
                 StationSources.trySpawnOuterDefenser(targetRoomName, spawnRoom, isInvader);
             }
-            // 外矿没有常驻视野时，旧的房间 Memory 会一直存在，但 keeper 死亡后
-            // 不会再进入后续孵化逻辑，形成“有缓存、无人采”的死锁。必须把失去
-            // 视野也视为需要 scout 的状态；已有同目标 scout 时不会重复孵化。
-            if (!Game.rooms[targetRoomName]
-                || !Memory.rooms[targetRoomName]
+            // Scout 只负责首次建立 source Memory。已有坐标、container ID 与路径
+            // 后，keeper 本身可以直接走入不可见的矿区；为重新拿视野而多派 scout
+            // 会把外矿恢复额外延后一个往返。
+            if (!Memory.rooms[targetRoomName]
                 || !Memory.rooms[targetRoomName][StationSources.stationName]) {
                 let scouter = spawnRoom.creeps("scouter", false).filter(e => {
                     let task = e.headTask();
@@ -49,8 +48,12 @@ let pro = {
                 if ((Game.time + spawnRoom.hashCode()) % 30 == 0 && harRoom) {
                     StationSources.update(harRoom)
                 }
-                if (harRoom && harRoom.controller && !harRoom.my) { // 先生claimer 再生 har 保证能量获取效率 没有视野会先生 har
+                // 普通外矿不依赖当前视野：任务中已有 source 坐标，keeper 会自行
+                // 进入目标房。reserve 仍只在看得见 controller 时决策。
+                if (!flag.name.includes('invader')) {
                     StationSources.trySpawnOuterHarKeeper(targetRoomName, spawnRoom, false);
+                }
+                if (harRoom && harRoom.controller && !harRoom.my) { // 先生claimer 再生 har 保证能量获取效率 没有视野会先生 har
                     let reserver = spawnRoom.creeps("reserver", false).filter(e => {
                         let task = e.headTask();
                         return task && task.roomName == targetRoomName;
