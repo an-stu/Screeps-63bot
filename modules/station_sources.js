@@ -381,8 +381,12 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         ]);
         return this.execLastTask();
     }
-    // 到达端点：修完（或非 keepBuilding 模式）则结束；未修完则掉头继续修
+    // 到达端点：先填充所有能量到 storage（即使道路未修完也要先送货），
+    // 然后才决定掉头修路或返回矿区
     if (this.pos.isNearTo(target) || this.store[RESOURCE_ENERGY] == 0) {
+        if (target && target.store && this.store[RESOURCE_ENERGY] > 0) {
+            this.transfer(target, RESOURCE_ENERGY);
+        }
         this.popTask();
         if (task.keepBuilding && this.store[RESOURCE_ENERGY] > 0 && data) {
             // 确定完成后再退出：端点强制刷新完成度检查
@@ -930,7 +934,14 @@ let pro = {
         if (creep.pos.roomName == point.roomName) {
             let range = creep.pos.getRangeTo(point);
             if (range == 0) return OK;
-            if (range == 1) return creep.move(creep.pos.getDirectionTo(point));
+            if (range == 1) {
+                let code = creep.move(creep.pos.getDirectionTo(point));
+                // 单步 move 不经过 BetterMove，手动更新 lastPos 便于诊断
+                if (code == OK) {
+                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
+                }
+                return code;
+            }
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
@@ -939,7 +950,13 @@ let pro = {
         // is needed to cross the cached route's room boundary.
         if (creep.pos.isBorder()) {
             let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
-            if (exit >= TOP && exit <= TOP_LEFT) return creep.move(exit);
+            if (exit >= TOP && exit <= TOP_LEFT) {
+                let code = creep.move(exit);
+                if (code == OK) {
+                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
+                }
+                return code;
+            }
         }
         // 非边界跨房（偏离到房间内部）：寻路到目标房间的路点
         return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
