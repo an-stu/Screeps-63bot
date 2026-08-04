@@ -883,15 +883,13 @@ let pro = {
             if (!Memory.rooms[roomName][StationSources.stationName][k]) delete Memory.rooms[roomName][StationSources.stationName][k]
 
         _.values(Memory.rooms[roomName][StationSources.stationName]).forEach(data => {
-            // 如果两个多个连在一起死掉一个
+            // 每个挖矿点只保留 1 只 keeper（保留最年轻的），多余的立即自杀，
+            // 防止重复爬聚集（旧的相邻判断无法清理分散的重复爬）
             let harCreeps = data["creeps"].map(e => Game.getObjectById(e)).filter(e => e && e.ticksToLive)
-            harCreeps.forEach(a => {
-                harCreeps.forEach(b => {
-                    if (a.id != b.id && a.pos.isNearTo(b)) {
-                        if (a.ticksToLive < b.ticksToLive) a.suicide(); else b.suicide();
-                    }
-                })
-            })
+            if (harCreeps.length > 1) {
+                harCreeps.sort((a, b) => b.ticksToLive - a.ticksToLive);
+                harCreeps.slice(1).forEach(e => e.suicide());
+            }
 
             // 清理死掉的creeps
             data["creeps"] = data["creeps"].filter(e => Game.getObjectById(e))
