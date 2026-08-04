@@ -516,14 +516,14 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 // 从 source 旁边的 container / 地上掉落取能量：只要相邻且自身空手
                 // 就直接取，不依赖 keeper 是否就位、不限最低能量
                 if (this.storeEmpty()) {
-                    if (container.store[RESOURCE_ENERGY] > 0) {
+                    // 优先捡地上的掉落（keeper 掉落的能量堆），不够再拿 container 里的
+                    let drop = this.pos.lookFor(LOOK_ENERGY).head();
+                    if (drop && this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) this.pickup(drop);
+                    if (this.storeEmpty() && container.store[RESOURCE_ENERGY] > 0) {
                         let code = this.withdraw(container, RESOURCE_ENERGY)
                         if (code == ERR_NOT_IN_RANGE)
                             this.moveTo(container)
                     }
-                    // keeper 掉落在 container 位置/地上的能量也捡走
-                    let drop = this.pos.lookFor(LOOK_ENERGY).head();
-                    if (drop && this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) this.pickup(drop);
                 }
                 else if (container.store[RESOURCE_ENERGY] != container.store.getUsedCapacity()) { // add by an_w
                     let ResType = Object.keys(container.store).filter(e => e != RESOURCE_ENERGY).head()
