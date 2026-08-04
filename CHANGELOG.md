@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.72.0 — Persistent blueprint visual
+
+### Fixed
+
+- Render a `showBlueprint` flag every tick while it exists, instead of only on
+  the auto-planner's 25-tick cadence. No visual or CPU work is performed
+  without that explicit flag.
+
 ## v0.71.0 — External carrier delivery and road-build priority
 
 ### Fixed
