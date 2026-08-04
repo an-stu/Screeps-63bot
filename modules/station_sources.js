@@ -872,6 +872,21 @@ let pro = {
         pro.trySpawnOuterHarKeeper(room.name, room);
     },
     trySpawnOuterHarKeeper(roomName, spawnRoom) {
+        // 重复 keeper 清理必须在生爬门槛之前执行：生爬失败（能量不足）时
+        // spawnFailure 会挡住后续逻辑，导致重复 keeper 一直无法清理
+        let harMemory = Memory.rooms[roomName.name || roomName] && Memory.rooms[roomName.name || roomName][StationSources.stationName];
+        if (harMemory) {
+            _.values(harMemory).forEach(data => {
+                // 每个挖矿点只保留 1 只 keeper（保留最年轻的），多余的立即自杀
+                let harCreeps = (data["creeps"] || []).map(e => Game.getObjectById(e)).filter(e => e && e.ticksToLive)
+                if (harCreeps.length > 1) {
+                    harCreeps.sort((a, b) => b.ticksToLive - a.ticksToLive);
+                    harCreeps.slice(1).forEach(e => e.suicide());
+                }
+                // 清理死掉的 creeps（自杀的爬在下 tick 死亡）
+                data["creeps"] = (data["creeps"] || []).filter(e => Game.getObjectById(e))
+            });
+        }
         if (spawnRoom.spawnFailure) return null;
         // log(roomName,spawnRoom.name)
         if (roomName == spawnRoom.name
@@ -883,17 +898,6 @@ let pro = {
             if (!Memory.rooms[roomName][StationSources.stationName][k]) delete Memory.rooms[roomName][StationSources.stationName][k]
 
         _.values(Memory.rooms[roomName][StationSources.stationName]).forEach(data => {
-            // 每个挖矿点只保留 1 只 keeper（保留最年轻的），多余的立即自杀，
-            // 防止重复爬聚集（旧的相邻判断无法清理分散的重复爬）
-            let harCreeps = data["creeps"].map(e => Game.getObjectById(e)).filter(e => e && e.ticksToLive)
-            if (harCreeps.length > 1) {
-                harCreeps.sort((a, b) => b.ticksToLive - a.ticksToLive);
-                harCreeps.slice(1).forEach(e => e.suicide());
-            }
-
-            // 清理死掉的creeps
-            data["creeps"] = data["creeps"].filter(e => Game.getObjectById(e))
-
             if (data["id"] && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
                 let harBody = StationSources.getHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable(), roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
