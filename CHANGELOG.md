@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.65.0 — Full-load carrier pickups
+
+### Fixed
+
+- Source-container and external-mining carriers now withdraw only when the
+  container holds strictly more energy than that creep's full carry capacity.
+  Insufficient loads are left in place instead of triggering a partial trip.
+
 ## v0.64.0 — Fully reinforce fresh ramparts
 
 ### Fixed

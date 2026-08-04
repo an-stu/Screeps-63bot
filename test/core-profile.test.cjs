@@ -68,6 +68,7 @@ assert.ok(stationSources.includes("let roadDir = task.roadDir == -1 ? -1 : 1"), 
 assert.ok(stationSources.includes("cleanupOuterRoadSites") && stationSources.includes("onRoadPath"), "outer roads must be cached-route-only and reclaim off-route road sites");
 assert.ok(prototypeCreep.includes("repairFreshRampart") && prototypeCreep.includes("completesRampart"), "a completed rampart site must keep its builder on immediate repair");
 assert.ok(prototypeCreep.includes("直到能量用尽") && !prototypeCreep.includes("if (code == OK) this.popTask().execLastTask();"), "a fresh rampart builder must spend its carried energy before resuming normal work");
+assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.includes("task.requireFullLoad"), "source-container carriers must wait for more than a full load before withdrawing");
 assert.ok(managerAutoPlanner.includes("extensionFailure") && managerAutoPlanner.includes("pruneOutOfTierExtensionSites"), "extension construction failures must be diagnosed without using future-RCL blueprint slots");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");

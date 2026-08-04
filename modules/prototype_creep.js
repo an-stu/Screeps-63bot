@@ -460,6 +460,15 @@ Creep.prototype.carryRes = function () {
         this.execLastTask();
         return;
     }
+    // Source-container carrier tasks should only start a trip with more than
+    // a full creep load available. The strict comparison intentionally keeps
+    // exactly-one-load energy as a keeper buffer.
+    if (task.requireFullLoad && this.storeEmpty()
+        && obj.store[task.resType] <= this.store.getCapacity(task.resType)) {
+        this.popTask();
+        this.execLastTask();
+        return;
+    }
     if (this._move_res_active) return;
     this._move_res_active = true
     if (task.resType == undefined) throw new Error("resType no found:" + task)

@@ -426,7 +426,10 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 if (!this.pos.isNearTo(container)) {
                     this.goTo(container)
                 }
-                if (container && container.store[RESOURCE_ENERGY] >= this.store.getFreeCapacity(RESOURCE_ENERGY)) {
+                // 外矿 carrier 只在 container 足以装满自身时才取能量。少量
+                // 能量会留给 keeper 缓冲，避免 carrier 为碎片资源频繁往返。
+                if (container && this.storeEmpty()
+                    && container.store[RESOURCE_ENERGY] > this.store.getCapacity(RESOURCE_ENERGY)) {
                     let code = this.withdraw(container, RESOURCE_ENERGY)
                     if (code == ERR_NOT_IN_RANGE)
                         this.moveTo(container)
@@ -842,7 +845,8 @@ let pro = {
                     maxContainerEnergyCnt = container.store[RESOURCE_ENERGY]
                 if (container && container.store[RESOURCE_ENERGY] > minEnergy && !room.used[container.id]) {
                     tasks.push([UtilsTask.task(container, "carryRes", "registerStationSourcesCarryInRoom", {
-                        resType: RESOURCE_ENERGY
+                        resType: RESOURCE_ENERGY,
+                        requireFullLoad: true,
                     })])
                 }
             }
