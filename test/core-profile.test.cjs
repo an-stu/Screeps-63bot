@@ -72,6 +72,7 @@ assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.inc
 assert.ok(stationSources.includes("!ret.incomplete") && stationSources.includes("reachesDestination"), "external-road paths must never cache an incomplete route that stops before storage");
 assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < stationSources.indexOf("if (spawnRoom.spawnFailure) return;"), "external-road route refresh must not be blocked by local spawn pressure");
 assert.ok(stationSources.includes("maxOps: 8000"), "cached external-route planning must have enough search budget to reach storage");
+assert.ok(stationSources.includes("if (!ret || ret.incomplete)") && stationSources.includes("fallback search threw"), "an unreachable blueprint route must retry using the native obstacle matrix");
 assert.ok(managerAutoPlanner.includes("extensionFailure") && managerAutoPlanner.includes("pruneOutOfTierExtensionSites"), "extension construction failures must be diagnosed without using future-RCL blueprint slots");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");

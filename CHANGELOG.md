@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.69.0 — Reachable external-road fallback
+
+### Fixed
+
+- If the blueprint-aware external route has no solution, retry once with
+  Screeps' native obstacle matrix and cache that complete route. The fallback
+  is used only for an otherwise unreachable storage endpoint.
+
 ## v0.68.0 — Sufficient external-route search budget
 
 ### Fixed

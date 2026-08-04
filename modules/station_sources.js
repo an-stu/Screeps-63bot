@@ -677,6 +677,23 @@ let pro = {
             data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
             return undefined;
         }
+        // 蓝图约束可能把主房入口到 storage 的所有格子封死。只有在首选
+        // 路网确实无解时，退回 Screeps 原生障碍矩阵；这样仍是一条缓存的
+        // 唯一路线，但不会把外矿 carrier 永久卡在房间入口。
+        if (!ret || ret.incomplete) {
+            try {
+                ret = PathFinder.search(from, to, {
+                    plainCost: 1,
+                    swampCost: 5,
+                    maxRooms: 4,
+                    maxOps: 8000,
+                    range: 1,
+                });
+            } catch (e) {
+                data.roadPathError = "fallback search threw: " + e.message + " tick=" + Game.time;
+                return undefined;
+            }
+        }
         let end = ret && ret.path && ret.path.last();
         let reachesDestination = end && to && end.roomName == to.roomName
             && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1;
