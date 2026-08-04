@@ -46,6 +46,7 @@ const roomResource = fs.readFileSync(path.join(root, "modules/helper_roomResourc
 const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), "utf8");
 const strategyOuterHarvest = fs.readFileSync(path.join(root, "modules/strategy_outerHarvest.js"), "utf8");
 const stationSources = fs.readFileSync(path.join(root, "modules/station_sources.js"), "utf8");
+const managerAutoPlanner = fs.readFileSync(path.join(root, "modules/manager_autoPlanner.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -66,6 +67,7 @@ assert.ok(managerRooms.indexOf("StrategyOuterHarvest.exec(room)") < managerRooms
 assert.ok(stationSources.includes("let roadDir = task.roadDir == -1 ? -1 : 1"), "legacy road-builder tasks must default to a valid route direction");
 assert.ok(stationSources.includes("cleanupOuterRoadSites") && stationSources.includes("onRoadPath"), "outer roads must be cached-route-only and reclaim off-route road sites");
 assert.ok(prototypeCreep.includes("repairFreshRampart") && prototypeCreep.includes("completesRampart"), "a completed rampart site must keep its builder on immediate repair");
+assert.ok(managerAutoPlanner.includes("extensionFailure") && managerAutoPlanner.includes("Game.constructionSites"), "extension construction failures must retain a compact actionable diagnostic");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");
 assert.ok(manifest.includes("strategy_marketPrice") && manifest.includes("strategy_market"), "market runtime and pricing dependency must ship together");
 assert.ok(manifest.includes("strategy_claim"), "claim task handlers must ship with planner dependencies");

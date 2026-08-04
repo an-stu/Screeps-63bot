@@ -287,8 +287,22 @@ let pro={
             let head = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType == struct).head()
             let site = pos.lookFor(LOOK_CONSTRUCTION_SITES).filter(e=>e.structureType == struct).head()
             if(!head&&!site){
-                room._construct_builed=(room._construct_builed||0)+1
-                return pos.createConstructionSite(struct) == OK;
+                let code = pos.createConstructionSite(struct);
+                if(code == OK){
+                    room._construct_builed=(room._construct_builed||0)+1;
+                    return true;
+                }
+                // Construction failures were previously silent, which made a
+                // global site cap indistinguishable from a broken blueprint.
+                // Keep only the latest compact result for console/dashboard
+                // diagnosis; no growing error log in Memory.
+                if(struct == STRUCTURE_EXTENSION){
+                    room.memory.autoBuild = room.memory.autoBuild || {};
+                    room.memory.autoBuild.extensionFailure = {
+                        tick: Game.time, code: code, x: pos.x, y: pos.y,
+                        globalSites: Object.keys(Game.constructionSites || {}).length,
+                    };
+                }
             }
         }
         return false;
@@ -350,10 +364,13 @@ let pro={
         }
     },
     tryAutoBuildHighLevel (room){
-        // Extension 是 Spawn 能力的一部分，不应和道路/实验室等 600-tick 背景
-        // 建筑一起等待。一次 decode 每 150 tick 的代价很小，且会重试全局工地
-        // 上限暂满时失败的两个位置。
-        if((Game.time+room.hashCode()) % 150 == 0 && Game.cpu.bucket>500&&room.memory.structMap){
+        // Extension 是 Spawn 能力的一部分。只要有缺口，每次经济调度（5 tick）
+        // 都立即尝试；满额后才退回零成本的 150-tick 检查。这样升级不会因
+        // 时间槽或全局工地上限暂满而长时间少两座 extension。
+        let extensionLimit = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.level];
+        let extensionQueued = room.constructionSite.filter(e => e.structureType == STRUCTURE_EXTENSION).length;
+        let extensionMissing = room.extension.length + extensionQueued < extensionLimit;
+        if(Game.cpu.bucket>500&&room.memory.structMap && (extensionMissing || (Game.time+room.hashCode()) % 150 == 0)){
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
         }
         if((Game.time+room.hashCode()) % 600 == 0 && Game.cpu.bucket>500&&room.memory.structMap){ // 4级后600tick更新一次

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.62.0 — Immediate extension placement diagnostics
+
+### Fixed
+
+- Retry a missing Extension on every staggered high-level economy pass rather
+  than waiting for its background construction time slot after an RCL upgrade.
+- Record the latest extension site creation failure code, coordinate, and
+  global construction-site count in compact `Memory.rooms[room].autoBuild`.
+  A full account-wide site limit is now visible instead of failing silently.
+
 ## v0.61.0 — Deterministic construction and remote roads
 
 ### Fixed
