@@ -580,9 +580,10 @@ Creep.prototype.repairFreshRampart = function () {
     if (this.store[RESOURCE_ENERGY] == 0) return this.popTask().execLastTask();
     let code = this.repair(rampart);
     if (code == ERR_NOT_IN_RANGE) this.moveTo(rampart, { range: 3, reusePath: 10 });
-    // One successful repair is enough to lift a new rampart beyond the
-    // decay floor; StationDefense then continues normal target-level repair.
-    if (code == OK) this.popTask().execLastTask();
+    // 新 rampart 必须优先吃完 builder 已携带的能量。若只 repair 一次就
+    // 回到升级/搬运任务，低等级 rampart 会长期停在极低 hits，甚至衰减消失。
+    // 同一任务会在后续 tick 继续 repair，直到能量用尽或目标已满。
+    if (rampart.hits >= rampart.hitsMax) this.popTask().execLastTask();
 }
 
 Creep.prototype.fillAllTask = function () {

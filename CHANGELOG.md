@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.64.0 — Fully reinforce fresh ramparts
+
+### Fixed
+
+- Keep a builder on its newly completed rampart until its carried energy is
+  exhausted (or the rampart is full), rather than releasing it after one
+  repair intent.
+
 ## v0.63.0 — Strict RCL blueprint tiers
 
 ### Fixed
