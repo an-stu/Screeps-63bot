@@ -393,10 +393,10 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         if (pathIndex == undefined) pathIndex = roadDir == 1 ? 0 : roadPath.length - 1;
         let wp = roadPath[Math.max(0, Math.min(pathIndex, roadPath.length - 1))];
         let dist = wp.roomName == this.pos.roomName ? Math.max(Math.abs(wp.x - this.pos.x), Math.abs(wp.y - this.pos.y)) : 999;
-        if (dist > 2) {
+        if (dist > 1) {
             // 偏离路径（或路径刚重算）：重新定位到最近路点
             pathIndex = pro.nextRoadPathIndex(roadPath, this.pos).index;
-        } else if (dist <= 1) {
+        } else if (dist == 0) {
             pathIndex += roadDir; // 到达当前路点，前进
         }
         pathIndex = Math.max(0, Math.min(pathIndex, roadPath.length - 1));
@@ -427,7 +427,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
                 }
             }
         }
-        let code = this.moveTo(new RoomPosition(wp.x, wp.y, wp.roomName), { range: 0, reusePath: 20, visualizePathStyle: { stroke: '#fffa00' } });
+        let code = pro.moveToOuterRoadPoint(this, task, wp);
         if (code == ERR_NO_PATH || code == ERR_NO_BODYPART) {
             // 应急：路径不可达（被建筑堵死等），失效缓存退回旧逻辑
             if (data) {
@@ -832,26 +832,59 @@ let pro = {
         let point = path[index];
         let range = point.roomName == creep.pos.roomName
             ? Math.max(Math.abs(point.x - creep.pos.x), Math.abs(point.y - creep.pos.y)) : 999;
-        if (range > 2) {
+        if (range > 1) {
             let nearest = pro.nextRoadPathIndex(path, creep.pos);
             if (nearest.dist >= 999) return false;
             index = nearest.index;
-        } else if (range <= 1) {
+        } else if (range == 0) {
             index += direction;
         }
         index = Math.max(0, Math.min(index, path.length - 1));
         task.returnPathIndex = index;
         point = path[index];
-        let code = creep.moveTo(new RoomPosition(point.x, point.y, point.roomName), {
-            range: 0,
-            reusePath: 20,
-            visualizePathStyle: { stroke: '#fffa00' },
-        });
+        let code = pro.moveToOuterRoadPoint(creep, task, point);
         if (code != ERR_NO_PATH && code != ERR_NO_BODYPART) return true;
         delete data.roadPathStr;
         delete data.roadPathTick;
         delete task.returnPathIndex;
         return false;
+    },
+    /**
+     * Walk an external route exactly one cached waypoint at a time. Adjacent
+     * route points deliberately use `move`, not `moveTo`, so Screeps never
+     * spends PathFinder CPU or cuts a parallel road. A creep displaced from
+     * the road first heads to its nearest point; only after repeated failure
+     * does it use a short native-path recovery search.
+     */
+    moveToOuterRoadPoint(creep, task, point) {
+        let positionKey = creep.pos.roomName + ":" + creep.pos.x + ":" + creep.pos.y;
+        let targetKey = point.roomName + ":" + point.x + ":" + point.y;
+        if (task.outerRoadMovePos == positionKey && task.outerRoadMoveTarget == targetKey) {
+            task.outerRoadStuck = (task.outerRoadStuck || 0) + 1;
+        } else {
+            task.outerRoadStuck = 0;
+        }
+        task.outerRoadMovePos = positionKey;
+        task.outerRoadMoveTarget = targetKey;
+        if (task.outerRoadStuck >= 3) {
+            return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
+        }
+        if (creep.pos.roomName == point.roomName) {
+            let range = creep.pos.getRangeTo(point);
+            if (range == 0) return OK;
+            if (range == 1) return creep.move(creep.pos.getDirectionTo(point));
+            // This creep has been pushed off the road. Move directly back to
+            // the selected nearest cached point before resuming one-step mode.
+            return creep.move(creep.pos.getDirectionTo(point));
+        }
+        // A room transition always occurs at a border. `findExit` returns the
+        // same direction constants accepted by Creep.move, so no path search
+        // is needed to cross the cached route's room boundary.
+        if (creep.pos.isBorder()) {
+            let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
+            if (exit >= TOP && exit <= TOP_LEFT) return creep.move(exit);
+        }
+        return ERR_NO_PATH;
     },
     /**
      * Return the closest route-bound road construction site in the creep's

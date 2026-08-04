@@ -78,6 +78,8 @@ assert.ok(stationSources.includes("nearestOuterRoadSite") && stationSources.incl
 assert.ok(stationSources.includes("!pro.outerRoadComplete(data) && isRoadBuilder"), "only WORK-capable external carriers may enter the road-only loop");
 assert.ok(stationSources.includes("moveOuterCarrierOnRoad(this, task, data, -1)") && stationSources.includes("delete task.returnPathIndex"), "external carriers must return to the source via cached roads and invalidate only unusable routes");
 assert.ok(!stationSources.includes("maintainOuterRoads") && !stationSources.includes("road.destroy()"), "external road maintenance must let off-route roads decay naturally");
+assert.ok(stationSources.includes("moveToOuterRoadPoint") && stationSources.includes("return creep.move(creep.pos.getDirectionTo(point))"), "external carriers must step exactly between cached road points before any recovery path search");
+assert.ok(stationSources.includes("if (dist > 1)") && stationSources.includes("if (range > 1)"), "an external carrier that leaves its route must reacquire the nearest cached point immediately");
 assert.ok(main.includes("Game.flags.showBlueprint") && main.includes("ManagerAutoPlanner.showRoom()"), "a requested blueprint visual must render every tick rather than only with planner work");
 assert.ok(managerAutoPlanner.includes("extensionFailure") && managerAutoPlanner.includes("pruneOutOfTierExtensionSites"), "extension construction failures must be diagnosed without using future-RCL blueprint slots");
 assert.ok(manifest.includes("strategy_scouter"), "flag-driven scouts must have their task handlers loaded");

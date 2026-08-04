@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.74.0 — Exact cached-road movement
+
+### Fixed
+
+- External carriers now use `Creep.move` between adjacent cached road points,
+  preventing `moveTo` from choosing parallel shortcuts. Displaced creeps first
+  return to their nearest cached point; a short path search is a recovery-only
+  fallback after repeated failed direct steps.
+
 ## v0.73.0 — Non-destructive external-road maintenance
 
 ### Fixed
