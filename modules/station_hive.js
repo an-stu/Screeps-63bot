@@ -104,6 +104,19 @@ let pro = {
         if (!room.spawnedMap) room.spawnedMap = {};
         return room.spawn.filter(e => !e.spawning && !room.spawnedMap[e.id]).head();
     },
+    /** 能量不足时缩减身体：从尾部删除部件直到成本适配（保留至少 1 个 MOVE） */
+    scaleBodyToFit(body, maxEnergy) {
+        let scaled = body.slice();
+        while (scaled.length > 1 && Utils.getBodyEnergyNeed(scaled) > maxEnergy) {
+            let idx = scaled.length - 1;
+            if (scaled[idx] == MOVE && scaled.filter(p => p == MOVE).length == 1) {
+                idx = scaled.length - 2; // 保留唯一 MOVE，删倒数第二个
+                if (idx < 0) break;
+            }
+            scaled.splice(idx, 1);
+        }
+        return Utils.getBodyEnergyNeed(scaled) <= maxEnergy ? scaled : null;
+    },
     trySpawn(room, targetRoomName, body, role, tasks, ops) {
         if (!room || !room.my) {
             console.log("room not yours cannot spawn in " + targetRoomName);
@@ -124,11 +137,20 @@ let pro = {
         if (ops) for (let t in ops) opts[t] = ops[t];
         let spend = Utils.getBodyEnergyNeed(body);
         if (room.currentEnergyAvailable < spend) {
-            room.spawnFailure = true; return undefined;
+            // 能量不足：按可用能量缩减身体，先保证产出（打破低能量房间的死锁）
+            let reduced = pro.scaleBodyToFit(body, room.currentEnergyAvailable);
+            if (reduced) {
+                body = reduced;
+                spend = Utils.getBodyEnergyNeed(body);
+            } else {
+                room.spawnFailure = true;
+                return undefined;
+            }
         }
         let spawn = room.spawn.find(e => !e.spawning && !room.spawnedMap[e.id] && (room.level == 8 || e.isActive()));
         if (!spawn) {
-            room.spawnFailure = true; return undefined;
+            room.spawnFailure = true;
+            return undefined;
         }
         let code = spawn.spawnCreep(body, name, opts);
         if (code == OK) {
