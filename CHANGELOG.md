@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.73.0 — Non-destructive external-road maintenance
+
+### Fixed
+
+- Remove the unused destructive external-road cleanup routine. Roads outside
+  the cached route are neither repaired nor rebuilt and now decay naturally;
+  only off-route construction sites are removed to preserve the global site
+  quota.
+
 ## v0.72.0 — Persistent blueprint visual
 
 ### Fixed

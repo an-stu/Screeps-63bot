@@ -918,46 +918,6 @@ let pro = {
         }
         return room._plannedBlockedSet.has(pos.x + ":" + pos.y);
     },
-    /**
-     * 外矿道路维护：只保留路径上的一条路，删除历史遗留的多余道路
-     * - 矿区房间：删除所有不在路径上的己方 road（该房间没有蓝图，路都是我们建的）
-     * - 主房间：只删除紧邻路径走廊（range<=2）且不在蓝图路网里的己方 road，
-     *   避免误删通向其他建筑/其他外矿的路
-     */
-    maintainOuterRoads(data, spawnRoom) {
-        if (data.lastRoadMaintain && Game.time - data.lastRoadMaintain < 100) return;
-        data.lastRoadMaintain = Game.time;
-        let path = pro.getOuterRoadPath(data);
-        if (!path || !path.length) return;
-        let pathRoads = new Set();
-        let pathTilesByRoom = {};
-        path.forEach(p => {
-            pathRoads.add(p.roomName + ":" + p.x + ":" + p.y);
-            (pathTilesByRoom[p.roomName] = pathTilesByRoom[p.roomName] || []).push(p);
-        });
-        let mineRoomName = data.roomName;
-        [mineRoomName, spawnRoom.name].forEach(roomName => {
-            let room = Game.rooms[roomName];
-            if (!room) return;
-            let plannedRoads = new Set();
-            let structMap = room.memory && room.memory.structMap;
-            if (structMap) {
-                pro.structMapPositions(structMap.road).forEach(p => plannedRoads.add((p.x != undefined ? p.x : p[0]) + ":" + (p.y != undefined ? p.y : p[1])));
-            }
-            let pathTiles = pathTilesByRoom[roomName];
-            let isMainRoom = roomName == spawnRoom.name;
-            room.getStructures().filter(s => s.structureType == STRUCTURE_ROAD && s.my).forEach(road => {
-                let key = road.pos.roomName + ":" + road.pos.x + ":" + road.pos.y;
-                if (pathRoads.has(key)) return; // 路径上的路保留
-                if (plannedRoads.has(road.pos.x + ":" + road.pos.y)) return; // 蓝图里的路保留
-                if (isMainRoom && pathTiles) {
-                    let near = pathTiles.some(t => Math.max(Math.abs(t.x - road.pos.x), Math.abs(t.y - road.pos.y)) <= 2);
-                    if (!near) return; // 远离走廊的路不动
-                }
-                road.destroy();
-            });
-        });
-    },
     generatorOuterHarDefenseTask(data) {
         return [
             UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "outerDefense", "registerStationSourcesDefenseOutRoom")
