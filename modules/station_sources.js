@@ -500,21 +500,24 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
             if (!pro.moveOuterCarrierOnRoad(this, task, data, -1)) this.goTo(task);
         } else {
             let sm = rm[pro.stationName][this.headTask().id];
-            let harCreep = Game.getObjectById(sm["creeps"][0])
             let container = Game.getObjectById(sm[STRUCTURE_CONTAINER]);
-            if (harCreep && container && harCreep.pos.isNearTo(container) || this.pos.isBorder()) { // 挖矿爬就位才动，避免堵路 ，如果自己在边界的地方也不能停下，两个在一起直接堵路
+            // 从 source 旁边的 container / 地上掉落取能量：只要相邻且自身空手
+            // 就直接取，不依赖 keeper 是否就位、不限最低能量
+            if (container) {
                 if (!this.pos.isNearTo(container)) {
                     this.goTo(container)
                 }
-                // 外矿 carrier 只在 container 足以装满自身时才取能量。少量
-                // 能量会留给 keeper 缓冲，避免 carrier 为碎片资源频繁往返。
-                if (container && this.storeEmpty()
-                    && container.store[RESOURCE_ENERGY] > this.store.getCapacity(RESOURCE_ENERGY)) {
-                    let code = this.withdraw(container, RESOURCE_ENERGY)
-                    if (code == ERR_NOT_IN_RANGE)
-                        this.moveTo(container)
+                if (this.storeEmpty()) {
+                    if (container.store[RESOURCE_ENERGY] > 0) {
+                        let code = this.withdraw(container, RESOURCE_ENERGY)
+                        if (code == ERR_NOT_IN_RANGE)
+                            this.moveTo(container)
+                    }
+                    // keeper 掉落在 container 位置/地上的能量也捡走
+                    let drop = this.pos.lookFor(LOOK_ENERGY).head();
+                    if (drop && this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) this.pickup(drop);
                 }
-                else if (container && container.store[RESOURCE_ENERGY] != container.store.getUsedCapacity()) { // add by an_w
+                else if (container.store[RESOURCE_ENERGY] != container.store.getUsedCapacity()) { // add by an_w
                     let ResType = Object.keys(container.store).filter(e => e != RESOURCE_ENERGY).head()
                     if (ResType) {
                         let code = this.withdraw(container, ResType)
