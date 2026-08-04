@@ -987,7 +987,6 @@ let pro = {
         }
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
-        if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
         let memoryRoom = Memory.rooms[roomName.name || roomName];
         let sm = harRoom ? harRoom.memory[pro.stationName] : memoryRoom && memoryRoom[pro.stationName];
@@ -998,6 +997,9 @@ let pro = {
             // 预先计算并缓存固定修路路径（一次性寻路，避免多个修路爬各走各的路线）
             pro.ensureOuterRoadPath(data, spawnRoom);
             pro.cleanupOuterRoadSites(data, spawnRoom);
+            // 路线验证/重算不依赖空闲 Spawn。单 Spawn 房若先尝试本地补员，
+            // spawnFailure 不能阻止已有外矿 carrier 修正其过期路径。
+            if (spawnRoom.spawnFailure) return;
             // container 不可见时仍可按缓存 ID / 坐标孵化；carrier 抵达矿区后
             // 再解析对象即可。否则 keeper 死后失去视野会再次把外矿锁死。
             if (pathTime && data["container"]) {

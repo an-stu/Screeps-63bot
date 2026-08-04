@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.67.0 — Spawn-independent route refresh
+
+### Fixed
+
+- Refresh and validate an existing external-road path before checking Spawn
+  availability. Local spawn pressure can no longer leave a broken cached road
+  path untouched indefinitely.
+
 ## v0.66.0 — Complete external-road routes
 
 ### Fixed
