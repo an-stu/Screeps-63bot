@@ -867,26 +867,29 @@ let pro = {
             UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestEnergy")
         ]
     },
+    /** 重复 keeper 清理：每个挖矿点只保留 1 只（保留最年轻的），不受生爬失败影响 */
+    cleanupDuplicateKeepers(roomName) {
+        let harMemory = Memory.rooms[roomName.name || roomName] && Memory.rooms[roomName.name || roomName][StationSources.stationName];
+        if (!harMemory) return;
+        _.values(harMemory).forEach(data => {
+            let harCreeps = (data["creeps"] || []).map(e => Game.getObjectById(e)).filter(e => e && e.ticksToLive)
+            if (harCreeps.length > 1) {
+                harCreeps.sort((a, b) => b.ticksToLive - a.ticksToLive);
+                harCreeps.slice(1).forEach(e => e.suicide());
+            }
+            // 清理死掉的 creeps（自杀的爬在下 tick 死亡）
+            data["creeps"] = (data["creeps"] || []).filter(e => Game.getObjectById(e))
+        });
+    },
     trySpawnHarKeeper(room) {
+        pro.cleanupDuplicateKeepers(room.name);
         if (room.spawnFailure) return null;
         pro.trySpawnOuterHarKeeper(room.name, room);
     },
     trySpawnOuterHarKeeper(roomName, spawnRoom) {
         // 重复 keeper 清理必须在生爬门槛之前执行：生爬失败（能量不足）时
         // spawnFailure 会挡住后续逻辑，导致重复 keeper 一直无法清理
-        let harMemory = Memory.rooms[roomName.name || roomName] && Memory.rooms[roomName.name || roomName][StationSources.stationName];
-        if (harMemory) {
-            _.values(harMemory).forEach(data => {
-                // 每个挖矿点只保留 1 只 keeper（保留最年轻的），多余的立即自杀
-                let harCreeps = (data["creeps"] || []).map(e => Game.getObjectById(e)).filter(e => e && e.ticksToLive)
-                if (harCreeps.length > 1) {
-                    harCreeps.sort((a, b) => b.ticksToLive - a.ticksToLive);
-                    harCreeps.slice(1).forEach(e => e.suicide());
-                }
-                // 清理死掉的 creeps（自杀的爬在下 tick 死亡）
-                data["creeps"] = (data["creeps"] || []).filter(e => Game.getObjectById(e))
-            });
-        }
+        pro.cleanupDuplicateKeepers(roomName);
         if (spawnRoom.spawnFailure) return null;
         // log(roomName,spawnRoom.name)
         if (roomName == spawnRoom.name
@@ -898,6 +901,8 @@ let pro = {
             if (!Memory.rooms[roomName][StationSources.stationName][k]) delete Memory.rooms[roomName][StationSources.stationName][k]
 
         _.values(Memory.rooms[roomName][StationSources.stationName]).forEach(data => {
+            // 净化被污染的 spawnTime（重复 concat 造成的极端负数会让生爬条件恒真）
+            if (!data["spawnTime"] || data["spawnTime"] < -1000 || data["spawnTime"] > Game.time) data["spawnTime"] = Game.time;
             if (data["id"] && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
                 let harBody = StationSources.getHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable(), roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
