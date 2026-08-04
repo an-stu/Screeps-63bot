@@ -113,9 +113,48 @@
 - `war_teamCore.js` flag._targets 重建：缓存游戏对象跨 tick 会引用过期对象——需重构为 id 列表，风险高——跳过。
 - `teamL2.js` 小队无限再生产检查：改动 spawn 行为，需在实战验证——暂缓。
 
-## 六、验证与部署
+## 六、第三轮：外矿修复与 CPU 优化（2026-08-04）
+
+### 外矿 E52S21 流程（均已部署验证）
+
+| 提交 | 内容 |
+| --- | --- |
+| `c913cc5` | 外矿全局派发（旗名第二段=供给房间，旗子物理位置=矿区），修复跨房旗子触发 |
+| `8123725`+`e473494` | 一次性寻路固定修路路径 + structMap 编码字符串解码 |
+| `1a394cf`+`323fdb8` | 路径自研紧凑序列化（Room.serializePath 对跨房路径产生 undefined，弃用） |
+| `050e122` | 序列化存储 + 增量路点索引（O(1)）+ 路修完才搬运门槛 |
+| `62d9b20` | 修复 TDZ 变量遮蔽（roadTask） |
+| `a409857`~`479607f`（Codex） | carrier/keeper 沿缓存路径行走、边界点推进、离线道路自然衰减 |
+| `2b9d5a9` | keeper 去程走缓存路径；legacy carrier 出程沿路径交付；repair 仅限路径 road |
+
+### E53S21 经济死锁修复链（均已部署验证）
+
+| 提交 | 问题 | 修复 |
+| --- | --- | --- |
+| `20bcb7a` | carrier 满载被派去灌 storage，hive 饿死 | hive 需要能量时先填 hive |
+| `31f4ea0` | 无 keeper 时 worker 不挖矿（storage≥3000 门槛） | 无 keeper 即让 worker 顶替挖矿 |
+| `3182925` | worker 有能量被派去升级/建造而非填 hive | worker 优先填 hive（不依赖 carrier） |
+| `c4a29a9`+`086f881` | carrier 身体按容量定（1200）永远生不出 | 按实际能量定身体，最小 300（仅 keeper+carrier 双缺时） |
+| `0a7b702` | carrier 取货门槛 1200，container 有货却挂机 | 空手 carrier 300 门槛取货 |
+| `f928d55` | **注册死 id 清理条件写回 bug → creeps 永远空 → 无限生 keeper** | 三个 register 函数始终写回 |
+| `b2c20d6`+`24e34fd`+`edb4d4f` | 重复 keeper 清理被 spawn 门槛挡住 + spawnTime 污染 | 清理独立前置；spawnTime 净化 |
+
+### 本轮 CPU 优化（`784cb9b`）
+
+线上 avg 20.28ms 超限（bucket 9126 下降）。最大消耗：unitTasks 11.89ms（keeper 3.98 / upgrader 3.01 / carrier 2.55）、rooms 5.44ms。
+
+1. **upgrader**：link/container `findInRange` 每 tick 两次 → 缓存 id，10 tick 重扫（行为等价，扫描减少 ~90%）
+2. **keeper**：工地扫描每 tick filter → 9 tick 节流；`dontPullMe` 内存写去抖
+3. **结构缓存**（rooms 阶段最大隐藏成本）：`multipleList`/`mass_stores` getter 由逐个 `Game.getObjectById` 改为每房间每 tick 一次 `find(FIND_STRUCTURES)` 映射查找
+
+### 待观察
+
+- CPU 遥测窗口（每 ~97 tick 采样）尚未完全覆盖新代码，avg20 已从 21.6 → 17.8 趋势改善，需持续观察
+- PB mission 修复已部署（pending 记录保留 + 校验兜底），等待合格 PB（≥5000 power、剩余≥4200、非 avoid 房间）出现验证
+
+## 七、验证与部署
 
 - `node --check`：全部修改文件通过
 - 回归测试：`test/core-profile.test.cjs`、`test/claim-flow.test.cjs` 全部通过
-- 第一轮 12 项 + 第二轮 9 项修改已提交 GitHub，随构建部署到 `default` 分支（shard3 实际运行分支）
-- 外矿 E52S21 流程已上线验证：scouter → 站数据注册 → reserver + 外矿 keeper，能量回运 E53S21 storage
+- 全部修改随构建部署到 `default` 分支（shard3 实际运行分支），每步提交可回退
+- 外矿 E52S21 全流程上线：scouter → 站注册 → reserver + keeper + carrier，能量回运 E53S21 storage
