@@ -374,6 +374,16 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // 规划路径：固定路线修路，路点索引增量推进（O(1)，不每 tick 全路径扫描）
     let roadPath = data && pro.getOuterRoadPath(data);
     if (roadPath && roadPath.length) {
+        // Exit tiles are special: a creep may arrive on a cached border point
+        // while its task index still names that same point. Force one exact
+        // cached step immediately, otherwise it can repeatedly select the
+        // border as its own movement target and never enter the next tile.
+        let borderIndex = pro.nextRoadPathIndex(roadPath, this.pos);
+        if (this.pos.isBorder() && borderIndex.dist == 0) {
+            task.pathIndex = borderIndex.index;
+            let borderCode = pro.stepFromOuterRoadPoint(this, roadPath, borderIndex.index, roadDir);
+            if (borderCode != ERR_NO_PATH) return;
+        }
         // A road builder must finish the nearest existing road site before
         // continuing along the route. This prevents a single carrier from
         // walking past several sites, spreading a tiny amount of progress
@@ -885,6 +895,16 @@ let pro = {
             if (exit >= TOP && exit <= TOP_LEFT) return creep.move(exit);
         }
         return ERR_NO_PATH;
+    },
+    /** Move exactly from one cached route point to its next point. */
+    stepFromOuterRoadPoint(creep, roadPath, index, direction) {
+        let next = roadPath[index + direction];
+        if (!next) return ERR_NO_PATH;
+        if (next.roomName == creep.pos.roomName) {
+            return creep.move(creep.pos.getDirectionTo(next));
+        }
+        let exit = Game.map.findExit(creep.pos.roomName, next.roomName);
+        return exit >= TOP && exit <= TOP_LEFT ? creep.move(exit) : ERR_NO_PATH;
     },
     /**
      * Return the closest route-bound road construction site in the creep's

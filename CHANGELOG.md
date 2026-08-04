@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.75.0 — Cached route border progression
+
+### Fixed
+
+- Force a carrier standing on an exact cached border waypoint to advance to
+  the next cached point. This fixes road-builder tasks repeatedly targeting
+  their own exit tile instead of entering the adjacent route tile.
+
 ## v0.74.0 — Exact cached-road movement
 
 ### Fixed
