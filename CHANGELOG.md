@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.66.0 — Complete external-road routes
+
+### Fixed
+
+- Reject cached PathFinder results that do not actually reach storage and
+  invalidate the old incomplete route immediately.
+- Treat unbuilt blueprint structures as very expensive rather than impassable
+  while calculating external roads, so a route can enter the home room and
+  reach storage without laying arbitrary roads.
+
 ## v0.65.0 — Full-load carrier pickups
 
 ### Fixed

@@ -607,11 +607,21 @@ let pro = {
      * serializePath 紧凑序列化存储，1000 tick 重算一次
      */
     ensureOuterRoadPath(data, spawnRoom) {
+        let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
         if (data.roadPathStr && data.roadPathStr.indexOf("undefined") < 0
-            && data.roadPathTick && Game.time - data.roadPathTick < 1000) return pro.getOuterRoadPath(data);
+            && data.roadPathTick && Game.time - data.roadPathTick < 1000) {
+            let cached = pro.getOuterRoadPath(data);
+            let end = cached && cached.last();
+            // PathFinder can return a non-empty but incomplete path. The old
+            // code cached it anyway, making a road-builder stop at a room
+            // entrance forever instead of ever reaching storage.
+            if (end && to && end.roomName == to.roomName
+                && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1) return cached;
+            delete data.roadPathStr;
+            delete data.roadPathTick;
+        }
         let from = Game.getObjectById(data.container);
         from = from ? from.pos : new RoomPosition(data.x, data.y, data.roomName);
-        let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
         if (!from || !to) {
             data.roadPathError = "no endpoints: from=" + (from || "none") + " to=" + (to || "none") + " tick=" + Game.time;
             return undefined;
@@ -638,7 +648,11 @@ let pro = {
                     let structMap = room.memory && room.memory.structMap;
                     if (structMap) {
                         for (let type in structMap) {
-                            let cost = (type == 'road' || type == 'container') ? 1 : 255;
+                            // Prefer the blueprint road network, but do not
+                            // turn unbuilt future structures into an absolute
+                            // wall. A hard wall can make the only room exit
+                            // unreachable and yields an incomplete path.
+                            let cost = (type == 'road' || type == 'container') ? 1 : 50;
                             pro.structMapPositions(structMap[type]).forEach(p => {
                                 let x = p.x != undefined ? p.x : p[0];
                                 let y = p.y != undefined ? p.y : p[1];
@@ -660,7 +674,10 @@ let pro = {
             data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
             return undefined;
         }
-        if (ret && ret.path && ret.path.length > 1) {
+        let end = ret && ret.path && ret.path.last();
+        let reachesDestination = end && to && end.roomName == to.roomName
+            && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1;
+        if (ret && !ret.incomplete && reachesDestination && ret.path.length > 1) {
             data.roadPathStr = pro.serializeOuterRoadPath(ret.path);
             data.roadPathTick = Game.time;
             delete data.roadPath;
