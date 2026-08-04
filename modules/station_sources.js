@@ -12,9 +12,8 @@ Creep.prototype.registerStationSources = function () {
         let rmHarList = source["creeps"] || [];
         // 清理已死亡的爬，避免列表无限膨胀
         let alive = rmHarList.filter(id => Game.getObjectById(id));
-        if (alive.length != rmHarList.length) source["creeps"] = alive;
-        if (!alive.contains(this.id))
-            alive.push(this.id)
+        if (!alive.contains(this.id)) alive.push(this.id)
+        source["creeps"] = alive; // 必须始终写回：新 id 的注册不能丢
     }
 };
 
@@ -261,9 +260,8 @@ Creep.prototype.registerStationSourcesCarryOutRoom = function () {
         let source = rm[pro.stationName][headTask.id];
         let rmHarList = source["carryCreeps"] || [];
         let alive = rmHarList.filter(id => Game.getObjectById(id));
-        if (alive.length != rmHarList.length) source["carryCreeps"] = alive;
-        if (!alive.contains(this.id))
-            alive.push(this.id)
+        if (!alive.contains(this.id)) alive.push(this.id)
+        source["carryCreeps"] = alive; // 必须始终写回
     }
 };
 
@@ -318,9 +316,8 @@ Creep.prototype.registerStationSourcesDefenseOutRoom = function () {
         let source = rm[pro.stationName][this.headTask().id];
         let rmHarList = source["defenseCreeps"] || [];
         let alive = rmHarList.filter(id => Game.getObjectById(id));
-        if (alive.length != rmHarList.length) source["defenseCreeps"] = alive;
-        if (!alive.contains(this.id))
-            alive.push(this.id)
+        if (!alive.contains(this.id)) alive.push(this.id)
+        source["defenseCreeps"] = alive; // 必须始终写回
     }
 };
 
