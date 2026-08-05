@@ -1209,10 +1209,10 @@ let pro = {
         }
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
+        if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
-        let memoryRoom = Memory.rooms[roomName.name || roomName];
-        let sm = harRoom ? harRoom.memory[pro.stationName] : memoryRoom && memoryRoom[pro.stationName];
-        if (!sm) return;
+        if (!harRoom) return;
+        let sm = harRoom.memory[pro.stationName]
         _.values(sm).forEach(data => {
             let pathTime = data["pathTime"];
             let container = Game.getObjectById(data["container"]);
