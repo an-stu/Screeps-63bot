@@ -907,7 +907,13 @@ let pro = {
             let nearest = pro.nextRoadPathIndex(path, creep.pos);
             if (nearest.dist >= 999) return false;
             index = nearest.index;
-        } else if (range == 0) {
+            // 重新定位后必须重算 range：若正好落在路点上（如跨房后到达对面
+            // 边界格），需继续推进 index，否则永远停在边界两侧来回横跳
+            point = path[index];
+            range = point.roomName == creep.pos.roomName
+                ? Math.max(Math.abs(point.x - creep.pos.x), Math.abs(point.y - creep.pos.y)) : 999;
+        }
+        if (range == 0) {
             index += direction;
         }
         index = Math.max(0, Math.min(index, path.length - 1));
