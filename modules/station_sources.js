@@ -547,7 +547,15 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
             this.pickup(dropEnergy);
         }
     }
-    if (this.store[RESOURCE_ENERGY] * 2 > this.store.getCapacity(RESOURCE_ENERGY)) {
+    if (this.store[RESOURCE_ENERGY] > 0) {
+        // 只要有能量就准备回程。keeper 不在时 container 能量少、难以攒满，
+        // 不等能量超过自身容量，取到就回（避免 carrier 卡在矿区空转）；
+        // keeper 在时攒满再回，减少碎片往返。
+        let sm = rm && rm[pro.stationName] && rm[pro.stationName][task.id];
+        let keeperAlive = sm && sm["creeps"] && Game.getObjectById(sm["creeps"][0]);
+        if (keeperAlive && this.store[RESOURCE_ENERGY] * 2 <= this.store.getCapacity(RESOURCE_ENERGY)) {
+            return; // keeper 正常时等攒满
+        }
         let data = task.roomName && task.id
             ? (Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
                 && Memory.rooms[task.roomName][pro.stationName][task.id]) : undefined;
