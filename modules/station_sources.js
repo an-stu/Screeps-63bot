@@ -969,21 +969,14 @@ let pro = {
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
-        // 跨房：边界格直接 move(exit) 一步位移到对面房间。边界两侧是相邻格，
-        // 两个爬对向移动会被 Screeps 交换（互相传送、位置不变）——move 后必须
-        // 验证位置确实进入了目标房间；失败或被传送则退回房间内（边界格不是
-        // 等待区），下 tick 重试，避免占住唯一出口造成死锁。
+        // 跨房：边界格每 tick 持续 move(exit) 向目标房间位移（用户验证：
+        // 一直朝目标方向移动就能通过；不验证位置、不退回、不等待——
+        // 退回会造成边界来回弹跳，等待会与对面爬互相传送死锁）。
         if (creep.pos.isBorder()) {
             let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
             if (exit >= TOP && exit <= TOP_LEFT) {
                 let code = creep.move(exit);
-                if (code == OK && creep.pos.roomName == point.roomName) {
-                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
-                    return code;
-                }
-                let back = creep.pos.getDirectionTo(new RoomPosition(25, 25, creep.pos.roomName));
-                let backCode = creep.move(back);
-                if (backCode == OK) {
+                if (code == OK) {
                     creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
                 }
                 return OK;
