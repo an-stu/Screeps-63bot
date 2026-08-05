@@ -77,18 +77,31 @@ let pro = {
     exec (room) {
         if((Game.time+room.hashCode())%30!=0)return;
         if(!room.storage)return;
-        let flags=room.flags("pillage");
+        // 全局扫描 pillage 旗子（旗子物理插在目标掠夺房间，可能非己方房间）
+        let flags = ManagerFlags.getFlagsByPrefix("pillage");
         if(!flags.length)return;
         flags.forEach(flag=>{
-            let pillager = room.creeps("pillager", false).filter(e => e.headTaskFlag()&&e.headTaskFlag().name == flag.name).head();
+            // 确定派发房间：旗名第二段优先（如 pillage_E41S32_1），否则最近的己方房间
+            let spawnRoom = flag.memory.spawnRoom && Game.rooms[flag.memory.spawnRoom];
+            if (!spawnRoom || !spawnRoom.my) {
+                let namedRoom = Game.rooms[flag.getRoomName()];
+                if (namedRoom && namedRoom.my && namedRoom.storage) spawnRoom = namedRoom;
+                else spawnRoom = StationHive.getClosestSpawnRoom(flag.pos.roomName, 7, 3, 15);
+                if (spawnRoom) flag.memory.spawnRoom = spawnRoom.name;
+            }
+            // 只有被认领的派发房间负责 spawn，避免多房间重复派发
+            if (!spawnRoom || !spawnRoom.storage || spawnRoom.name != room.name) return;
+            // 全局检查该旗子的 pillager（出生后即离开派发房间，不能只看房间内）
+            let pillager = Object.values(Game.creeps).filter(e => e.memory.role == "pillager"
+                && e.headTaskFlag() && e.headTaskFlag().name == flag.name).head();
             if(pillager)return;
             let tasks = [UtilsTask.taskFlag(flag,  "pillage","registerPillage")]
             if (flag.name.indexOf("boost")==-1){
-                StationHive.trySpawn(room, room.name, pro.getPillagerBodyConfig(room.getEnergyCapacityAvailable()), "pillager", tasks);
+                StationHive.trySpawn(spawnRoom, spawnRoom.name, pro.getPillagerBodyConfig(spawnRoom.getEnergyCapacityAvailable()), "pillager", tasks);
             }
-            else if (room.level >= 7 && StationLab.boostAble(room,{'KH2O': 30*25})) {
-                tasks = tasks.concat(StationLab.generatorBoostLevelTask(room, "capacity", 25, 1));
-                StationHive.trySpawn(room, room.name, pro.getPillagerBodyConfig(room.getEnergyCapacityAvailable()), "pillager", tasks);
+            else if (spawnRoom.level >= 7 && StationLab.boostAble(spawnRoom,{'KH2O': 30*25})) {
+                tasks = tasks.concat(StationLab.generatorBoostLevelTask(spawnRoom, "capacity", 25, 1));
+                StationHive.trySpawn(spawnRoom, spawnRoom.name, pro.getPillagerBodyConfig(spawnRoom.getEnergyCapacityAvailable()), "pillager", tasks);
             }
         })
     }

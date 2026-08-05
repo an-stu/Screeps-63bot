@@ -106,7 +106,7 @@ const managerRooms = {
         if (global.StrategyResourceBalance) {
             HelperError.catchError(() => StrategyResourceBalance.exec(room), room.name);
         }
-        if (global.StrategyPillage && isCpuFeatureEnabled("pillage") && room.flags("pillage").length) {
+        if (global.StrategyPillage && isCpuFeatureEnabled("pillage") && ManagerFlags.hasPrefix("pillage")) {
             HelperError.catchError(() => StrategyPillage.exec(room), room.name);
         }
         if (!MIN_CPU && global.StationObserver && isCpuFeatureEnabled("observer") && Game.shard.name != "shard1") {

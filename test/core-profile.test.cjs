@@ -78,7 +78,7 @@ assert.ok(stationSources.includes("nearestOuterRoadSite") && stationSources.incl
 assert.ok(stationSources.includes("!pro.outerRoadComplete(data) && isRoadBuilder"), "only WORK-capable external carriers may enter the road-only loop");
 assert.ok(stationSources.includes("moveOuterCarrierOnRoad(this, task, data, -1)") && stationSources.includes("delete task.returnPathIndex"), "external carriers must return to the source via cached roads and invalidate only unusable routes");
 assert.ok(!stationSources.includes("maintainOuterRoads") && !stationSources.includes("road.destroy()"), "external road maintenance must let off-route roads decay naturally");
-assert.ok(stationSources.includes("moveToOuterRoadPoint") && stationSources.includes("return creep.move(creep.pos.getDirectionTo(point))"), "external carriers must step exactly between cached road points before any recovery path search");
+assert.ok(stationSources.includes("moveToOuterRoadPoint") && stationSources.includes("creep.move(creep.pos.getDirectionTo(point))"), "external carriers must step exactly between cached road points before any recovery path search");
 assert.ok(stationSources.includes("if (dist > 1)") && stationSources.includes("if (range > 1)"), "an external carrier that leaves its route must reacquire the nearest cached point immediately");
 assert.ok(stationSources.includes("stepFromOuterRoadPoint") && stationSources.includes("this.pos.isBorder() && borderIndex.dist == 0"), "cached border waypoints must advance rather than repeatedly target themselves");
 assert.ok(stationSources.includes("let nextIndex = borderIndex.index + roadDir") && stationSources.includes("task.pathIndex = nextIndex"), "a boundary move must persist its next cached waypoint index");
