@@ -27,26 +27,15 @@ Creep.prototype.pillage=function () {
         if(!this.memory.concatTime)this.memory.concatTime=(1500-this.ticksToLive)*2
         return this.fillAll(this.mainRoom().storage)
     }
-    let target = this.pos.findClosestByPath(FIND_RUINS,{filter:e=>{
-            return e.store&&e.store.getAllResTypeCount()
-        },ignoreCreeps:true}); 
-    if (!target && this.room.storage) target = this.room.storage.store.getUsedCapacity()?this.room.storage:0;
-    if(!target) target = this.pos.findClosestByPath(FIND_STRUCTURES,{filter:e=>{
-            return e.store
-                &&e.structureType==STRUCTURE_TERMINAL// nuker搬不动，先判断类型避免对无关建筑做昂贵的检查
-                &&e.store.getAllResTypeCount()
-                &&!e.pos.coverRampart()
-                &&(!this.room.my||!e.my) // 如果房间是我的，就搬一下不是我的建筑里面的东西（好像只剩下terminal了）
-        },ignoreCreeps:true});
-    // if (!target) target=this.pos.findClosestByPath(FIND_TOMBSTONES,{filter:e=>{
-    //         return e.store&&e.store.getAllResTypeCount()
-    //     });
-    let drop = undefined;
-    if(!target)drop = this.pos.findClosestByPath(FIND_DROPPED_RESOURCES,{filter:(e)=>e.amount>100,ignoreCreeps:true})
-    if(target){
-        this.carryAll(target);
-        // this.execLastTask();
-    }else if(drop){
+    // 按价值选目标：比较 storage/terminal/废墟里所有资源的市场单价×数量，
+    // 优先搬价值最高的（如 XGHO2 远贵于 energy），而不是固定先搬 storage
+    let best = pro.getBestPillageTarget(this);
+    if (best) {
+        this.addTask(UtilsTask.task(best.target, "carryRes", undefined, { resType: best.resType }));
+        return;
+    }
+    let drop = this.pos.findClosestByPath(FIND_DROPPED_RESOURCES,{filter:(e)=>e.amount>100,ignoreCreeps:true})
+    if(drop){
         return this.addTask(UtilsTask.task(drop,"pickupRes"))
     }else if(flag.name.indexOf("keeper")==-1){
         flag.remove();
@@ -60,6 +49,52 @@ Creep.prototype.pillage=function () {
 };
 
 let pro = {
+    /**
+     * 在 storage / terminal / 废墟 中找出当前单位价值最高的可搬资源。
+     * 每趟容量固定（约 2500），按单价而非总价值排序，一趟收益最大。
+     * 价值用固定排序 RES_PRIORITY_LIST（从高到低，XGHO2 等化合物靠前）。
+     * 返回 {target, resType}
+     */
+    getBestPillageTarget(creep) {
+        let candidates = [];
+        let pushStore = (target) => {
+            if (!target || !target.store) return;
+            for (let resType in target.store) {
+                let amount = target.store[resType];
+                if (!amount || amount <= 0) continue;
+                candidates.push({ target: target, resType: resType, amount: amount });
+            }
+        };
+        // 废墟
+        let ruin = creep.pos.findClosestByPath(FIND_RUINS, {
+            filter: e => e.store && e.store.getAllResTypeCount(),
+            ignoreCreeps: true,
+        });
+        if (ruin) pushStore(ruin);
+        // storage（废弃房间的 storage 也能搬）
+        if (creep.room.storage && creep.room.storage.store.getUsedCapacity()) pushStore(creep.room.storage);
+        // terminal：只搬非己方建筑内的（己方 terminal 由市场/平衡逻辑处理）
+        let terminal = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: e => e.store
+                && e.structureType == STRUCTURE_TERMINAL
+                && e.store.getAllResTypeCount()
+                && !e.pos.coverRampart()
+                && (!creep.room.my || !e.my),
+            ignoreCreeps: true,
+        });
+        if (terminal) pushStore(terminal);
+        if (!candidates.length) return undefined;
+        // 按单位价值降序：市场单价优先，无价资源用优先级兜底
+        candidates.sort((a, b) => pro.resUnitValue(b) - pro.resUnitValue(a));
+        return candidates[0];
+    },
+    resUnitValue(c) {
+        if (c.unitValue !== undefined) return c.unitValue;
+        // 固定价值排序：RES_PRIORITY_LIST 按价值从高到低排列，
+        // XGHO2 等化合物权重远高于 energy，保证优先搬高价值资源
+        c.unitValue = RES_PRIORITY_MAP[c.resType] || 0;
+        return c.unitValue;
+    },
     getPillagerBodyConfig (energy){
         let current=0;
         let cost = BODYPART_COST[CARRY]+BODYPART_COST[MOVE];
