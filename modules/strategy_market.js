@@ -370,9 +370,24 @@ let pro = {
             global._resCnt[resType] = ManagerRooms.getNormalRoom().map(e => StationCarry.roomMassStoreCnt(e, resType)).sum();
             global._resCnt.tick = Game.time;
         }
-        if (global._resCnt[resType] >= ManagerRooms.getNormalRoom().length * 6000 + 10000) return;//如果资源有剩下就不买,从别的房间拿
+        // 普通需求：每房 6000 + 1 万缓冲。lab 反应原料额外加需求：
+        // 若存在 lab 房间且该矿物是合成原料（BOOST_RES_HOLD 折算），
+        // 买入线提高到 lab 需要量，保证反应能持续进行
+        let labRooms = ManagerRooms.getNormalRoom().filter(e => e.memory.stationLab
+            && e.memory.stationLab.centerLabs && e.memory.stationLab.centerLabs.length >= 2);
+        let labNeed = 0;
+        if (labRooms.length) {
+            let hold = global.BOOST_RES_HOLD || {};
+            for (let prod in hold) {
+                let comps = (global.LAB_REACTIONS && global.LAB_REACTIONS[prod]) || [];
+                if (comps[0] == resType || comps[1] == resType) labNeed += hold[prod] / 2;
+            }
+            labNeed = Math.min(labNeed, 300000);
+        }
+        let need = ManagerRooms.getNormalRoom().length * 6000 + 10000 + labNeed;
+        if (global._resCnt[resType] >= need) return;//如果资源有剩下就不买,从别的房间拿
 
-        let buyCnt = 6000
+        let buyCnt = Math.min(need - global._resCnt[resType], 30000)
         let myRoomSet = ManagerRooms.getNormalRoom().map(e => e.name).toSet()
         let myRooms = _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt)
             .map(e => e.roomName).filter(e => myRoomSet.has(e)).toSet();
@@ -380,13 +395,18 @@ let pro = {
             .filter(e => !myRoomSet.has(e))
             .map(e => e.price).maxBy(e => e) || 0
         maxPrice += StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY) * 0.1
+        // lab 缺原料时酌情加价到历史价水平，否则挂单永远等不到卖单
+        if (labNeed > 0 && global._resCnt[resType] < labRooms.length * 6000) {
+            let ref = StrategyMarketPrice.getResTypeHistory(resType)
+            maxPrice = Math.max(maxPrice, ref * 0.95)
+        }
         _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt).forEach(e => {
             Game.market.changeOrderPrice(e.id, maxPrice)
         });
 
         ManagerRooms.getNormalRoom().filter(e => !myRooms.has(e.name) && e.terminal).map(room => {
             let resCnt = StationCarry.roomMassStoreCnt(room, resType)
-            if (resCnt <= 3000) {
+            if (resCnt <= 6000) {
                 let isBuy = pro.buySome(room, resType, maxPrice * 1.05, buyCnt)
                 if (!isBuy) Game.market.createOrder({
                     type: ORDER_BUY,

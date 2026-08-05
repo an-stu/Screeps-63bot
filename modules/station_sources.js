@@ -63,6 +63,12 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
         // 满载且相邻 container：直接把能量放进 container（供外矿 carrier 取走），
         // 否则能量滞留 keeper 身上、container 一直空、carrier 空跑往返
         if (container && this.pos.isNearTo(container) && this.store[RESOURCE_ENERGY] > 0) {
+            // 修脚下的 container：容器在 source keeper / 敌人攻击下掉血，keeper
+            // 有 WORK 部件，利用挖矿能量把容器修回满血，避免容器被打爆后
+            // 能量无处存放、外矿搬运中断。低于 95% 才修，修完剩余能量再转移
+            if (container.hits < container.hitsMax * 0.95 && this.ticksToLive % 3 == 0) {
+                this.repair(container);
+            }
             this.transfer(container, RESOURCE_ENERGY)
         }
         if (!container && this.ticksToLive % 7 == 0) {
@@ -537,14 +543,32 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         }
     }
 
+    // 拾取路径附近的尸体能量 / 掉落能量：寿命终止在路径上的旧 carrier
+    // 会留下 tombstone 或掉落堆，新 carrier 顺路捡起即可接续搬运，避免
+    // 能量白白滞留在外矿。范围限当前房间内 8 格，只捡能量，不偏离路线
     if (this.ticksToLive % 4 == 0) {
-        let tombstone = this.pos.lookFor(LOOK_TOMBSTONES).filter(e => e.store[RESOURCE_ENERGY] > 0).head();
+        let tombstone = this.pos.findInRange(FIND_TOMBSTONES, 8, {
+            filter: e => e.store[RESOURCE_ENERGY] > 0
+        }).head();
         if (tombstone) {
-            this.withdraw(tombstone, RESOURCE_ENERGY)
+            if (this.pos.isNearTo(tombstone)) {
+                this.withdraw(tombstone, RESOURCE_ENERGY);
+            } else {
+                // 尸体不在脚下：沿缓存路径行进中可短暂绕行拾取
+                this.goTo(tombstone);
+                return;
+            }
         }
-        let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
+        let dropEnergy = this.pos.findInRange(FIND_DROPPED_RESOURCES, 8, {
+            filter: e => e.resourceType == RESOURCE_ENERGY && e.amount > 50
+        }).head();
         if (dropEnergy) {
-            this.pickup(dropEnergy);
+            if (this.pos.isNearTo(dropEnergy)) {
+                this.pickup(dropEnergy);
+            } else {
+                this.goTo(dropEnergy);
+                return;
+            }
         }
     }
     if (this.store[RESOURCE_ENERGY] > 0) {
