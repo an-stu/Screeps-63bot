@@ -128,7 +128,9 @@ let pro = {
         // 清理死掉的creeps
         data["creeps"] = data["creeps"].filter(e => Game.getObjectById(e))
         let container = Game.getObjectById(data["container"]) // change by an_w
-        if (container && room.extractor && room[room.mineral.mineralType] < 200000 && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
+        // 能采就采：容器与 extractor 在、矿物还有存量即派 keeper，不再因房间
+        // 存量达到 200000 而暂停——多余矿物由 StrategyMarket 挂卖单消化
+        if (container && room.extractor && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
             // log("Mineral" + room.name)
             let harBody = StationMineral.getHarvesterBodyConfig(room.getEnergyCapacityAvailable(room))
             let tasks = (StationMineral.generatorHarTask(data))

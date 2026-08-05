@@ -549,6 +549,64 @@ let pro = {
     // 返回当前价格，供其他函数使用
     return maxPrice;
 },
+    autoSellMineral(room) {
+        if (!room.storage || !room.terminal || !room.terminal.my) return;
+        // 基础矿物：能采就采，超出保留量的部分搬到 terminal 挂卖单，而不是
+        // 暂停采集（station_minetral 已放开 20 万存量上限）
+        let sellable = ["U", "L", "K", "Z", "X", "O", "H"];
+        // 每房间保留量：自用/合成缓冲，避免自买自卖（买入线约 6000/房间）
+        let keep = 30000;
+        for (let resType of sellable) {
+            let storeCnt = room.storage.store[resType] || 0;
+            let termCnt = room.terminal.store[resType] || 0;
+            let total = storeCnt + termCnt;
+            if (total <= keep) continue;
+            // 全局存量不足买入线时保留，避免卖出后又触发 autoBuyMineral 自买自卖
+            if (!global._resCnt) global._resCnt = { tick: -1 };
+            if (global._resCnt.tick != Game.time) {
+                global._resCnt.tick = Game.time;
+                for (let r of sellable) global._resCnt[r] = ManagerRooms.getNormalRoom().map(e => StationCarry.roomMassStoreCnt(e, r)).sum();
+            }
+            if ((global._resCnt[resType] || 0) < ManagerRooms.getNormalRoom().length * 6000 + 10000) continue;
+            let sellAmount = total - keep;
+            // 已有未完成的卖单：挂单量不足时按 terminal 存量补充
+            let orders = _.values(Game.market.orders).filter(e => e.remainingAmount > 0
+                && e.resourceType == resType && e.type == ORDER_SELL && e.roomName == room.name);
+            if (orders.length == 0) {
+                // 先把 storage 矿物搬到 terminal（成交时从 terminal 扣货）
+                if (storeCnt > 0 && room.terminal.store.getFreeCapacity(resType) > 0) {
+                    let carrier = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty() && e.ticksToLive > 90).head();
+                    if (carrier) {
+                        let amount = Math.min(storeCnt, room.terminal.store.getFreeCapacity(resType), 3000);
+                        carrier.addTask([
+                            UtilsTask.task(room.terminal, "fillRes", undefined, { resType: resType, resCount: amount }),
+                            UtilsTask.task(room.storage, "carryRes", undefined, { resType: resType, resCount: amount }),
+                        ]);
+                    }
+                }
+                // terminal 有货才挂单，避免挂空单等待
+                if (termCnt < 1000) continue;
+                let amount = Math.min(sellAmount, termCnt);
+                if (amount < 1000) continue;
+                let price = pro.getMineralSellPrice(resType);
+                let code = Game.market.createOrder({
+                    type: ORDER_SELL,
+                    resourceType: resType,
+                    price: price,
+                    totalAmount: amount,
+                    roomName: room.name,
+                });
+                if (code == OK) console.log(`[sellMineral] ${room.name} ${resType} ${amount} @ ${price}`);
+            }
+        }
+    },
+    getMineralSellPrice(resType) {
+        let history = StrategyMarketPrice.getResTypeHistory(resType);
+        let buyOrders = pro.getAllOrdersCacheList(resType, ORDER_BUY);
+        let maxBuy = buyOrders.length ? buyOrders.maxBy(e => e.price).price : 0;
+        // 价格合适：不低于历史均价（不贱卖），不高于市场买价太多（能成交）
+        return Math.max(history * 0.95, maxBuy * 1.05, 0.01);
+    },
     exec(room) {
         if (isSaveCpu && (
             (Game.cpu.bucket < 5000 && (Game.time) % 29 != 0) ||
@@ -647,6 +705,8 @@ let pro = {
         // sell energy or battery
         const SELL_RES_TYPES=[RESOURCE_ENERGY, RESOURCE_BATTERY];
         if (Game.time % 290 == 0) SELL_RES_TYPES.forEach(e => {pro.autoSell(e, room)})
+        // 基础矿物：能采就采，超出保留量自动挂卖单（矿物采集已不再因存量暂停）
+        pro.autoSellMineral(room);
 
         if (StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY) < 80000) return;
         // 买东西
