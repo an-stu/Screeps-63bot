@@ -768,6 +768,13 @@ let pro = {
         if (available < MARKET_MIN_COMMODITY_DEAL) continue;
         
         let maxPrice = sellPrice[resType];
+        // 高频 deal 不必要：exec 每 ~20 tick 才轮到本房间一次，这就是"适当
+        // 时间"。成交门槛 = 历史均价 × (1+溢价)，溢价默认 10%
+        // （Memory.marketSettings.dealPremium 可调）——买价没高过平常价
+        // 一部分就不 deal，避免贱卖；与成本底线取大
+        let historyAvg = StrategyMarketPrice.getResTypeHistory(resType);
+        let dealPremium = Number(Memory.marketSettings && Memory.marketSettings.dealPremium || 0.1);
+        if (historyAvg > 0) maxPrice = Math.max(maxPrice, historyAvg * (1 + dealPremium));
         let buyList = pro.getAllOrdersCacheList(resType, ORDER_BUY);
         let maxOrder = undefined;
         let bestPrice = 0;
