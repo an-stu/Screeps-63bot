@@ -631,9 +631,11 @@ let pro = {
      * carrier、upgrader 的补员与能量供应。防止外矿爬先吃光能量后触发
      * spawnFailure 连锁，把主房经济拖垮（E53S21 事件：storage 7 万、
      * spawn 74、extension 395、tower 0，主房只剩 3 只爬）。
-     * 外矿本体（E52S21）仍持续挖矿入库，只是暂缓新增爬。
+     * 注意：阈值不能太高——外矿 keeper 是主房的能量输入（挖 E52S21 的
+     * 矿运回主房），把它也挡了主房永远起不来。storage 有 2 万以上就
+     * 允许外矿 keeper；外矿 carrier（纯消耗）要求 8 万。
      */
-    outerMineStarvesSpawnRoom(spawnRoom) {
+    outerMineStarvesSpawnRoom(spawnRoom, isCarrier) {
         if (!spawnRoom || !spawnRoom.my) return true;
         if (!spawnRoom.storage) return false; // 无 storage 的低级房不做限制
         let storageEnergy = spawnRoom.storage.store[RESOURCE_ENERGY] || 0;
@@ -642,9 +644,9 @@ let pro = {
         let available = spawnRoom.getEnergyAvailable();
         let deficit = Math.max(0, capacity - available);
         let disposable = storageEnergy - deficit;
-        // 外矿爬 body 大（keeper 约 20+ 部件），需要可支配能量 > 15 万且
-        // storage 有 10 万以上才值得 spawn；否则主房自己都转不起来
-        return disposable < 150000;
+        // keeper 是能量输入（低阈值 2 万），carrier 是外矿搬运链必要环节
+        // （没它 keeper 挖的能量滞留外矿），阈值也放低到 3 万
+        return disposable < (isCarrier ? 30000 : 20000);
     },
     getHarvesterBodyConfig(energy, isOutRoom, level, data) {
         let regPerTick = 10; // 每tick+10的能量
@@ -1211,7 +1213,7 @@ let pro = {
         // carrier 补员被 spawnFailure 连锁挡死，主房经济崩溃（E53S21 事件）。
         // 注意：只挡外矿（roomName != spawnRoom.name），主房自己的 keeper
         // 是能量源头，永远不能挡——否则主房无能量来源，恶性循环
-        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom)) return null;
+        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, false)) return null;
         // 重复 keeper 清理必须在生爬门槛之前执行：生爬失败（能量不足）时
         // spawnFailure 会挡住后续逻辑，导致重复 keeper 一直无法清理
         pro.cleanupDuplicateKeepers(roomName);
@@ -1277,8 +1279,8 @@ let pro = {
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
         // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
-        // 是主房能量循环的一部分，不能挡；只挡外矿 carrier
-        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom)) return null;
+        // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）
+        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) return null;
         if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
         if (!harRoom) return;
