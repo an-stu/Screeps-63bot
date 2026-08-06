@@ -156,28 +156,94 @@ let pro = {
         return orders;
     },
     autoBuy() {
-        if ((Game.time) % 100 == 0) {
-            _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
-            if (Game.shard.name.startsWith("shard")) {
-                // pro.autoBuyEnergy();
-                if (Game.market.credits > 2000000 && Memory.stats.buyEnergy) {
-                    pro.autoBuyEnergy();
-                }
-                // pro.autoBuyPower();
-                // 自动买depo
-                // if (Game.shard.name.startsWith("shard2")) {
-                //     let depoBuyPriceMap = StrategyMarketPrice.getAutoBuyDepoPrice();
-                //     for (let resType in depoBuyPriceMap) {
-                //         RES_BUY_MAX_PRICE_ROOM[resType] = depoBuyPriceMap[resType]
-                //         pro.autoBuyDepo(resType, depoBuyPriceMap[resType])
-                //     }
-                // }
+        // 调用频率由 main.js 的 shouldRun(100, 19) 控制（Game.time%100==81）。
+        // 早期这里的 `(Game.time)%100==0` 检查与调用偏移互斥，导致
+        // autoBuyMineral 从未执行、lab 原料永不买入——故不再内部限频。
+        _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
+        if (Game.shard.name.startsWith("shard")) {
+            // pro.autoBuyEnergy();
+            if (Game.market.credits > 2000000 && Memory.stats.buyEnergy) {
+                pro.autoBuyEnergy();
             }
-            // if(Game.shard.name=="shard2"){
-            ["U", "L", "K", "Z", "X", "O", "H"].forEach(e => pro.autoBuyMineral(e));
+            // pro.autoBuyPower();
+            // 自动买depo
+            // if (Game.shard.name.startsWith("shard2")) {
+            //     let depoBuyPriceMap = StrategyMarketPrice.getAutoBuyDepoPrice();
+            //     for (let resType in depoBuyPriceMap) {
+            //         RES_BUY_MAX_PRICE_ROOM[resType] = depoBuyPriceMap[resType]
+            //         pro.autoBuyDepo(resType, depoBuyPriceMap[resType])
+            //     }
             // }
         }
+        ["U", "L", "K", "Z", "X", "O", "H"].forEach(e => pro.autoBuyMineral(e));
+        // 利润套利：买入利润率超阈值商品的展开基础原料，供工厂合成后售卖
+        pro.autoBuyHighProfitComponents();
         // if((Game.time)%3==0)pro.autoBuyPixel();
+    },
+    /**
+     * 利润驱动买入：从商品利润分析中挑出利润率 ≥ threshold 的商品
+     * （默认 1000%，Memory.marketSettings.highProfitMargin 可调），
+     * 把其展开后的基础原料（depo 基础品/bar/原矿）买到有 OPF 工厂的
+     * 房间，工厂 highLevel/noLevel 会逐级合成，成品由 getOnSellPrice
+     * 自动挂卖单。注意按利润率而非等级挑选——同等级商品利润差异巨大
+     * （如 level5 的 organism +1694% vs essence +431%）。
+     */
+    autoBuyHighProfitComponents() {
+        if (!global.StrategyMarketPrice || !global.StrategyFactoryPowerCreep) return;
+        let threshold = Number(Memory.marketSettings && Memory.marketSettings.highProfitMargin || 1000);
+        let analysis = StrategyMarketPrice.calculateAllCommoditiesProfit();
+        if (!analysis || !analysis.commodities) return;
+        // 按利润率降序，只保留达标商品
+        let candidates = Object.keys(analysis.commodities)
+            .map(k => [k, analysis.commodities[k]])
+            .filter(([k, d]) => d.profitMargin >= threshold && d.marketPrice > 0)
+            .sort((a, b) => b[1].profitMargin - a[1].profitMargin);
+        if (!candidates.length) return;
+        // 工厂房间：有 OPF 旗子且 power creep 在位能运营工厂的房间
+        let factoryRooms = ManagerFlags.getFlagsByPrefix("OPF")
+            .map(f => Game.rooms[f.pos.roomName])
+            .filter(r => r && r.my && r.storage && r.terminal
+                && StrategyFactoryPowerCreep.getPowerFactoryLevel(r));
+        Memory.diagBuy = {
+            t: Game.time,
+            candidates: candidates.slice(0, 3).map(([k, d]) => k + ":" + Math.round(d.profitMargin)),
+            factoryRooms: factoryRooms.map(r => r.name),
+            credits: Game.market.credits,
+        };
+        if (!factoryRooms.length) return;
+        // 每个商品最多挑前 2 个利润最高的处理，控制买入品种数量
+        candidates.slice(0, 2).forEach(([resType, data]) => {
+            let needLevel = data.level;
+            let components = data.components || {};
+            factoryRooms.forEach(room => {
+                let level = StrategyFactoryPowerCreep.getPowerFactoryLevel(room) || 0;
+                if (needLevel > level) return; // 该房间工厂等级不足以合成
+                // 原料缺口：备 10 批（按单批 amount 折算），已有存量扣减
+                for (let comp in components) {
+                    let need = components[comp] * 10;
+                    let have = StationCarry.roomMassStoreCnt(room, comp);
+                    let gap = Math.max(0, need - have);
+                    if (gap < 1000) continue;
+                    let price = StrategyMarketPrice.getResTypeHistory(comp);
+                    if (!price || price <= 0) price = 0.01;
+                    // 已有该房间该原料买单则跳过（防止重复挂单）
+                    let hasBuyOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
+                        && e.resourceType == comp && e.type == ORDER_BUY && e.roomName == room.name);
+                    if (hasBuyOrder) continue;
+                    let isBuy = pro.buySome(room, comp, price * 1.2, Math.min(gap, 30000));
+                    if (!isBuy && Game.market.credits > 100000) {
+                        Game.market.createOrder({
+                            type: ORDER_BUY,
+                            resourceType: comp,
+                            price: price,
+                            totalAmount: Math.min(gap, 30000),
+                            roomName: room.name,
+                        });
+                        console.log(`[buyHighProfit] ${room.name} ${comp} ${Math.min(gap, 30000)} @ ${price} for ${resType}`);
+                    }
+                }
+            });
+        });
     },
     autoBuyDepo(resType, maxPrice, maxCnt = 10000) {
         let room = _.shuffle(ManagerRooms.getNormalRoom().filter(e => e.storage && e.terminal)).head();//随机一个房间
