@@ -589,34 +589,60 @@ let pro = {
             }
             if ((global._resCnt[resType] || 0) < ManagerRooms.getNormalRoom().length * 6000 + 10000) continue;
             let sellAmount = total - keep;
-            // 已有未完成的卖单：挂单量不足时按 terminal 存量补充
-            let orders = _.values(Game.market.orders).filter(e => e.remainingAmount > 0
-                && e.resourceType == resType && e.type == ORDER_SELL && e.roomName == room.name);
-            if (orders.length == 0) {
-                // 先把 storage 矿物搬到 terminal（成交时从 terminal 扣货）
-                if (storeCnt > 0 && room.terminal.store.getFreeCapacity(resType) > 0) {
-                    let carrier = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty() && e.ticksToLive > 90).head();
-                    if (carrier) {
-                        let amount = Math.min(storeCnt, room.terminal.store.getFreeCapacity(resType), 3000);
+            // 清理已完全成交的残留订单（remainingAmount=0），防止占位/重复挂单
+            let myOrders = _.values(Game.market.orders).filter(e =>
+                e.resourceType == resType && e.type == ORDER_SELL && e.roomName == room.name);
+            myOrders.filter(e => !e.remainingAmount).forEach(e => {
+                Game.market.cancelOrder(e.id);
+                console.log(`[cancel] ${room.name} ${resType} spent order ${e.id}`);
+            });
+            let orders = myOrders.filter(e => e.remainingAmount > 0);
+            if (orders.length > 1) {
+                // 只保留一张卖单，取消多余的
+                orders.slice(1).forEach(e => {
+                    Game.market.cancelOrder(e.id);
+                    console.log(`[cancel] ${room.name} ${resType} extra order ${e.id}`);
+                });
+                orders = [orders[0]];
+            }
+            // 持续补货 terminal：卖单成交从 terminal 扣货，storage 有矿就搬过去。
+            // terminal 空间被 balanceTerminalResource 的各资源 3000 占满时，
+            // 先把一种其他矿物搬回 storage，腾位置给待卖矿物
+            if (storeCnt > 0) {
+                let carrier = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty() && e.ticksToLive > 90).head();
+                if (carrier) {
+                    if (room.terminal.store.getFreeCapacity(resType) < 1000) {
+                        // 找一个非 energy 非本资源的 terminal 存量搬回 storage 腾位
+                        let victim = _.keys(room.terminal.store).find(r => r != RESOURCE_ENERGY && r != resType
+                            && (room.terminal.store[r] || 0) > 0);
+                        if (victim && room.storage.store.getFreeCapacity(victim) > 0) {
+                            let amount = Math.min(room.terminal.store[victim], room.storage.store.getFreeCapacity(victim), 3000);
+                            carrier.addTask([
+                                UtilsTask.task(room.storage, "fillRes", undefined, { resType: victim, resCount: amount }),
+                                UtilsTask.task(room.terminal, "carryRes", undefined, { resType: victim, resCount: amount }),
+                            ]);
+                        }
+                    } else {
+                        let amount = Math.min(storeCnt, room.terminal.store.getFreeCapacity(resType), 20000);
                         carrier.addTask([
                             UtilsTask.task(room.terminal, "fillRes", undefined, { resType: resType, resCount: amount }),
                             UtilsTask.task(room.storage, "carryRes", undefined, { resType: resType, resCount: amount }),
                         ]);
                     }
                 }
-                // terminal 有货才挂单，避免挂空单等待
-                if (termCnt < 1000) continue;
-                let amount = Math.min(sellAmount, termCnt);
-                if (amount < 1000) continue;
+            }
+            // 一次挂足量卖单：挂单量 = 全部可卖量（像能量卖单一样，不管
+            // terminal 现存量；terminal 由上面的搬运任务持续补货）
+            if (orders.length == 0 && sellAmount >= 1000) {
                 let price = pro.getMineralSellPrice(resType);
                 let code = Game.market.createOrder({
                     type: ORDER_SELL,
                     resourceType: resType,
                     price: price,
-                    totalAmount: amount,
+                    totalAmount: sellAmount,
                     roomName: room.name,
                 });
-                if (code == OK) console.log(`[sellMineral] ${room.name} ${resType} ${amount} @ ${price}`);
+                if (code == OK) console.log(`[sellMineral] ${room.name} ${resType} ${sellAmount} @ ${price}`);
             }
         }
     },
