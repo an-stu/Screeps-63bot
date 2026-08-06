@@ -1,5 +1,64 @@
 # Changelog
 
+## v0.77.0 — CPU, market, lab, and pillage overhaul
+
+### Performance (CPU 25-27 → ~20, at limit; bucket stabilized)
+
+- Market exec batch cadence 5 → 10 ticks per room; commodity deal scans,
+  mineral auto-sell, and buy scans throttled to ~80 ticks per room with
+  per-room staggering. `calcTransactionCost` unit cost cached permanently
+  on `global` (previously recomputed per candidate order every exec).
+- `StationLab.checkLabs` cached for 30 ticks (was per-tick `room.lab.filter`
+  plus ~12 `getObjectById`); reaction state machine runs every 2 ticks.
+- Main-room `harvestEnergyKeeper` moves straight to the container with
+  `moveTo` instead of pushing `goToPop` task stacks every tick.
+- Online telemetry (`Memory.codeHealth.phases.roomDetails`) identified
+  E55S39 (3.64ms) and W33N55 (2.84ms) as the two hot rooms; both were
+  StationLab.exec costs.
+
+### Fixed
+
+- Border crossing: recompute range after re-anchoring so a carrier that
+  lands on the opposite exit waypoint advances instead of bouncing between
+  the two rooms every tick.
+- Pillage flags in foreign rooms now dispatch from the nearest owned room
+  (`flag.memory.spawnRoom` claim, mirroring the har_ mechanism); the old
+  code only scanned flags physically inside owned rooms.
+- Pillage target selection ranks resources by the fixed `RES_PRIORITY_LIST`
+  value order rather than market price (XGHO2 had no market history, so its
+  fallback price lost to energy and kept hauling energy first).
+- `autoBuy` removed its internal `(Game.time)%100==0` gate that never
+  aligned with main.js's `shouldRun(100,19)` offset — mineral buying for lab
+  feedstocks (X/H) had never executed, starving every lab reaction.
+- `autoSellMineral` lists the full sellable amount on one order (buyers
+  deal 3k at a time) instead of 3k-sized orders; spent (`remainingAmount=0`)
+  and duplicate orders are cancelled; carriers keep refilling the terminal.
+- Commodity deals require a premium over the historical average price
+  (`Memory.marketSettings.dealPremium`, default 10%) instead of the
+  cost-based minimum, avoiding dumping high-value goods like organism.
+
+### Added
+
+- Minerals are mined without the 200k stock cap; excess is auto-sold.
+- `autoBuyMineral` accounts for lab reaction feedstocks (BOOST_RES_HOLD,
+  capped 300k) and raises bids toward market history when labs starve.
+- `autoBuyHighProfitComponents` buys expanded base feedstocks for
+  commodities with `profitMargin >= 1000%` (default; configurable) into
+  OPF factory rooms. Profit ranking is by margin, not level: level-5
+  organism (+1694%)/machine (+1109%) lead, but level-5 essence (+431%)
+  and level-4 hydraulics (+61%) trail level-3 frame (+232%).
+- Outer-harvest carriers loot tombstone/drop energy within 8 tiles on
+  their route (not just their own tile), so a new carrier can take over
+  the haul left by a predecessor that died on the path.
+- Outer-harvest keepers repair the container beneath them (below 95% hits,
+  every 3 ticks) before transferring mined energy.
+
+### Notes
+
+- Factory level = the power creep's PWR_OPERATE_FACTORY (P19) skill level,
+  unrelated to the PC name (P0-P9). Online: E55S31 (P4) is level 5 — the
+  only room able to produce level-5 goods.
+
 ## v0.76.0 — Border waypoint index synchronization
 
 ### Fixed

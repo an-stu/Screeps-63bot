@@ -104,3 +104,80 @@
 ## 六、部署说明
 
 本报告所述改动位于 `modules/` 源码；游戏内 `main` 分支运行的是打包后的 `main.js`（webpack bundle，来自 TS 构建产物），**需要重新构建并上传后才能生效**。本次未执行部署。
+
+---
+
+## 七、2026-08-06 会话：外矿恢复 / 掠夺 / 市场 / lab / 工厂 / CPU 优化
+
+### 7.1 外矿 carrier 边界横跳修复（已部署 `f3a8d3a`）
+
+- 位置：`modules/station_sources.js`（`moveOuterCarrierOnRoad`）
+- 问题：carrier 跨房后恰好落在对面出口路点上，`range>1` 重新定位分支**没有重算 range**，`index += direction` 被跳过，导致永远指向出口格，每 tick 在 E53S21:0,37 ↔ E52S21:49,37 之间来回传送横跳。
+- 修复：重新定位最近路点后重算 range，落在路点上立即推进 index。
+- 验证：线上诊断确认 carrier 恢复沿缓存路径正常往返（E52S21:7,33 → E53S21:5,42）。
+
+### 7.2 pillage 支持跨房掠夺（已部署 `0ed5bbd`）
+
+- 位置：`modules/strategy_pillage.js`、`modules/manager_rooms.js`
+- 问题：原 `StrategyPillage.exec` 只处理**本房间内**的 pillage 旗子，且 `ManagerRooms.exec` 对非 my 房间直接 return——旗子插在废弃房（E42S32）永远不会触发派发。
+- 修复：exec 全局扫描 pillage 旗子，`flag.memory.spawnRoom` 认领最近的有 storage 的己方房间（仿外矿 har_ 机制）；pillager 全局查重。
+- 插旗方法：在目标房间创建 `pillage_<派发房间>_<序号>` 旗子（如 `pillage_E41S32_1`），系统自动从 E41S32 派 pillager 跨房搬运 storage/terminal/废墟/掉落，搬空自动删旗。
+
+### 7.3 pillage 按固定价值序挑资源（已部署 `2aa5258`）
+
+- 问题：先按市场价排序，XGHO2 无可靠市场历史导致 fallback 价过低（0.041 < energy 0.5），仍先搬 energy。
+- 修复：改为纯 `RES_PRIORITY_LIST` 固定价值序（XGHO2/organism 等化合物权重远高于 energy），每趟装单价最高的资源。线上确认 pillager 先搬 organism → XGHO2 → 最后 energy。
+
+### 7.4 矿物能采就采 + 自动售卖（已部署 `f5b6707` / `9b3e4a4` / `c23dc6f`）
+
+- `station_minetral.js`：删除 `room[mineral] < 200000` 停采上限，容器+extractor 在就持续采集。
+- `strategy_market.js` 新增 `autoSellMineral`：存量超 3 万/房间保留量时自动挂卖单；**挂单量为全部可卖量**（不再 3k 一单），买家自然 3k/3k deal；`remainingAmount=0` 与重复订单自动取消；terminal 由 carrier 持续补货（空间不足先腾其他矿物回 storage）。
+
+### 7.5 lab 停摆根因修复（已部署 `b93de16`）
+
+- **根因**：`autoBuy()` 内部 `if ((Game.time) % 100 == 0)` 与 main.js 调用偏移 `shouldRun(100, 19)` 永远互斥——矿物买入逻辑**从未执行**。X/H 基础矿物全线耗尽（13 房仅 W33N53 有 H、W33N55 有 X），`needReaction` 凑不齐配方 → lab 停转。
+- 修复：移除 autoBuy 内部时间门（频率已由 main.js 控制），并让 `autoBuyMineral` 计入 lab 原料需求（BOOST_RES_HOLD 折算，封顶 30 万），lab 缺原料时加价到历史均价×0.95 挂买单。
+
+### 7.6 买入高利润商品原料（已部署 `b93de16`）
+
+- `autoBuyHighProfitComponents`：从商品利润分析中挑 `profitMargin >= 1000%`（默认，`Memory.marketSettings.highProfitMargin` 可调）的商品，把展开后的基础原料买到 OPF 工厂房间，工厂逐级合成。
+- **结论（非最高级利润最高）**：level 5 的 organism +1694% / machine +1109% 最高，但同为 level 5 的 essence 仅 +431%，level 4 的 hydraulics 仅 +61% 低于 level 3 的 frame +232%——**必须按利润率挑选，不能按等级**。
+- 工厂等级=power creep 的 PWR_OPERATE_FACTORY（P19）技能等级，与 PC 名字 P0-P9 无关。线上实测：E55S31=P4 房 level 5、E48S41=P0 房 level 4、E55S39=P3 房 level 3、W33N55=P8 房 level 3…… 唯一能产 level 5 的是 E55S31。
+
+### 7.7 商品 deal 溢价门槛（已部署 `d985f79`）
+
+- 问题：商品 deal 成交门槛是成本×1.15，organism 这类高价值商品可能被贱卖。
+- 修复：exec（每房间约 20 tick 一次，即"适当时间"）比较市场最高买价与历史均价，只有买价高于 `历史均价×(1+dealPremium)`（默认 10%）才成交；不高频轮询。
+
+### 7.8 CPU 优化（已部署 `e8a1733`）
+
+- **市场**：exec 批次频率 5→10 tick/房间；商品 deal 扫描、矿物挂单、买入扫描按房间错开节流到约 80 tick；`calcTransactionCost` 单位成本永久缓存于 global（原每 exec 重建、每候选订单调用）。
+- **lab**：`checkLabs` 30 tick 缓存（原每 tick filter + 12 次 getObjectById）；合成状态机由每 tick 改为每 2 tick（12 次 getObjectById 减半）。
+- **keeper**：主房间 `harvestEnergyKeeper` 改用 `moveTo` 直走容器，去掉每 tick addTask/goToPop 任务栈压弹。
+- 线上效果：CPU 从 25-27 降到 **19.9-20.6**（进入 limit 20 内），bucket 止跌回稳（2001→2004）。
+- 定位工具：`Memory.codeHealth.phases.roomDetails` 揪出 E55S39(3.64)/W33N55(2.84) 两个 lab 热点房间；临时 `_roomDiag` 计时确认 StationLab.exec 是元凶。
+
+### 7.9 外矿其它修复（已部署 `9b3e4a4`）
+
+- carrier 路径 8 格内捡 tombstone/掉落能量（原只捡脚下），新 carrier 接续死在路上的旧 carrier 的搬运；
+- 外矿 keeper 修理脚下 container（血量 <95% 每 3 tick repair），防容器被 source keeper 打爆后搬运中断。
+
+### 7.10 已部署提交清单（本会话）
+
+```
+f3a8d3a fix: recompute range after re-anchoring so a landed creep advances
+0ed5bbd fix: pillage flags in foreign rooms dispatch from the nearest owned room
+2aa5258 fix: pillage picks resources by fixed value order, not market price
+f5b6707 feat: keep mining minerals regardless of stock, sell excess via market orders
+9b3e4a4 feat: lab mineral buying, outer carrier looting, keeper container repair
+c23dc6f fix: mineral sell orders list the full sellable amount
+b93de16 fix: autoBuy no longer double-gates on tick parity; high-profit buying
+d985f79 fix: commodity deals require a premium over the usual market price
+e8a1733 perf: throttle market passes, lab checks, keeper moveTo
+```
+
+### 7.11 已知待办
+
+- lab 原料买入已恢复，但需观察 X/H 是否真正成交到位、lab 是否恢复反应；
+- E55S31 单条 level 5 产线是 organism 瓶颈，多 PC 升级 P19 可扩产；
+- `autoBuyHighProfitComponents` 每 100 tick 的市场查询可再节流（当前收益已达标暂缓）。
