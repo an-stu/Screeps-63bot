@@ -47,6 +47,16 @@ let pro = {
         // 定身体并保证最小 300 能量；正常运行用完整的按容量配置
         let starving = room.creeps("harvestEnergyKeeper", false).length == 0
             && room.creeps("carrier", false).length == 0;
+        // 主房能量循环保护：keeper 在但 spawn/extension 严重缺电（hive 缺电
+        // 过半）时同样按实际能量生小 carrier——否则按满容量配的大 body
+        // 在低能量 spawn 下永远生不出来，主房死锁（E53S21 事件）
+        if (!starving && room.storage) {
+            let capacity = room.energyCapacityAvailable || 0;
+            let available = room.getEnergyAvailable();
+            let deficit = Math.max(0, capacity - available);
+            let storageEnergy = room.storage.store[RESOURCE_ENERGY] || 0;
+            if (storageEnergy > deficit && storageEnergy > 50000 && deficit > capacity * 0.3) starving = true;
+        }
         let budget = starving ? Math.max(300, Math.min(totalEnergy, room.energyAvailable)) : totalEnergy;
         for (let i = 1; i * bodyEnergy <= budget; i++) {
             if (num >= 17) break;

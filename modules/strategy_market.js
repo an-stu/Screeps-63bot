@@ -574,18 +574,25 @@ let pro = {
             .filter(e => !Game.market.orders[e.id]);
         let historyAvg = StrategyMarketPrice.getResTypeHistory(resType) || 0;
 
-        // 参考价：市场最高买价优先，无买价时用历史均价
+        // 参考价：市场最高买价优先，无买价时用历史均价。
+        // 但买价可能被异常高单污染（如 680 的能量买单），必须以历史均价为
+        // 锚：参考价不超过历史均价的 3 倍，避免跟着离谱买单挂出天价卖单
         let reference = buyOrders.length > 0 ? _.max(buyOrders, 'price').price : historyAvg;
-        // 他人最低卖价（若有）
+        if (historyAvg > 0 && reference > historyAvg * 3) reference = historyAvg * 3;
+        if (reference <= 0) reference = historyAvg;
+        // 他人最低卖价（若有），用于"贴单不砸盘"
         let lowestSell = sellOrders.length > 0 ? sellOrders.minBy(e => e.price).price : undefined;
-
-        // 超量越多折扣越大（最高 25%），超量 200 万时打满折扣
         let excess = Math.max(0, resCnt - 400000);
         let discount = Math.min(0.25, excess / 2000000 * 0.25);
         maxPrice = Math.max(reference * (1 - discount), 0.001);
 
-        // 不主动破价：计算价低于他人最低卖单时贴单价，不做砸盘者
-        if (lowestSell !== undefined && maxPrice < lowestSell) maxPrice = lowestSell;
+        // 不主动破价：计算价低于他人最低卖单时贴单价，不做砸盘者。
+        // 但他人卖单同样可能异常（如被高价买单带偏到 680），贴单也
+        // 封顶在历史均价×3，绝不让我们的卖单跟着市场噪音飞到天价
+        if (lowestSell !== undefined && maxPrice < lowestSell) {
+            let cap = historyAvg > 0 ? historyAvg * 3 : lowestSell;
+            maxPrice = Math.min(lowestSell, cap);
+        }
         // 硬底价：不低于历史均价的 85%（且不低于 2），防止双方互踩导致价格无限下跌
         maxPrice = Math.max(maxPrice, historyAvg * 0.85, 2);
     } else {

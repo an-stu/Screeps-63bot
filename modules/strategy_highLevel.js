@@ -269,10 +269,24 @@ let pro = {
         if (!room.memory.carryBusy.length) room.memory.carryBusy = []
         let avgBusy = room.memory.carryBusy.sum() / room.memory.carryBusy.length
         // log(avgBusy,room.creeps("carrier",false).length,room.creeps("carrier",false).length*0.85)
-
-        if ((room.creeps("carrier", false).length <= 0 && (room.storage[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
-            room.creeps("carrier", false).length <= 7 &&
-            avgBusy > room.creeps("carrier", false).filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
+        // 主房能量循环保护：storage 有能量但 spawn/extension 严重缺电时，
+        // 无条件补 carrier（每 100 tick 至少补一只），否则主房永远起不来
+        let capacity = room.energyCapacityAvailable || 0;
+        let available = room.getEnergyAvailable();
+        let deficit = Math.max(0, capacity - available);
+        let storageEnergy = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
+        let starved = storageEnergy > deficit && storageEnergy > 50000 && deficit > capacity * 0.3;
+        let carrierList = room.creeps("carrier", false);
+        let carrierCnt = carrierList.length;
+        if (starved && carrierCnt <= 2 && (Game.time + room.hashCode()) % 100 == 0) {
+            StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
+            if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
+            room.memory.carryBusy.push(0)
+            return;
+        }
+        if ((carrierCnt <= 0 && (room.storage[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
+            carrierCnt <= 7 &&
+            avgBusy > carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
             StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
         }
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)

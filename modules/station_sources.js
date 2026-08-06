@@ -150,14 +150,17 @@ Creep.prototype.harvestEnergyKeeper = function () {
         let link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
         if (!link && link2) link = link2;
         if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
-        if (container && !container.pos.isEqualTo(this)) {
-            // 直接用 moveTo 走向容器，避免每 tick addTask 压栈/弹栈的任务开销
-            // （27 个 keeper 每 tick 各压一次 goToPop，任务栈反复伸缩）
-            this.moveTo(container, { visualizePathStyle: { stroke: '#67ffed' } });
+        if (container && !container.pos.isNearTo(this)) {
+            // 直接用 moveTo 走向容器（相邻即可，不必站到容器格上——容器格
+            // 可能被其他 creep/建筑占据导致 moveTo 卡死、dontPullMe 永久卡位）
+            this.moveTo(container, { range: 1, visualizePathStyle: { stroke: '#67ffed' } });
             return;
         } else if (source && !source.pos.isNearTo(this)) {
-            this.addTask(UtilsTask.task(source, "concatStationSources"));
-            this.addTaskAndExec(UtilsTask.task(source, "goToNearPop"));
+            // keeper 必须站到 source 相邻格才能挖矿+transfer。用 range:1 的
+            // moveTo 直接找 source 周边空格，避免 goToNearPop 反复压栈任务
+            // 且只认某个固定格——(10,5) 卡死事件：容器相邻但 source range 2，
+            // 任务栈每 tick 压 concat+goToNearPop，位置却永远不动
+            this.moveTo(source, { range: 1, visualizePathStyle: { stroke: '#67ffed' } });
             return;
         }
         if ((source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
@@ -622,6 +625,27 @@ if (Game.shard.name == '6g3y-station') saveCpuLevel = 7
 
 let pro = {
     stationName: "stationSources",
+    /**
+     * 主房能量保护：storage 可支配能量（扣除 spawn/extension 已耗）低于
+     * 阈值时，外矿 keeper/carrier 缓生，优先保证主房自身 spawn、worker、
+     * carrier、upgrader 的补员与能量供应。防止外矿爬先吃光能量后触发
+     * spawnFailure 连锁，把主房经济拖垮（E53S21 事件：storage 7 万、
+     * spawn 74、extension 395、tower 0，主房只剩 3 只爬）。
+     * 外矿本体（E52S21）仍持续挖矿入库，只是暂缓新增爬。
+     */
+    outerMineStarvesSpawnRoom(spawnRoom) {
+        if (!spawnRoom || !spawnRoom.my) return true;
+        if (!spawnRoom.storage) return false; // 无 storage 的低级房不做限制
+        let storageEnergy = spawnRoom.storage.store[RESOURCE_ENERGY] || 0;
+        // 主房可支配能量：storage 能量减去 spawn/extension 的缺口
+        let capacity = (spawnRoom.energyCapacityAvailable || 0);
+        let available = spawnRoom.getEnergyAvailable();
+        let deficit = Math.max(0, capacity - available);
+        let disposable = storageEnergy - deficit;
+        // 外矿爬 body 大（keeper 约 20+ 部件），需要可支配能量 > 15 万且
+        // storage 有 10 万以上才值得 spawn；否则主房自己都转不起来
+        return disposable < 150000;
+    },
     getHarvesterBodyConfig(energy, isOutRoom, level, data) {
         let regPerTick = 10; // 每tick+10的能量
         if (data["lastPowerTime"] + 3000 > Game.time)
@@ -1182,6 +1206,12 @@ let pro = {
         pro.trySpawnOuterHarKeeper(room.name, room);
     },
     trySpawnOuterHarKeeper(roomName, spawnRoom) {
+        // 主房能量优先：storage + spawn/extension 可支配能量低于阈值时，
+        // 外矿 keeper 缓一缓——否则外矿爬先吃光能量、主房 spawn/worker/
+        // carrier 补员被 spawnFailure 连锁挡死，主房经济崩溃（E53S21 事件）。
+        // 注意：只挡外矿（roomName != spawnRoom.name），主房自己的 keeper
+        // 是能量源头，永远不能挡——否则主房无能量来源，恶性循环
+        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom)) return null;
         // 重复 keeper 清理必须在生爬门槛之前执行：生爬失败（能量不足）时
         // spawnFailure 会挡住后续逻辑，导致重复 keeper 一直无法清理
         pro.cleanupDuplicateKeepers(roomName);
@@ -1246,6 +1276,9 @@ let pro = {
         }
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
+        // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
+        // 是主房能量循环的一部分，不能挡；只挡外矿 carrier
+        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom)) return null;
         if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName]
         if (!harRoom) return;
