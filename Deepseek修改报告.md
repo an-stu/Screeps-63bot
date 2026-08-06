@@ -181,3 +181,18 @@ e8a1733 perf: throttle market passes, lab checks, keeper moveTo
 - lab 原料买入已恢复，但需观察 X/H 是否真正成交到位、lab 是否恢复反应；
 - E55S31 单条 level 5 产线是 organism 瓶颈，多 PC 升级 P19 可扩产；
 - `autoBuyHighProfitComponents` 每 100 tick 的市场查询可再节流（当前收益已达标暂缓）。
+
+### 7.12 主房能量循环崩溃修复（已部署 `9b720f9`，E53S21 事件）
+
+- **现象**：E53S21 storage 停在 7 万、spawn 74、extension 395、tower 0，全房只剩 3 只爬（无 upgrader），controller 升级停滞，能量循环死锁。
+- **根因链（4 个连环问题）**：
+  1. **外矿爬抢占 spawn**：`StrategyOuterHarvest` 在 worker/carrier/upgrader 之前执行，外矿 keeper/carrier 先消耗 spawn 能量，能量不足触发 `spawnFailure` 连锁挡住主房所有补员；
+  2. **carrier body 过大**：`getCarrierBodyConfig` 只要有 keeper 存在就按满容量配大 body（约 600 能量），低能量 spawn 永远生不出；
+  3. **主房 keeper 卡位**：keeper 卡在 (10,5)——与容器相邻但与 source range 2，`goToNearPop` 任务栈每 tick 压栈却永不走动（容器格被占时 `isEqualTo` 死等）；
+  4. **carrier 补员条件苛刻**：`avgBusy > 0.85×存活数` 不满足时永不补，`carrierCnt.filter` 还抛 TypeError。
+- **修复**：
+  - `outerMineStarvesSpawnRoom`：只挡外矿（`roomName != spawnRoom.name`）keeper/carrier 生爬，主房可支配能量 <15 万时缓生；**主房 keeper 是能量源头绝不挡**；
+  - `getCarrierBodyConfig`：hive 缺电 >30% 时按实际能量生小 carrier（最小 300 能量）；
+  - keeper `moveTo(source, {range:1})` 直走 source 相邻格，容器判断改 `isNearTo(range:1)`（容器格被占也能工作）；
+  - `trySpawnCarrier` 紧急补员：carrier≤2 时每 100 tick 补一只，缺电阈值降到 30%，并修复 `carrierCnt.filter` TypeError。
+- **验证**：E53S21 恢复——keeper 2→3、carrier 补到 2、upgrader/reserver 复生、spawn 满 300、tower 恢复供电、source 正常挖矿、CPU 18-20（limit 内）、`lastErrorTick` 不再更新（无新报错）。
