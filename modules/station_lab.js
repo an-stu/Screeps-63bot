@@ -350,7 +350,16 @@ let pro={
     },
     checkLabs (room) {
         if(!room.my)return;
-        let obj =  room.memory[pro.stationName] || (room.memory[pro.stationName] = {})
+        // lab 布局几乎不变：30 tick 检查一次足够（原来每 tick 跑
+        // room.lab.filter + 12 次 getObjectById，10 lab 房间约 0.1 CPU/tick）。
+        // 非检查 tick 复用上次结果（房间对象每 tick 重建，缓存挂 memory）
+        let labMem = room.memory[pro.stationName] || (room.memory[pro.stationName] = {});
+        let cached = labMem._labCheckedTick;
+        if (cached && Game.time - cached < 30
+            && labMem.centerLabs && labMem.centerLabs.length == 2 && labMem.otherLabs && labMem.otherLabs.length) {
+            return true;
+        }
+        let obj = labMem
         obj["centerLabs"]=obj["centerLabs"]||[]
         obj["otherLabs"]=obj["otherLabs"]||[]
         let labCnt = (obj["centerLabs"].concat(obj["otherLabs"])).filter(id=>Game.getObjectById(id)).length
@@ -388,13 +397,15 @@ let pro={
             // room.memory[pro.stationName] = obj
         }
         if(labCnt>=3){
-            if(!Game.getObjectById(obj["unboostContainer"])){
+            if(!Game.getObjectById(obj["unboostContainer"])){ // change by an_w
                 obj["unboostContainer"]=undefined
                 let container = pro.checkUnboostContainer(room,obj.centerLabs);
                 if(container)obj["unboostContainer"] = container.id
             }
         }
-        return obj["centerLabs"].length==2&&obj["otherLabs"].length
+        let ok = obj["centerLabs"].length==2&&obj["otherLabs"].length;
+        obj._labCheckedTick = Game.time;
+        return ok
     },
     generatorOperatorBoostTask (room){
         let stationMemory = room.memory[pro.stationName];
@@ -559,6 +570,10 @@ let pro={
 
         // HelperVisual.showText(Game.getObjectById(obj["centerLabs"][0]),(obj["stat"] + " "+ obj["reacting"]))
         if(resType){
+            // 合成中的 lab 每 tick 要检查状态，但 12 次 getObjectById 开销大。
+            // 缓冲 2 tick：合成（REACTION_TIME 分钟级）状态变化慢，2 tick
+            // 延迟无影响，却能省一半的 map + getObjectById
+            if ((Game.time + room.hashCode()) % 2 != 0) return;
             let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
             let centerLabs = obj.centerLabs.map(id => Game.getObjectById(id))
             if(obj["stat"]=='clear'||obj["stat"]==undefined){

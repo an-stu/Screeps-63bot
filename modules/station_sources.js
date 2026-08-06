@@ -146,12 +146,14 @@ Creep.prototype.harvestEnergyKeeper = function () {
         let container = Game.getObjectById(station["container"]);
 
         let link = Game.getObjectById(station["link"]);
-        let link2 = Game.getObjectById(station["link2"]);
+        // link2 是双 link 房间才有的（少数），缺失时跳过查询省 getObjectById
+        let link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
         if (!link && link2) link = link2;
         if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
         if (container && !container.pos.isEqualTo(this)) {
-            this.addTask(UtilsTask.task(container, "concatStationSources"));
-            this.addTaskAndExec(UtilsTask.task(container, "goToPop"));
+            // 直接用 moveTo 走向容器，避免每 tick addTask 压栈/弹栈的任务开销
+            // （27 个 keeper 每 tick 各压一次 goToPop，任务栈反复伸缩）
+            this.moveTo(container, { visualizePathStyle: { stroke: '#67ffed' } });
             return;
         } else if (source && !source.pos.isNearTo(this)) {
             this.addTask(UtilsTask.task(source, "concatStationSources"));
@@ -159,7 +161,12 @@ Creep.prototype.harvestEnergyKeeper = function () {
             return;
         }
         if ((source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
-            this.harvest(source);
+            // bucket 吃紧时挖矿降频（每 2 tick 一次），能量产量略降但守住 CPU
+            if (Game.cpu.bucket < 5000 && this.ticksToLive % 2 != 0) {
+                // 不挖，但保留 harvest 节奏
+            } else {
+                this.harvest(source);
+            }
         }
         let freeEnergyCapacity = this.store.getFreeCapacity(RESOURCE_ENERGY);
         let notLinkFull = link && link.store[RESOURCE_ENERGY] != 800;

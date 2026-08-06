@@ -637,6 +637,10 @@ let pro = {
 },
     autoSellMineral(room) {
         if (!room.storage || !room.terminal || !room.terminal.my) return;
+        // 矿物挂单/补货也是 CPU 大头（7 种矿物 × 市场订单查询）。
+        // 按房间错开每 100 tick 检查一次：矿物产量低、卖单成交慢，
+        // 每 100 tick 更新一次价格与数量足够
+        if ((Game.time + room.hashCode()) % 80 != 0) return;
         // 基础矿物：能采就采，超出保留量的部分搬到 terminal 挂卖单，而不是
         // 暂停采集（station_minetral 已放开 20 万存量上限）
         let sellable = ["U", "L", "K", "Z", "X", "O", "H"];
@@ -719,6 +723,15 @@ let pro = {
         // 价格合适：不低于历史均价（不贱卖），不高于市场买价太多（能成交）
         return Math.max(history * 0.95, maxBuy * 1.05, 0.01);
     },
+    // 交易成本单位缓存：只依赖 from/to 房间名与距离，跨 tick 不变，
+    // 放 global 避免每次 exec 重建、每房间每 20 tick 重复 calcTransactionCost
+    // （该调用是市场模块 CPU 大头之一）
+    getTxCostUnit(fromRoom, toRoom) {
+        let map = (global._marketTxCost = global._marketTxCost || {});
+        let key = fromRoom + ">" + toRoom;
+        if (map[key] !== undefined) return map[key];
+        return map[key] = Game.market.calcTransactionCost(100, fromRoom, toRoom) / 100;
+    },
     exec(room) {
         if (isSaveCpu && (
             (Game.cpu.bucket < 5000 && (Game.time) % 29 != 0) ||
@@ -737,15 +750,17 @@ let pro = {
         let dealed = Game.market._dealedOrder
 
     // 卖东西 - 只卖最佳商品
+    // deal 扫描是 CPU 大头（遍历市场买单 + 交易成本计算）。价格缓存
+    // 1000 tick 刷新一次，deal 检查也按房间错开节流到约 100 tick 一次，
+    // 不每 20 tick 重复全量扫描——buy 单价格变化慢，低频足够吃到高价。
+    // 注意：此节流只包住商品 deal 段，后面的能量/矿物挂单与买入不受影响
+    let doCommodityDeal = (Game.time + room.hashCode()) % 80 == 0;
     let sellPrice = pro.getOnSellPrice();
     let bestCommodities = sellPriceCache.bestCommodities || {};
     let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
     // 交易成本只与距离、数量线性相关，同一目标房间按单位成本缓存一次
-    let txCostCache = {};
     let txCost = function (amount, toRoom) {
-        let unit = txCostCache[toRoom];
-        if (unit === undefined) unit = txCostCache[toRoom] = Game.market.calcTransactionCost(100, room.name, toRoom) / 100;
-        return unit * amount;
+        return pro.getTxCostUnit(room.name, toRoom) * amount;
     };
     
     // 按利润率排序，优先卖出利润率高的商品
@@ -761,8 +776,9 @@ let pro = {
         })
         .sort((a, b) => b.profitMargin - a.profitMargin); // 按利润率降序排序
     
-    // 尝试卖出每个商品
+    // 尝试卖出每个商品（按房间错开每 100 tick 一次，省 CPU）
     for (let item of sortedCommodities) {
+        if (!doCommodityDeal) break;
         let resType = item.resType;
         let available = room.terminal.store[resType] || 0;
         if (available < MARKET_MIN_COMMODITY_DEAL) continue;
@@ -827,7 +843,11 @@ let pro = {
         // 基础矿物：能采就采，超出保留量自动挂卖单（矿物采集已不再因存量暂停）
         pro.autoSellMineral(room);
 
+        // 买入低频化：遍历 RES_BUY_AMOUNT_ROOM 每个资源都要查市场卖单，
+        // 是 CPU 大头。买入只需每 100 tick 一次（与矿物挂单同频）——
+        // 库存缺口变化慢，100 tick 内买到就够，不必每 20 tick 全量扫描
         if (StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY) < 80000) return;
+        if ((Game.time + room.hashCode()) % 80 != 0) return;
         // 买东西
         if (Game.market.credits > 100000)
             for (let resType in RES_BUY_AMOUNT_ROOM) {
