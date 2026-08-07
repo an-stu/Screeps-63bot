@@ -1163,15 +1163,19 @@ let pro = {
         room.used = room.used || {}
         let tasks = [];
         if (rm) {
-            if (room.level == 8) minEnergy = 1600
+            // level 8 默认门槛 1600；但调用方显式传了更低门槛（如 hive 满
+            // 时抽容器传 300）时以显式参数为准——否则容器 900-1000 能量在
+            // level 8 房永远不搬、积压溢出
+            if (room.level == 8 && arguments.length < 2) minEnergy = 1600;
             let maxContainerEnergyCnt = 0;
             // 跨 tick 认领表：容器 id -> {creepId, tick}。已认领且认领者
             // 存活时不再分配，防止多个 carrier/worker 搬运同一容器
             let carryClaim = rm._carryClaim || {};
-            // 清理死认领（认领者已死或超过 300 tick 未续）
+            // 清理死认领（认领者已死、不在本房间或超过 300 tick 未续）
             for (let cid in carryClaim) {
                 let claim = carryClaim[cid];
-                if (!Game.getObjectById(claim.creepId) || Game.time - claim.tick > 300) delete carryClaim[cid];
+                let claimer = Game.getObjectById(claim.creepId);
+                if (!claimer || claimer.room.name != room.name || Game.time - claim.tick > 300) delete carryClaim[cid];
             }
             for (let resm of _.values(rm[pro.stationName])) {
                 let container = Game.getObjectById(resm["container"]);
