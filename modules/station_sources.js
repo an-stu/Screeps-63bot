@@ -24,10 +24,14 @@ Creep.prototype.registerStationSourcesCarryInRoom = function () {
     room.used[this.headTask().id] = true
     // 跨 tick 去重：room.used 每 tick 重建，同容器可能被多个 carrier 重复
     // 领取（低等级房间 carrier 少、容器少时冲突尤其明显）。把领取关系持久
-    // 化到 room memory：容器 id -> {creep, tick}，generatorCarryEnergyTask
-    // 分配时跳过已领取且未完成的容器，直到领取者死亡或超时
-    let carryClaim = (room.memory[pro.stationName] = room.memory[pro.stationName] || {})._carryClaim
-        = (room.memory[pro.stationName] || {})._carryClaim || {};
+    // 化到房间 memory（独立字段，不放进 stationSources——否则会被
+    // trySpawnOuterHarKeeper/cleanupDuplicateKeepers 等遍历污染）：
+    // 容器 id -> {creepId, tick}，generatorCarryEnergyTask 分配时跳过
+    let carryClaim = room.memory._carryClaim = room.memory._carryClaim || {};
+    // 迁移清理：早期版本把认领表误放在 stationSources 内，删掉残留
+    if (room.memory[pro.stationName] && room.memory[pro.stationName]._carryClaim) {
+        delete room.memory[pro.stationName]._carryClaim;
+    }
     let containerId = this.headTask().id;
     let creepId = this.id;
     let old = carryClaim[containerId];
@@ -1160,7 +1164,7 @@ let pro = {
             let maxContainerEnergyCnt = 0;
             // 跨 tick 认领表：容器 id -> {creepId, tick}。已认领且认领者
             // 存活时不再分配，防止多个 carrier/worker 搬运同一容器
-            let carryClaim = (rm[pro.stationName] && rm[pro.stationName]._carryClaim) || {};
+            let carryClaim = rm._carryClaim || {};
             // 清理死认领（认领者已死或超过 300 tick 未续）
             for (let cid in carryClaim) {
                 let claim = carryClaim[cid];
@@ -1253,10 +1257,13 @@ let pro = {
         for (let k in Memory.rooms[roomName][StationSources.stationName])
             if (!Memory.rooms[roomName][StationSources.stationName][k]) delete Memory.rooms[roomName][StationSources.stationName][k]
 
+        // 排除非 source 数据（认领表 _carryClaim 等辅助字段），避免被当
+        // 成挖矿点遍历、污染 spawnTime
         _.values(Memory.rooms[roomName][StationSources.stationName]).forEach(data => {
+            if (!data || typeof data != "object" || !data["id"]) return;
             // 净化被污染的 spawnTime（重复 concat 造成的极端负数会让生爬条件恒真）
             if (!data["spawnTime"] || data["spawnTime"] < -1000 || data["spawnTime"] > Game.time) data["spawnTime"] = Game.time;
-            if (data["id"] && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
+            if (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0) {
                 let harBody = StationSources.getHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable(), roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
                 StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)

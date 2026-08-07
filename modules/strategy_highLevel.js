@@ -178,10 +178,11 @@ let pro = {
             if (StationHive.HiveNeedToFill(room)) {
                 creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 if (creep.storeEmpty()) {
-                    // 空手且 hive 缺电：storage 能量优先（充裕稳定），
-                    // 取不到再从容器取——hive 充足是第一优先级，允许用 storage
-                    let sourceTasks = StorageCarryEnergyTasks;
-                    if (!sourceTasks.length) sourceTasks = StationSources.generatorCarryEnergyTask(room, 300);
+                    // 空手且 hive 缺电：先取容器（keeper 新挖的新鲜能量，
+                    // 认领表已防重复），容器没货再取 storage——hive 充足
+                    // 是第一优先级，storage 能量兜底
+                    let sourceTasks = StationSources.generatorCarryEnergyTask(room, 300);
+                    if (!sourceTasks.length) sourceTasks = StorageCarryEnergyTasks;
                     if (sourceTasks.length) creep.addTask(sourceTasks);
                 }
             } else if (fillTowerTasks.length) {

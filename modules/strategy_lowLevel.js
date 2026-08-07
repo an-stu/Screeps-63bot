@@ -140,13 +140,18 @@ let pro = {
             // 内矿的能量搬运 和掉落资源
             let pickTasks = StationCarry.generatorPickTask(room, true)
             let carryTasks = StationSources.generatorCarryEnergyTask(room);
+            let storageTasks = StationCarry.generatorCarryStorageEnergyTask(room);
             room.creeps("carrier").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (StationHive.HiveNeedToFill(room)) {
-                    // hive 是第一优先级：空手 carrier 先从 storage 取能量填
-                    // hive（允许使用 storage 能量），再考虑搬容器
-                    let storageTask = StationCarry.generatorCarryStorageEnergyTask(room);
-                    if (storageTask.length) {
-                        creep.addTask(storageTask);
+                    // hive 是第一优先级：空手 carrier 先取容器（keeper 新挖的
+                    // 新鲜能量，认领表已防重复），容器没货再取 storage 兜底
+                    if (carryTasks.length) {
+                        creep.addTask(carryTasks.pop());
+                        creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+                        return;
+                    }
+                    if (storageTasks.length) {
+                        creep.addTask(storageTasks.shift());
                         creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                         return;
                     }

@@ -297,6 +297,11 @@ let pro={
             if(sm.stat == STAT_CLEAR){// 清理阶段
                 sm.powered = false
                 if(room.factory.store.getAllResTypeCount()==0){
+                    // CPU 保护开关：bucket < 8000 时不启动新生产任务
+                    if (Game.cpu.bucket < 8000) {
+                        sm.lastCooldown = Game.time + FACTORY_SLEEP_TIME;
+                        return;
+                    }
                     let needProduce = pro.getProduceType(room)
                     if(!needProduce){
                         sm.lastCooldown = Game.time + FACTORY_SLEEP_TIME;
@@ -327,6 +332,12 @@ let pro={
                 }
                 // log(room.memory[pro.stationName].produce)
             }else if(sm.stat == STAT_PRODUCE) {// 反应阶段
+                // CPU 保护开关：bucket < 8000 时暂停生产（已搬入的原料保留，
+                // bucket 恢复后继续）
+                if (Game.cpu.bucket < 8000) {
+                    sm.lastCooldown = Game.time + 20;
+                    return;
+                }
                 let resType = sm.produce.produceResType
                 let code = room.factory.produce(resType)
                 if(code!=OK&&COMMODITIES[resType].level){ // 如果需要OP
