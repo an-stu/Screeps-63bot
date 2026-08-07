@@ -81,16 +81,16 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
         if ((source.energy + 100) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
             this.harvest(source);
         }
-        // 满载且相邻 container：直接把能量放进 container（供外矿 carrier 取走），
-        // 否则能量滞留 keeper 身上、container 一直空、carrier 空跑往返
-        if (container && this.pos.isNearTo(container) && this.store[RESOURCE_ENERGY] > 0) {
-            // 修脚下的 container：容器在 source keeper / 敌人攻击下掉血，keeper
-            // 有 WORK 部件，利用挖矿能量把容器修回满血，避免容器被打爆后
-            // 能量无处存放、外矿搬运中断。低于 95% 才修，修完剩余能量再转移
+        // 站在容器上挖矿：store 满后的溢出能量自动进入脚下容器（Screeps
+        // 机制），无需 transfer。若容器被占只能站旁边，则仍手动 transfer
+        // 兜底，避免能量滞留 keeper 身上/掉地上
+        if (container && this.store[RESOURCE_ENERGY] > 0) {
             if (container.hits < container.hitsMax * 0.95 && this.ticksToLive % 3 == 0) {
                 this.repair(container);
             }
-            this.transfer(container, RESOURCE_ENERGY)
+            if (!this.pos.isEqualTo(container)) {
+                this.transfer(container, RESOURCE_ENERGY);
+            }
         }
         if (!container && this.ticksToLive % 7 == 0) {
             this.pos.createConstructionSite(STRUCTURE_CONTAINER)
@@ -171,10 +171,13 @@ Creep.prototype.harvestEnergyKeeper = function () {
         let link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
         if (!link && link2) link = link2;
         if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
-        if (container && !container.pos.isNearTo(this)) {
-            // 直接用 moveTo 走向容器（相邻即可，不必站到容器格上——容器格
-            // 可能被其他 creep/建筑占据导致 moveTo 卡死、dontPullMe 永久卡位）
-            this.moveTo(container, { range: 1, visualizePathStyle: { stroke: '#67ffed' } });
+        if (container && !container.pos.isEqualTo(this)) {
+            // 站到容器上：creep 站在 container 上挖矿时，store 满后的溢出
+            // 能量自动进入脚下的容器（Screeps 机制），无需每 tick transfer。
+            // 容器格被其他 creep 占据时才退而站旁边（range 1）
+            let occupied = container.pos.lookFor(LOOK_CREEPS).length > 0
+                || container.pos.lookFor(LOOK_POWER_CREEPS).length > 0;
+            this.moveTo(container, { range: occupied ? 1 : 0, visualizePathStyle: { stroke: '#67ffed' } });
             return;
         } else if (source && !source.pos.isNearTo(this)) {
             // keeper 必须站到 source 相邻格才能挖矿+transfer。用 range:1 的
