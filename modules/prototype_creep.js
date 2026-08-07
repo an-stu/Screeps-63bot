@@ -482,9 +482,18 @@ Creep.prototype.carryRes = function () {
         let number = Math.min(Math.min(Math.max(this.store.getFreeCapacity(task.resType), 0), task.resCount ? task.resCount : 1e5), obj.store[task.resType])
         this.store[task.resType] = (this.store[task.resType] || 0) + number
         obj.store[task.resType] -= number
+        // 搬运完成一趟即释放容器认领（_carryClaim），让后续 carrier 可接替
+        // 继续抽容器——否则满载容器永不释放认领，单 carrier 独占拖慢搬运
+        let claim = this.room.memory._carryClaim;
+        if (claim && claim[task.id] && claim[task.id].creepId == this.id) {
+            delete claim[task.id];
+        }
         this.popTask();
         this.execLastTask();
     } else if (code == ERR_NOT_ENOUGH_RESOURCES) {
+        // 容器被搬空（并发/认领者冲突）：释放认领避免占位
+        let claim = this.room.memory._carryClaim;
+        if (claim && claim[task.id]) delete claim[task.id];
         this.popTask();
     }
 

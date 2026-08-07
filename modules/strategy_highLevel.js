@@ -199,7 +199,11 @@ let pro = {
         // container 能量
         freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.ticksToLive > 50); // 从这里开始下面的任务最好大于150ttl
         if (room.creeps("harvestEnergyKeeper").length && room.link.length < 6 || room.level < 8) {// 必须要有挖矿的 和 6个 link才会不去搬运能量
-            carryLinkTasks = StationSources.generatorCarryEnergyTask(room);
+            // hive 满时容器能量无处可去（keeper 溢出会堵死容器），降低搬运
+            // 门槛到 300，把容器能量尽量抽回 storage；hive 缺电时才用 1200
+            // 门槛（只搬值得一趟的）
+            let minEnergy = StationHive.HiveNeedToFill(room) ? 1200 : 300;
+            carryLinkTasks = StationSources.generatorCarryEnergyTask(room, minEnergy);
             carryLinkTasks.forEach(e => {
                 if (freeCarries.length) { freeCarries.pop().addTask(e); }
             })

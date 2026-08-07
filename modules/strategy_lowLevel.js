@@ -139,7 +139,9 @@ let pro = {
 
             // 内矿的能量搬运 和掉落资源
             let pickTasks = StationCarry.generatorPickTask(room, true)
-            let carryTasks = StationSources.generatorCarryEnergyTask(room);
+            // hive 满时容器能量无处去（keeper 溢出会堵死容器），降低门槛
+            // 到 300 尽量抽回；hive 缺电时才用 1200 门槛
+            let carryTasks = StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 300);
             let storageTasks = StationCarry.generatorCarryStorageEnergyTask(room);
             room.creeps("carrier").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (StationHive.HiveNeedToFill(room)) {
@@ -189,6 +191,12 @@ let pro = {
                     creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 } else if (fillTowerTasks.length) {
                     creep.addTask(fillTowerTasks.shift())
+                } else if (room.storage) {
+                    // hive 满且塔满：把身上能量放回 storage，防止容器/身上
+                    // 能量滞留溢出
+                    creep.addTask(UtilsTask.task(room.storage, "fillRes", undefined, {
+                        resType: RESOURCE_ENERGY,
+                    }))
                 }
             })
 
@@ -201,7 +209,7 @@ let pro = {
                 }
             }
 
-            let lowEnergyCarry = StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 500)
+            let lowEnergyCarry = StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 300)
             room.creeps("worker").filter(e => e.isFree()).forEach(creep => {
                 if (creep.storeEmpty()) {
                     if (lowEnergyCarry.length)
