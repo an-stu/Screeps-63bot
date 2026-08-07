@@ -141,6 +141,16 @@ let pro = {
             let pickTasks = StationCarry.generatorPickTask(room, true)
             let carryTasks = StationSources.generatorCarryEnergyTask(room);
             room.creeps("carrier").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
+                if (StationHive.HiveNeedToFill(room)) {
+                    // hive 是第一优先级：空手 carrier 先从 storage 取能量填
+                    // hive（允许使用 storage 能量），再考虑搬容器
+                    let storageTask = StationCarry.generatorCarryStorageEnergyTask(room);
+                    if (storageTask.length) {
+                        creep.addTask(storageTask);
+                        creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+                        return;
+                    }
+                }
                 if (carryTasks.length) {
                     creep.addTask(carryTasks.pop())
                 } else if (pickTasks.length) {
