@@ -73,6 +73,11 @@ let pro = {
         let created = false
         let hasConSite = room.find(FIND_CONSTRUCTION_SITES).length
         if (!room.storage || !room.storage.my) return; // 4 级前什么都不做，防不住的
+        // 5 级不生成 rampart/wall（也不维护旧 rampart），6 级开始再建墙
+        if (room.level < 6) {
+            delete pro.needRepairWallMap[room.name];
+            return;
+        }
 
         function createWallOrRampart(pos, structType) {
             let needRepair = pos.lookFor(LOOK_STRUCTURES).filter(e => e.structureType == structType).head();
