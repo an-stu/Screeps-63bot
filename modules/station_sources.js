@@ -172,18 +172,24 @@ Creep.prototype.harvestEnergyKeeper = function () {
         if (!link && link2) link = link2;
         if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
         if (container && !container.pos.isEqualTo(this)) {
-            // 站到容器上：creep 站在 container 上挖矿时，store 满后的溢出
-            // 能量自动进入脚下的容器（Screeps 机制），无需每 tick transfer。
-            // 容器格被其他 creep 占据时才退而站旁边（range 1）
             let occupied = container.pos.lookFor(LOOK_CREEPS).length > 0
                 || container.pos.lookFor(LOOK_POWER_CREEPS).length > 0;
-            this.moveTo(container, { range: occupied ? 1 : 0, visualizePathStyle: { stroke: '#67ffed' } });
-            return;
+            if (!occupied) {
+                // 站到容器上：creep 站在 container 上挖矿时，store 满后的溢出
+                // 能量自动进入脚下的容器（Screeps 机制），无需每 tick transfer。
+                this.moveTo(container, { range: 0, visualizePathStyle: { stroke: '#67ffed' } });
+                return;
+            }
+            // 容器被占（worker 顶替挖矿/carrier 站脚）时不能只满足"挨着容器"——
+            // 那可能离 source 太远挖不到（(10,5) 卡死事件）。改为直接站到
+            // source 相邻格，保证能挖矿。
+            if (source && !source.pos.isNearTo(this)) {
+                this.moveTo(source, { range: 1, visualizePathStyle: { stroke: '#67ffed' } });
+                return;
+            }
         } else if (source && !source.pos.isNearTo(this)) {
             // keeper 必须站到 source 相邻格才能挖矿+transfer。用 range:1 的
             // moveTo 直接找 source 周边空格，避免 goToNearPop 反复压栈任务
-            // 且只认某个固定格——(10,5) 卡死事件：容器相邻但 source range 2，
-            // 任务栈每 tick 压 concat+goToNearPop，位置却永远不动
             this.moveTo(source, { range: 1, visualizePathStyle: { stroke: '#67ffed' } });
             return;
         }
@@ -245,10 +251,53 @@ Creep.prototype.harvestEnergyKeeper = function () {
 
 Creep.prototype.harvestEnergy = function () {
     let task = this.lastTask();
+    let station = this.room.memory[pro.stationName] && this.room.memory[pro.stationName][task.id];
+    // 主房有 storage（高等级）：该源已有活 keeper 时 worker 顶替挖矿结束，
+    // 交还任务让出容器格，否则 worker 占容器格会卡死 keeper（E53S21 复现）
+    if (this.mainRoom().storage
+        && station && station["creeps"] && station["creeps"].some(id => {
+            let c = Game.getObjectById(id);
+            return c && c.ticksToLive;
+        })) {
+        this.popTask();
+        return;
+    }
+    // 空手：优先取能量，不随便挖源 —— 先取源旁容器，storage 健康再取 storage；
+    // 只有仓库确实没能量才挖源（最后兜底）
+    if (this.store[RESOURCE_ENERGY] == 0) {
+        let container = station && Game.getObjectById(station.container);
+        if (container && container.store[RESOURCE_ENERGY] > 0) {
+            if (this.pos.isNearTo(container)) {
+                let amount = Math.min(container.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
+                if (this.withdraw(container, RESOURCE_ENERGY, amount) == OK) {
+                    container.store[RESOURCE_ENERGY] -= amount;
+                    this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
+                    this.popTask();
+                }
+            } else {
+                this.moveTo(container);
+            }
+            return;
+        }
+        let storage = this.mainRoom().storage;
+        if (storage && storage.store[RESOURCE_ENERGY] > 10000) { // storage 健康才取，避免抽干
+            if (this.pos.isNearTo(storage)) {
+                let amount = Math.min(storage.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
+                if (this.withdraw(storage, RESOURCE_ENERGY, amount) == OK) {
+                    storage.store[RESOURCE_ENERGY] -= amount;
+                    this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
+                    this.popTask();
+                }
+            } else {
+                this.moveTo(storage);
+            }
+            return;
+        }
+    }
+    // 仓库没能量：真的挖源（最后兜底）
     if (this.store.getFreeCapacity(RESOURCE_ENERGY) <= this.getActiveBodyparts(WORK) * 2) {
         // 满载：有 carrier 且源旁有 container 时先放进 container 让 carrier 搬运，
         // 否则自己带回去（worker 自给自足路径，避免 carrier 挂机）
-        let station = this.room.memory[pro.stationName] && this.room.memory[pro.stationName][task.id];
         let container = station && Game.getObjectById(station.container);
         if (container && this.pos.isNearTo(container) && this.room.creeps("carrier", false).length > 0) {
             let code = this.transfer(container, RESOURCE_ENERGY);
@@ -261,19 +310,16 @@ Creep.prototype.harvestEnergy = function () {
         this.goTo(task);
     } else {
         let source = Game.getObjectById(task["id"]);
-        // let station = this.room.memory[pro.stationName][task["id"]];
         if (source && !source.pos.isNearTo(this)) {
             this.addTaskAndExec(UtilsTask.task(source, "goToNearPop"));
             return;
         }
-        // if((source.energy+100)/source.energyCapacity>(source.ticksToRegeneration||300)/300&&source.energy){
         if (source.energy == 0) {
             this.popTask();
             return;
         }
         this.harvest(source);
-        // }
-
+    }
     // 满载且相邻主房 storage/terminal（或矿区 container）：直接填充，
     // 不依赖 fillRes 任务链——路径终点若未紧贴 storage，任务链可能永不触发填充
     if (this.store[RESOURCE_ENERGY] > 0 && this.room.my) {
@@ -284,14 +330,13 @@ Creep.prototype.harvestEnergy = function () {
     }
 
     if (this.ticksToLive % 4 == 0) {
-            //捡起掉落的能量
-            let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
-            if (dropEnergy) this.pickup(dropEnergy);
-            //捡起尸体的能量
-            let tombstone = this.pos.lookFor(LOOK_TOMBSTONES).head();
-            if (tombstone) this.withdraw(tombstone, RESOURCE_ENERGY);
-            //捡起container的能量
-        }
+        //捡起掉落的能量
+        let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
+        if (dropEnergy) this.pickup(dropEnergy);
+        //捡起尸体的能量
+        let tombstone = this.pos.lookFor(LOOK_TOMBSTONES).head();
+        if (tombstone) this.withdraw(tombstone, RESOURCE_ENERGY);
+        //捡起container的能量
     }
 };
 

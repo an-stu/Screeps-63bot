@@ -75,9 +75,10 @@ let pro = {
         //     spawnWorker();
         // }
 
-        // 无 keeper 时让 worker 顶替挖矿（保证能量持续流入 container），
-        // 否则 keeper 死光后 container 空、carrier 无事可做、hive 不满、keeper 生不出来，形成死循环
-        if (room.storage.store[RESOURCE_ENERGY] < 3000 || room.creeps("harvestEnergyKeeper").length == 0) {
+        // 无 keeper 且 storage 告急时才让 worker 顶替挖矿填容器；
+        // storage 有能量时 worker 走正常取货路径（优先取能量），不随便挖源、
+        // 也不占容器格（避免卡死 keeper）。
+        if (room.creeps("harvestEnergyKeeper").length == 0 && room.storage.store[RESOURCE_ENERGY] < 3000) {
             _.values(room.memory[StationSources.stationName]).filter(e => Game.getObjectById(e.id).energy).forEach(data => {
                 if (data["creeps"].filter(e => Game.getObjectById(e)).length == 0 && room.creeps().filter(e => e.memory.role == "harvestEnergyKeeper").length == 0) {
                     let posLen = room[data["id"]].pos.nearPos(1).filter(e => e.walkable()).length
