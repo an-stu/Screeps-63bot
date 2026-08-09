@@ -326,6 +326,11 @@ let pro = {
 
         pro.trySpawnCarrier(room); // 一定要在carrierManager后面
         StationSources.trySpawnHarKeeper(room);
+        // 主房 worker/carrier/keeper 优先占用 spawn 之后才轮到外矿，避免
+        // 单 spawn 房被外矿抢占补员拖垮主房经济（旧顺序外矿最先，E53S21 崩盘根因之一）。
+        if (global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest") && !room.flags("stopRemote").length) {
+            HelperError.catchError(() => StrategyOuterHarvest.exec(room), room.name);
+        }
         StationMineral.trySpawnHarKeeper(room);
         StationUpgrade.spawnUpgrader(room);
 

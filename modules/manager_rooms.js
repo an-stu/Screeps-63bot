@@ -86,12 +86,6 @@ const managerRooms = {
             && isCpuFeatureEnabled("powerBank") && ManagerFlags.hasPrefix("powerBank");
         if (powerBankActive) HelperError.catchError(() => StrategyPowerBank.exec(room), room.name);
 
-        // 外矿 keeper / scout 是本房资源输入，必须在本地 worker 队列之前申请
-        // 空闲 Spawn；否则单 Spawn 房会长期被内部补员占满，外矿永远不触发。
-        if (global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest") && !room.flags("stopRemote").length) {
-            HelperError.catchError(() => StrategyOuterHarvest.exec(room), room.name);
-        }
-
         if (room.flags("blockRoom").length) return;
         if (global.StrategyGCLRoom && isCpuFeatureEnabled("GCLRoom") && room.flags("GCLRoom").length) {
             HelperError.catchError(() => StrategyGCLRoom.exec(room), room.name);

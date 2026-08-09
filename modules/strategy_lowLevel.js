@@ -101,6 +101,11 @@ let pro = {
                 StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room), "worker", [])
 
             StationSources.trySpawnHarKeeper(room);
+            // 与 high-level 一致：主房 keeper 之后才排外矿（外矿需 storage
+            // 接收能量，无 storage 的低级房此调用为空操作）
+            if (global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest") && !room.flags("stopRemote").length) {
+                HelperError.catchError(() => StrategyOuterHarvest.exec(room), room.name);
+            }
 
 
             let creeps = room.creeps("worker").filter(e => e.storeEmpty() && e.isFree())
