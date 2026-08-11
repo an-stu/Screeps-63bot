@@ -179,12 +179,9 @@ let pro = {
             if (StationHive.HiveNeedToFill(room)) {
                 creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 if (creep.storeEmpty()) {
-                    // 空手且 hive 缺电：先取容器（keeper 新挖的新鲜能量，
-                    // 认领表已防重复），容器没货再取 storage——hive 充足
-                    // 是第一优先级，storage 能量兜底
-                    let sourceTasks = StationSources.generatorCarryEnergyTask(room, 300);
-                    if (!sourceTasks.length) sourceTasks = StorageCarryEnergyTasks;
-                    if (sourceTasks.length) creep.addTask(sourceTasks);
+                    // 空手且 hive 缺电：不派容器任务，carrier 自己先源容器
+                    // 再 storage 取能量填 hive（容器不够格直接去 storage）
+                    creep.addTask(UtilsTask.task(creep, "carryEnergyAuto"));
                 }
             } else if (fillTowerTasks.length) {
                 creep.addTask(fillTowerTasks.shift())
@@ -197,16 +194,11 @@ let pro = {
             room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).forEach(e => e.fillAllMainRoomStorage())
         }
 
-        // container 能量
+        // container 能量：不派具体容器任务，空手 carrier 自动抽（先容器后 storage）
         freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.ticksToLive > 50); // 从这里开始下面的任务最好大于150ttl
         if (room.creeps("harvestEnergyKeeper").length && room.link.length < 6 || room.level < 8) {// 必须要有挖矿的 和 6个 link才会不去搬运能量
-            // hive 满时容器能量无处可去（keeper 溢出会堵死容器），降低搬运
-            // 门槛到 300，把容器能量尽量抽回 storage；hive 缺电时才用 1200
-            // 门槛（只搬值得一趟的）
-            let minEnergy = StationHive.HiveNeedToFill(room) ? 1200 : 300;
-            carryLinkTasks = StationSources.generatorCarryEnergyTask(room, minEnergy);
-            carryLinkTasks.forEach(e => {
-                if (freeCarries.length) { freeCarries.pop().addTask(e); }
+            freeCarries.forEach(e => {
+                if (e.storeEmpty()) e.addTask(UtilsTask.task(e, "carryEnergyAuto"));
             })
         }
 

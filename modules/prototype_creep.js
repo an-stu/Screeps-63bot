@@ -516,6 +516,71 @@ Creep.prototype.carryRes = function () {
  * resCount 资源数量
  * fromStorage 如果空了，往storage拿，默认true
  */
+Creep.prototype.carryEnergyAuto = function () {
+    // carrier 空手自寻能量：先源容器（能量够装满我），再 storage；不派容器任务。
+    // 容器不够格（requireFullLoad 语义）时直接去 storage，避免空转等容器。
+    if (this.store[RESOURCE_ENERGY] > 0) {
+        this.popTask();
+        this.execLastTask();
+        return;
+    }
+    let room = this.room;
+    if (!room) { this.popTask(); this.execLastTask(); return; }
+    room.used = room.used || {};
+    let carryClaim = room.memory._carryClaim = room.memory._carryClaim || {};
+    // 1) 源容器：选能量最多的可用容器（本 tick 未用、认领表未占或认领者已死）
+    let best = undefined, bestE = 0;
+    if (room.memory[StationSources.stationName]) {
+        _.values(room.memory[StationSources.stationName]).forEach(data => {
+            let c = Game.getObjectById(data["container"]);
+            if (!c) return;
+            let e = c.store[RESOURCE_ENERGY] || 0;
+            if (e > bestE && !room.used[c.id]
+                && (!carryClaim[c.id] || carryClaim[c.id].creepId == this.id
+                    || !Game.getObjectById(carryClaim[c.id].creepId) || Game.time - carryClaim[c.id].tick > 300)) {
+                bestE = e; best = c;
+            }
+        });
+    }
+    if (best && bestE > this.store.getCapacity(RESOURCE_ENERGY)) {
+        room.used[best.id] = true;
+        if (!carryClaim[best.id] || carryClaim[best.id].creepId != this.id) carryClaim[best.id] = { creepId: this.id, tick: Game.time };
+        if (this.pos.isNearTo(best)) {
+            let amount = Math.min(best.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
+            if (this.withdraw(best, RESOURCE_ENERGY, amount) == OK) {
+                best.store[RESOURCE_ENERGY] -= amount;
+                this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
+                if (best.store[RESOURCE_ENERGY] <= 0) delete carryClaim[best.id];
+                this.popTask();
+                this.execLastTask();
+            }
+        } else {
+            this.moveTo(best, { visualizePathStyle: { stroke: '#67ffed' } });
+        }
+        return;
+    }
+    // 2) storage 兜底
+    let storage = room.storage;
+    if (storage && storage.store[RESOURCE_ENERGY] > 2000) {
+        if (this.pos.isNearTo(storage)) {
+            let amount = Math.min(storage.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
+            if (this.withdraw(storage, RESOURCE_ENERGY, amount) == OK) {
+                storage.store[RESOURCE_ENERGY] -= amount;
+                this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
+                this.popTask();
+                this.execLastTask();
+            }
+        } else {
+            this.moveTo(storage, { visualizePathStyle: { stroke: '#67ffed' } });
+        }
+        return;
+    }
+    // 3) 没有可取能量：放弃任务
+    this.popTask();
+    this.execLastTask();
+};
+
+
 Creep.prototype.fillRes = function () {
     let task = this.lastTask();
     if (task.resType == undefined) throw new Error("resType no found:" + task)
