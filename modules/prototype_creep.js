@@ -465,6 +465,17 @@ Creep.prototype.carryRes = function () {
     // exactly-one-load energy as a keeper buffer.
     if (task.requireFullLoad && this.storeEmpty()
         && obj.store[task.resType] <= this.store.getCapacity(task.resType)) {
+        // 容器能量不够装满我：hive 缺能时改从 storage 取，避免 carrier 空转
+        // 等一个永远够不着的容器任务（大 carrier 挂机根因）
+        if (this.room && StationHive.HiveNeedToFill(this.room)) {
+            let storageTasks = StationCarry.generatorCarryStorageEnergyTask(this.room);
+            if (storageTasks.length) {
+                this.popTask();
+                this.addTask(storageTasks);
+                this.execLastTask();
+                return;
+            }
+        }
         this.popTask();
         this.execLastTask();
         return;
