@@ -10,13 +10,6 @@ let pro = {
         // Preserve the manual switch while entering low-CPU mode early enough
         // to protect the 20 CPU baseline from a draining bucket.
         MIN_CPU = !!Memory.mincpu || Game.cpu.bucket < 2000;
-        // E53S21 快速升 RCL：upgrade_<房间>_<数量> 旗帜控制 upgrader 数量。
-        // 房间达到 RCL8 后，现有 upgrader 管理逻辑会自动移除该旗帜。
-        let upgradeRoom = Game.rooms.E53S21;
-        if (upgradeRoom && upgradeRoom.my && upgradeRoom.controller
-            && upgradeRoom.controller.level < 8 && !Game.flags["upgrade_E53S21_3"]) {
-            upgradeRoom.controller.pos.createFlag("upgrade_E53S21_3");
-        }
         if (MIN_CPU && Game.time % 100 == 0) console.log("warning : min cpu on")
         let objects = getTickObjects();
         objects.rooms.forEach(room => room.used = {});

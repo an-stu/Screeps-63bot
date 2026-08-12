@@ -73,7 +73,7 @@ assert.ok(prototypeCreep.includes("The next tick observes the withdrawal") && !p
 assert.ok(!prototypeCreep.includes("room.memory._carryClaim =") && !stationSources.includes("let carryClaim = rm._carryClaim"), "carrier collision avoidance must not persist stale claims in Memory");
 assert.ok(strategyHighLevel.includes("hiveFree -= creep.store.getCapacity(RESOURCE_ENERGY)") && strategyHighLevel.includes("availableLoads.findIndex") && !strategyHighLevel.includes("Math.max(1, srcCnt)"), "carrier dispatch must use real capacity and assign no work when no source exists");
 assert.ok(managerMissions.includes("data.resType == RESOURCE_ENERGY ? amount + cost <= energy : cost <= energy"), "terminal missions must charge transaction cost to energy independently of the sent resource");
-assert.ok(main.includes('Game.flags["upgrade_E53S21_3"]') && main.includes('createFlag("upgrade_E53S21_3")'), "E53S21 must retain its automatic three-upgrader flag until RCL8");
+assert.ok(!main.includes("upgrade_E53S21_3") && !main.includes("createFlag(\"upgrade_"), "upgrade flags must remain manually controlled rather than hard-coded in the tick loop");
 assert.ok(powerCreepPrototype.includes("code == OK || code == ERR_INVALID_ARGS || code == ERR_NOT_ENOUGH_RESOURCES"), "operate-storage tasks must terminate after success or a terminal error");
 assert.ok(prototypeCreep.includes("直到能量用尽") && !prototypeCreep.includes("if (code == OK) this.popTask().execLastTask();"), "a fresh rampart builder must spend its carried energy before resuming normal work");
 assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.includes("task.requireFullLoad"), "source-container carriers must wait for more than a full load before withdrawing");

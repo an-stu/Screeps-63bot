@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.78.1 — Preserve manual upgrade flags
+
+### Changed
+
+- Stop hard-coding automatic creation of `upgrade_E53S21_3`. Existing upgrade
+  flags remain untouched and continue to control upgrader counts normally.
+
 ## v0.78.0 — Carrier dispatch and terminal correctness
 
 ### Fixed
@@ -17,8 +24,6 @@
   visible next tick, and guard missing `carryRes` targets before reading them.
 - Complete `OPERATE_STORAGE` tasks after success or a terminal error instead of
   leaving the Power Creep on a stale task.
-- Retain automatic creation of `upgrade_E53S21_3` until E53S21 reaches RCL8,
-  preserving the room's requested three-upgrader policy.
 
 ## v0.77.0 — CPU, market, lab, and pillage overhaul
 
