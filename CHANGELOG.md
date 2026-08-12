@@ -17,12 +17,8 @@
   visible next tick, and guard missing `carryRes` targets before reading them.
 - Complete `OPERATE_STORAGE` tasks after success or a terminal error instead of
   leaving the Power Creep on a stale task.
-
-### Removed
-
-- Remove the E53S21-specific upgrade Flag creation from the global tick loop;
-  room upgrade counts remain controlled through normal `upgrade_<room>_<count>`
-  flags.
+- Retain automatic creation of `upgrade_E53S21_3` until E53S21 reaches RCL8,
+  preserving the room's requested three-upgrader policy.
 
 ## v0.77.0 — CPU, market, lab, and pillage overhaul
 
