@@ -575,7 +575,24 @@ Creep.prototype.carryEnergyAuto = function () {
         }
         return;
     }
-    // 3) 没有可取能量：放弃任务
+    // 3) terminal 兜底：storage 空了才拉 terminal（跨房运来的能量），喂 hive
+    let terminal = room.terminal;
+    let storageLow = !storage || storage.store[RESOURCE_ENERGY] < 2000;
+    if (storageLow && terminal && terminal.store[RESOURCE_ENERGY] > 2000) {
+        if (this.pos.isNearTo(terminal)) {
+            let amount = Math.min(terminal.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
+            if (this.withdraw(terminal, RESOURCE_ENERGY, amount) == OK) {
+                terminal.store[RESOURCE_ENERGY] -= amount;
+                this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
+                this.popTask();
+                this.execLastTask();
+            }
+        } else {
+            this.moveTo(terminal, { visualizePathStyle: { stroke: '#67ffed' } });
+        }
+        return;
+    }
+    // 4) 没有可取能量：放弃任务
     this.popTask();
     this.execLastTask();
 };

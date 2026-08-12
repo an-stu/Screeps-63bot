@@ -80,13 +80,19 @@ global.missionFunc = { //被crossShard引用 ，相当于交叉依赖了
                 terminal._need_hold[data.resType] = (terminal._need_hold[data.resType]||0) + data.amount
             }
             if(terminal&&from.terminal.cooldown==0){
-                let cnt = Math.min(from.terminal.store[data.resType],data.amount);
-                if(cnt&&(cnt==data.amount||cnt>=3000)){
-                    let code = from.terminal.send(data.resType,cnt,data.toRoomName)
-                    // console.log(code)
-                    if(code==OK){
-                        data.amount -= cnt;
-                        if(!data.amount)return true;
+                let want = Math.min(from.terminal.store[data.resType],data.amount);
+                if(want&&(want==data.amount||want>=3000)){
+                    // 交易成本也从源 terminal 扣：先预留 cost，否则想发空 terminal
+                    // 时 amount+cost 超仓量会 ERR_NOT_ENOUGH_RESOURCES，mission 永不完成
+                    let cost = Game.market.calcTransactionCost(want, data.fromRoomName, data.toRoomName);
+                    let cnt = Math.max(0, Math.min(want, from.terminal.store[data.resType] - cost));
+                    if(cnt && (cnt==data.amount || cnt>=3000)){
+                        let code = from.terminal.send(data.resType,cnt,data.toRoomName)
+                        // console.log(code)
+                        if(code==OK){
+                            data.amount -= cnt;
+                            if(!data.amount)return true;
+                        }
                     }
                 }
             }
