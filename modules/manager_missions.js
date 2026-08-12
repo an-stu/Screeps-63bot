@@ -82,10 +82,20 @@ global.missionFunc = { //被crossShard引用 ，相当于交叉依赖了
             if(terminal&&from.terminal.cooldown==0){
                 let want = Math.min(from.terminal.store[data.resType],data.amount);
                 if(want&&(want==data.amount||want>=3000)){
-                    // 交易成本也从源 terminal 扣：先预留 cost，否则想发空 terminal
-                    // 时 amount+cost 超仓量会 ERR_NOT_ENOUGH_RESOURCES，mission 永不完成
-                    let cost = Game.market.calcTransactionCost(want, data.fromRoomName, data.toRoomName);
-                    let cnt = Math.max(0, Math.min(want, from.terminal.store[data.resType] - cost));
+                    // Terminal 始终用 energy 支付交易成本。发送 energy 时本体
+                    // 和成本共享库存；发送其他资源时只检查独立的 energy 库存。
+                    let energy = from.terminal.store[RESOURCE_ENERGY] || 0;
+                    let affordable = amount => {
+                        let cost = Game.market.calcTransactionCost(amount, data.fromRoomName, data.toRoomName);
+                        return data.resType == RESOURCE_ENERGY ? amount + cost <= energy : cost <= energy;
+                    };
+                    let low = 0, high = want;
+                    while(low < high){
+                        let mid = Math.ceil((low + high) / 2);
+                        if(affordable(mid)) low = mid;
+                        else high = mid - 1;
+                    }
+                    let cnt = low;
                     if(cnt && (cnt==data.amount || cnt>=3000)){
                         let code = from.terminal.send(data.resType,cnt,data.toRoomName)
                         // console.log(code)

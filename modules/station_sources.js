@@ -20,29 +20,14 @@ Creep.prototype.registerStationSources = function () {
 
 Creep.prototype.registerStationSourcesCarryInRoom = function () {
     let room = Game.rooms[this.memory["roomName"]]
+    if (!room) return;
     room.used = room.used || {}
     room.used[this.headTask().id] = true
-    // 跨 tick 去重：room.used 每 tick 重建，同容器可能被多个 carrier 重复
-    // 领取（低等级房间 carrier 少、容器少时冲突尤其明显）。把领取关系持久
-    // 化到房间 memory（独立字段，不放进 stationSources——否则会被
-    // trySpawnOuterHarKeeper/cleanupDuplicateKeepers 等遍历污染）：
-    // 容器 id -> {creepId, tick}，generatorCarryEnergyTask 分配时跳过
-    let carryClaim = room.memory._carryClaim = room.memory._carryClaim || {};
-    // 迁移清理：早期版本把认领表误放在 stationSources 内，删掉残留
+    // 活跃任务会在每 tick 注册到 room.used；无需把认领关系持久化到
+    // Memory。顺便清除早期版本遗留的两种认领表。
+    if (room.memory._carryClaim) delete room.memory._carryClaim;
     if (room.memory[pro.stationName] && room.memory[pro.stationName]._carryClaim) {
         delete room.memory[pro.stationName]._carryClaim;
-    }
-    let containerId = this.headTask().id;
-    let creepId = this.id;
-    let old = carryClaim[containerId];
-    // 只允许一只 creep 认领；换人需旧认领者已死
-    if (!old || !Game.getObjectById(old.creepId)) {
-        carryClaim[containerId] = { creepId: creepId, tick: Game.time };
-    }
-    // 若容器已空（搬运完成），立即释放认领，让下一轮可重新分配
-    let container = Game.getObjectById(containerId);
-    if (container && container.store && !container.store.getUsedCapacity(RESOURCE_ENERGY)) {
-        delete carryClaim[containerId];
     }
 };
 
@@ -270,8 +255,6 @@ Creep.prototype.harvestEnergy = function () {
             if (this.pos.isNearTo(container)) {
                 let amount = Math.min(container.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
                 if (this.withdraw(container, RESOURCE_ENERGY, amount) == OK) {
-                    container.store[RESOURCE_ENERGY] -= amount;
-                    this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
                     this.popTask();
                 }
             } else {
@@ -284,8 +267,6 @@ Creep.prototype.harvestEnergy = function () {
             if (this.pos.isNearTo(storage)) {
                 let amount = Math.min(storage.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
                 if (this.withdraw(storage, RESOURCE_ENERGY, amount) == OK) {
-                    storage.store[RESOURCE_ENERGY] -= amount;
-                    this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
                     this.popTask();
                 }
             } else {
@@ -314,7 +295,7 @@ Creep.prototype.harvestEnergy = function () {
             this.addTaskAndExec(UtilsTask.task(source, "goToNearPop"));
             return;
         }
-        if (source.energy == 0) {
+        if (!source || source.energy == 0) {
             this.popTask();
             return;
         }
@@ -1213,21 +1194,11 @@ let pro = {
             // level 8 房永远不搬、积压溢出
             if (room.level == 8 && arguments.length < 2) minEnergy = 1600;
             let maxContainerEnergyCnt = 0;
-            // 跨 tick 认领表：容器 id -> {creepId, tick}。已认领且认领者
-            // 存活时不再分配，防止多个 carrier/worker 搬运同一容器
-            let carryClaim = rm._carryClaim || {};
-            // 清理死认领（认领者已死、不在本房间或超过 300 tick 未续）
-            for (let cid in carryClaim) {
-                let claim = carryClaim[cid];
-                let claimer = Game.getObjectById(claim.creepId);
-                if (!claimer || claimer.room.name != room.name || Game.time - claim.tick > 300) delete carryClaim[cid];
-            }
             for (let resm of _.values(rm[pro.stationName])) {
                 let container = Game.getObjectById(resm["container"]);
                 if (container && container.store[RESOURCE_ENERGY] > maxContainerEnergyCnt)
                     maxContainerEnergyCnt = container.store[RESOURCE_ENERGY]
-                if (container && container.store[RESOURCE_ENERGY] > minEnergy && !room.used[container.id]
-                    && !carryClaim[container.id]) {
+                if (container && container.store[RESOURCE_ENERGY] > minEnergy && !room.used[container.id]) {
                     tasks.push([UtilsTask.task(container, "carryRes", "registerStationSourcesCarryInRoom", {
                         resType: RESOURCE_ENERGY,
                         requireFullLoad: true,

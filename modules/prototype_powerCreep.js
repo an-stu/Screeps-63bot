@@ -78,10 +78,12 @@ PowerCreep.prototype.OpStorage = function () {
     }
     if (!this.pos.inRangeTo(storage, 3)) {
         this.moveTo(storage, { range: 3 });
+        return;
     }
-    if (pcPower.cooldown) return;
     let code = this.usePower(PWR_OPERATE_STORAGE, storage);
-    if (code == ERR_INVALID_ARGS) this.popTask();
+    if (code == OK || code == ERR_INVALID_ARGS || code == ERR_NOT_ENOUGH_RESOURCES) {
+        this.popTask().execLastTask();
+    }
 }
 
 PowerCreep.prototype.OpSource = function () {

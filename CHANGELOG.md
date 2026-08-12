@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.78.0 — Carrier dispatch and terminal correctness
+
+### Fixed
+
+- Calculate Terminal transaction energy independently from the resource being
+  sent, including the shared inventory constraint when sending energy itself.
+- Cache each automatic carrier's selected source in its task so it no longer
+  rescans and changes destination every tick; only the current tick's task
+  registry is used for collision avoidance, removing stale `_carryClaim`
+  Memory writes.
+- Match carrier dispatch thresholds to actual creep capacity, count no source
+  as no work, and size hive assignments from real carrier capacities.
+- Stop manually mutating Screeps `Store` proxies in the newly added automatic
+  carrier/worker branches, defer their follow-up task until the intent is
+  visible next tick, and guard missing `carryRes` targets before reading them.
+- Complete `OPERATE_STORAGE` tasks after success or a terminal error instead of
+  leaving the Power Creep on a stale task.
+
+### Removed
+
+- Remove the E53S21-specific upgrade Flag creation from the global tick loop;
+  room upgrade counts remain controlled through normal `upgrade_<room>_<count>`
+  flags.
+
 ## v0.77.0 — CPU, market, lab, and pillage overhaul
 
 ### Performance (CPU 25-27 → ~20, at limit; bucket stabilized)

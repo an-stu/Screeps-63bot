@@ -183,12 +183,11 @@ let pro = {
             });
             // 空手 carrier：只派够填 hive 缺口的数量
             let hiveFree = room.energyCapacityAvailable - room.getEnergyAvailable();
-            let emptyNeed = Math.max(1, Math.ceil(hiveFree / 1500));
-            while (emptyNeed > 0 && freeCarries.length) {
+            while (hiveFree > 0 && freeCarries.length) {
                 let creep = freeCarries.pop();
                 creep.addTask(StationHive.generatorFillHiveTask(room, creep));
-                creep.addTask(UtilsTask.task(creep, "carryEnergyAuto"));
-                emptyNeed--;
+                creep.addTask(UtilsTask.task(creep, "carryEnergyAuto", undefined, {allowStorage:true}));
+                hiveFree -= creep.store.getCapacity(RESOURCE_ENERGY);
             }
         } else if (fillTowerTasks.length) {
             // 填 tower：一只 carrier 一个 tower
@@ -207,18 +206,26 @@ let pro = {
         // container 能量：按需派发——有多少个有能量的源容器 + terminal 超额，派多少只
         let emptyPool = room.creeps("carrier").filter(e => e.isFree() && e.ticksToLive > 50 && e.storeEmpty());
         if (room.creeps("harvestEnergyKeeper").length && room.link.length < 6 || room.level < 8) {// 必须要有挖矿的 和 6个 link才会不去搬运能量
-            let srcCnt = 0;
+            let availableLoads = [];
             if (room.memory[StationSources.stationName]) {
                 _.values(room.memory[StationSources.stationName]).forEach(data => {
                     let c = Game.getObjectById(data["container"]);
-                    if (c && c.store[RESOURCE_ENERGY] > 300) srcCnt++;
+                    if (c) availableLoads.push({ amount: c.store[RESOURCE_ENERGY] || 0, partial: false });
                 });
             }
             let terminal = room.terminal;
-            if (terminal && terminal.store[RESOURCE_ENERGY] > 50000) srcCnt++;
-            let need = Math.min(emptyPool.length, Math.max(1, srcCnt));
-            for (let i = 0; i < need; i++) {
-                let creep = emptyPool.pop();
+            if (terminal && terminal.store[RESOURCE_ENERGY] > 50000) {
+                availableLoads.push({ amount: terminal.store[RESOURCE_ENERGY] - 50000, partial: true });
+            }
+            // Prefer the largest carrier that can actually take a full load;
+            // smaller carriers can still consume sources rejected by it.
+            emptyPool.sort((a, b) => b.store.getCapacity(RESOURCE_ENERGY) - a.store.getCapacity(RESOURCE_ENERGY));
+            for (let creep of emptyPool) {
+                if (!availableLoads.length) break;
+                let capacity = creep.store.getCapacity(RESOURCE_ENERGY);
+                let sourceIndex = availableLoads.findIndex(source => source.partial ? source.amount > 0 : source.amount > capacity);
+                if (sourceIndex < 0) continue;
+                availableLoads.splice(sourceIndex, 1);
                 creep.addTask(UtilsTask.task(creep, "carryEnergyAuto"));
             }
         }

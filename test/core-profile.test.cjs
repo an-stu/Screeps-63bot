@@ -47,6 +47,7 @@ const cpuHelper = fs.readFileSync(path.join(root, "modules/helper_cpuUsed.js"), 
 const strategyOuterHarvest = fs.readFileSync(path.join(root, "modules/strategy_outerHarvest.js"), "utf8");
 const stationSources = fs.readFileSync(path.join(root, "modules/station_sources.js"), "utf8");
 const managerAutoPlanner = fs.readFileSync(path.join(root, "modules/manager_autoPlanner.js"), "utf8");
+const managerMissions = fs.readFileSync(path.join(root, "modules/manager_missions.js"), "utf8");
 
 assert.equal(new Set(manifest).size, manifest.length, "core manifest must not duplicate a module");
 for (const moduleName of manifest) {
@@ -67,6 +68,13 @@ assert.ok(managerRooms.indexOf("StrategyOuterHarvest.exec(room)") < managerRooms
 assert.ok(stationSources.includes("let roadDir = task.roadDir == -1 ? -1 : 1"), "legacy road-builder tasks must default to a valid route direction");
 assert.ok(stationSources.includes("cleanupOuterRoadSites") && stationSources.includes("onRoadPath"), "outer roads must be cached-route-only and reclaim off-route road sites");
 assert.ok(prototypeCreep.includes("repairFreshRampart") && prototypeCreep.includes("completesRampart"), "a completed rampart site must keep its builder on immediate repair");
+assert.ok(prototypeCreep.includes("task.sourceId") && prototypeCreep.includes("reusePath: 10"), "automatic carrier targets must remain stable while travelling");
+assert.ok(prototypeCreep.includes("The next tick observes the withdrawal") && !prototypeCreep.includes("this.popTask();\n    this.execLastTask();\n};\n\nCreep.prototype.fillRes"), "automatic carriers must not run a fill task against stale same-tick Store data");
+assert.ok(!prototypeCreep.includes("room.memory._carryClaim =") && !stationSources.includes("let carryClaim = rm._carryClaim"), "carrier collision avoidance must not persist stale claims in Memory");
+assert.ok(strategyHighLevel.includes("hiveFree -= creep.store.getCapacity(RESOURCE_ENERGY)") && strategyHighLevel.includes("availableLoads.findIndex") && !strategyHighLevel.includes("Math.max(1, srcCnt)"), "carrier dispatch must use real capacity and assign no work when no source exists");
+assert.ok(managerMissions.includes("data.resType == RESOURCE_ENERGY ? amount + cost <= energy : cost <= energy"), "terminal missions must charge transaction cost to energy independently of the sent resource");
+assert.ok(!main.includes("upgrade_E53S21_3"), "one-room upgrade policy must not run from the global tick loop");
+assert.ok(powerCreepPrototype.includes("code == OK || code == ERR_INVALID_ARGS || code == ERR_NOT_ENOUGH_RESOURCES"), "operate-storage tasks must terminate after success or a terminal error");
 assert.ok(prototypeCreep.includes("直到能量用尽") && !prototypeCreep.includes("if (code == OK) this.popTask().execLastTask();"), "a fresh rampart builder must spend its carried energy before resuming normal work");
 assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.includes("task.requireFullLoad"), "source-container carriers must wait for more than a full load before withdrawing");
 assert.ok(stationSources.includes("!ret.incomplete") && stationSources.includes("reachesDestination"), "external-road paths must never cache an incomplete route that stops before storage");

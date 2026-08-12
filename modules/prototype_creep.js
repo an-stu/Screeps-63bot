@@ -452,10 +452,15 @@ Creep.prototype.pickupRes = function () {
 Creep.prototype.carryRes = function () {
     let task = this.lastTask();
     let obj = Game.getObjectById(task.id)
+    if (!obj || !obj.store) {
+        this.popTask();
+        this.execLastTask();
+        return;
+    }
     if (!this.pos.isNearTo(obj)) {
         this.moveTo(task, { visualizePathStyle: { stroke: '#67ffed' } })
     }
-    if (!obj || obj.store[task.resType] == 0 || this.storeFull()) {
+    if (obj.store[task.resType] == 0 || this.storeFull()) {
         this.popTask();
         this.execLastTask();
         return;
@@ -493,18 +498,9 @@ Creep.prototype.carryRes = function () {
         let number = Math.min(Math.min(Math.max(this.store.getFreeCapacity(task.resType), 0), task.resCount ? task.resCount : 1e5), obj.store[task.resType])
         this.store[task.resType] = (this.store[task.resType] || 0) + number
         obj.store[task.resType] -= number
-        // 搬运完成一趟即释放容器认领（_carryClaim），让后续 carrier 可接替
-        // 继续抽容器——否则满载容器永不释放认领，单 carrier 独占拖慢搬运
-        let claim = this.room.memory._carryClaim;
-        if (claim && claim[task.id] && claim[task.id].creepId == this.id) {
-            delete claim[task.id];
-        }
         this.popTask();
         this.execLastTask();
     } else if (code == ERR_NOT_ENOUGH_RESOURCES) {
-        // 容器被搬空（并发/认领者冲突）：释放认领避免占位
-        let claim = this.room.memory._carryClaim;
-        if (claim && claim[task.id]) delete claim[task.id];
         this.popTask();
     }
 
@@ -526,78 +522,54 @@ Creep.prototype.carryEnergyAuto = function () {
     }
     let room = this.room;
     if (!room) { this.popTask(); this.execLastTask(); return; }
-    // 1) terminal：超过 5 万市场储备的能量搬回 storage/hive（跨房运来的能量、
-    //    终端自动平衡预留之外的都用起来），避免能量堆在 terminal 够不着 hive
-    let terminal = room.terminal;
-    if (terminal && terminal.store[RESOURCE_ENERGY] > 50000) {
-        let amount = Math.min(terminal.store[RESOURCE_ENERGY] - 50000, this.store.getFreeCapacity(RESOURCE_ENERGY));
-        if (amount > 0) {
-            if (this.pos.isNearTo(terminal)) {
-                if (this.withdraw(terminal, RESOURCE_ENERGY, amount) == OK) {
-                    terminal.store[RESOURCE_ENERGY] -= amount;
-                    this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
-                    this.popTask();
-                    this.execLastTask();
-                }
-            } else {
-                this.moveTo(terminal, { visualizePathStyle: { stroke: '#67ffed' } });
-            }
-            return;
-        }
-        // amount<=0（terminal 已到储备线）：继续看容器/storage
-    }
     room.used = room.used || {};
-    let carryClaim = room.memory._carryClaim = room.memory._carryClaim || {};
-    // 2) 源容器：选能量最多的可用容器（本 tick 未用、认领表未占或认领者已死）
-    let best = undefined, bestE = 0;
-    if (room.memory[StationSources.stationName]) {
-        _.values(room.memory[StationSources.stationName]).forEach(data => {
-            let c = Game.getObjectById(data["container"]);
-            if (!c) return;
-            let e = c.store[RESOURCE_ENERGY] || 0;
-            if (e > bestE && !room.used[c.id]
-                && (!carryClaim[c.id] || carryClaim[c.id].creepId == this.id
-                    || !Game.getObjectById(carryClaim[c.id].creepId) || Game.time - carryClaim[c.id].tick > 300)) {
-                bestE = e; best = c;
-            }
-        });
-    }
-    if (best && bestE > this.store.getCapacity(RESOURCE_ENERGY)) {
-        room.used[best.id] = true;
-        if (!carryClaim[best.id] || carryClaim[best.id].creepId != this.id) carryClaim[best.id] = { creepId: this.id, tick: Game.time };
-        if (this.pos.isNearTo(best)) {
-            let amount = Math.min(best.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
-            if (this.withdraw(best, RESOURCE_ENERGY, amount) == OK) {
-                best.store[RESOURCE_ENERGY] -= amount;
-                this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
-                if (best.store[RESOURCE_ENERGY] <= 0) delete carryClaim[best.id];
-                this.popTask();
-                this.execLastTask();
-            }
-        } else {
-            this.moveTo(best, { visualizePathStyle: { stroke: '#67ffed' } });
+    let task = this.lastTask();
+    let target = task.sourceId && Game.getObjectById(task.sourceId);
+    let reserve = task.sourceType == "terminal" ? 50000 : task.sourceType == "storage" ? 2000 : 0;
+    if (!target || !target.store || target.store[RESOURCE_ENERGY] <= reserve || room.used[target.id]) {
+        delete task.sourceId;
+        delete task.sourceType;
+        let candidates = [];
+        if (room.terminal && room.terminal.store[RESOURCE_ENERGY] > 50000 && !room.used[room.terminal.id]) {
+            candidates.push({object:room.terminal, available:room.terminal.store[RESOURCE_ENERGY] - 50000, type:"terminal"});
         }
+        if (room.memory[StationSources.stationName]) {
+            _.values(room.memory[StationSources.stationName]).forEach(data => {
+                let container = data && Game.getObjectById(data.container);
+                if (container && !room.used[container.id]) {
+                    candidates.push({object:container, available:container.store[RESOURCE_ENERGY] || 0, type:"container"});
+                }
+            });
+        }
+        candidates.sort((a, b) => b.available - a.available);
+        let load = this.store.getFreeCapacity(RESOURCE_ENERGY);
+        // Source containers retain one full carrier load as keeper buffer;
+        // terminal excess may be drained partially down to its reserve.
+        let selected = candidates.find(item => item.type == "terminal" ? item.available > 0 : item.available > load);
+        if (!selected && task.allowStorage && room.storage && room.storage.store[RESOURCE_ENERGY] > 2000) {
+            selected = {object:room.storage, available:room.storage.store[RESOURCE_ENERGY] - 2000, type:"storage"};
+        }
+        if (!selected || selected.available <= 0) return this.popTask().execLastTask();
+        target = selected.object;
+        task.sourceId = target.id;
+        task.sourceType = selected.type;
+        reserve = selected.type == "terminal" ? 50000 : selected.type == "storage" ? 2000 : 0;
+    }
+    room.used[target.id] = true;
+    if (!this.pos.isNearTo(target)) {
+        this.moveTo(target, { reusePath: 10, visualizePathStyle: { stroke: '#67ffed' } });
         return;
     }
-    // 3) storage 兜底
-    let storage = room.storage;
-    if (storage && storage.store[RESOURCE_ENERGY] > 2000) {
-        if (this.pos.isNearTo(storage)) {
-            let amount = Math.min(storage.store[RESOURCE_ENERGY], this.store.getFreeCapacity(RESOURCE_ENERGY));
-            if (this.withdraw(storage, RESOURCE_ENERGY, amount) == OK) {
-                storage.store[RESOURCE_ENERGY] -= amount;
-                this.store[RESOURCE_ENERGY] = (this.store[RESOURCE_ENERGY] || 0) + amount;
-                this.popTask();
-                this.execLastTask();
-            }
-        } else {
-            this.moveTo(storage, { visualizePathStyle: { stroke: '#67ffed' } });
-        }
+    let amount = Math.min(target.store[RESOURCE_ENERGY] - reserve, this.store.getFreeCapacity(RESOURCE_ENERGY));
+    if (amount <= 0 || this.withdraw(target, RESOURCE_ENERGY, amount) != OK) {
+        delete task.sourceId;
+        delete task.sourceType;
         return;
     }
-    // 4) 没有可取能量：放弃任务
+    // Game objects keep their start-of-tick Store values until the next tick.
+    // Do not execute the fill task immediately: it would still see this creep
+    // as empty and discard valid work. The next tick observes the withdrawal.
     this.popTask();
-    this.execLastTask();
 };
 
 Creep.prototype.fillRes = function () {
