@@ -44,7 +44,6 @@ let pro = {
             let mainRoom = pc.mainRoom();
             if (!mainRoom) return;
             if (pc.needRenewInRoom()) pc.addRenewMainRoomTask();
-            else if (pc.needSaveOps()) pc.saveRoomOps();
             else if (pc.needGetOps()) pc.getRoomOps();
             else if (obj = pc.needOpExt()) pc.addTask(UtilsTask.task(obj, "OpExt"))
             else if (mainRoom.storage && (obj = pc.needOpStorage(mainRoom.storage))) pc.addTask(UtilsTask.task(obj, "OpStorage"))
@@ -53,6 +52,7 @@ let pro = {
             else if (obj = pc.needOpPowerSpawn()) pc.addTask(UtilsTask.task(obj, "OpPowerSpawn"))
             // else if (obj = pc.needOpLab()) pc.addTask(UtilsTask.task(obj, "OpLab"))
             else if (obj = pc.needOpMineral()) pc.addTask(UtilsTask.task(obj, "OpMineral"))
+            else if (pc.needSaveOps()) pc.saveRoomOps();
             else if (Game.time % 60 == 0 || pc.room.find(FIND_HOSTILE_CREEPS).length) {
                 let obj = mainRoom.storage || mainRoom.terminal || mainRoom.powerSpawn
                 if (obj) pc.addTask(UtilsTask.task(obj, "goToNearPop"));
