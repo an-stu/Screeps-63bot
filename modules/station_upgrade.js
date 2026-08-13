@@ -94,7 +94,7 @@ Creep.prototype.unregisterStationUpgrade = function () {
         let source = rm[pro.stationName];
         let rmHarList = source["creeps"];
         if (rmHarList.contains(this.id))
-            rmHarList = rmHarList.without(this.id)
+            source["creeps"] = rmHarList.without(this.id)
     }
 };
 
@@ -122,6 +122,7 @@ Creep.prototype.registerStationUpgradeCarryInRoom = function () {
 Creep.prototype.upgrade = function () {
     if (this.store[RESOURCE_ENERGY] == 0) {
         this.popTask()
+        return;
     }
     let obj = this.lastTaskObj();
     let upgradePosition = obj && pro.getUpgradePosition(this, obj);

@@ -111,6 +111,7 @@ Creep.prototype.harvestMineralOuterKeeper = function () {
     let task = this.headTask();
     if (task.roomName != this.room.name) {
         this.goTo(task);
+        return;
     } else {
         let mineral = Game.getObjectById(task["id"]);
         let station = Memory.rooms[this.headTask().roomName][pro.stationName][task["id"]];
@@ -1223,7 +1224,7 @@ let pro = {
                     needCarry = (container && container.store[RESOURCE_ENERGY]) > ((link && link2 && (link.store.isFull() && link2.store.isFull())) ? 0 : 800)
                 }
             }
-            let centerLink = Game.getObjectById(rm[StationCarry.stationName][STRUCTURE_LINK]);
+            let centerLink = rm[StationCarry.stationName] && Game.getObjectById(rm[StationCarry.stationName][STRUCTURE_LINK]);
             if (needCarry && centerLink && !centerLink.store.isEmpty() && !room.used[centerLink.id]) {
                 if (room.storage) tasks.push([
                     UtilsTask.task(room.storage, "fillRes", "registerStationSourcesCarryInRoom", { resType: RESOURCE_ENERGY }),
@@ -1286,7 +1287,7 @@ let pro = {
             if (!data || typeof data != "object" || !data["id"]) return;
             // 净化被污染的 spawnTime（重复 concat 造成的极端负数会让生爬条件恒真）
             if (!data["spawnTime"] || data["spawnTime"] < -1000 || data["spawnTime"] > Game.time) data["spawnTime"] = Game.time;
-            if (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0) {
+            if (Game.time - data["spawnTime"] > 1500 || (data["creeps"] || []).length == 0) {
                 let harBody = StationSources.getHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable(), roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
                 StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)
