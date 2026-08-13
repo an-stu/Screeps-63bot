@@ -129,6 +129,7 @@ global.ManageTeam = {
     },
 
     execCalTarget  ( flag ){
+        if(!flag._creeps || !flag._creeps.length) return;
         action.targetFilter(flag);
         let creeps = flag._creeps;
         if(creeps)creeps.forEach(e=>WarCache.getRoomStructures(e.room.name))//刷新全部建筑缓存
@@ -591,7 +592,9 @@ let action = {
         // 尝试奶回来
         creeps.forEach(healer=>{healer._heal_be_attack = healer.possibleHealDamage(1,false,healer.hits)});
         creeps.forEach(healer=>{
-            let needHeal = creeps.filter(e=>e.pos.isNearTo(healer)).maxBy(e=>e._need_heal_dmg)//当前tick需要算 跨房间能不能奶
+            let near = creeps.filter(e=>e.pos.isNearTo(healer));
+            if(!near.length) return;
+            let needHeal = near.maxBy(e=>e._need_heal_dmg)//当前tick需要算 跨房间能不能奶
             if(needHeal._need_heal_dmg>0){
                 healer.heal(needHeal)
                 needHeal._need_heal_dmg-=healer._heal_be_attack // 打残后奶回来的
@@ -766,7 +769,7 @@ let action = {
                 }
                 return true;
             }
-        }else if(!creeps.head().pos.crossRoomGetRangeTo(creeps[1])>2){
+        }else if(!(creeps.head().pos.crossRoomGetRangeTo(creeps[1])>2)){
             creeps.head().moveTo(creeps[1]);
             for(let i=1;i<creeps.length;i++){creeps[i].moveTo(creeps[i-1])}
         }else {
@@ -881,7 +884,7 @@ let action = {
 
         for(let i = 0;i<creeps.length;i++){
             for(let j = i+1;j<creeps.length;j++) {
-                if (!creeps[i].pos.getRangeTo(creeps[j])>3) { // 如果走不到
+                if (creeps[i].pos.getRangeTo(creeps[j])>3) { // 如果走不到
                     return false
                 }
             }
@@ -956,7 +959,7 @@ let action = {
         if(!flag._targets){
             let room = Game.rooms[flag.pos.roomName]
             let out = []
-            let forceStructs = flag._creeps.find(e=>e.getActiveBodyparts(WORK)) // 工兵不打人
+            let forceStructs = flag._creeps && flag._creeps.find(e=>e.getActiveBodyparts(WORK)) // 工兵不打人
 
             if(room){
                 if(!room.my)out.push(...room.find(FIND_STRUCTURES).filter(e=>e.hits&&(forceSpawn?e.structureType==STRUCTURE_SPAWN:true)))
