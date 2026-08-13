@@ -17,7 +17,7 @@ let RES_BALANCE_ROOM = function () {
     // RESOURCES_ALL.forEach(e=>{
     //     obj[e] = 3000
     // })
-    (["O", "L", "H", "X", "K", "Z", "U", "OH", " GH2O", "LH2O", "GH", "LH", "ZHO2", "KH2O", "GHO2", "UHO2", "UH2O", "XLHO2", "XGHO2", "XZHO2", "XZH2O", "XUH2O", "XKHO2", "XGH2O"]).forEach(e => {
+    (["O", "L", "H", "X", "K", "Z", "U", "OH", "GH2O", "LH2O", "GH", "LH", "ZHO2", "KH2O", "GHO2", "UHO2", "UH2O", "XLHO2", "XGHO2", "XZHO2", "XZH2O", "XUH2O", "XKHO2", "XGH2O"]).forEach(e => {
         obj[e] = 3000
     })
     obj[RESOURCE_ENERGY] = 50000
@@ -109,7 +109,7 @@ Creep.prototype.roomStorageEmpty = function () {
         this.popTask();
         this.execLastTask();
     }
-    if (this.room.terminal.store.getUsedCapacity(RESOURCE_ENERGY) + this.room.terminal.store.getFreeCapacity(RESOURCE_ENERGY) < 50000) {
+    if (this.room.terminal.store.getUsedCapacity(RESOURCE_ENERGY) < 50000) {
         let ops = {
             resType: RESOURCE_ENERGY
         }
