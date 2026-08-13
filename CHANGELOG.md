@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.78.2 — Crash guards, memory leak, and config fixes
+
+### Fixed
+
+- `carryRes` passed `Math.min(undefined)` (NaN) to `withdraw` when a task had
+  no `resCount`, leaving carriers stuck re-attempting the same task every tick.
+- `trySpawnCarrier` read `room.storage[RESOURCE_ENERGY]` (missing `.store`), so
+  the storage-has-energy spawn branch never fired.
+- `harvestMineralOuterKeeper` dereferenced `mineral`/`container` out of scope
+  after `goTo`, throwing `ReferenceError` on the tombstone-pickup branch.
+- `unregisterStationUpgrade` reassigned a local instead of `source.creeps`,
+  leaking dead upgrader ids into Memory.
+- `upgrade()` popped its task on empty energy then kept executing against the
+  wrong target; now returns immediately.
+- Planner: `createRoads` flood-fill operator precedence, `computeRoom` null
+  guard when `computeManor` fails, and a leaked module-global `objects` array.
+- Combat (dormant by default): `flag._creeps` null guards, `maxBy` over an empty
+  list, and `!range>N` operator-precedence dead branches.
+- Market/resource: OPS auto-buy configured amount/min-hold for BATTERY instead
+  of OPS, `" GH2O"` leading-space key, and a dead terminal-refill condition.
+
+
 ## v0.78.1 — Preserve manual upgrade flags
 
 ### Changed
