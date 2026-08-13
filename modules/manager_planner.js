@@ -87,6 +87,7 @@ let pro={
      * 闭包太多，改不动了
      */
     init  (){
+        objects = []
         visited = new RoomArray()
         roomWalkable = new RoomArray()
         nearWall = new RoomArray()

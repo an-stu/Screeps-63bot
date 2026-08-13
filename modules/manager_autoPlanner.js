@@ -102,7 +102,7 @@ let pro={
         visited.init()
         queMin.whileNoEmpty(nd=>{
             roomWalkable.forNear((x,y,val)=>{
-                if(!visited.exec(x,y,1)&&val>0||val==STRUCTURE_RAMPART){
+                if(!visited.exec(x,y,1)&&(val>0||val==STRUCTURE_RAMPART)){
                     queMin.push(NewNode(nd.k+1,x,y))
                 }
             },nd.x,nd.y)
@@ -462,6 +462,7 @@ let pro={
         points = points.concat(roomObject.room.source.map(e=>e.pos))
         points = points.map(e=>{return {pos:new RoomPosition(e.x,e.y,roomObject.pos.roomName) }} )
         let roomStructsData = ManagerPlanner.computeManor(roomObject.pos.roomName,points)
+        if (!roomStructsData) return;
         _.keys(roomStructsData.structMap).forEach(e=>{
             roomStructsData.structMap[e] = Utils.encodePosArray(roomStructsData.structMap[e].map(t=>{return {x:t[0],y:t[1]}}))
         })
