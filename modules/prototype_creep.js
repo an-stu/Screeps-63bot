@@ -489,7 +489,10 @@ Creep.prototype.carryRes = function () {
     this._move_res_active = true
     if (task.resType == undefined) throw new Error("resType no found:" + task)
 
-    let code = this.withdraw(obj, task.resType, Math.min(task.resCount ? Math.min(obj.store[task.resType] || 0, this.store.getFreeCapacity(task.resType), task.resCount) : undefined));
+    // `Math.min(undefined)` is NaN. When resCount is absent, withdraw as much
+    // as possible instead of passing a NaN amount to the engine (which no-ops
+    // and leaves the carrier stuck re-attempting the same task every tick).
+    let code = this.withdraw(obj, task.resType, task.resCount ? Math.min(obj.store[task.resType] || 0, this.store.getFreeCapacity(task.resType), task.resCount) : undefined);
     // if(code==ERR_NOT_IN_RANGE){
     //  this.moveTo(task,{visualizePathStyle: {stroke: '#67ffed'}})
     // }

@@ -79,9 +79,11 @@ let pro = {
         // storage 有能量时 worker 走正常取货路径（优先取能量），不随便挖源、
         // 也不占容器格（避免卡死 keeper）。
         if (room.creeps("harvestEnergyKeeper").length == 0 && room.storage.store[RESOURCE_ENERGY] < 3000) {
-            _.values(room.memory[StationSources.stationName]).filter(e => Game.getObjectById(e.id).energy).forEach(data => {
-                if (data["creeps"].filter(e => Game.getObjectById(e)).length == 0 && room.creeps().filter(e => e.memory.role == "harvestEnergyKeeper").length == 0) {
-                    let posLen = room[data["id"]].pos.nearPos(1).filter(e => e.walkable()).length
+            _.values(room.memory[StationSources.stationName]).filter(e => Game.getObjectById(e.id) && Game.getObjectById(e.id).energy).forEach(data => {
+                if ((data["creeps"] || []).filter(e => Game.getObjectById(e)).length == 0 && room.creeps().filter(e => e.memory.role == "harvestEnergyKeeper").length == 0) {
+                    let source = Game.getObjectById(data["id"]);
+                    if (!source) return;
+                    let posLen = source.pos.nearPos(1).filter(e => e.walkable()).length
                     let targetCnt = posLen * 1.5 - room.creeps("worker").filter(e => e.headTask() && e.headTask().id == data["id"]).length;
                     if (Math.min(6, Math.ceil(targetCnt)) > 0) {
                         let creep = room.creeps("worker").filter(e => e.storeEmpty() && e.isFree()).head()
@@ -311,7 +313,7 @@ let pro = {
             room.memory.carryBusy.push(0)
             return;
         }
-        if ((carrierCnt <= 0 && (room.storage[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
+        if ((carrierCnt <= 0 && (room.storage.store[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
             carrierCnt <= 7 &&
             avgBusy > carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
             StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
