@@ -544,6 +544,8 @@ let pro = {
         return code;
     },
     autoSell(resType, room) {
+        // 能量：RCL<8 的房间（升级/恢复期）不自动卖能量，保证升级能源不流失
+        if (resType == RESOURCE_ENERGY && room.level < 8) return;
     // 获取该房间该资源类型的所有售卖订单
     let orders = _.values(Game.market.orders).filter(e => 
         e.remainingAmount > 0 && 
