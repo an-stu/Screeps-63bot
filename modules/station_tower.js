@@ -13,6 +13,12 @@ StructureTower.prototype.getDamageTo = function (target){
 
 let lastAttackCreepMap={}
 
+// 和平房间的敌对扫描/安全模式检查不需要每 tick 全量执行。
+// 塔的战术扫描原本就是 ~10 tick 一次；把 checkSafeMode 也降到每 3 tick
+// 一次（带房间哈希错峰），敌袭出现时 scanTick 会自动连续运行不受影响。
+const TOWER_SCAN_INTERVAL=10;
+const SAFE_MODE_CHECK_INTERVAL=3;
+
 let pro={
     stationName:"stationTower",
     needRepairsRoomMap:{},
@@ -38,12 +44,15 @@ let pro={
             .map(e => e.id)
     },
     exec (room){
-        // Safe-mode detection stays immediate; the same tactical scan is then
-        // reused by tower targeting and advanced defense.
-        let hostiles = room.getHostileCreeps();
-        StationDefense.checkSafeMode(room, hostiles);
-        if (!pro.lastUpdateMap[room.name]||pro.lastUpdateMap[room.name] <= 0) {
-            pro.lastUpdateMap[room.name] = 10
+        // 战术扫描 tick 上复用同一份 hostiles；其它 tick 仅让安全模式
+        // 检查按 3 tick 节流自己扫描，塔本体逻辑不碰敌人数据。
+        let scanTick = !pro.lastUpdateMap[room.name]||pro.lastUpdateMap[room.name] <= 0;
+        let hostiles = scanTick ? room.getHostileCreeps() : undefined;
+        if ((Game.time + room.hashCode()) % SAFE_MODE_CHECK_INTERVAL == 0) {
+            StationDefense.checkSafeMode(room, hostiles);
+        }
+        if (scanTick) {
+            pro.lastUpdateMap[room.name]=TOWER_SCAN_INTERVAL
             if (global.WarDefenseCore && isCpuFeatureEnabled("combat")) WarDefenseCore.checkNeedDefense(room, hostiles);
             let randomAttack = undefined;
             if(hostiles.length){
@@ -60,6 +69,9 @@ let pro={
 
             if(!lastAttackCreepMap[room.name])lastAttackCreepMap[room.name] = {}
             let lastAttack = lastAttackCreepMap[room.name]
+            // 优先打奶妈：奶妈不死，坦克被奶住永远打不掉。对整个房间只找一次，
+            // 避免每座塔重复 find。
+            let healer = hostiles.length ? hostiles.find(e => e.getActiveBodyparts(HEAL) > 0) : undefined;
 
             room.tower.filter(e=>!e._used).forEach(tower => {
 
@@ -70,15 +82,20 @@ let pro={
                 }
 
                 if(hostiles.length){
-                    let headHostiles = hostiles.head()
-                    let lastTickHealAble = headHostiles.id==lastAttack.id&&lastAttack.hits<=headHostiles.hits// 上一秒奶不回去
-                    if(!lastTickHealAble&&headHostiles.hits!=headHostiles.hitsMax){
-                        tower.attack(headHostiles)
-                        lastAttackCreepMap[room.name] = headHostiles
-                    }else{
-                        if(Game.time%15==0 || Game.time%15==7){
-                            randomAttack = randomAttack || Utils.randomGet(hostiles);
-                            tower.attack(randomAttack)
+                    if (healer) {
+                        tower.attack(healer)
+                        lastAttackCreepMap[room.name] = healer
+                    } else {
+                        let headHostiles = hostiles.head()
+                        let lastTickHealAble = headHostiles.id==lastAttack.id&&lastAttack.hits<=headHostiles.hits// 上一秒奶不回去
+                        if(!lastTickHealAble&&headHostiles.hits!=headHostiles.hitsMax){
+                            tower.attack(headHostiles)
+                            lastAttackCreepMap[room.name] = headHostiles
+                        }else{
+                            if(Game.time%15==0 || Game.time%15==7){
+                                randomAttack = randomAttack || Utils.randomGet(hostiles);
+                                tower.attack(randomAttack)
+                            }
                         }
                     }
                     return;

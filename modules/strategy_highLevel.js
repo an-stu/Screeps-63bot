@@ -333,7 +333,7 @@ let pro = {
         // Task assignment and spawn planning tolerate a short delay. Spreading
         // this expensive economy pass across rooms keeps ordinary ticks below
         // the shard's 20 CPU allowance without delaying tower defense.
-        let economyInterval = MIN_CPU ? 10 : 5;
+        let economyInterval = MIN_CPU ? 10 : 7;
         if ((Game.time + room.hashCode()) % economyInterval != 0) return;
         if (global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")) ManagerAutoPlanner.tryAutoBuildHighLevel(room);
 

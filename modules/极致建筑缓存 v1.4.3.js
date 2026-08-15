@@ -115,7 +115,11 @@ function Hub(room) {
 
 Room.prototype.__proto__ = new Proxy({}, {
     get(cache, id) {
-        return Game.getObjectById(id);
+        // 只有标准 24 位对象 id 才值得查一次 getObjectById。业务代码常在
+        // Room 对象上读写 _xxx 临时缓存字段，旧实现会让每个未命中字段都
+        // 白白调用一次引擎查询。
+        if (typeof id == "string" && id.length == 24) return Game.getObjectById(id);
+        return undefined;
     }
 });
 
@@ -284,7 +288,10 @@ Object.defineProperty(Room.prototype, 'mass_stores', {
 
 Object.defineProperty(Room.prototype, 'my', {
     get () {
-        return this.controller && this.controller.my;
+        // Room 对象每 tick 重建，同 tick 缓存可安全复用；execLastTask 等
+        // 热路径每只爬每 tick 都会读 room.my，省掉重复的 controller 查询。
+        if ('_my' in this) return this._my;
+        return this._my = !!(this.controller && this.controller.my);
     },
     set () {
     },
@@ -294,7 +301,8 @@ Object.defineProperty(Room.prototype, 'my', {
 
 Object.defineProperty(Room.prototype, 'level', {
     get () {
-        return this.controller && this.controller.level;
+        if ('_level' in this) return this._level;
+        return this._level = this.controller ? this.controller.level : undefined;
     },
     set () {
     },

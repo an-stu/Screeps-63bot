@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.78.3 — Tactical scan throttling and Memory churn reduction
+
+### Performance
+
+- Tower rooms no longer scan `FIND_HOSTILE_CREEPS` every tick: the tactical
+  pass keeps its ~10-tick cadence, and the safe-mode check runs on a 3-tick
+  staggered schedule. Hostile presence still forces a scan every tick.
+- Rooms without towers skip the tower station pass entirely, and observed
+  (non-owned) rooms skip lab/factory/tower passes.
+- High-level economy planning runs every 7 ticks instead of 5 for normal rooms
+  (MIN_CPU keeps 10); task dispatch and spawning tolerate the extra delay.
+- `Room#my` / `Room#level` are cached per tick, and unknown room-property
+  lookups no longer issue a useless `Game.getObjectById` through the structure
+  cache prototype proxy.
+- BetterMove's stuck-position tracker only writes `lastPos` / `dontPullMe` when
+  the value actually changes, reducing per-tick Memory serialization churn.
+- Keeper registration and duplicate-keeper cleanup write Memory only when the
+  alive-creep list changed, and cleanup runs once per room economy pass instead
+  of twice.
+
+### Changed
+
+- Towers prioritize HEAL-armed hostiles so tanks under continuous healing can
+  still be brought down; the healer is located once per room scan.
+
 ## v0.78.2 — Crash guards, memory leak, and config fixes
 
 ### Fixed

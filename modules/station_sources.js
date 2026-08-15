@@ -9,11 +9,19 @@ Creep.prototype.registerStationSources = function () {
         if (this.spawning) {
             source["spawnTime"] = Game.time
         }
+        // 只在实际内容变化时写回 Memory：清理死爬、首次注册自己。
         let rmHarList = source["creeps"] || [];
-        // 清理已死亡的爬，避免列表无限膨胀
-        let alive = rmHarList.filter(id => Game.getObjectById(id));
-        if (!alive.contains(this.id)) alive.push(this.id)
-        source["creeps"] = alive; // 必须始终写回：新 id 的注册不能丢
+        let changed = false;
+        let alive = [];
+        for (let id of rmHarList) {
+            if (Game.getObjectById(id)) alive.push(id);
+            else changed = true;
+        }
+        if (!alive.includes(this.id)) {
+            alive.push(this.id);
+            changed = true;
+        }
+        if (changed) source["creeps"] = alive; // 避免无意义的每 tick 序列化抖动
     }
 };
 
@@ -1247,17 +1255,26 @@ let pro = {
         let harMemory = Memory.rooms[roomName.name || roomName] && Memory.rooms[roomName.name || roomName][StationSources.stationName];
         if (!harMemory) return;
         _.values(harMemory).forEach(data => {
-            let harCreeps = (data["creeps"] || []).map(e => Game.getObjectById(e)).filter(e => e && e.ticksToLive)
-            if (harCreeps.length > 1) {
-                harCreeps.sort((a, b) => b.ticksToLive - a.ticksToLive);
-                harCreeps.slice(1).forEach(e => e.suicide());
+            // 跳过认领表等辅助字段，只处理真正的挖矿点
+            if (!data || typeof data != "object" || !data.id) return;
+            let ids = data.creeps || [];
+            if (!ids.length) return;
+            let alive = [];
+            for (let id of ids) {
+                let creep = Game.getObjectById(id);
+                if (creep && creep.ticksToLive) alive.push(creep);
             }
-            // 清理死掉的 creeps（自杀的爬在下 tick 死亡）
-            data["creeps"] = (data["creeps"] || []).filter(e => Game.getObjectById(e))
+            if (alive.length > 1) {
+                alive.sort((a, b) => b.ticksToLive - a.ticksToLive);
+                alive.slice(1).forEach(e => e.suicide());
+            }
+            // 只在确实清出死爬时才写回，减少 Memory 抖动
+            if (alive.length != ids.length) data["creeps"] = alive.map(e => e.id);
         });
     },
     trySpawnHarKeeper(room) {
-        pro.cleanupDuplicateKeepers(room.name);
+        // 清理动作收敛到 trySpawnOuterHarKeeper 内部，避免同一 room 的
+        // economy pass 重复执行两次 cleanupDuplicateKeepers。
         if (room.spawnFailure) return null;
         pro.trySpawnOuterHarKeeper(room.name, room);
     },

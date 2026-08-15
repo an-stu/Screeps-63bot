@@ -71,13 +71,17 @@ const managerRooms = {
             return;
         }
 
+        // 观察房/过道没有己方建筑，跳过这些 station pass，省掉每 tick 的
+        // 敌对扫描与结构体 getter 构建（room.lab/tower 首次访问会建缓存）。
         if (global.StationLab && room.lab && room.lab.length) {
             HelperError.catchError(() => StationLab.exec(room), room.name);
         }
         if (global.StationFactory && room.factory) {
             HelperError.catchError(() => StationFactory.exec(room), room.name);
         }
-        HelperError.catchError(() => StationTower.exec(room), room.name);
+        if (room.tower && room.tower.length) {
+            HelperError.catchError(() => StationTower.exec(room), room.name);
+        }
 
         // A live Power Bank attacker is unsafe without its healer. Dispatch
         // its queue before background worker/upgrader management can consume

@@ -1614,13 +1614,19 @@ if (!Creep.prototype.$moveTo) {
     Creep.prototype.originMoveTo = originMoveTo;
     Creep.prototype.$moveTo = Creep.prototype.moveTo;
     Creep.prototype.moveTo = function (...e) {
-        if (this.memory.lastPos && this.memory.lastPos.x == this.pos.x && this.memory.lastPos.y == this.pos.y) {
-            this.memory.lastPos.time += 1;
-            if (this.memory.lastPos.time > 6)
-                this.memory.dontPullMe = true;
+        // 卡位检测：只在数值真正变化时写 Memory，避免每个 moving creep
+        // 每 tick 都无意义地重写 lastPos / dontPullMe 造成 Memory 抖动。
+        let pos = this.pos;
+        let memory = this.memory;
+        let lastPos = memory.lastPos;
+        if (lastPos && lastPos.x == pos.x && lastPos.y == pos.y && lastPos.roomName == pos.roomName) {
+            if (lastPos.time < 6) {
+                lastPos.time += 1;
+                if (lastPos.time > 6 && memory.dontPullMe !== true) memory.dontPullMe = true;
+            }
         } else {
-            this.memory.dontPullMe = false;
-            this.memory.lastPos = { x: this.pos.x, y: this.pos.y, time: 0 }
+            memory.lastPos = { x: pos.x, y: pos.y, roomName: pos.roomName, time: 0 };
+            if (memory.dontPullMe) memory.dontPullMe = false;
         }
         // this.say(this.memory.lastPos.time)
         return this.$moveTo(...e)
