@@ -197,6 +197,12 @@ let shouldRunCreep = function (creep) {
 }
 
 let updateCodeHealth = function () {
+    // 97-tick 采样与 20-tick 健康快照错位：把本 tick 的相位采样先落盘，
+    // 否则 codeHealth.phases 只能每 lcm(97,20)=1940 tick 才更新一次。
+    if (Game._coreCpuProfile) {
+        Memory.codeHealth = Memory.codeHealth || {};
+        Memory.codeHealth.phases = Game._coreCpuProfile;
+    }
     if (Game.time % 20 != 0) return;
     let previousHealth = Memory.codeHealth || {};
     // Keep the newest failure available for diagnosis, but do not preserve an

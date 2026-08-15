@@ -19,6 +19,9 @@
 - Keeper registration and duplicate-keeper cleanup write Memory only when the
   alive-creep list changed, and cleanup runs once per room economy pass instead
   of twice.
+- Per-phase CPU samples are persisted on every profile tick instead of only
+  when the 97-tick sampler and 20-tick health snapshot align (once per 1,940
+  ticks), keeping `Memory.codeHealth.phases` actionable for online tuning.
 
 ### Changed
 
