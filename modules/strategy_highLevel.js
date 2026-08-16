@@ -313,6 +313,17 @@ let pro = {
         let starved = storageEnergy > deficit && storageEnergy > 50000 && deficit > capacity * 0.3;
         let carrierList = room.creeps("carrier", false);
         let carrierCnt = carrierList.length;
+        // E53S21 恢复机制：hive 缺能且可用能量还不够满配 carrier(2500) 时，
+        // 先补一只 750 能量的小 carrier（CARRY*10+MOVE*5），避免单 carrier
+        // 在空 hive 阶段一车一车搬到天亮。
+        if (carrierCnt <= 2 && (Game.time + room.hashCode()) % 50 == 0
+            && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 750 && room.energyAvailable < 2500) {
+            let emergencyBody = ManagerCreeps.calcBodyPart({ [MOVE]: 5, [CARRY]: 10 });
+            StationHive.trySpawn(room, room.name, emergencyBody, "carrier", []);
+            if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
+            room.memory.carryBusy.push(0)
+            return;
+        }
         if (starved && carrierCnt <= 2 && (Game.time + room.hashCode()) % 100 == 0) {
             StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)

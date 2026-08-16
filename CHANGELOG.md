@@ -19,6 +19,10 @@
   is skipped until the deficit is covered by reservations. Free-carrier lists
   are recomputed after each dispatch group, fixing duplicate assignment to a
   carrier already given lab work.
+- Starved hives with between 750 and 2,500 room energy and at most two carriers
+  now spawn a small emergency carrier (`CARRY*10 + MOVE*5`, 750 energy) every
+  50 ticks, because the normal full-size carrier body (2,500 energy) can never
+  be afforded while the hive is empty.
 
 ## v0.78.3 — Tactical scan throttling and Memory churn reduction
 
