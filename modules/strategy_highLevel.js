@@ -313,14 +313,18 @@ let pro = {
         let starved = storageEnergy > deficit && storageEnergy > 50000 && deficit > capacity * 0.3;
         let carrierList = room.creeps("carrier", false);
         let carrierCnt = carrierList.length;
-        // 目标 carrier 数量：低等级房（如 E53S21 RCL7）按矿点+1，最多 3；
-        // 高等级房保留原 7 只上限，避免工厂/实验室/能量转运不够用。
-        let carrierTarget = room.level < 8
-            ? Math.max(2, Math.min(3, (room.source ? room.source.length : 2) + 1))
-            : 7;
-        // E53S21 恢复机制：hive 缺能且可用能量还不够满配 carrier(2500) 时，
-        // 先补一只 750 能量的小 carrier（CARRY*10+MOVE*5），避免单 carrier
-        // 在空 hive 阶段一车一车搬到天亮。
+        // 目标 carrier 数量：高等级房保留 7 只上限；低等级房按矿点+keeper
+        // 动态计算（E53S21: 2 矿点 + 2 keeper → 基础 2，hive 缺能时 +1）。
+        let carrierTarget = 7;
+        if (room.level < 8) {
+            let sourceCnt = room.source ? room.source.length : 2;
+            let keeperCnt = room.creeps("harvestEnergyKeeper", false).length;
+            // 动态目标：基础按“矿点 + keeper”折半（E53S21: 2+2 → 2）；
+            // hive 出现缺口时额外 +1（→3），缺口消除后自然回落到 2。
+            // 不主动 recycle 超编 carrier，让多余的爬自然老死，避免浪费。
+            carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
+            if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
+        }
         if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 50 == 0
             && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 750 && room.energyAvailable < 2500) {
             let emergencyBody = ManagerCreeps.calcBodyPart({ [MOVE]: 5, [CARRY]: 10 });
@@ -348,17 +352,6 @@ let pro = {
             carrierCnt < carrierTarget &&
             avgBusy > carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
             StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
-        }
-        // 超编收敛：hive 满且 storage 健康时，让多出的空闲 carrier 回收到
-        // spawn，逐步降到 carrierTarget（E53S21 从 5 只收敛到 3 只）。
-        if (carrierCnt > carrierTarget && !StationHive.HiveNeedToFill(room)
-            && room.storage && room.storage.store[RESOURCE_ENERGY] > 10000) {
-            let idleCarriers = room.creeps("carrier").filter(e => !e.spawning && e.isFree() && e.storeEmpty() && e.ticksToLive > 50);
-            while (carrierCnt > carrierTarget && idleCarriers.length) {
-                let creep = idleCarriers.pop();
-                creep.addTask(UtilsTask.taskData("recycleCreep"));
-                carrierCnt--;
-            }
         }
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
         room.memory.carryBusy.push(room.creeps("carrier").filter(e => !e.isFree()).reduce((a) => a + 1, 0))
