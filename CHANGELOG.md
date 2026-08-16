@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.78.4 — Hive energy recovery priority
+
+### Fixed
+
+- `HiveNeedToFill` compared `room.energyAvailable + room.hiveEnergySending`
+  where the reservation counter starts `undefined`, so an empty hive with no
+  in-flight `fillHive` task evaluated `NaN < capacity` as false and never
+  requested energy. This was the root cause of the E53S21 starvation.
+- `generatorFillHiveTask` now initializes the same per-tick reservation
+  counter before adding to it.
+
+### Changed
+
+- `carrierManager` now treats hive (spawn/extension) energy as the highest
+  carrier priority: when the hive has a deficit, free carriers are assigned
+  `fillHive + carryEnergyAuto` first, and low-priority link/tower/lab dispatch
+  is skipped until the deficit is covered by reservations. Free-carrier lists
+  are recomputed after each dispatch group, fixing duplicate assignment to a
+  carrier already given lab work.
+
 ## v0.78.3 — Tactical scan throttling and Memory churn reduction
 
 ### Performance

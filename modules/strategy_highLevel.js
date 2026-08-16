@@ -157,9 +157,30 @@ let pro = {
 
     },
     carrierManager(room) {
-        pro.carrierOperatorBoost(room);
-
+        // 最高优先级：hive（spawn/extension）缺能时先扣住空闲 carrier 填 hive。
+        // E53S21 恢复机制：link/tower/lab 等低优先级派发不得在 hive 缺口
+        // 消除前抢跑，否则唯一 carrier 会被 link 整理任务拐走。
         let freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
+
+        if (StationHive.HiveNeedToFill(room)) {
+            // 已带能量的 carrier 直接填 hive
+            room.creeps("carrier").filter(e => e.isFree() && !e.storeEmpty() && !e.storeContainsEnergyOtherResType()).forEach(creep => {
+                creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+            });
+            // 空手 carrier：只派够填 hive 缺口的数量
+            let hiveFree = room.energyCapacityAvailable - room.getEnergyAvailable();
+            while (hiveFree > 0 && freeCarries.length) {
+                let creep = freeCarries.pop();
+                creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+                creep.addTask(UtilsTask.task(creep, "carryEnergyAuto", undefined, {allowStorage:true}));
+                hiveFree -= creep.store.getCapacity(RESOURCE_ENERGY);
+            }
+            if (StationHive.HiveNeedToFill(room)) return;
+            freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
+        }
+
+        pro.carrierOperatorBoost(room);
+        freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
 
         let carryLinkTasks = StationSources.generatorCarryEnergyFromLinkTask(room); // 优先整理中央link的资源，这个最快
         if (carryLinkTasks.length && freeCarries.length) freeCarries.pop().addTask(carryLinkTasks)
@@ -176,22 +197,7 @@ let pro = {
         let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
 
-        // 填 hive：派发任务，按需求逐个派，不所有 carrier 一起搬运——
-        // 空闲 carrier 少，avgBusy 低，trySpawnCarrier 不会虚增 carrier
-        if (StationHive.HiveNeedToFill(room)) {
-            // 已带能量的 carrier 直接填 hive
-            room.creeps("carrier").filter(e => e.isFree() && !e.storeEmpty() && !e.storeContainsEnergyOtherResType()).forEach(creep => {
-                creep.addTask(StationHive.generatorFillHiveTask(room, creep));
-            });
-            // 空手 carrier：只派够填 hive 缺口的数量
-            let hiveFree = room.energyCapacityAvailable - room.getEnergyAvailable();
-            while (hiveFree > 0 && freeCarries.length) {
-                let creep = freeCarries.pop();
-                creep.addTask(StationHive.generatorFillHiveTask(room, creep));
-                creep.addTask(UtilsTask.task(creep, "carryEnergyAuto", undefined, {allowStorage:true}));
-                hiveFree -= creep.store.getCapacity(RESOURCE_ENERGY);
-            }
-        } else if (fillTowerTasks.length) {
+        if (fillTowerTasks.length) {
             // 填 tower：一只 carrier 一个 tower
             while (fillTowerTasks.length && freeCarries.length) {
                 let creep = freeCarries.pop();

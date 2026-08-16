@@ -54,12 +54,15 @@ let pro = {
     _time: 0,
     generatorFillHiveTask(room, creep) {
         // todo 分配 需要fill的能量
-        room.hiveEnergySending += creep.store[RESOURCE_ENERGY] > 0 ? creep.store[RESOURCE_ENERGY] : creep.store.getFreeCapacity(RESOURCE_ENERGY)
+        room.hiveEnergySending = (room.hiveEnergySending || 0) + (creep.store[RESOURCE_ENERGY] > 0 ? creep.store[RESOURCE_ENERGY] : creep.store.getFreeCapacity(RESOURCE_ENERGY))
         return UtilsTask.task(creep, "fillHive", "registerStationHiveCarryInRoom", { resType: RESOURCE_ENERGY })
 
     },
     HiveNeedToFill(room) {
-        return room.energyAvailable + room.hiveEnergySending < room.energyCapacityAvailable;
+        // room.hiveEnergySending 是当 tick 房间对象上的预约量，可能尚未初始化。
+        // 缺省按 0 处理，否则能量空了但还没有 fillHive 任务时 NaN 比较恒为 false，
+        // hive 会永远缺能（E53S21 根因）。
+        return room.energyAvailable + (room.hiveEnergySending || 0) < room.energyCapacityAvailable;
     },
     /**
      *
