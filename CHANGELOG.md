@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.78.5 — Carrier count control and hive energy guard
+
+### Changed
+
+- Carrier spawn target is now explicit: low-level rooms (RCL < 8, e.g. E53S21)
+  target `min(3, sources + 1)` carriers instead of the old hard-coded 7.
+  High-level rooms keep the 7-carrier ceiling.
+- Emergency/recovery/starved carrier spawns all respect the room target, so
+  an empty hive no longer overshoots into too many carriers.
+- When a room exceeds its carrier target while the hive is full and storage
+  is healthy, excess idle empty carriers are sent to `recycleCreep`, gradually
+  converging to the target instead of living out their full lifespan.
+
+### Fixed
+
+- Hive energy dispatch remains the highest carrier priority; the new culling
+  never runs while `HiveNeedToFill` is true, so spawn/extension energy is
+  protected during recovery.
+
 ## v0.78.4 — Hive energy recovery priority
 
 ### Fixed
