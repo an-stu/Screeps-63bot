@@ -324,6 +324,15 @@ let pro = {
             room.memory.carryBusy.push(0)
             return;
         }
+        // hive 缺口 + 能量已够满配 carrier：不等 avgBusy 门槛（空 hive 时
+        // avgBusy 常年在 0.85 以下，单 carrier 永远等不到第二只）。
+        if (carrierCnt <= 2 && (Game.time + room.hashCode()) % 25 == 0
+            && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 2500) {
+            StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", []);
+            if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
+            room.memory.carryBusy.push(0)
+            return;
+        }
         if (starved && carrierCnt <= 2 && (Game.time + room.hashCode()) % 100 == 0) {
             StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
