@@ -280,6 +280,16 @@ let pro = {
                     sendAble[resType] = RES_BALANCE_ROOM[resType]
                 }
             }
+            // 紧急能量援助：目标房能量见底时，即使本房总量没到 3 倍标准，
+            // 只要 terminal 能量 >=20000 且 storage+terminal 合计 >60000，
+            // 也允许向缺能房间发送最多 30000 能量（E53S21 恢复用）。
+            if (sendAble[RESOURCE_ENERGY] === undefined) {
+                let eStorage = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
+                let eTerminal = room.terminal.store[RESOURCE_ENERGY] || 0;
+                if (eTerminal >= 20000 && eStorage + eTerminal > 60000) {
+                    sendAble[RESOURCE_ENERGY] = Math.min(eTerminal, 30000);
+                }
+            }
             for (let targetRoom of targetRooms) {
                 for (let resType in sendAble) {
                     let requireCnt = pro.roomRequireCnt(targetRoom, resType)

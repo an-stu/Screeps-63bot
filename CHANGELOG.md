@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.78.6 — Tower maintenance during hive deficit and emergency energy sharing
+
+### Changed
+
+- `carrierManager` now reserves one free carrier for tower filling even while
+  the hive is in deficit, so towers no longer sit at 0 energy and ramparts
+  decay while every carrier chases spawn/extension energy.
+- `StrategyResourceBalance` can now send emergency energy from a room with
+  terminal energy ≥ 20,000 and storage+terminal energy > 60,000 even when the
+  old 150,000-total threshold is not met; this lets nearby rooms feed a room
+  whose storage has collapsed (E53S21).
+
 ## v0.78.5 — Carrier count control and hive energy guard
 
 ### Changed

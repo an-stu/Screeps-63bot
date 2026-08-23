@@ -158,22 +158,32 @@ let pro = {
     },
     carrierManager(room) {
         // 最高优先级：hive（spawn/extension）缺能时先扣住空闲 carrier 填 hive。
-        // E53S21 恢复机制：link/tower/lab 等低优先级派发不得在 hive 缺口
-        // 消除前抢跑，否则唯一 carrier 会被 link 整理任务拐走。
+        // 但塔防/维修不能停：hive 缺口期间也预留一只 carrier 填塔，避免
+        // tower 空能量、rampart 掉血无人修（E53S21 教训）。
         let freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
+        let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
+        let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
 
         if (StationHive.HiveNeedToFill(room)) {
             // 已带能量的 carrier 直接填 hive
             room.creeps("carrier").filter(e => e.isFree() && !e.storeEmpty() && !e.storeContainsEnergyOtherResType()).forEach(creep => {
                 creep.addTask(StationHive.generatorFillHiveTask(room, creep));
             });
-            // 空手 carrier：只派够填 hive 缺口的数量
+            // 空手 carrier：只派够填 hive 缺口的数量；但至少留一只给塔
             let hiveFree = room.energyCapacityAvailable - room.getEnergyAvailable();
-            while (hiveFree > 0 && freeCarries.length) {
+            let hiveCarries = Math.max(0, freeCarries.length - (fillTowerTasks.length ? 1 : 0));
+            while (hiveFree > 0 && hiveCarries > 0) {
                 let creep = freeCarries.pop();
                 creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 creep.addTask(UtilsTask.task(creep, "carryEnergyAuto", undefined, {allowStorage:true}));
                 hiveFree -= creep.store.getCapacity(RESOURCE_ENERGY);
+                hiveCarries--;
+            }
+            // 塔最低保障：只派一只，避免塔全空
+            if (fillTowerTasks.length && freeCarries.length) {
+                let creep = freeCarries.pop();
+                creep.addTask(fillTowerTasks.shift());
+                if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
             }
             if (StationHive.HiveNeedToFill(room)) return;
             freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
@@ -194,9 +204,6 @@ let pro = {
          * 优先填tower 和 ext
          * 如果填完后还有能量就放回storage
          */
-        let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
-        let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
-
         if (fillTowerTasks.length) {
             // 填 tower：一只 carrier 一个 tower
             while (fillTowerTasks.length && freeCarries.length) {
