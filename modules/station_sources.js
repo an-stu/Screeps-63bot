@@ -1305,7 +1305,11 @@ let pro = {
             // 净化被污染的 spawnTime（重复 concat 造成的极端负数会让生爬条件恒真）
             if (!data["spawnTime"] || data["spawnTime"] < -1000 || data["spawnTime"] > Game.time) data["spawnTime"] = Game.time;
             if (Game.time - data["spawnTime"] > 1500 || (data["creeps"] || []).length == 0) {
-                let harBody = StationSources.getHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable(), roomName != spawnRoom.name, spawnRoom.level, data)
+                // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。
+                // 按当前可用能量收缩体型，至少保证 550 能量的基础 keeper，
+                // 让 E53S21 这类缺能房先恢复挖矿，而不是 spawnFailure 卡死。
+                let energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(spawnRoom.energyAvailable, 550));
+                let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
                 StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)
             }

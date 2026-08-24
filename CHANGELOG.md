@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.78.7 — Bootstrap harvester when hive energy is low
+
+### Fixed
+
+- Keeper spawning always used the room's full energy capacity to size the
+  body, so a room like E53S21 with ~1,500 available energy could never afford
+  the 3,650-energy full-size keeper, `spawnFailure` stayed set, and the second
+  source had no harvester. Keeper body budget now shrinks to the room's
+  current available energy (minimum 550), so low-energy rooms can bootstrap
+  mining and recover instead of stalling.
+
 ## v0.78.6 — Tower maintenance during hive deficit and emergency energy sharing
 
 ### Changed
