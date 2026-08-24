@@ -10,6 +10,9 @@
   source had no harvester. Keeper body budget now shrinks to the room's
   current available energy (minimum 550), so low-energy rooms can bootstrap
   mining and recover instead of stalling.
+- Keeper spawning now runs before worker/carrier spawns in the room economy
+  pass; previously carriers consumed the empty hive's last spawn energy and
+  the keeper (energy producer) could never spawn.
 
 ## v0.78.6 — Tower maintenance during hive deficit and emergency energy sharing
 
