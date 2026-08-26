@@ -25,6 +25,11 @@
 - While a hive is in deficit with less than 2,500 available energy, normal
   worker, upgrader, and avgBusy-driven carrier spawns are paused; only keepers
   and the bootstrap/emergency carrier paths may spawn.
+- RCL8 rooms now keep at least one upgrader whenever 2,000+ energy is
+  available (previously they waited for 150,000 storage energy or
+  `ticksToDowngrade < 5000`, which let controllers slide toward downgrade).
+  Low-level rooms also spawn an upgrader when they have none and can afford
+  the body, instead of waiting for large storage reserves.
 
 ## v0.78.6 — Tower maintenance during hive deficit and emergency energy sharing
 
