@@ -22,6 +22,9 @@
 - Added a 150-energy `CARRY*2 + MOVE` bootstrap carrier when a room has no
   carriers, a hive deficit, and only 150–750 available energy, breaking the
   "no creep to move terminal energy, no energy to spawn a creep" deadlock.
+- While a hive is in deficit with less than 2,500 available energy, normal
+  worker, upgrader, and avgBusy-driven carrier spawns are paused; only keepers
+  and the bootstrap/emergency carrier paths may spawn.
 
 ## v0.78.6 — Tower maintenance during hive deficit and emergency energy sharing
 

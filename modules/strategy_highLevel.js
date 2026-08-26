@@ -3,6 +3,9 @@
  */
 let pro = {
     workerManager(room) {
+        // 空 hive 保护：hive 缺口大且可用能量很低时不再生 worker，
+        // 把 spawn 能量留给 keeper 和 bootstrap carrier（E53S21 教训）。
+        if (StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500) return;
         let spawnWorker = () => {
             let body = StationWork.getMiddleLevelWorkerBodyConfig(room);
             let partCnt = body.filter(e => e == WORK).length;
@@ -371,6 +374,7 @@ let pro = {
         }
         if ((carrierCnt <= 0 && (room.storage.store[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
             carrierCnt < carrierTarget &&
+            !(StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500) &&
             avgBusy > carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
             StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
         }
@@ -414,7 +418,7 @@ let pro = {
             HelperError.catchError(() => StrategyOuterHarvest.exec(room), room.name);
         }
         StationMineral.trySpawnHarKeeper(room);
-        StationUpgrade.spawnUpgrader(room);
+        if (!(StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500)) StationUpgrade.spawnUpgrader(room);
 
 
         //最后回收全部资源！
