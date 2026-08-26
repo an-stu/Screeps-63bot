@@ -165,6 +165,8 @@ let pro = {
             if (Game.market.credits > 2000000 && Memory.stats.buyEnergy) {
                 pro.autoBuyEnergy();
             }
+            // RCL<8 的升级房持续大量买能量，不依赖 buyEnergy 开关。
+            pro.autoBuyLowRclEnergy();
             // pro.autoBuyPower();
             // 自动买depo
             // if (Game.shard.name.startsWith("shard2")) {
@@ -335,6 +337,36 @@ let pro = {
         });
         // })();
         // }
+    },
+    /**
+     * RCL < 8 的房间持续大量购买能量，方便升级。
+     * 不依赖 Memory.stats.buyEnergy：只要 credits 足够且房间有终端，
+     * 能量存量低于 300k 时就会维持一个竞争性买单。
+     */
+    autoBuyLowRclEnergy() {
+        if (Game.market.credits < 5000000) return;
+        let rooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.level < 8 && e.terminal);
+        if (!rooms.length) return;
+        let buyOrders = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_BUY);
+        let maxBuy = buyOrders.length ? buyOrders.maxBy(e => e.price).price : 0;
+        let avg = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
+        let basePrice = Math.max(avg, maxBuy);
+        rooms.forEach(room => {
+            let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
+            if (energyCnt >= 300000) return;
+            let hasOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
+                && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);
+            if (hasOrder) return;
+            let amount = Math.max(50000, 300000 - energyCnt);
+            let price = Math.min(basePrice * 1.02, avg * 5);
+            Game.market.createOrder({
+                type: ORDER_BUY,
+                resourceType: RESOURCE_ENERGY,
+                price: price,
+                totalAmount: amount,
+                roomName: room.name,
+            });
+        });
     },
     /**
      * @param room

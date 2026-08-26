@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.78.8 — Continuous energy buying for RCL < 8 rooms
+
+### Added
+
+- `StrategyMarket.autoBuyLowRclEnergy()` keeps a competitive energy buy order
+  on every owned room below RCL 8 while credits exceed 5,000,000. It targets
+  300,000 stored energy per room and does not depend on `Memory.stats.buyEnergy`.
+
 ## v0.78.7 — Bootstrap harvester when hive energy is low
 
 ### Fixed
