@@ -30,6 +30,9 @@
   `ticksToDowngrade < 5000`, which let controllers slide toward downgrade).
   Low-level rooms also spawn an upgrader when they have none and can afford
   the body, instead of waiting for large storage reserves.
+- `spawnUpgrader` no longer aborts when the controller container is missing;
+  it only aborts when both container and link are gone, so a room with a
+  working upgrade link keeps its controller leveled (E53S21).
 
 ## v0.78.6 — Tower maintenance during hive deficit and emergency energy sharing
 

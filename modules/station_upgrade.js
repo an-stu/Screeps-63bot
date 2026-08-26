@@ -367,7 +367,9 @@ let pro = {
     spawnUpgrader(room) {
         let sm = room.memory[pro.stationName];
         if (!sm["creeps"]) sm["creeps"] = []
-        if (!Game.getObjectById(sm["container"])) return;
+        // 容器被拆/退化时，只要升级 link 还在，upgradeKeeper 仍能取能量升级；
+        // 只有 container 和 link 都没了才放弃本 tick，等 stationUpgrade.update 重建。
+        if (!Game.getObjectById(sm["container"]) && !Game.getObjectById(sm["link"])) return;
 
         // let creeps = sm["creeps"].map(e=>Game.getObjectById(e)).filter(e=>e&&e.ticksToLive) // 清理两个爬重叠
         // creeps.forEach(a=>{
