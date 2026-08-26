@@ -528,13 +528,15 @@ Creep.prototype.carryEnergyAuto = function () {
     room.used = room.used || {};
     let task = this.lastTask();
     let target = task.sourceId && Game.getObjectById(task.sourceId);
-    let reserve = task.sourceType == "terminal" ? 50000 : task.sourceType == "storage" ? 2000 : 0;
+    // hive 缺能时（allowStorage）允许从 terminal 取到 0，否则保留 5 万市场储备。
+    let terminalReserve = task.allowStorage ? 0 : 50000;
+    let reserve = task.sourceType == "terminal" ? terminalReserve : task.sourceType == "storage" ? 2000 : 0;
     if (!target || !target.store || target.store[RESOURCE_ENERGY] <= reserve || room.used[target.id]) {
         delete task.sourceId;
         delete task.sourceType;
         let candidates = [];
-        if (room.terminal && room.terminal.store[RESOURCE_ENERGY] > 50000 && !room.used[room.terminal.id]) {
-            candidates.push({object:room.terminal, available:room.terminal.store[RESOURCE_ENERGY] - 50000, type:"terminal"});
+        if (room.terminal && room.terminal.store[RESOURCE_ENERGY] > terminalReserve && !room.used[room.terminal.id]) {
+            candidates.push({object:room.terminal, available:room.terminal.store[RESOURCE_ENERGY] - terminalReserve, type:"terminal"});
         }
         if (room.memory[StationSources.stationName]) {
             _.values(room.memory[StationSources.stationName]).forEach(data => {
@@ -556,7 +558,7 @@ Creep.prototype.carryEnergyAuto = function () {
         target = selected.object;
         task.sourceId = target.id;
         task.sourceType = selected.type;
-        reserve = selected.type == "terminal" ? 50000 : selected.type == "storage" ? 2000 : 0;
+        reserve = selected.type == "terminal" ? terminalReserve : selected.type == "storage" ? 2000 : 0;
     }
     room.used[target.id] = true;
     if (!this.pos.isNearTo(target)) {

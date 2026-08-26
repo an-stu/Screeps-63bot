@@ -13,6 +13,15 @@
 - Keeper spawning now runs before worker/carrier spawns in the room economy
   pass; previously carriers consumed the empty hive's last spawn energy and
   the keeper (energy producer) could never spawn.
+- `carrierManager` only reserves a tower-filling carrier when at least two
+  free carriers exist; with a single free carrier the hive always wins, so a
+  dead room cannot get stuck filling towers while spawn/extensions are empty.
+- `carryEnergyAuto` can now drain terminal energy down to 0 when it is running
+  as a hive-fill task (`allowStorage`), instead of always keeping a 50,000
+  market reserve that empty hives cannot afford.
+- Added a 150-energy `CARRY*2 + MOVE` bootstrap carrier when a room has no
+  carriers, a hive deficit, and only 150–750 available energy, breaking the
+  "no creep to move terminal energy, no energy to spawn a creep" deadlock.
 
 ## v0.78.6 — Tower maintenance during hive deficit and emergency energy sharing
 

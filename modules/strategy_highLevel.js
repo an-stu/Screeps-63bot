@@ -171,7 +171,10 @@ let pro = {
             });
             // 空手 carrier：只派够填 hive 缺口的数量；但至少留一只给塔
             let hiveFree = room.energyCapacityAvailable - room.getEnergyAvailable();
-            let hiveCarries = Math.max(0, freeCarries.length - (fillTowerTasks.length ? 1 : 0));
+            // 只有至少 2 只空闲 carrier 时才预留 1 只给塔；只剩 1 只时
+            // 必须优先填 hive，否则空 hive + 单 carrier 会永远去填塔（E53S21）。
+            let towerReserve = fillTowerTasks.length && freeCarries.length >= 2 ? 1 : 0;
+            let hiveCarries = Math.max(0, freeCarries.length - towerReserve);
             while (hiveFree > 0 && hiveCarries > 0) {
                 let creep = freeCarries.pop();
                 creep.addTask(StationHive.generatorFillHiveTask(room, creep));
@@ -331,6 +334,17 @@ let pro = {
             // 不主动 recycle 超编 carrier，让多余的爬自然老死，避免浪费。
             carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
             if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
+        }
+        // 死房自救：没有 carrier、hive 缺能、可用能量只够微型 body 时，
+        // 先孵 CARRY*2+MOVE(150) 的 bootstrap carrier，把 terminal 能量搬回 hive。
+        if (carrierCnt <= 0 && StationHive.HiveNeedToFill(room)
+            && room.energyAvailable >= 150 && room.energyAvailable < 750
+            && (Game.time + room.hashCode()) % 10 == 0) {
+            let bootBody = ManagerCreeps.calcBodyPart({ [CARRY]: 2, [MOVE]: 1 });
+            StationHive.trySpawn(room, room.name, bootBody, "carrier", []);
+            if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
+            room.memory.carryBusy.push(0)
+            return;
         }
         if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 50 == 0
             && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 750 && room.energyAvailable < 2500) {
