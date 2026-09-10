@@ -408,7 +408,10 @@ let pro = {
         // 如果没更新过，或者30t跟新一次
         if (!pro.resRoomBalanceCache[room.name] || (Game.time + room.hashCode()) % 30 == 0) pro.update(room);
 
-        if (!room.balancingTerminalResource && _.keys(pro.resRoomBalanceCache[room.name]).length > 0) {
+        // hive 缺能时，唯一空闲 carrier 必须留给 hive 搬运，terminal/storage
+        // 内部平衡让位于生存（W33N53/W34N52 的 bootstrap carrier 曾被它拐走）。
+        if (!room.balancingTerminalResource && _.keys(pro.resRoomBalanceCache[room.name]).length > 0
+            && !StationHive.HiveNeedToFill(room)) {
             let carrier = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty() && e.ticksToLive > 90).head();
             // if(carrier) carrier.say(_.keys(pro.resRoomBalanceCache[room.name]).length)
             if (carrier) carrier.addTask([UtilsTask.task(room.terminal, "balanceTerminalResource", "registerBalanceTerminalResource")])

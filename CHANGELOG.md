@@ -16,6 +16,9 @@
   container/link) it spawns a 150-energy carrier; if there is no stored energy
   it spawns a 200–300 energy worker with a harvest task instead, so source
   energy can restart the room directly.
+- Resource balance no longer assigns `balanceTerminalResource` to the room's
+  only free carrier while `HiveNeedToFill` is true; that task was stealing the
+  bootstrap carrier in W33N53/W34N52 and keeping spawn/extensions empty.
 
 ## v0.78.8 — Continuous energy buying for RCL < 8 rooms
 
