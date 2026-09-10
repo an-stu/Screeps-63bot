@@ -9,6 +9,13 @@
   bootstrap carrier could never spawn in a dead room. Carrier bootstrap/
   emergency/recovery spawns now reset `spawnFailure` and re-evaluate current
   energy, so rooms like W33N53 and W34N52 can restart from terminal energy.
+- Dead-room bootstrap now runs every economy pass instead of waiting for the
+  `%10` (bootstrap) and `%7` (economy) schedules to align, which could delay
+  it for dozens of ticks.
+- Dead-room fallback: if there is stored energy to haul (storage/terminal/
+  container/link) it spawns a 150-energy carrier; if there is no stored energy
+  it spawns a 200–300 energy worker with a harvest task instead, so source
+  energy can restart the room directly.
 
 ## v0.78.8 — Continuous energy buying for RCL < 8 rooms
 

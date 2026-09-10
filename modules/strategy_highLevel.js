@@ -345,13 +345,28 @@ let pro = {
             carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
             if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
         }
-        // 死房自救：没有 carrier、hive 缺能、可用能量只够微型 body 时，
-        // 先孵 CARRY*2+MOVE(150) 的 bootstrap carrier，把 terminal 能量搬回 hive。
+        // 死房自救：没有 carrier、hive 缺能、可用能量 ≤750 时每个 economy
+        // pass 立即评估，不再受 %10 与 %7 对齐的偶发限制。
+        // 有存量能量可搬 → 150 能量 bootstrap carrier（≤300）；
+        // 没有存量能量 → 300 能量 worker 直接挖矿（保底预算 ≤300）。
         if (carrierCnt <= 0 && StationHive.HiveNeedToFill(room)
-            && room.energyAvailable >= 150 && room.energyAvailable < 750
-            && (Game.time + room.hashCode()) % 10 == 0) {
-            let bootBody = ManagerCreeps.calcBodyPart({ [CARRY]: 2, [MOVE]: 1 });
-            spawnCarrierNow(bootBody);
+            && room.energyAvailable >= 150 && room.energyAvailable < 750) {
+            let storedEnergy = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY)
+                + room.container.reduce((a, c) => a + (c.store[RESOURCE_ENERGY] || 0), 0)
+                + room.link.reduce((a, l) => a + (l.store[RESOURCE_ENERGY] || 0), 0);
+            if (storedEnergy > 0) {
+                let bootBody = ManagerCreeps.calcBodyPart({ [CARRY]: 2, [MOVE]: 1 });
+                spawnCarrierNow(bootBody);
+            } else if (room.energyAvailable >= 200) {
+                let workerBody = room.energyAvailable >= 300
+                    ? ManagerCreeps.calcBodyPart({ [WORK]: 2, [CARRY]: 1, [MOVE]: 1 })
+                    : ManagerCreeps.calcBodyPart({ [WORK]: 1, [CARRY]: 1, [MOVE]: 1 });
+                let harData = _.values(room.memory[StationSources.stationName] || {}).find(d => d && d.id);
+                let bootTasks = harData ? StationSources.generatorReleaseAbleHarTask(harData) : [];
+                room.spawnFailure = false;
+                room.currentEnergyAvailable = undefined;
+                StationHive.trySpawn(room, room.name, workerBody, "worker", bootTasks);
+            }
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
