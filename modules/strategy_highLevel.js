@@ -326,6 +326,13 @@ let pro = {
         let starved = storageEnergy > deficit && storageEnergy > 50000 && deficit > capacity * 0.3;
         let carrierList = room.creeps("carrier", false);
         let carrierCnt = carrierList.length;
+        // keeper 先跑时，昂贵体型失败会把 spawnFailure 锁住整个 tick；
+        // carrier 分支按当前真实可用能量重算，避免便宜的 bootstrap carrier 被挡住。
+        let spawnCarrierNow = function (body) {
+            room.spawnFailure = false;
+            room.currentEnergyAvailable = undefined;
+            StationHive.trySpawn(room, room.name, body, "carrier", []);
+        };
         // 目标 carrier 数量：高等级房保留 7 只上限；低等级房按矿点+keeper
         // 动态计算（E53S21: 2 矿点 + 2 keeper → 基础 2，hive 缺能时 +1）。
         let carrierTarget = 7;
@@ -344,7 +351,7 @@ let pro = {
             && room.energyAvailable >= 150 && room.energyAvailable < 750
             && (Game.time + room.hashCode()) % 10 == 0) {
             let bootBody = ManagerCreeps.calcBodyPart({ [CARRY]: 2, [MOVE]: 1 });
-            StationHive.trySpawn(room, room.name, bootBody, "carrier", []);
+            spawnCarrierNow(bootBody);
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
@@ -352,7 +359,7 @@ let pro = {
         if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 50 == 0
             && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 750 && room.energyAvailable < 2500) {
             let emergencyBody = ManagerCreeps.calcBodyPart({ [MOVE]: 5, [CARRY]: 10 });
-            StationHive.trySpawn(room, room.name, emergencyBody, "carrier", []);
+            spawnCarrierNow(emergencyBody);
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
@@ -361,13 +368,13 @@ let pro = {
         // avgBusy 常年在 0.85 以下，单 carrier 永远等不到第二只）。
         if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 25 == 0
             && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 2500) {
-            StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", []);
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room));
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
         }
         if (starved && carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 100 == 0) {
-            StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room))
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
@@ -376,7 +383,7 @@ let pro = {
             carrierCnt < carrierTarget &&
             !(StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500) &&
             avgBusy > carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
-            StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room))
         }
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
         room.memory.carryBusy.push(room.creeps("carrier").filter(e => !e.isFree()).reduce((a) => a + 1, 0))

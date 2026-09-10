@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.78.9 — Unblock bootstrap carriers after failed expensive spawns
+
+### Fixed
+
+- A failed keeper spawn (expensive body) used to set `room.spawnFailure` for
+  the rest of the tick, and since keepers now run first, the 150-energy
+  bootstrap carrier could never spawn in a dead room. Carrier bootstrap/
+  emergency/recovery spawns now reset `spawnFailure` and re-evaluate current
+  energy, so rooms like W33N53 and W34N52 can restart from terminal energy.
+
 ## v0.78.8 — Continuous energy buying for RCL < 8 rooms
 
 ### Added
