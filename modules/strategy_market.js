@@ -228,6 +228,11 @@ let pro = {
                     if (gap < 1000) continue;
                     let price = StrategyMarketPrice.getResTypeHistory(comp);
                     if (!price || price <= 0) price = 0.01;
+                    // 市场没有卖单或最低卖价明显高于我们能接受的价格时，不挂买不到的单。
+                    let sellList = pro.getAllOrdersCacheList(comp, ORDER_SELL).filter(o => o.amount > 0);
+                    if (!sellList.length) continue;
+                    let minSellPrice = sellList.reduce((min, o) => Math.min(min, o.price), Infinity);
+                    if (minSellPrice > price * 1.2) continue;
                     // 已有该房间该原料买单则跳过（防止重复挂单）
                     let hasBuyOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
                         && e.resourceType == comp && e.type == ORDER_BUY && e.roomName == room.name);

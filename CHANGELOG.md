@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.78.11 — Energy-priority upgrader throttle and deposits off
+## v0.78.11 — Energy-priority upgrader throttle and market buy filtering
 
 ### Changed
 
@@ -10,9 +10,11 @@
   two-source room's production), while creep replacement adds roughly
   11–19 energy/tick; pausing upgrades when the buffer is gone lets the
   economy and hive recover first.
-- Deposits are disabled (`Memory.cpuFeatures.deposits = false`). The active
-  W31N55 deposit missions were spawning several dedicated harvesters/carriers
-  and could not be supplied profitably through the market.
+- Deposits stay enabled (`Memory.cpuFeatures.deposits = true`); deposit
+  harvest missions are required. What is filtered is *market buying*: for
+  high-profit component ingredients, if there are no sell orders or the
+  cheapest sell price is clearly above the acceptable price, no buy order is
+  created, so unfillable orders no longer accumulate.
 
 ### Analysis
 
@@ -22,6 +24,13 @@
 - Main drains: RCL8 upgrader energy/tick and repeated creep body replacement
   (spawn upkeep). Rooms therefore cannot fully self-sustain while running a
   full-time RCL8 upgrader on a 2-source budget.
+- PC energy production (`PWR_REGEN_SOURCE`, power 13) is active: E53S21's P10
+  keeps a level-4 effect on one source (`ticksRemaining` refreshed).
+  However, it only boosts regeneration on one source at a time and still
+  requires keepers to harvest the extra energy and carriers to move it; if
+  keepers/carriers die or upgrade/spawn drain exceeds the boosted output, the
+  room still stalls. PC regen is a multiplier, not a replacement for the
+  harvest/carry chain.
 
 ## v0.78.10 — Faster road rebuild after road decay
 
