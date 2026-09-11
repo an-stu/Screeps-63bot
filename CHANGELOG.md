@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.78.10 — Faster road rebuild after road decay
+
+### Fixed
+
+- Planned road construction was only re-evaluated every 600 ticks. Rooms whose
+  roads decayed to nothing (W33N53, W34N52, E53S21) could sit with missing
+  roads for a long time. `tryAutoBuildHighLevel` now checks planned-vs-actual
+  road count on every economy pass and immediately re-queues road sites (up to
+  the existing per-room construction-site budget).
+
 ## v0.78.9 — Unblock bootstrap carriers after failed expensive spawns
 
 ### Fixed

@@ -387,6 +387,16 @@ let pro={
         if(Game.cpu.bucket>500&&room.memory.structMap && (extensionMissing || (Game.time+room.hashCode()) % 150 == 0)){
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
         }
+        // 道路补建：路消失/被打掉后不能等 600 tick。规划路数量 > 实际路+工地时，
+        // 每个 economy pass 都补工地（每 tick 最多 10 个，受全局工地上限约束）。
+        if (Game.cpu.bucket > 500 && room.memory.structMap && room.memory.structMap[STRUCTURE_ROAD]) {
+            let plannedRoadCnt = Utils.decodePosArray(room.memory.structMap[STRUCTURE_ROAD]).length || 0;
+            let currentRoadCnt = (room.road ? room.road.length : 0)
+                + room.constructionSite.filter(e => e.structureType == STRUCTURE_ROAD).length;
+            if (currentRoadCnt < plannedRoadCnt) {
+                pro.tryCreateStructs(room, room.memory.structMap, STRUCTURE_ROAD);
+            }
+        }
         if((Game.time+room.hashCode()) % 600 == 0 && Game.cpu.bucket>500&&room.memory.structMap){ // 4级后600tick更新一次
             // 开始建 road 和 container
             _.keys(CONTROLLER_STRUCTURES).forEach(struct=>{
