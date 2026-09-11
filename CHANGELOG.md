@@ -4,12 +4,14 @@
 
 ### Changed
 
-- RCL8 upgraders now respect room energy stock: they stop below 10,000
-  combined storage+terminal energy and run at half rate below 30,000. RCL8
-  upgrading is the largest continuous sink (~15 energy/tick, about 75% of a
-  two-source room's production), while creep replacement adds roughly
-  11–19 energy/tick; pausing upgrades when the buffer is gone lets the
-  economy and hive recover first.
+- RCL8 controllers are no longer upgraded continuously. Spawning an RCL8
+  upgrader requires `ticksToDowngrade < 30,000` and at least 2,500 energy;
+  the upgrader only runs while `ticksToDowngrade < 50,000`, so once the timer
+  is refilled it idles and the room keeps its energy. RCL8 upgrading used to
+  be the largest continuous sink (~15 energy/tick, about 75% of a two-source
+  room's production).
+- RCL8 upgraders still respect room energy stock: they stop below 10,000
+  combined storage+terminal energy and run at half rate below 30,000.
 - Deposits stay enabled (`Memory.cpuFeatures.deposits = true`); deposit
   harvest missions are required. What is filtered is *market buying*: for
   high-profit component ingredients, if there are no sell orders or the

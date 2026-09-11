@@ -192,6 +192,9 @@ let shouldRunCreep = function (creep) {
     if (creep.memory.role != "upgrader") return true;
     let room = Game.rooms[creep.memory.roomName];
     if (!room || !room.controller || room.controller.level < 8 || room.controller.ticksToDowngrade < 20000) return true;
+    // RCL8 不需要一直升级：降级计时器还很长（>50k）时让 upgrader 闲置，
+    // 只有 ttd 降到 50k 以下才运行，配合 spawn 的 30k 阈值形成回差。
+    if (room.controller.ticksToDowngrade > 50000) return false;
     // RCL8 持续升级是最大能量开销（约 15 energy/tick，占双源产量的 75%）。
     // 存量见底时先保 hive/经济，再逐步恢复升级：<10k 停，<30k 半速。
     let stock = (room.storage ? room.storage.store.energy : 0) + (room.terminal ? room.terminal.store.energy : 0);
