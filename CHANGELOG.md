@@ -9,6 +9,11 @@
   roads for a long time. `tryAutoBuildHighLevel` now checks planned-vs-actual
   road count on every economy pass and immediately re-queues road sites (up to
   the existing per-room construction-site budget).
+- `boostCreepBodyPart` no longer waits forever when lab boost resources are
+  missing. Boost tasks now carry a `boostExpire` deadline (200 ticks for new
+  tasks, 50 ticks retrofit for legacy tasks), after which the creep drops the
+  boost task and resumes normal work. W33N53/W34N52 workers were permanently
+  stuck on boosting instead of building their missing roads.
 
 ## v0.78.9 — Unblock bootstrap carriers after failed expensive spawns
 

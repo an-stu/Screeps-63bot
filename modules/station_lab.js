@@ -114,7 +114,17 @@ Creep.prototype.registerBoostCreep=function () {
 };
 
 Creep.prototype.boostCreepBodyPart = function () {
-    let data = this.lastTask().data;
+    let task = this.lastTask();
+    // 缺 boost 资源时不能无限等待：超过期限就放弃 boost，恢复普通工作
+    // （W33N53/W34N52 的 worker 曾被永久卡在 boostCreepBodyPart，路没人修）。
+    // 旧任务没有 boostExpire 时在此补上期限，避免历史卡死无法自愈。
+    if (!task.boostExpire) task.boostExpire = Game.time + 50;
+    if (Game.time > task.boostExpire) {
+        this.memory.isBoost = false;
+        this.popTask().execLastTask();
+        return;
+    }
+    let data = task.data;
     let resType = _.keys(data).sort((a,b)=> a.localeCompare(b)).head();
     this.say(resType);
     let lab = pro.getBoostLab(this.room,resType);
@@ -243,7 +253,7 @@ let pro={
             if(!room._boost_need)room._boost_need = []
             room._boost_need.unshift(data)
         }
-        return [UtilsTask.taskData("boostCreepBodyPart","registerBoostCreep",{data:data})];
+        return [UtilsTask.taskData("boostCreepBodyPart","registerBoostCreep",{data:data,boostExpire:Game.time + 200})];
     },
     getRegBoostMap(room){ // 从 register 中拿到的，进行计算
         let boostMap = {}
