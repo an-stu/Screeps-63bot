@@ -10,6 +10,10 @@
   is refilled it idles and the room keeps its energy. RCL8 upgrading used to
   be the largest continuous sink (~15 energy/tick, about 75% of a two-source
   room's production).
+- Downgrade emergencies bypass the bucket safety: when `ticksToDowngrade`
+  drops below 5,000, an RCL8 upgrader spawns even if the CPU bucket is under
+  9,000 (E53S21 fell to ttd 4,909 while the bucket was ~7,000 and the normal
+  gate blocked the rescue spawn).
 - RCL8 upgraders still respect room energy stock: they stop below 10,000
   combined storage+terminal energy and run at half rate below 30,000.
 - Deposits stay enabled (`Memory.cpuFeatures.deposits = true`); deposit

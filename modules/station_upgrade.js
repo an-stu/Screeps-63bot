@@ -416,7 +416,9 @@ let pro = {
                 || (room.storage.store[RESOURCE_ENERGY] > 10000 && minUpgraderCnt > room.creeps("upgrader", false).length))
                 spawn()
         }
-        else if (checkGCL() && checkBucket() && room.energyAvailable >= 2500
+        else if (checkGCL()
+            && (checkBucket() || room.controller.ticksToDowngrade < 5000) // 降级告急时无视 bucket
+            && room.energyAvailable >= (room.controller.ticksToDowngrade < 5000 ? 2000 : 2500)
             && room.controller.ticksToDowngrade < 30000
             && (room.creeps("upgrader", false).length == 0 || Game.time - sm["spawnTime"] + unboostTime > 1500)) { // RCL8 只在降级前 3 万 tick 内补 1 只
             // room.creeps("upgrader",false).filter(e=>!e.ticksToLive||e.ticksToLive>e.body.length*3).length==0)
