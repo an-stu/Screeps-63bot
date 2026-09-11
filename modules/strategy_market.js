@@ -345,7 +345,11 @@ let pro = {
      */
     autoBuyLowRclEnergy() {
         if (Game.market.credits < 5000000) return;
-        let rooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.level < 8 && e.terminal);
+        // 覆盖两类房间：
+        //  1) RCL<8 的升级房
+        //  2) RCL8 但存量能量见底（<50k）的停摆房（如 E53S21）
+        let rooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.terminal
+            && (e.level < 8 || StationCarry.roomMassStoreCnt(e, RESOURCE_ENERGY) < 50000));
         if (!rooms.length) return;
         let buyOrders = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_BUY);
         let maxBuy = buyOrders.length ? buyOrders.maxBy(e => e.price).price : 0;

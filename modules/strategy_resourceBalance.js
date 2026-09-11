@@ -270,7 +270,13 @@ let pro = {
             // let t = Game.cpu.getUsed()
             let targetRooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.name != room.name && e.terminal)
                 .map(e => [e, Game.map.getRoomLinearDistance(e.name, room.name, true)])
-                .sort((a, b) => a[1] - b[1]).map(e => e[0])
+                // 存量能量见底的房间优先（E53S21 停摆时不应被更近的普通需求挤掉）。
+                .sort((a, b) => {
+                    let aSt = StationCarry.roomMassStoreCnt(a[0], RESOURCE_ENERGY);
+                    let bSt = StationCarry.roomMassStoreCnt(b[0], RESOURCE_ENERGY);
+                    if (aSt < 20000 || bSt < 20000) return aSt - bSt;
+                    return a[1] - b[1];
+                }).map(e => e[0])
 
             let sendAble = {} // 计算哪些可以发送
             for (let resType of _.keys(RES_BALANCE_ROOM)) {

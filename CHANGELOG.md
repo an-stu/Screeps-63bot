@@ -18,6 +18,13 @@
   storage portion above 2,000 + containers/links). A room with only a few
   hundred storage energy and no keeper/worker spawns a mining worker instead
   of a carrier that has nothing it can withdraw.
+- `autoBuyLowRclEnergy` now also covers RCL8 rooms whose stored energy is
+  below 50,000 (e.g. E53S21), so a room whose manual buy order was consumed
+  gets a fresh competitive energy order automatically.
+- Cross-room resource balancing now sorts targets so rooms with less than
+  20,000 stored energy are served first, instead of the nearest room always
+  being chosen; starved rooms like E53S21 no longer lose the race to nearer
+  ordinary deficits.
 
 ## v0.78.9 — Unblock bootstrap carriers after failed expensive spawns
 
