@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.78.11 — Energy-priority upgrader throttle and deposits off
+
+### Changed
+
+- RCL8 upgraders now respect room energy stock: they stop below 10,000
+  combined storage+terminal energy and run at half rate below 30,000. RCL8
+  upgrading is the largest continuous sink (~15 energy/tick, about 75% of a
+  two-source room's production), while creep replacement adds roughly
+  11–19 energy/tick; pausing upgrades when the buffer is gone lets the
+  economy and hive recover first.
+- Deposits are disabled (`Memory.cpuFeatures.deposits = false`). The active
+  W31N55 deposit missions were spawning several dedicated harvesters/carriers
+  and could not be supplied profitably through the market.
+
+### Analysis
+
+- T3 lab reactions consume about 5 energy per reaction (well under 1/tick)
+  and factory batches only 64–1,200 energy each, so compound synthesis is not
+  the main energy drain.
+- Main drains: RCL8 upgrader energy/tick and repeated creep body replacement
+  (spawn upkeep). Rooms therefore cannot fully self-sustain while running a
+  full-time RCL8 upgrader on a 2-source budget.
+
 ## v0.78.10 — Faster road rebuild after road decay
 
 ### Fixed
