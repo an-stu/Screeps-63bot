@@ -349,15 +349,21 @@ let pro = {
         // pass 立即评估，不再受 %10 与 %7 对齐的偶发限制。
         // 有存量能量可搬 → 150 能量 bootstrap carrier（≤300）；
         // 没有存量能量 → 300 能量 worker 直接挖矿（保底预算 ≤300）。
-        if (carrierCnt <= 0 && StationHive.HiveNeedToFill(room)
+        if (StationHive.HiveNeedToFill(room)
             && room.energyAvailable >= 150 && room.energyAvailable < 750) {
-            let storedEnergy = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY)
-                + room.container.reduce((a, c) => a + (c.store[RESOURCE_ENERGY] || 0), 0)
-                + room.link.reduce((a, l) => a + (l.store[RESOURCE_ENERGY] || 0), 0);
-            if (storedEnergy > 0) {
+            // 可用存量 = terminal 全部 + storage 超过 2000 的部分 + container/link。
+            // storage 只有几百能量时 carrier 取不出来，应改生 worker 挖矿。
+            let terminalEnergy = room.terminal ? (room.terminal.store[RESOURCE_ENERGY] || 0) : 0;
+            let storageUsable = room.storage ? Math.max(0, (room.storage.store[RESOURCE_ENERGY] || 0) - 2000) : 0;
+            let containerEnergy = room.container.reduce((a, c) => a + (c.store[RESOURCE_ENERGY] || 0), 0);
+            let linkEnergy = room.link.reduce((a, l) => a + (l.store[RESOURCE_ENERGY] || 0), 0);
+            let haulableEnergy = terminalEnergy + storageUsable + containerEnergy + linkEnergy;
+            let noEnergyProducer = room.creeps("harvestEnergyKeeper", false).length == 0
+                && room.creeps("worker", false).length == 0;
+            if (carrierCnt <= 0 && haulableEnergy > 0) {
                 let bootBody = ManagerCreeps.calcBodyPart({ [CARRY]: 2, [MOVE]: 1 });
                 spawnCarrierNow(bootBody);
-            } else if (room.energyAvailable >= 200) {
+            } else if (noEnergyProducer && haulableEnergy <= 0 && room.energyAvailable >= 200) {
                 let workerBody = room.energyAvailable >= 300
                     ? ManagerCreeps.calcBodyPart({ [WORK]: 2, [CARRY]: 1, [MOVE]: 1 })
                     : ManagerCreeps.calcBodyPart({ [WORK]: 1, [CARRY]: 1, [MOVE]: 1 });

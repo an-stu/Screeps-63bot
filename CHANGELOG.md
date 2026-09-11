@@ -14,6 +14,10 @@
   tasks, 50 ticks retrofit for legacy tasks), after which the creep drops the
   boost task and resumes normal work. W33N53/W34N52 workers were permanently
   stuck on boosting instead of building their missing roads.
+- Dead-room bootstrap now counts only *usable* stored energy (terminal + the
+  storage portion above 2,000 + containers/links). A room with only a few
+  hundred storage energy and no keeper/worker spawns a mining worker instead
+  of a carrier that has nothing it can withdraw.
 
 ## v0.78.9 — Unblock bootstrap carriers after failed expensive spawns
 
