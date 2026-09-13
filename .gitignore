@@ -10,3 +10,5 @@ deploy/core-payload.json
 room-*.json
 .probe.json
 .syntax-check.log
+.check-*.json
+.terrain-*.json

@@ -36,7 +36,7 @@ global.RUNTIME_PROFILE = {
     version: "0.78.11",
     uploadedModules: 70,
     restoredSnapshotModules: 68,
-    intentionallyExcluded: ["调用栈分析器", "闲聊 v1.0"]
+    intentionallyExcluded: []
 }
 
 // 数据结构
