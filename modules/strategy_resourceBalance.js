@@ -398,8 +398,11 @@ let pro = {
     },
     exec(room) {
         if ((Game.time + room.hashCode()) % 10 != 0) return;
-        if (room.find(FIND_FLAGS).find(flag => SPECIAL_ROOM.has(flag.getPrefix()) && flag.getPrefix() != "storageEmpty")) return;
-        let flag = room.find(FIND_FLAGS).filter(e => e.getPrefix() == "storageEmpty").head();
+        // ManagerFlags.init 每 tick 已按可见房间缓存 flag 列表，直接复用，
+        // 省掉两次 room.find(FIND_FLAGS) 扫描。
+        let roomFlags = room.flags();
+        if (roomFlags.find(flag => SPECIAL_ROOM.has(flag.getPrefix()) && flag.getPrefix() != "storageEmpty")) return;
+        let flag = roomFlags.filter(e => e.getPrefix() == "storageEmpty").head();
         if (flag) {
             let toRoomName = flag.getRoomName()
             pro.storageEmpty(room)
