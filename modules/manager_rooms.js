@@ -8,6 +8,7 @@ global.SPECIAL_ROOM = new Set([
 ]);
 
 const ROOM_MEMORY_TTL = 20000;
+const ROOM_TTL_SWEEP_INTERVAL = 10;
 const ROOM_REFRESH_INTERVAL = 61;
 const MOVEMENT_CACHE_REFRESH_INTERVAL = 301;
 
@@ -16,11 +17,15 @@ const managerRooms = {
 
     init() {
         Memory.rooms = Memory.rooms || {};
-        for (let roomName in Memory.rooms) {
-            let roomMemory = Memory.rooms[roomName];
-            if (!roomMemory.ttl) roomMemory.ttl = Game.time + ROOM_MEMORY_TTL;
-            if (Game.rooms[roomName]) roomMemory.ttl = Game.time + ROOM_MEMORY_TTL;
-            else if (roomMemory.ttl < Game.time) delete Memory.rooms[roomName];
+        // 观测覆盖下记忆房间上百个，每 tick 巡检 TTL 是纯固定开销。
+        // TTL 窗口 20000 tick，错峰到每 10 tick 巡检对过期清理无影响。
+        if (Game.time % ROOM_TTL_SWEEP_INTERVAL == 0) {
+            for (let roomName in Memory.rooms) {
+                let roomMemory = Memory.rooms[roomName];
+                if (!roomMemory.ttl) roomMemory.ttl = Game.time + ROOM_MEMORY_TTL;
+                if (Game.rooms[roomName]) roomMemory.ttl = Game.time + ROOM_MEMORY_TTL;
+                else if (roomMemory.ttl < Game.time) delete Memory.rooms[roomName];
+            }
         }
     },
 
