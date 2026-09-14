@@ -2,6 +2,8 @@
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.ALL_SHARD_NAME = ["shard0","shard1","shard2","shard3"]
 // global.ALL_SHARD_NAME = ['shard3']
+// 收件箱扫描间隔（tick）。见 init 内注释。
+const CROSS_SHARD_SCAN_INTERVAL = 5;
 global.CORSS_SHARD_TIME_OUT = 5000 // 任务超过5000tick 自动删除，防止内存泄漏 如果没有时间默认删除 比如说我去S1，S1没有cpu，而且爬被吃了,可能我1天都不去,S1没有运行，所以内存泄漏了
 
 /**
@@ -152,6 +154,11 @@ let pro={
     dirty: false,
     init(){
         if(!isCpuFeatureEnabled("crossShard")||typeof InterShardMemory=="undefined")return;
+        // InterShardMemory 读取 + 每个远端 shard 一次 JSON.parse 是固定 CPU
+        // 开销，而跨 shard 任务以数百上千 tick 计时，入站扫描错峰到每 5 tick
+        // 一次没有可感知影响。出站请求不走这条路：addCrossShardRequest 写入
+        // addDataList，仍由每 tick 的 afterWork 冲洗保存。
+        if (Game.time % CROSS_SHARD_SCAN_INTERVAL) return;
         pro.dirty = false;
         let parse = value=>{try{return JSON.parse(value||"{}")||{}}catch(e){return {}}};
         // 获取所有 shard 的 InterShardMemory
