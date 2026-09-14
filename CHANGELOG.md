@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.78.12 — Trim fixed per-tick overhead in init and room passes
+
+### Changed
+
+- Cross-shard inbox scans `InterShardMemory` every 5 ticks instead of every
+  tick. Each scan reads the local segment plus three remote segments and
+  JSON-parses all four, which was the main driver of the init-phase average
+  (0.73 CPU) and its 22-CPU spikes. Cross-shard missions run on multi-tick
+  timescales, so the added inbound latency (≤5 ticks) is invisible. Outbound
+  requests are unaffected: `addCrossShardRequest` still flushes through
+  `ManagerCrossShard.afterWork` every tick.
+- `ManagerRooms.init` prunes expired room memory every 10 ticks instead of
+  every tick. The observer coverage keeps ~138 rooms in `Memory.rooms`, so
+  this loop was pure fixed overhead; the 20,000-tick TTL window makes a
+  10-tick pruning delay irrelevant.
+- `StrategyResourceBalance` reuses the per-tick flag list cached by
+  `ManagerFlags.init` instead of running two `FIND_FLAGS` room scans per
+  economy pass. The cached list is populated from `Game.flags` for visible
+  rooms at the start of the same tick, so the result is identical.
+
 ## v0.78.11 — Energy-priority upgrader throttle and market buy filtering
 
 ### Changed
