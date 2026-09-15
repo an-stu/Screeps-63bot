@@ -34,19 +34,28 @@ let pro={
         return Memory.observerWatch[roomName] = Memory.observerWatch[roomName] || {};
     },
     migrateWatchMemory () {
-        if (Memory.observerWatchMigrated) return;
+        if (Memory.observerWatchMigratedV2) return;
         for (let rn in Memory.rooms) {
             let om = Memory.rooms[rn].stationObserver;
-            if (!om) continue;
-            let w = pro.watchRoom(rn);
-            if (om.lastUpdateTime) w.u = om.lastUpdateTime;
-            if (om.closedMyRoom) w.c = om.closedMyRoom;
-            if (om.closedMyRoomLastUpdate) w.cl = om.closedMyRoomLastUpdate;
-            if (om.priorityVisibleTick) w.p = om.priorityVisibleTick;
-            if (om.lastPowerBank) w.pb = om.lastPowerBank;
-            delete Memory.rooms[rn].stationObserver;
+            if (om) {
+                let w = pro.watchRoom(rn);
+                if (om.lastUpdateTime) w.u = om.lastUpdateTime;
+                if (om.closedMyRoom) w.c = om.closedMyRoom;
+                if (om.closedMyRoomLastUpdate) w.cl = om.closedMyRoomLastUpdate;
+                if (om.priorityVisibleTick) w.p = om.priorityVisibleTick;
+                if (om.lastPowerBank) w.pb = om.lastPowerBank;
+                delete Memory.rooms[rn].stationObserver;
+            }
+            // 观测遗留条目：非拥有房间若只剩 ttl（和已迁移的 stationObserver），
+            // 没有任何业务数据，TTL 巡检却会不断给它续命——整个条目直接清除。
+            // 有其它键（structMap、station 数据等）的条目一律保留。
+            let roomObj = Game.rooms[rn];
+            if (!(roomObj && roomObj.my)
+                && !Object.keys(Memory.rooms[rn]).some(k => k != "ttl" && k != "stationObserver")) {
+                delete Memory.rooms[rn];
+            }
         }
-        Memory.observerWatchMigrated = true;
+        Memory.observerWatchMigratedV2 = true;
     },
     pruneWatch (checkTimeDelay) {
         let watch = Memory.observerWatch || {};
