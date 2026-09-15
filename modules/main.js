@@ -222,16 +222,22 @@ let updateCodeHealth = function () {
         delete previousHealth.lastErrorTick;
         delete previousHealth.errorCount;
     }
-    let missingTaskHandlers = {};
-    let objects = getTickObjects();
-    let units = objects.creeps.concat(objects.powerCreeps.filter(e => e.ticksToLive));
-    for (let unit of units) {
-        for (let task of unit.memory.tasks || []) {
-            if (task && task.taskName && typeof unit[task.taskName] != "function") {
-                missingTaskHandlers[task.taskName] = (missingTaskHandlers[task.taskName] || 0) + 1;
+    let missingTaskHandlers = previousHealth.missingTaskHandlers || {};
+    // 纯诊断扫描：78 个 creep × 全部任务每 tick 走一遍是固定开销，
+    // 100 tick 的粒度足够发现部署后缺模块的问题。
+    if (Game.time % 100 == 0) {
+        missingTaskHandlers = {};
+        let objects = getTickObjects();
+        let units = objects.creeps.concat(objects.powerCreeps.filter(e => e.ticksToLive));
+        for (let unit of units) {
+            for (let task of unit.memory.tasks || []) {
+                if (task && task.taskName && typeof unit[task.taskName] != "function") {
+                    missingTaskHandlers[task.taskName] = (missingTaskHandlers[task.taskName] || 0) + 1;
+                }
             }
         }
     }
+    let objects = getTickObjects();
     Memory.codeHealth = Object.assign(previousHealth, {
         time: Game.time,
         cpu: Game.cpu.getUsed(),
@@ -301,8 +307,14 @@ let main = function () {
     // bucket 当前剩余量
     Memory.stats.bucket = Game.cpu.bucket
     if (!Memory.stats.RCL) Memory.stats.RCL = {};
-    // 统计RCL的的百分比
-    getTickObjects().rooms.filter(e => e.my && e.level < 8).forEach(room => Memory.stats.RCL[room.name] = room.controller.progress / room.controller.progressTotal * 100);
+    // 统计RCL的的百分比；只保留仍拥有的房间，清掉易主后的陈旧条目
+    // （stats 写入只增不删，丢掉的房间会在 Memory 里留Forever）
+    let rclStats = Memory.stats.RCL;
+    getTickObjects().rooms.filter(e => e.my && e.level < 8).forEach(room => rclStats[room.name] = room.controller.progress / room.controller.progressTotal * 100);
+    for (let name in rclStats) {
+        let room = Game.rooms[name];
+        if (!room || !room.my) delete rclStats[name];
+    }
 
     
 };
