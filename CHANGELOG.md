@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.78.15 — Share one structure scan per refresh pass between tower and defense
+
+### Changed
+
+- `StationTower.update` and `StationDefense.update` both run inside the same
+  every-61-tick room refresh and each issued its own full-room
+  `FIND_STRUCTURES` scan (~200 structures on an RCL8 room). Both now read
+  `room.getStructures()`, the per-tick cache in `prototype_room`, so the
+  refresh pass performs at most one scan and later readers reuse it. Filter
+  semantics are unchanged (the cache returns the same unfiltered set).
+- No behavior change: repair target selection, safe-mode checks and wall
+  maintenance run exactly as before, one full scan cheaper per refresh.
+
 ## v0.78.14 — Spread market auto-buy scans across ticks
 
 ### Analysis
