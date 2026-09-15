@@ -24,6 +24,41 @@ let pro={
     stationName:"stationObserver",
     ObserveRoomQueue:{},// id:room
     PriorityObserveRoomQueue:{},
+    // 观测调度的每房间记账原本散在 Memory.rooms[rn].stationObserver 里，
+    // 123 个过道房间积了 ~30KB，而整份 Memory 每 tick 都要重新序列化。
+    // 收敛到 Memory.observerWatch 扁平 map + 短键：u=lastUpdateTime,
+    // c=closedMyRoom, cl=closedMyRoomLastUpdate, p=priorityVisibleTick,
+    // pb=lastPowerBank。迁移在首次 update 时执行一次。
+    watchRoom (roomName) {
+        Memory.observerWatch = Memory.observerWatch || {};
+        return Memory.observerWatch[roomName] = Memory.observerWatch[roomName] || {};
+    },
+    migrateWatchMemory () {
+        if (Memory.observerWatchMigrated) return;
+        for (let rn in Memory.rooms) {
+            let om = Memory.rooms[rn].stationObserver;
+            if (!om) continue;
+            let w = pro.watchRoom(rn);
+            if (om.lastUpdateTime) w.u = om.lastUpdateTime;
+            if (om.closedMyRoom) w.c = om.closedMyRoom;
+            if (om.closedMyRoomLastUpdate) w.cl = om.closedMyRoomLastUpdate;
+            if (om.priorityVisibleTick) w.p = om.priorityVisibleTick;
+            if (om.lastPowerBank) w.pb = om.lastPowerBank;
+            delete Memory.rooms[rn].stationObserver;
+        }
+        Memory.observerWatchMigrated = true;
+    },
+    pruneWatch (checkTimeDelay) {
+        let watch = Memory.observerWatch || {};
+        for (let rn in watch) {
+            let w = watch[rn];
+            if (!w || !(w.u || w.cl || w.p || w.pb)) { delete watch[rn]; continue; }
+            // 观测环内的房间每 ~checkTimeDelay 刷新一次 u；u 长期不刷新说明
+            // 已退出观测范围。closedMyRoom 缓存新鲜时保留，避免重复 BFS。
+            if ((Game.time - (w.u || 0)) > checkTimeDelay * 3
+                && !(w.c && Game.time - (w.cl || 0) < 10000)) delete watch[rn];
+        }
+    },
     requestRoom(roomName, preferredObserverRoom) {
         if (Game.rooms[roomName]) return preferredObserverRoom;
         let preferred = preferredObserverRoom && Game.rooms[preferredObserverRoom];
@@ -42,13 +77,11 @@ let pro={
     },
     getClosedMyRoomName (roomName){
         if(AVOID_ROOMS.has(roomName))return;
-        Memory.rooms[roomName] = Memory.rooms[roomName] || {};
-        Memory.rooms[roomName][pro.stationName] = Memory.rooms[roomName][pro.stationName]||{}
-
-        if (Game.time - (Memory.rooms[roomName][pro.stationName].closedMyRoomLastUpdate || 0) >10000) {
-            Memory.rooms[roomName][pro.stationName].closedMyRoom = undefined
+        let w = pro.watchRoom(roomName);
+        if (Game.time - (w.cl || 0) >10000) {
+            w.c = undefined
         }
-        let closedMyRoom = Memory.rooms[roomName][pro.stationName].closedMyRoom;
+        let closedMyRoom = w.c;
         if(closedMyRoom){
             if(Game.rooms[closedMyRoom]&&Game.rooms[closedMyRoom].my&&Game.rooms[closedMyRoom].observer){
                 return closedMyRoom;
@@ -64,8 +97,8 @@ let pro={
                     tmpList.push(nn)
                     visited[nn]=true;
                     if(Game.rooms[nn]&&Game.rooms[nn]&&Game.rooms[nn].my&&Game.rooms[nn].level==8&&Game.rooms[nn].observer){
-                        Memory.rooms[roomName][pro.stationName].closedMyRoom = nn
-                        Memory.rooms[roomName][pro.stationName].closedMyRoomLastUpdate = Game.time
+                        w.c = nn
+                        w.cl = Game.time
                         return nn;
                     }
                 }
@@ -104,8 +137,7 @@ let pro={
     },
     observeLastRoom (room){
         if(AVOID_ROOMS.has(room.name))return;
-        let sm=room.memory[pro.stationName]=room.memory[pro.stationName]||{};
-        sm.lastUpdateTime= Game.time
+        pro.watchRoom(room.name).u= Game.time
         let deposits = global.StrategyDeposits && isCpuFeatureEnabled("deposits") ? room.find(FIND_DEPOSITS) : [];
         let powerBanks = global.StrategyPowerBank && isCpuFeatureEnabled("powerBank")
             ? room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_POWER_BANK}) : [];
@@ -137,10 +169,7 @@ let pro={
         if(roomName){
             let observeResult = room.observer.observeRoom(roomName);
             if (observeResult == OK && isPriorityObservation) {
-                Memory.rooms[roomName] = Memory.rooms[roomName] || {};
-                let targetMemory = Memory.rooms[roomName][pro.stationName]
-                    = Memory.rooms[roomName][pro.stationName] || {};
-                targetMemory.priorityVisibleTick = Game.time + 1;
+                pro.watchRoom(roomName).p = Game.time + 1;
             }
             if (observeResult == OK) stationMemory.lastRoomName=roomName;
             else if (isPriorityObservation && !priorityQueue.includes(roomName)) priorityQueue.unshift(roomName);
@@ -148,25 +177,21 @@ let pro={
     },
     update (room) {
         if(!room.observer)return;// 如果没有ob就不动
+        pro.migrateWatchMemory();
         // if(room.name=="W1N4")log(pro.getNearRoom(room))
         let checkTimeDelay = 31*7;//checkTimeDelay tick 更新一次
         if((Game.time+room.hashCode())%(checkTimeDelay)!=0)return;
-        let sm=room.memory[pro.stationName]=room.memory[pro.stationName]||{};
-        sm.roomNames = pro.getNearRoom(room)
-
-        sm.roomNames = sm.roomNames||[]
-        let overRoomNames = sm.roomNames.filter(e=>e.indexOf("0")>0)// 过道
+        // 邻居清单只在本次调度内使用，不再持久化到观测者房间的 Memory。
+        let roomNames = pro.getNearRoom(room)
+        let overRoomNames = roomNames.filter(e=>e.indexOf("0")>0)// 过道
         pro.ObserveRoomQueue[room.observer.id] = []
         for(let rn of overRoomNames){
-            // sm.lastCheckTime = Game.time;
-            if(!Memory.rooms[rn])Memory.rooms[rn] = {}
-            let rm=Memory.rooms[rn][pro.stationName]=Memory.rooms[rn][pro.stationName]||{};
-            let lastUpdate = rm.lastUpdateTime||0
+            let lastUpdate = (Memory.observerWatch[rn]||{}).u||0
             if(Game.time - lastUpdate>checkTimeDelay/2){
                 pro.ObserveRoomQueue[room.observer.id].push(rn)
             }
         }
-
+        pro.pruneWatch(checkTimeDelay);
     },
 };
 

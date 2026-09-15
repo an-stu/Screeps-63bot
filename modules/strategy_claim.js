@@ -117,10 +117,11 @@ let pro = {
         if(!ManagerFlags.hasPrefix("claim"))return;
         ManagerFlags.getFlagsByPrefix("claim").forEach(flag=>{
             let targetRoom = Game.rooms[flag.pos.roomName];
-            let targetObserverMemory = Memory.rooms[flag.pos.roomName]
-                && Memory.rooms[flag.pos.roomName][StationObserver.stationName];
-            let priorityVisionTick = targetRoom && targetObserverMemory
-                && targetObserverMemory.priorityVisibleTick == Game.time;
+            // 观测可见性记账已从 Memory.rooms[*].stationObserver 迁到
+            // Memory.observerWatch（p = priorityVisibleTick）。
+            let watch = Memory.observerWatch && Memory.observerWatch[flag.pos.roomName];
+            let priorityVisionTick = targetRoom && watch
+                && watch.p == Game.time;
             if (Game.time % 3 != 0 && !priorityVisionTick) return;
             if (!targetRoom && global.StationObserver && isCpuFeatureEnabled("observer")) {
                 flag.memory.observerRoom = StationObserver.requestRoom(flag.pos.roomName, flag.memory.observerRoom)

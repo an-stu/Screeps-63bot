@@ -232,11 +232,10 @@ let pro = {
         // A PB is only visible for the Observer tick in which it was scanned.
         // Keep one compact, replace-in-place decision record so `dash` can
         // explain why a visible bank did or did not become a mission without
-        // retaining an ever-growing observation history.
-        Memory.rooms[targetRoomName] = Memory.rooms[targetRoomName] || {};
-        let observerMemory = Memory.rooms[targetRoomName].stationObserver
-            = Memory.rooms[targetRoomName].stationObserver || {};
-        observerMemory.lastPowerBank = {
+        // retaining an ever-growing observation history. Stored in the
+        // observer watch map (pb) instead of Memory.rooms[*].stationObserver.
+        let observerMemory = StationObserver.watchRoom(targetRoomName);
+        observerMemory.pb = {
             tick: Game.time,
             id: powerBankData.id,
             power: powerBankData.power,
