@@ -89,7 +89,9 @@ let pro={
     sampleInterval: 5,
     maxSamples: 600,
     longTermBucketTicks: 100,
-    longTermMaxBuckets: 100,
+    // 50 桶 = 最近 5000 tick 的趋势足以判断收支方向；100 桶会让
+    // Memory.cpuTelemetry 多占 ~5KB，而整份 Memory 每 tick 都要序列化。
+    longTermMaxBuckets: 50,
     cpu: new Array(600),
     bucket: new Array(600),
     cursor: 0,
