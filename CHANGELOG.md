@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.78.16 — Cheaper health diagnostics and stale RCL stat pruning
+
+### Changed
+
+- The `missingTaskHandlers` diagnostic scan in `updateCodeHealth` now runs
+  every 100 ticks instead of every 20 (it walks every creep × every task);
+  between scans the last result is carried forward. It exists to catch
+  missing modules after a deploy, where a 100-tick detection window is
+  plenty.
+- `Memory.stats.RCL` entries are pruned when the room is no longer owned.
+  The writer only ever added keys, so lost rooms (E43S31, W23N55) stayed
+  in Memory forever.
+
 ## v0.78.15 — Share one structure scan per refresh pass between tower and defense
 
 ### Changed
