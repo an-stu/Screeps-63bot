@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.78.13 — Shrink Memory payload: observer bookkeeping out of Memory.rooms
+
+### Analysis
+
+- Live measurement showed `RawMemory` at ~141 KB with `Memory.rooms` at
+  ~78 KB (136 entries). Owned-room data is legitimate working state (~41 KB),
+  but ~30 KB was observer scheduling bookkeeping (`stationObserver` entries:
+  lastUpdateTime / closedMyRoom / priorityVisibleTick / lastPowerBank) spread
+  across 123 non-owned highway rooms, plus a per-observer-room `roomNames`
+  neighbor cache that was written and only read within the same update call.
+  The whole Memory tree is re-serialized every tick, so this was pure
+  per-tick overhead.
+
+### Changed
+
+- Observer scheduling bookkeeping now lives in a flat compact map,
+  `Memory.observerWatch = {roomName: {u,c,cl,p,pb}}`, written and read through
+  `StationObserver.watchRoom`. A one-time migration ports existing
+  `Memory.rooms[*].stationObserver` fields and deletes the old keys; stale
+  entries (not observed for 3 scheduling windows) are pruned.
+- `StrategyObserver.update` no longer persists `roomNames` (the neighbor list
+  is a local variable now) and no longer creates `Memory.rooms` entries just
+  to stamp `lastUpdateTime`.
+- Consumers updated: `strategy_claim` reads `priorityVisibleTick` from the
+  watch map; `strategy_powerBank.recordMissionDecision` stores `lastPowerBank`
+  there too (it had no other readers).
+- `HelperCpuUsed.longTermMaxBuckets` 100 → 50: 5000 ticks of trend buckets is
+  enough to judge income/spend, saves ~5 KB of Memory.
+
 ## v0.78.12 — Trim fixed per-tick overhead in init and room passes
 
 ### Changed
