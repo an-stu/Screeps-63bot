@@ -36,7 +36,9 @@ let pro={
         }
 
         // 记录要修理的 东西
-        pro.needRepairsRoomMap[room.name] = room.find(FIND_STRUCTURES)
+        // getStructures() 复用 prototype_room 的每 tick 扫描缓存：同一个
+        // refreshRoom tick 里 Defense.update 也要全房结构，省一次重复扫描。
+        pro.needRepairsRoomMap[room.name] = room.getStructures()
             .filter(e => e.structureType != STRUCTURE_WALL && e.structureType != STRUCTURE_RAMPART)
             .filter(e => e.hits / e.hitsMax < 0.8 && e.hits < 10000000)
             .filter(e => (!roadNeedRepair||roadNeedRepair[e.pos.x*50+e.pos.y])||e.structureType != STRUCTURE_ROAD)

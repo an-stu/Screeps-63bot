@@ -109,7 +109,8 @@ let pro = {
         let coverMap = {}
         for (let i = 0; i < rampartCover.length; i++) { coverMap[rampartCover[i]] = i + 1; }
         if (room.level >= 7) {
-            needRepairs.push(...room.find(FIND_STRUCTURES, { filter: e => coverMap[e.structureType] })
+            // 与 Tower.update 共享同一份每 tick 结构扫描缓存（getStructures）。
+            needRepairs.push(...room.getStructures().filter(e => coverMap[e.structureType])
                 .sort((a, b) => coverMap[a.structureType] - coverMap[b.structureType])
                 .map(e => createWallOrRampart(e.pos, STRUCTURE_RAMPART)))
         }
