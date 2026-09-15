@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.78.14 — Spread market auto-buy scans across ticks
+
+### Analysis
+
+- `MARKET_ORDER_TTL` (100) exactly matches the auto-buy cadence
+  (`shouldRun(100, 19)`), so on every auto-buy tick all cached order lists
+  expired simultaneously and the tick performed fresh `getAllOrders` scans
+  for all 7 base minerals plus the high-profit component analysis — 10-20
+  CPU stacked onto an already ~18 CPU tick. This was the main contributor
+  to the `optional` phase lifetime max of 24.2 and to the over-limit tail.
+
+### Changed
+
+- `StrategyMarket.autoBuy` now rotates base minerals two per invocation
+  (full coverage every 400 ticks; per-resource decision latency is
+  immaterial for orders that fill over hours) and runs the high-profit
+  component arbitrage every other invocation (200 ticks). Energy buys keep
+  their every-100-tick schedule. The every-100-tick spike becomes a small
+  distributed cost, directly shrinking the over-limit tail that drains the
+  bucket.
+
 ## v0.78.13 — Shrink Memory payload: observer bookkeeping out of Memory.rooms
 
 ### Analysis
