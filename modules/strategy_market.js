@@ -159,6 +159,12 @@ let pro = {
         // 调用频率由 main.js 的 shouldRun(100, 19) 控制（Game.time%100==81）。
         // 早期这里的 `(Game.time)%100==0` 检查与调用偏移互斥，导致
         // autoBuyMineral 从未执行、lab 原料永不买入——故不再内部限频。
+        // MARKET_ORDER_TTL=100 与该间隔重合：每次 autoBuy 所有订单缓存恰好
+        // 同时过期，7 个矿物扫描 + 高利润组件的全量利润分析曾把 ~10-20 CPU
+        // 集中在一个 tick（optional 相位 lifetime 峰值 24.2 的来源）。
+        // 矿物按 2 个/次轮转、高利润组件隔次执行，把尖峰摊平——单个资源
+        // 的决策延迟变为 400 tick（组件 200 tick），对以小时计的挂单成交
+        // 毫无影响。
         _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
         if (Game.shard.name.startsWith("shard")) {
             // pro.autoBuyEnergy();
@@ -177,9 +183,11 @@ let pro = {
             //     }
             // }
         }
-        ["U", "L", "K", "Z", "X", "O", "H"].forEach(e => pro.autoBuyMineral(e));
+        let MINERALS = ["U", "L", "K", "Z", "X", "O", "H"];
+        let batch = Math.floor(Game.time / 100) % 4;
+        for (let i = 0; i < 2; i++) pro.autoBuyMineral(MINERALS[(batch * 2 + i) % MINERALS.length]);
         // 利润套利：买入利润率超阈值商品的展开基础原料，供工厂合成后售卖
-        pro.autoBuyHighProfitComponents();
+        if (batch % 2 == 0) pro.autoBuyHighProfitComponents();
         // if((Game.time)%3==0)pro.autoBuyPixel();
     },
     /**
