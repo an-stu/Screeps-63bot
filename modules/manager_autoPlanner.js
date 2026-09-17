@@ -377,6 +377,18 @@ let pro={
         }
     },
     tryAutoBuildHighLevel (room){
+        // min-CPU 模式下 worker（ROLE_PRIORITY -5）不执行，规划出的工地没人
+        // 建：跳过 prune/例行扩建/道路补建，省下每个经济 pass 的扫描。
+        // 唯一例外：extension 覆盖率 <60% 会直接卡死房间发展（spawn 无法
+        // 产大爬），这个逃生门保留 bucket>300 的低门槛。
+        if (MIN_CPU) {
+            let emergencyLimit = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.level];
+            if (room.memory.structMap && room.extension.length < emergencyLimit * 0.6
+                && Game.cpu.bucket > 300) {
+                pro.tryCreateStructs(room, room.memory.structMap, STRUCTURE_EXTENSION);
+            }
+            return;
+        }
         // Extension 是 Spawn 能力的一部分。只要有缺口，每次经济调度（5 tick）
         // 都立即尝试；满额后才退回零成本的 150-tick 检查。这样升级不会因
         // 时间槽或全局工地上限暂满而长时间少两座 extension。
