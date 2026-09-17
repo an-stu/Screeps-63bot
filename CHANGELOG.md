@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.78.17 — Skip construction planning while in min-CPU mode
+
+### Analysis
+
+- `StrategyHighLevel.exec` calls `ManagerAutoPlanner.tryAutoBuildHighLevel`
+  directly on every economy pass, bypassing the `isCpuFeatureEnabled`
+  and MIN_CPU gates that main.js applies to the full planner. During
+  min-CPU mode (deposit expeditions, bucket crises) workers do not run
+  (ROLE_PRIORITY -5), so the planned extension/road sites sat unbuilt
+  while the prune pass, extension scan and road-gap check still burned
+  CPU every pass.
+
+### Changed
+
+- `tryAutoBuildHighLevel` returns early in MIN_CPU mode, keeping only a
+  low-gate (bucket > 300) emergency extension site creation for rooms
+  whose extension coverage falls below 60% - that gate prevents a
+  bootstrap room from stalling because spawn cannot grow its body size.
+  Routine extension/road planning and the out-of-tier site prune stay
+  suspended until min-CPU mode lifts.
+
 ## v0.78.16 — Cheaper health diagnostics and stale RCL stat pruning
 
 ### Changed
