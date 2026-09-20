@@ -1,6 +1,29 @@
 # Changelog
 
-## v0.78.17 — Skip construction planning while in min-CPU mode
+## v0.78.18 — More downgrade margin and stronger upgrader energy guard
+
+### Changed
+
+- RCL8 upgrader spawn threshold raised from `ticksToDowngrade < 30,000`
+  to `< 80,000`, so a room starts refilling the downgrade timer much earlier.
+- RCL8 upgraders now idle until `ticksToDowngrade < 120,000` (was < 50,000);
+  the 80k/120k hysteresis keeps a 40k safety margin without continuous
+  upgrading.
+- Energy floor for running RCL8 upgraders raised from 10k/30k to
+  **30k/60k** combined storage+terminal: stop below 30k, half speed below
+  60k. This is the main protection against the recurring energy shortage.
+
+### Analysis
+
+- A two-source RCL8 room produces at most 20 energy/tick. A full-time
+  RCL8 upgrader consumes ~15 energy/tick, and creep replacement (spawn
+  upkeep) adds another ~11–19 energy/tick. That is why rooms repeatedly ran
+  out of energy when upgraders ran continuously.
+- The new 80k/120k schedule plus 30k/60k energy floor lets the upgrader run
+  only when the room can actually afford it, and stops it while the hive and
+  economy rebuild buffers.
+
+## ## v0.78.17 — Skip construction planning while in min-CPU mode
 
 ### Analysis
 
