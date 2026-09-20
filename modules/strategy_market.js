@@ -368,18 +368,25 @@ let pro = {
         let maxBuy = buyOrders.length ? buyOrders.maxBy(e => e.price).price : 0;
         let avg = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
         let basePrice = Math.max(avg, maxBuy);
+        let desiredPrice = Math.min(basePrice * 1.05, avg * 6);
         rooms.forEach(room => {
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
             if (energyCnt >= 300000) return;
-            let hasOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
+            let order = _.values(Game.market.orders).find(e => e.remainingAmount > 0
                 && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);
-            if (hasOrder) return;
+            if (order) {
+                // 旧单不会自动跟价：市场最高买价上涨后，把低 RCL 房的
+                // 能量单价同步抬到竞争价，避免一直买不到。
+                if (order.price < desiredPrice * 0.995) {
+                    Game.market.changeOrderPrice(order.id, desiredPrice);
+                }
+                return;
+            }
             let amount = Math.max(50000, 300000 - energyCnt);
-            let price = Math.min(basePrice * 1.02, avg * 5);
             Game.market.createOrder({
                 type: ORDER_BUY,
                 resourceType: RESOURCE_ENERGY,
-                price: price,
+                price: desiredPrice,
                 totalAmount: amount,
                 roomName: room.name,
             });

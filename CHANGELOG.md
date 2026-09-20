@@ -1,6 +1,23 @@
 # Changelog
 
-## v0.78.18 — More downgrade margin and stronger upgrader energy guard
+## v0.78.19 — Keep low-RCL energy buy orders competitive
+
+### Changed
+
+- `autoBuyLowRclEnergy` now maintains the price of an existing energy buy
+  order for RCL < 8 rooms (and energy-starved RCL8 rooms). Previously it only
+  created an order once and skipped rooms that already had one, so an order
+  placed at 51 would sit unfilled after the market's top buy price rose.
+  Existing orders are now raised to `max(history, topBuy) * 1.05` when they
+  fall more than 0.5% below the competitive price.
+
+### Analysis
+
+- Low-RCL rooms still target 300,000 stored energy and do not depend on the
+  `Memory.stats.buyEnergy` switch, so buying continues until the room reaches
+  RCL8.
+
+## ## v0.78.18 — More downgrade margin and stronger upgrader energy guard
 
 ### Changed
 
