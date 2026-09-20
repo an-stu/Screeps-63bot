@@ -367,11 +367,12 @@ let pro = {
         let buyOrders = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_BUY);
         let maxBuy = buyOrders.length ? buyOrders.maxBy(e => e.price).price : 0;
         let avg = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
-        let basePrice = Math.max(avg, maxBuy);
-        let desiredPrice = Math.min(basePrice * 1.05, avg * 6);
+        // 低 RCL 加速升级也要控制信用点消耗：目标 10 万即可，价格不超过历史
+        // 均价 1.5 倍（此前 300k 目标 + 最高买价跟价导致信用点快速流失）。
+        let desiredPrice = Math.max(avg, Math.min(maxBuy * 1.05, avg * 1.5));
         rooms.forEach(room => {
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
-            if (energyCnt >= 300000) return;
+            if (energyCnt >= 100000) return;
             let order = _.values(Game.market.orders).find(e => e.remainingAmount > 0
                 && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);
             if (order) {
@@ -382,7 +383,7 @@ let pro = {
                 }
                 return;
             }
-            let amount = Math.max(50000, 300000 - energyCnt);
+            let amount = Math.max(30000, 100000 - energyCnt);
             Game.market.createOrder({
                 type: ORDER_BUY,
                 resourceType: RESOURCE_ENERGY,
@@ -391,6 +392,32 @@ let pro = {
                 roomName: room.name,
             });
         });
+    },
+    /**
+     * deposit 产出（silicon/metal/biomass/mist）超过保留量时自动挂卖单。
+     * 这些原料优先供给工厂合成高级商品，因此只卖 surplus，保留 3k/房。
+     */
+    autoSellDeposit(room) {
+        if (!room.storage || !room.terminal || !room.terminal.my) return;
+        if ((Game.time + room.hashCode()) % 80 != 0) return;
+        for (let resType of [RESOURCE_SILICON, RESOURCE_METAL, RESOURCE_BIOMASS, RESOURCE_MIST]) {
+            let total = (room.storage.store[resType] || 0) + (room.terminal.store[resType] || 0);
+            let keep = 3000;
+            let sellAmount = total - keep;
+            if (sellAmount < 100) continue;
+            let hasOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
+                && e.resourceType == resType && e.type == ORDER_SELL && e.roomName == room.name);
+            if (hasOrder) continue;
+            let price = pro.getMineralSellPrice(resType);
+            let code = Game.market.createOrder({
+                type: ORDER_SELL,
+                resourceType: resType,
+                price: price,
+                totalAmount: sellAmount,
+                roomName: room.name,
+            });
+            if (code == OK) console.log(`[sellDeposit] ${room.name} ${resType} ${sellAmount} @ ${price}`);
+        }
     },
     /**
      * @param room
@@ -907,6 +934,7 @@ let pro = {
         if (Game.time % 290 == 0) SELL_RES_TYPES.forEach(e => {pro.autoSell(e, room)})
         // 基础矿物：能采就采，超出保留量自动挂卖单（矿物采集已不再因存量暂停）
         pro.autoSellMineral(room);
+        pro.autoSellDeposit(room);
 
         // 买入低频化：遍历 RES_BUY_AMOUNT_ROOM 每个资源都要查市场卖单，
         // 是 CPU 大头。买入只需每 100 tick 一次（与矿物挂单同频）——

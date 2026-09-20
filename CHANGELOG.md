@@ -1,6 +1,28 @@
 # Changelog
 
-## v0.78.19 — Keep low-RCL energy buy orders competitive
+## v0.78.20 — Throttle low-RCL energy buys and auto-sell deposit surplus
+
+### Fixed
+
+- Low-RCL energy buying was draining credits extremely fast: the target was
+  300,000 energy and the order followed the top market buy price (75+/unit).
+  Money history showed ~250M credits spent in ~1,600 ticks, almost entirely
+  energy buys. The target is now 100,000 stored energy and the price is
+  capped at `max(history, min(topBuy*1.05, history*1.5))`, so E53S21 and
+  starved RCL8 rooms buy enough to upgrade without draining credits.
+- Added `autoSellDeposit`: silicon / metal / biomass / mist above a 3,000
+  per-room reserve are automatically listed for sale, so deposit harvesting
+  produces credits instead of only being consumed by the factory chain.
+
+### Analysis
+
+- Recent money history (deduplicated, tick 83106375–83108032) showed
+  `market.buy` −248.9M and `market.fee` −10.4M with **zero sale income**;
+  energy buys alone were −244M. That is why credits dropped visibly.
+- Deposits were not auto-selling raw output; they fed factory synthesis, and
+  only qualifying high-tier commodities are auto-sold.
+
+## ## v0.78.19 — Keep low-RCL energy buy orders competitive
 
 ### Changed
 
