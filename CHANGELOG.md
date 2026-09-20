@@ -1,3 +1,14 @@
+## v0.78.26 — Restore E53S21's dedicated 800k energy buffer
+
+### Changed
+
+- The credit-drain hotfix reduced every room's energy target to 100k. That is
+  right for the other rooms, but E53S21 is the only RCL7 room racing to RCL8
+  and the user explicitly asked for an 800k buffer. `autoBuyLowRclEnergy` now
+  uses an 800k target for E53S21 and 100k for everyone else. Existing
+  E53S21 orders are extended to keep ~800k covered, and any order is still
+  cancelled once its room reaches its own target.
+
 ## v0.78.25 — Cancel energy buy orders once a room reaches its target
 
 ### Changed

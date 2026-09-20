@@ -371,15 +371,23 @@ let pro = {
         // 均价 1.5 倍（此前 300k 目标 + 最高买价跟价导致信用点快速流失）。
         let desiredPrice = Math.max(avg, Math.min(maxBuy * 1.05, avg * 1.5));
         rooms.forEach(room => {
+            // E53S21 是唯一的 RCL7 冲刺房，按用户要求单独保留 80 万能量缓冲；
+            // 其它房间补到 10 万即停，避免再次出现全服大量买单吃信用点。
+            let target = room.name === "E53S21" ? 800000 : 100000;
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
             let order = _.values(Game.market.orders).find(e => e.remainingAmount > 0
                 && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);
-            if (energyCnt >= 100000) {
+            if (energyCnt >= target) {
                 // 房间已经补到目标存量：撤掉剩余买单，避免恢复后继续吃信用点。
                 if (order) Game.market.cancelOrder(order.id);
                 return;
             }
             if (order) {
+                let missing = target - energyCnt;
+                // 旧单存量明显不足时补足，保持冲刺房的能量缓冲。
+                if (order.remainingAmount < missing * 0.95) {
+                    Game.market.extendOrder(order.id, Math.ceil(missing - order.remainingAmount));
+                }
                 // 旧单不会自动跟价：市场最高买价上涨后，把低 RCL 房的
                 // 能量单价同步抬到竞争价，避免一直买不到。
                 if (order.price < desiredPrice * 0.995) {
@@ -387,7 +395,7 @@ let pro = {
                 }
                 return;
             }
-            let amount = Math.max(30000, 100000 - energyCnt);
+            let amount = Math.max(30000, target - energyCnt);
             Game.market.createOrder({
                 type: ORDER_BUY,
                 resourceType: RESOURCE_ENERGY,
