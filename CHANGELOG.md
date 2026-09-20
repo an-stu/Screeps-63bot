@@ -1,3 +1,15 @@
+## v0.78.24 — Let RCL8 upgraders use terminal reserves
+
+### Fixed
+
+- `Creep.prototype.upgradeKeeper` still had a legacy storage gate that
+  stopped calling `upgradeController` whenever storage energy was below
+  10,000. With most rooms holding their reserve in the terminal while storage
+  sat at 0–8k, this left active upgraders standing at the controller with
+  70 energy and `ticksToDowngrade` still falling. The gate is removed;
+  `shouldRunCreep` already stops RCL8 upgrades when total storage+terminal
+  energy is below 30k (or runs them at half speed below 60k).
+
 ## v0.78.23 — Power Bank carriers yield to a missing RCL8 upgrader
 
 ### Fixed

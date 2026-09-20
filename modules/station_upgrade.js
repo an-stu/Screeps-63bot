@@ -194,7 +194,7 @@ Creep.prototype.upgradeKeeper = function () {
     let upgradePosition = pro.getUpgradePosition(this, obj, [link, container].filter(Boolean));
 
     if (this.store[RESOURCE_ENERGY] > 0) {
-        if (!(this.memory.concated && this.room.storage && this.room.storage.store[RESOURCE_ENERGY] < 10000) || this.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) < 10000) { //少于 1w 的时候暂时不更新
+        { // 存储 <1w 不再阻止升级：总能量闸门已由 main.js shouldRunCreep(30k/60k) 控制
             let code = this.upgradeController(obj);
             if (code == ERR_NOT_IN_RANGE && this.ticksToLive % 3 == 0) {
                 if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20});
