@@ -393,6 +393,11 @@ let pro = {
         // return StationHive.trySpawn(room,room.name,body,"PBHeal", tasks)
     },
     trySpawnPBCarrier(room, memory, needCarry) {
+        // RCL8 控制器掉到 8 万 tick 以下且还没有 upgrader 时，先让位给
+        // StationUpgrade 补一只升级爬：Power Bank 还能等，控制器降级不可逆。
+        if (room.controller && room.controller.level == 8
+            && room.controller.ticksToDowngrade < 80000
+            && room.creeps("upgrader", false).length == 0) return false;
         let tasks = [UtilsTask.taskData("carrierPB", "registerCarrierPB", memory)]
         let carryCnt = Math.ceil(needCarry / 50)
         let moveCnt = Math.ceil(carryCnt / 2)

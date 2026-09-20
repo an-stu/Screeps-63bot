@@ -1,3 +1,15 @@
+## v0.78.23 — Power Bank carriers yield to a missing RCL8 upgrader
+
+### Fixed
+
+- E41S23's active Power Bank mission queued three `PBCarrier` spawns while
+  its controller had fallen to 51k ticks and had no upgrader at all. The
+  spawns were all occupied, so the room could not restore its downgrade
+  timer. `trySpawnPBCarrier` now declines to spawn while an RCL8 controller
+  is below 80k ticks and has no upgrader (including one currently spawning);
+  the Power Bank mission retries on later ticks, while `StationUpgrade` can
+  use the free spawn that tick.
+
 ## v0.78.22 — Right-size RCL8 carrier fleets dynamically
 
 ### Changed
