@@ -395,7 +395,6 @@ let pro = {
         let upgradeFlag = room.flags("upgrade").head()
 
         let checkGCL = () => (Game.shard.name.startsWith("shard") || Game.gcl.level < MAX_GCL)
-        let checkBucket = () => (!isSaveCpu || Game.cpu.bucket > 9000)
         if (room.level < 8 || !room.storage) {
             let minUpgraderCnt = 0;
             if (upgradeFlag || (upgradeFlag && room.terminal && room.terminal.my)) {
@@ -416,8 +415,11 @@ let pro = {
                 || (room.storage.store[RESOURCE_ENERGY] > 10000 && minUpgraderCnt > room.creeps("upgrader", false).length))
                 spawn()
         }
+        // Spawn 与 CPU bucket 解耦：升级动作本身由 main.js 的 shouldRunCreep
+        // 按 bucket/能量存量节流，但降级计时器低于 spawn 阈值时必须保证有
+        // 一只 upgrader 存在，否则 bucket 长期 <9000 时 RCL8 会在没有任何
+        // upgrader 的情况下被慢慢拖到降级（E41S23/E41S32 等曾降到 51k）。
         else if (checkGCL()
-            && (checkBucket() || room.controller.ticksToDowngrade < 5000) // 降级告急时无视 bucket
             && room.energyAvailable >= (room.controller.ticksToDowngrade < 5000 ? 2000 : 2500)
             && room.controller.ticksToDowngrade < 80000
             && (room.creeps("upgrader", false).length == 0 || Game.time - sm["spawnTime"] + unboostTime > 1500)) { // RCL8 在降级前 8 万 tick 内补 1 只

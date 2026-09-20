@@ -1,3 +1,23 @@
+## v0.78.21 — RCL8 upgrader spawn no longer blocked by low CPU bucket
+
+### Fixed
+
+- `StationUpgrade.spawnUpgrader` required `Game.cpu.bucket > 9000` before
+  spawning an RCL8 upgrader. With average CPU around 17.8/20 the bucket sat
+  near 7.8k, so every RCL8 room lost its upgrader and their downgrade timers
+  decayed to 51k–78k while three idle spawns and 12.9k energy sat unused.
+  Spawning is now decoupled from the bucket; the actual upgrade intents remain
+  throttled by `shouldRunCreep` (bucket interval plus 30k/60k energy floors).
+  RCL8 rooms will again spawn one upgrader once `ticksToDowngrade < 80k` and
+  let it idle once the timer is back above 120k.
+
+### Analysis
+
+- `CONTROLLER_DOWNGRADE_RESTORE` is 100 ticks per successful upgrade action,
+  so restoring 70k ticks only costs ~700 upgrade actions (~10.5k energy).
+  Long-term RCL8 upkeep is therefore tiny; the previous continuous-upgrade
+  drain was not the root cause of the recent energy shortage.
+
 # Changelog
 
 ## v0.78.20 — Throttle low-RCL energy buys and auto-sell deposit surplus
