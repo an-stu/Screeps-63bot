@@ -372,9 +372,13 @@ let pro = {
         let desiredPrice = Math.max(avg, Math.min(maxBuy * 1.05, avg * 1.5));
         rooms.forEach(room => {
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
-            if (energyCnt >= 100000) return;
             let order = _.values(Game.market.orders).find(e => e.remainingAmount > 0
                 && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);
+            if (energyCnt >= 100000) {
+                // 房间已经补到目标存量：撤掉剩余买单，避免恢复后继续吃信用点。
+                if (order) Game.market.cancelOrder(order.id);
+                return;
+            }
             if (order) {
                 // 旧单不会自动跟价：市场最高买价上涨后，把低 RCL 房的
                 // 能量单价同步抬到竞争价，避免一直买不到。

@@ -1,3 +1,12 @@
+## v0.78.25 — Cancel energy buy orders once a room reaches its target
+
+### Changed
+
+- `autoBuyLowRclEnergy` now cancels a room's remaining energy buy order
+  when stored energy reaches 100,000. Previously the order stayed on the
+  market after the room recovered, so a later price spike or market dump
+  could fill it and spend credits on energy the room no longer needed.
+
 ## v0.78.24 — Let RCL8 upgraders use terminal reserves
 
 ### Fixed
