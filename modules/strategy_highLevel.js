@@ -345,6 +345,12 @@ let pro = {
             carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
             if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
         }
+        else {
+            // RCL8 大多通过 link 转运，固定 7 只只会让空闲 carrier 占着 spawn、
+            // 吃掉本应留给 upgrader/keeper 的补员能量。按 link 数动态下调：
+            // 6 link 房 4 只，4-5 link 房 5 只。
+            carrierTarget = room.link.length >= 6 ? 4 : 5;
+        }
         // 死房自救：没有 carrier、hive 缺能、可用能量 ≤750 时每个 economy
         // pass 立即评估，不再受 %10 与 %7 对齐的偶发限制。
         // 有存量能量可搬 → 150 能量 bootstrap carrier（≤300）；

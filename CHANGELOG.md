@@ -1,3 +1,13 @@
+## v0.78.22 — Right-size RCL8 carrier fleets dynamically
+
+### Changed
+
+- RCL8 carrier target was a fixed 7 per room. `carryBusy` history showed
+  E41S23 averaging 1.9 busy carriers while spawning 3 more, and E59S38/W34N52
+  similarly keeping 5–7 around. Those idle carriers held spawn time and
+  energy that the recovering upgraders needed. The target is now dynamic:
+  4 carriers for 6-link rooms, 5 carriers for rooms with 4–5 links.
+
 ## v0.78.21 — RCL8 upgrader spawn no longer blocked by low CPU bucket
 
 ### Fixed
