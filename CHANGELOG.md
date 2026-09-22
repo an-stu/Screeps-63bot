@@ -1,3 +1,34 @@
+## v0.78.28 — Mineral mining caps and idle PC power usage
+
+### Changed
+
+- **Mineral mining is no longer “mine until the mineral depletes”.**
+  `StationMineral` now pauses a room's mineral keeper when the room's
+  storage + terminal + source container holds 20,000 of that mineral. The
+  cap sits below `autoSellMineral`'s 30,000 sale trigger, so the room never
+  mines just to sell the result.
+- **U / K / Z are buy-only.** Their market price (≈9–20 credits) is far
+  below the spawn-energy cost of a large mineral keeper, so the bot now
+  relies on `autoBuyMineral` for them instead of mining. L / X / O / H
+  remain mined up to the 20k cap.
+- **Power Creep operator tasks gained the missing useful powers:**
+  - `PWR_OPERATE_SPAWN` is used only by PCs with at least 600 carried ops,
+    on a room with an active spawning spawn (or a hive deficit), saving
+    100 ops per 1,000 ticks on a level-4 PC while shortening spawn time.
+  - `PWR_OPERATE_TOWER` is maintained on one tower with ≥500 energy by the
+    two PCs that have it, costing 10 ops per 100 ticks and improving tower
+    repair/attack efficiency.
+  Existing `PWR_GENERATE_OPS`, `PWR_REGEN_SOURCE`, `PWR_OPERATE_STORAGE`,
+  `PWR_OPERATE_EXTENSION`, `PWR_OPERATE_FACTORY` and `PWR_OPERATE_POWER`
+  behavior is unchanged.
+
+### Notes
+
+- `Memory.mineralSettings[resType].stop` can override the per-mineral
+  mining cap; `mineStop` defaults to 20,000.
+- PCs without `PWR_OPERATE_SPAWN` / `PWR_OPERATE_TOWER`, or with a low ops
+  buffer, are untouched so factory/ops reserves are not diverted.
+
 ## v0.78.27 — Stop buying 800k energy after E53S21 reached RCL8
 
 ### Changed

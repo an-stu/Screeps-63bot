@@ -105,6 +105,64 @@ PowerCreep.prototype.OpSource = function () {
     }
 }
 
+PowerCreep.prototype.needOpSpawn = function () {
+    let pcPower = this.powers[PWR_OPERATE_SPAWN];
+    if (!pcPower || pcPower.cooldown > 0) return false;
+    // ops 储备阈值：spawn 效果 100 ops/1000t，只有富余的 PC 才使用，避免抢工厂 ops。
+    if ((this.store[RESOURCE_OPS] || 0) < 600) return false;
+    let room = this.mainRoom();
+    if (!room || !room.my) return false;
+    let spawns = (room.spawn || []).filter(s => !s.effects || !s.effects.some(e => e.power == PWR_OPERATE_SPAWN));
+    if (!spawns.length) return false;
+    let spawning = spawns.filter(s => s.spawning);
+    if (spawning.length) return spawning[0];
+    // 没有正在生成的 spawn 时，只在 hive 缺能（说明接下来要补员）才预铺效果。
+    if (room.energyAvailable < room.energyCapacityAvailable) return spawns[0];
+    return false;
+};
+
+PowerCreep.prototype.OpSpawn = function () {
+    let pcPower = this.powers[PWR_OPERATE_SPAWN];
+    let spawn = this.lastTaskObj();
+    if (!pcPower || pcPower.cooldown > 0 || !spawn) {
+        this.popTask().execLastTask();
+        return;
+    }
+    if (!this.pos.inRangeTo(spawn, 3)) {
+        this.moveTo(spawn, { range: 3 });
+        return;
+    }
+    let code = this.usePower(PWR_OPERATE_SPAWN, spawn);
+    if (code != ERR_NOT_IN_RANGE) this.popTask().execLastTask();
+};
+
+PowerCreep.prototype.needOpTower = function () {
+    let pcPower = this.powers[PWR_OPERATE_TOWER];
+    if (!pcPower || pcPower.cooldown > 0) return false;
+    // tower 效果只要 10 ops/100t，但只给有能量的塔维持，空塔不浪费。
+    if ((this.store[RESOURCE_OPS] || 0) < 100) return false;
+    let room = this.mainRoom();
+    if (!room || !room.my || !room.tower || !room.tower.length) return false;
+    let tower = room.tower.find(t => (t.energy || 0) >= 500
+        && (!t.effects || !t.effects.some(e => e.power == PWR_OPERATE_TOWER)));
+    return tower || false;
+};
+
+PowerCreep.prototype.OpTower = function () {
+    let pcPower = this.powers[PWR_OPERATE_TOWER];
+    let tower = this.lastTaskObj();
+    if (!pcPower || pcPower.cooldown > 0 || !tower) {
+        this.popTask().execLastTask();
+        return;
+    }
+    if (!this.pos.inRangeTo(tower, 3)) {
+        this.moveTo(tower, { range: 3 });
+        return;
+    }
+    let code = this.usePower(PWR_OPERATE_TOWER, tower);
+    if (code != ERR_NOT_IN_RANGE) this.popTask().execLastTask();
+};
+
 
 PowerCreep.prototype.needSaveOps = function () {
     let mainRoom = this.mainRoom();

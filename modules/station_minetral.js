@@ -45,6 +45,8 @@ Creep.prototype.harvestMineralKeeper = function () {
             this.addTaskAndExec(UtilsTask.task(container, "goToPop"));
             return;
         }
+        let policy = pro.getMiningPolicy(station.resType);
+        let stock = pro.getMineralStock(this.room, station);
         if (this.ticksToLive % 6 == 0) {
             if (container && container.store.getFreeCapacity(station.resType) > 80) {
                 if (mineral && mineral.amount == 0) {
@@ -55,18 +57,37 @@ Creep.prototype.harvestMineralKeeper = function () {
                     } else {
                         this.suicide();
                     }
-
+                    return;
                 }
+                // 单房存量达到上限，或该矿物改为市场采购：暂停采集。
+                if (!policy.mine || stock >= policy.stop) return;
                 this.harvest(mineral);
             }
         }
     }
-};
-
+}
 
 
 let pro = {
     stationName: "stationMineral",
+    // 单房矿物存量达到此值即暂停采集；必须低于 StrategyMarket 的
+    // autoSellMineral 卖单起点 keep=30000，避免“边采边卖”。
+    mineStop: 20000,
+    // 市场价太低、挖矿 spawn 能量成本不划算的基础矿物改为直接买入。
+    buyOnlyMinerals: [RESOURCE_UTRIUM, RESOURCE_KEANIUM, RESOURCE_ZYNTHIUM],
+    getMiningPolicy(resType) {
+        if (this.buyOnlyMinerals.includes(resType)) return { mine: false, stop: 0 };
+        let custom = Memory.mineralSettings && Memory.mineralSettings[resType];
+        let stop = Number(custom && custom.stop) || this.mineStop;
+        return { mine: true, stop: stop };
+    },
+    getMineralStock(room, data) {
+        if (!data || !data.resType) return 0;
+        let stock = StationCarry.roomMassStoreCnt(room, data.resType);
+        let container = Game.getObjectById(data.container);
+        if (container) stock += container.store[data.resType] || 0;
+        return stock;
+    },
     getHarvesterBodyConfig(energy) {
         let current = 0;
         let cost = BODYPART_COST[WORK] * 4 + BODYPART_COST[MOVE];
@@ -128,8 +149,11 @@ let pro = {
         // 清理死掉的creeps
         data["creeps"] = data["creeps"].filter(e => Game.getObjectById(e))
         let container = Game.getObjectById(data["container"]) // change by an_w
-        // 能采就采：容器与 extractor 在、矿物还有存量即派 keeper，不再因房间
-        // 存量达到 200000 而暂停——多余矿物由 StrategyMarket 挂卖单消化
+        // 采集上限：单房存量（storage+terminal+container）达到 policy.stop 就暂停；
+        // U/K/Z 市场价太低，直接买入，不再为它们消耗 spawn 能量。
+        let policy = pro.getMiningPolicy(data.resType);
+        let stock = pro.getMineralStock(room, data);
+        if (!policy.mine || stock >= policy.stop) return;
         if (container && room.extractor && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
             // log("Mineral" + room.name)
             let harBody = StationMineral.getHarvesterBodyConfig(room.getEnergyCapacityAvailable(room))

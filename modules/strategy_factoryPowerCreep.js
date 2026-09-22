@@ -48,6 +48,8 @@ let pro = {
             else if (obj = pc.needOpExt()) pc.addTask(UtilsTask.task(obj, "OpExt"))
             else if (mainRoom.storage && (obj = pc.needOpStorage(mainRoom.storage))) pc.addTask(UtilsTask.task(obj, "OpStorage"))
             else if (obj = pc.needOpSource()) pc.addTask(UtilsTask.task(obj, "OpSource"))
+            else if (obj = pc.needOpSpawn()) pc.addTask(UtilsTask.task(obj, "OpSpawn"))
+            else if (obj = pc.needOpTower()) pc.addTask(UtilsTask.task(obj, "OpTower"))
             else if (global.StationFactory && mainRoom.factory && pc.powers[PWR_OPERATE_FACTORY] && StationFactory.needPower(mainRoom)) pc.addTask(UtilsTask.task(mainRoom.factory, "OpFactory"))
             else if (obj = pc.needOpPowerSpawn()) pc.addTask(UtilsTask.task(obj, "OpPowerSpawn"))
             // else if (obj = pc.needOpLab()) pc.addTask(UtilsTask.task(obj, "OpLab"))
