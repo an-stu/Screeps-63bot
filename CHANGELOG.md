@@ -1,3 +1,18 @@
+## v0.78.27 — Stop buying 800k energy after E53S21 reached RCL8
+
+### Changed
+
+- E53S21 reached RCL8, so the dedicated 800k energy buffer is no longer
+  needed. `autoBuyLowRclEnergy` now uses the 800k target only while E53S21
+  is still below RCL8; afterwards it returns to the normal 100k target.
+- Rooms with an existing energy buy order are now always included in the
+  management pass, even after their stored energy rises above 50k. This
+  lets the code cancel or shrink legacy oversized orders instead of leaving
+  them on the market to drain credits.
+- Duplicate per-room energy buy orders are cancelled; an order significantly
+  larger than the remaining target gap is cancelled and recreated at the
+  correct size.
+
 ## v0.78.26 — Restore E53S21's dedicated 800k energy buffer
 
 ### Changed
