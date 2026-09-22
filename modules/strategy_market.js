@@ -773,6 +773,11 @@ let pro = {
                 global._resCnt.tick = Game.time;
                 for (let r of sellable) global._resCnt[r] = ManagerRooms.getNormalRoom().map(e => StationCarry.roomMassStoreCnt(e, r)).sum();
             }
+            // autoBuyMineral 也会写 global._resCnt；它只填当次轮到的资源。
+            // 当前资源缺失时单独补算，避免因此跳过本可卖出的矿物。
+            if (global._resCnt[resType] == null) {
+                global._resCnt[resType] = ManagerRooms.getNormalRoom().map(e => StationCarry.roomMassStoreCnt(e, resType)).sum();
+            }
             if ((global._resCnt[resType] || 0) < ManagerRooms.getNormalRoom().length * 6000 + 10000) continue;
             let sellAmount = total - keep;
             // 清理已完全成交的残留订单（remainingAmount=0），防止占位/重复挂单

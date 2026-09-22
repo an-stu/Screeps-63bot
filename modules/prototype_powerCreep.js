@@ -139,8 +139,8 @@ PowerCreep.prototype.OpSpawn = function () {
 PowerCreep.prototype.needOpTower = function () {
     let pcPower = this.powers[PWR_OPERATE_TOWER];
     if (!pcPower || pcPower.cooldown > 0) return false;
-    // tower 效果只要 10 ops/100t，但只给有能量的塔维持，空塔不浪费。
-    if ((this.store[RESOURCE_OPS] || 0) < 100) return false;
+    // tower 效果 10 ops/100t；保留 300 ops 缓冲，避免和工厂 ops 互相挤占。
+    if ((this.store[RESOURCE_OPS] || 0) < 300) return false;
     let room = this.mainRoom();
     if (!room || !room.my || !room.tower || !room.tower.length) return false;
     let tower = room.tower.find(t => (t.energy || 0) >= 500

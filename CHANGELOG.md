@@ -1,3 +1,16 @@
+## v0.78.29 — Ops buffer for tower power and mineral sell cache fix
+
+### Changed
+
+- `PWR_OPERATE_TOWER` now requires at least 300 carried ops instead of
+  100, leaving headroom for factory power on the same PC. P0 (1,642 ops)
+  and P4 (490 ops) can maintain it; P2 (260 ops) stays on factory duty.
+- `autoSellMineral` no longer skips a mineral when `autoBuyMineral` has
+  already written `global._resCnt.tick` for the same tick but only filled
+  the one or two resources it happened to be rotating through. Missing
+  resource counts are computed on demand, so U/K/Z stockpiles can actually
+  be listed for sale.
+
 ## v0.78.28 — Mineral mining caps and idle PC power usage
 
 ### Changed
