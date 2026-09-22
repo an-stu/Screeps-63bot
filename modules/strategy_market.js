@@ -166,6 +166,9 @@ let pro = {
         // 的决策延迟变为 400 tick（组件 200 tick），对以小时计的挂单成交
         // 毫无影响。
         _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
+        // 能量不充裕时进入低采购模式：只保留 energy 买单，商品/中间产物买单全部撤掉，
+        // 等 energy surplus 恢复后由 autoBuyMineral / 工厂链重新按需买入。
+        if (!StationHive.isEnergyAbundant()) pro.pauseCommodityBuys();
         if (Game.shard.name.startsWith("shard")) {
             // pro.autoBuyEnergy();
             if (Game.market.credits > 2000000 && Memory.stats.buyEnergy) {
@@ -189,6 +192,18 @@ let pro = {
         // 利润套利：买入利润率超阈值商品的展开基础原料，供工厂合成后售卖
         if (batch % 2 == 0) pro.autoBuyHighProfitComponents();
         // if((Game.time)%3==0)pro.autoBuyPixel();
+    },
+    /**
+     * 低能量模式：撤销所有非 energy 买单，避免继续采购 lab/工厂商品链。
+     */
+    pauseCommodityBuys() {
+        if (Game._pauseCommodityBuysTick === Game.time) return;
+        Game._pauseCommodityBuysTick = Game.time;
+        _.values(Game.market.orders).forEach(order => {
+            if (order.type == ORDER_BUY && order.remainingAmount && order.resourceType != RESOURCE_ENERGY) {
+                Game.market.cancelOrder(order.id);
+            }
+        });
     },
     /**
      * 利润驱动买入：从商品利润分析中挑出利润率 ≥ threshold 的商品
@@ -596,11 +611,14 @@ let pro = {
             }
         });
 
-        let bar = { "U": "utrium_bar", "L": "lemergium_bar", "K": "keanium_bar", "Z": "zynthium_bar", "X": "purifier", "O": "oxidant", "H": "reductant" }
-        let barResType = bar[resType]
-        let barPrice = maxPrice * 5 + StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
-        let barMaxPrice = StrategyMarket.getAllOrdersCacheList(barResType, ORDER_BUY).filter(e => !myRoomSet.has(e)).map(e => e.price).maxBy(e => e) || 0;
-        if (barMaxPrice < barPrice) StrategyMarket.autoBuySome(barResType, 3000)
+        // 只有能量充裕时才补充 bar / 中间产物；低能量模式只保证基础矿物。
+        if (StationHive.isEnergyAbundant()) {
+            let bar = { "U": "utrium_bar", "L": "lemergium_bar", "K": "keanium_bar", "Z": "zynthium_bar", "X": "purifier", "O": "oxidant", "H": "reductant" }
+            let barResType = bar[resType]
+            let barPrice = maxPrice * 5 + StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
+            let barMaxPrice = StrategyMarket.getAllOrdersCacheList(barResType, ORDER_BUY).filter(e => !myRoomSet.has(e)).map(e => e.price).maxBy(e => e) || 0;
+            if (barMaxPrice < barPrice) StrategyMarket.autoBuySome(barResType, 3000)
+        }
     },
     autoBuyPixel() {
         if (Game.market.credits < MIN_PIXEL_HAS_CR) return;// 如果没什么钱的时候不卖

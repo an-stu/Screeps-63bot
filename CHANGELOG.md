@@ -1,3 +1,23 @@
+## v0.78.31 — Low-purchase mode cancels commodity buy orders
+
+### Changed
+
+- When `StationHive.isEnergyAbundant()` is false, `StrategyMarket.autoBuy`
+  now calls `pauseCommodityBuys`, which cancels every non-energy buy order.
+  Basic mineral/O supply will be recreated by the normal `autoBuyMineral`
+  rotation once energy is abundant again; labs and factories are already
+  paused.
+- `autoBuyMineral` no longer buys bar / intermediate products
+  (`utrium_bar`, `reductant`, `oxidant`, `purifier`, etc.) while energy is
+  not abundant. This removes the main source of the observed commodity-chain
+  buy orders.
+
+### Notes
+
+- The first `autoBuy` pass in low-energy mode cancels the current
+  commodity/lab/factory buy book; later passes maintain only energy and the
+  base mineral reserve.
+
 ## v0.78.30 — Energy-surplus gate for labs, factory and commodity buys
 
 ### Added
