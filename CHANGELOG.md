@@ -1,3 +1,37 @@
+## v0.78.30 — Energy-surplus gate for labs, factory and commodity buys
+
+### Added
+
+- `StationHive.isEnergyAbundant()`: a per-tick global energy-surplus
+  indicator with hysteresis. It averages owned-room `storage + terminal`
+  energy and tracks the lowest room:
+  - enable when average >= 120k **and** every room >= 40k;
+  - disable when average < 80k **or** any room < 20k.
+  State is kept in `Memory.ecoBalance` and cached in
+  `Game._ecoAbundance` for the tick.
+
+### Changed
+
+- `StationLab.needReaction` no longer starts or maintains lab reactions
+  unless the global surplus flag is on **and** the room itself holds at
+  least 100k energy. Existing `reacting` state is cleared when the room
+  drops below the gate, so reactions pause instead of consuming inputs.
+- `StationFactory.needPower`, `noLevel` and `highLevel` are gated by the
+  same flag plus a 100k per-room energy floor. `energyCheck` battery
+  decompression remains available so low-energy rooms can still turn
+  batteries back into energy.
+- `autoBuyHighProfitComponents` stops buying commodity-chain inputs while
+  energy is not abundant.
+- `autoBuyMineral` no longer inflates its purchase line by lab-reaction
+  demand while energy is not abundant; base per-room reserves are still
+  maintained.
+
+### Notes
+
+- Labs, factories and high-profit commodity buying will turn back on
+  automatically once the energy surplus recovers, producing a natural
+  on/off cycle instead of continuously spending credits and energy.
+
 ## v0.78.29 — Ops buffer for tower power and mineral sell cache fix
 
 ### Changed

@@ -65,6 +65,39 @@ let pro = {
         return room.energyAvailable + (room.hiveEnergySending || 0) < room.energyCapacityAvailable;
     },
     /**
+     * 动态能量余量：全局平均能量 + 最低房能量双重滞回。
+     * 只有为 true 时才允许 lab 合成、商品买入和工厂高阶生产。
+     * 当前门槛：平均 >= 120k 且最低房 >= 40k 开启；
+     * 平均 < 80k 或最低房 < 20k 关闭。
+     */
+    isEnergyAbundant() {
+        if (Game._ecoAbundance && Game._ecoAbundance.t === Game.time) return Game._ecoAbundance.on;
+        let rooms = (Game._coreObjects ? Game._coreObjects.rooms : Object.values(Game.rooms))
+            .filter(r => r.controller && r.controller.my);
+        let total = 0, min = Infinity, n = 0, low = 0;
+        for (let room of rooms) {
+            let e = (room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0)
+                + (room.terminal ? (room.terminal.store[RESOURCE_ENERGY] || 0) : 0);
+            total += e; n++;
+            if (e < min) min = e;
+            if (e < 40000) low++;
+        }
+        let avg = n ? total / n : 0;
+        if (min === Infinity) min = 0;
+        let state = Memory.ecoBalance || (Memory.ecoBalance = { abundant: false });
+        if (!state.abundant) {
+            if (avg >= 120000 && min >= 40000) state.abundant = true;
+        } else if (avg < 80000 || min < 20000) {
+            state.abundant = false;
+        }
+        state.t = Game.time;
+        state.avg = Math.round(avg);
+        state.min = Math.round(min);
+        state.low = low;
+        Game._ecoAbundance = { t: Game.time, on: state.abundant, avg: state.avg, min: state.min, low: low };
+        return state.abundant;
+    },
+    /**
      *
      * @param roomName
      * @param level

@@ -452,6 +452,16 @@ let pro={
     },
     needReaction (room){
         let obj =  room.memory[pro.stationName];
+        // 动态平衡：全局能量不充裕，或本房能量低于 10 万时暂停 lab 合成。
+        let roomEnergy = (room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0)
+            + (room.terminal ? (room.terminal.store[RESOURCE_ENERGY] || 0) : 0);
+        if (!StationHive.isEnergyAbundant() || roomEnergy < 100000) {
+            if (obj["reacting"]) {
+                obj["stat"] = "clear";
+                delete obj["reacting"];
+            }
+            return undefined;
+        }
         if(obj["reacting"]) return obj["reacting"];
         // CPU 保护开关：bucket < 8000 时不启动新反应（已有反应照常继续）
         if (Game.cpu.bucket < 8000) return obj["reacting"];

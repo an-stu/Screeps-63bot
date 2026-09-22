@@ -200,6 +200,8 @@ let pro = {
      */
     autoBuyHighProfitComponents() {
         if (!global.StrategyMarketPrice || !global.StrategyFactoryPowerCreep) return;
+        // 动态平衡：能量不充裕时停止追买高利润组件原料，先让能源经济回血。
+        if (!StationHive.isEnergyAbundant()) return;
         let threshold = Number(Memory.marketSettings && Memory.marketSettings.highProfitMargin || 1000);
         let analysis = StrategyMarketPrice.calculateAllCommoditiesProfit();
         if (!analysis || !analysis.commodities) return;
@@ -546,8 +548,11 @@ let pro = {
         // 普通需求：每房 6000 + 1 万缓冲。lab 反应原料额外加需求：
         // 若存在 lab 房间且该矿物是合成原料（BOOST_RES_HOLD 折算），
         // 买入线提高到 lab 需要量，保证反应能持续进行
-        let labRooms = ManagerRooms.getNormalRoom().filter(e => e.memory.stationLab
-            && e.memory.stationLab.centerLabs && e.memory.stationLab.centerLabs.length >= 2);
+        // 只有能量充裕时才把 lab 反应需求计入买入线；否则只保留基础保障量。
+        let labRooms = StationHive.isEnergyAbundant()
+            ? ManagerRooms.getNormalRoom().filter(e => e.memory.stationLab
+                && e.memory.stationLab.centerLabs && e.memory.stationLab.centerLabs.length >= 2)
+            : [];
         let labNeed = 0;
         if (labRooms.length) {
             let hold = global.BOOST_RES_HOLD || {};

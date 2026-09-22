@@ -154,6 +154,8 @@ let pro={
         return false
     },
     needPower (room){
+        // 能量不充裕时不消耗 ops 给工厂上电，等 surplus 恢复再开。
+        if(!StationHive.isEnergyAbundant())return false;
         if(!room.factory||room.factory.cooldown)return false;
         let sm = room.memory[pro.stationName];
         return sm && sm.produce
@@ -188,6 +190,9 @@ let pro={
         return undefined;
     },
     highLevel (room){
+        // 动态平衡：只有全局能量充裕且本房 >=10 万时才做高级商品合成。
+        if(!StationHive.isEnergyAbundant())return undefined;
+        if(StationCarry.roomMassStoreCnt(room,RESOURCE_ENERGY)<100000)return undefined;
         let flag = room.find(FIND_FLAGS,{filter:e=>e.name.indexOf("OPF")>=0}).head();
         if(!flag)return undefined;
         let split = flag.getNameSplit();
@@ -236,6 +241,9 @@ let pro={
 
     },
     noLevel (room){
+        // 动态平衡：只有全局能量充裕且本房 >=10 万时才做基础商品/压缩合成。
+        if(!StationHive.isEnergyAbundant())return undefined;
+        if(StationCarry.roomMassStoreCnt(room,RESOURCE_ENERGY)<100000)return undefined;
         for(let com of BASE_DEPOSITS){
             if (StationCarry.roomMassStoreCnt(room,com) >= BASE_BATCH_SIZE) {
                 let produce = BASE_COMMODITIES_MAP[com];
