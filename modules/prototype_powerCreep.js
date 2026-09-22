@@ -105,20 +105,29 @@ PowerCreep.prototype.OpSource = function () {
     }
 }
 
+PowerCreep.prototype.hasPBInRoom = function (room) {
+    if (!global.ManagerFlags) return false;
+    let flags = ManagerFlags.getFlagsByPrefix("powerBank") || [];
+    if (flags.some(f => f.getRoomName(1) === room.name)) return true;
+    // PB 队伍已经在房内生成/集结时也算，避免旗子短暂不可见时空转。
+    return room.find(FIND_MY_CREEPS).some(c => {
+        let role = c.memory && c.memory.role;
+        return role == "PBer" || role == "PBCarrier" || role == "PBHeal";
+    });
+};
+
 PowerCreep.prototype.needOpSpawn = function () {
     let pcPower = this.powers[PWR_OPERATE_SPAWN];
     if (!pcPower || pcPower.cooldown > 0) return false;
-    // ops 储备阈值：spawn 效果 100 ops/1000t，只有富余的 PC 才使用，避免抢工厂 ops。
-    if ((this.store[RESOURCE_OPS] || 0) < 600) return false;
+    // ops 很贵：只用于 PB 任务房的 spawn，且至少保留 200 ops（两次效果）。
+    if ((this.store[RESOURCE_OPS] || 0) < 200) return false;
     let room = this.mainRoom();
     if (!room || !room.my) return false;
+    if (!this.hasPBInRoom(room)) return false;
     let spawns = (room.spawn || []).filter(s => !s.effects || !s.effects.some(e => e.power == PWR_OPERATE_SPAWN));
     if (!spawns.length) return false;
     let spawning = spawns.filter(s => s.spawning);
-    if (spawning.length) return spawning[0];
-    // 没有正在生成的 spawn 时，只在 hive 缺能（说明接下来要补员）才预铺效果。
-    if (room.energyAvailable < room.energyCapacityAvailable) return spawns[0];
-    return false;
+    return spawning[0] || spawns[0];
 };
 
 PowerCreep.prototype.OpSpawn = function () {
@@ -139,11 +148,13 @@ PowerCreep.prototype.OpSpawn = function () {
 PowerCreep.prototype.needOpTower = function () {
     let pcPower = this.powers[PWR_OPERATE_TOWER];
     if (!pcPower || pcPower.cooldown > 0) return false;
-    // tower 效果 10 ops/100t；保留 300 ops 缓冲，避免和工厂 ops 互相挤占。
-    if ((this.store[RESOURCE_OPS] || 0) < 300) return false;
+    // 只在被攻击时使用；10 ops/100t 也只在战斗期花。
+    if ((this.store[RESOURCE_OPS] || 0) < 100) return false;
     let room = this.mainRoom();
     if (!room || !room.my || !room.tower || !room.tower.length) return false;
-    let tower = room.tower.find(t => (t.energy || 0) >= 500
+    let hostile = room.find(FIND_HOSTILE_CREEPS);
+    if (!hostile.length && room.find(FIND_HOSTILE_POWER_CREEPS).length == 0) return false;
+    let tower = room.tower.find(t => (t.energy || 0) >= 10
         && (!t.effects || !t.effects.some(e => e.power == PWR_OPERATE_TOWER)));
     return tower || false;
 };
@@ -214,7 +225,10 @@ PowerCreep.prototype.roomPowerEnable = function () {
 
 PowerCreep.prototype.needOpPowerSpawn = function () {
     let room = this.mainRoom();
-    if (this.store[RESOURCE_OPS] < 200 || (room.storage.store[RESOURCE_POWER] || 0) < 3000 || room.storage.store[RESOURCE_ENERGY] < (90000)) return false;
+    if (!room || !room.my || !room.storage) return false;
+    // ops 很贵：只在能量充裕且 power/ops 有富余时处理 power。
+    if (!StationHive.isEnergyAbundant()) return false;
+    if (this.store[RESOURCE_OPS] < 400 || (room.storage.store[RESOURCE_POWER] || 0) < 3000 || room.storage.store[RESOURCE_ENERGY] < (90000)) return false;
     if (StationCarry.roomMassStoreCnt(room, RESOURCE_OPS) < 600) return false;
     let pcPower = this.powers[PWR_OPERATE_POWER]//
     if (pcPower && pcPower.cooldown < OP_SOURCE_WAIT_TIME) {

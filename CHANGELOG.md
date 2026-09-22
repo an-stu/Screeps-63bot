@@ -1,3 +1,30 @@
+## v0.78.32 — Spend PC ops only on PB, combat and essential energy
+
+### Changed
+
+- `PWR_OPERATE_SPAWN` is no longer maintained for ordinary hive
+  replenishment. It is only used by a PC whose room has an active
+  `powerBank` mission (or live `PBer` / `PBCarrier` / `PBHeal` creeps)
+  and only while the PC carries at least 200 ops. This keeps the ops
+  reserve for high-value missions.
+- `PWR_OPERATE_TOWER` is now combat-only: it requires hostile creeps
+  (or hostile power creeps) in the room. Peace-time tower repair no
+  longer spends ops.
+- `PWR_OPERATE_POWER` additionally requires the global energy-surplus
+  flag and a 400-ops buffer, so power processing does not compete with
+  cheaper/safer uses.
+- Essential energy powers are unchanged and still take priority:
+  `PWR_REGEN_SOURCE`, `PWR_OPERATE_EXTENSION` and the existing
+  storage-capacity condition. `PWR_OPERATE_FACTORY` remains gated by the
+  energy-surplus and factory-need checks added in v0.78.30.
+
+### Notes
+
+- Already-active spawn/tower effects expire naturally; they will not be
+  re-applied outside PB / combat conditions.
+- `PWR_GENERATE_OPS` still runs whenever the ops store has room, so the
+  ops pool keeps accumulating for these targeted uses.
+
 ## v0.78.31 — Low-purchase mode cancels commodity buy orders
 
 ### Changed
