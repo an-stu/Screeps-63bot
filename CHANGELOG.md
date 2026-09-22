@@ -1,3 +1,12 @@
+## v0.78.33 — Cheaper PB detection for spawn power
+
+### Changed
+
+- `PowerCreep.hasPBInRoom` now checks only the persistent `powerBank`
+  flags instead of also scanning every owned creep in the room on each
+  spawn-power evaluation. This keeps the PB-spawn power logic but removes
+  a repeated `FIND_MY_CREEPS` scan from up to four PCs.
+
 ## v0.78.32 — Spend PC ops only on PB, combat and essential energy
 
 ### Changed

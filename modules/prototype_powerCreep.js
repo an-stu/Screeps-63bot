@@ -107,13 +107,9 @@ PowerCreep.prototype.OpSource = function () {
 
 PowerCreep.prototype.hasPBInRoom = function (room) {
     if (!global.ManagerFlags) return false;
+    // 只看持久化的 powerBank 任务旗标；不再每次 find 全房 creep，省 CPU。
     let flags = ManagerFlags.getFlagsByPrefix("powerBank") || [];
-    if (flags.some(f => f.getRoomName(1) === room.name)) return true;
-    // PB 队伍已经在房内生成/集结时也算，避免旗子短暂不可见时空转。
-    return room.find(FIND_MY_CREEPS).some(c => {
-        let role = c.memory && c.memory.role;
-        return role == "PBer" || role == "PBCarrier" || role == "PBHeal";
-    });
+    return flags.some(f => f.getRoomName(1) === room.name);
 };
 
 PowerCreep.prototype.needOpSpawn = function () {
