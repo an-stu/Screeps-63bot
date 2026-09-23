@@ -292,12 +292,20 @@ let pro = {
             if (sendAble[RESOURCE_ENERGY] === undefined) {
                 let eStorage = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
                 let eTerminal = room.terminal.store[RESOURCE_ENERGY] || 0;
-                if (eTerminal >= 20000 && eStorage + eTerminal > 60000) {
-                    sendAble[RESOURCE_ENERGY] = Math.min(eTerminal, 30000);
+                // 能量不充裕时不做普通房间间搬运（每次 send 都会消耗 transaction energy）。
+                // 只有确实存在 <2 万能量的饥饿房，才从 >4 万缓冲的房紧急援助。
+                let hasStarving = targetRooms.some(e => StationCarry.roomMassStoreCnt(e, RESOURCE_ENERGY) < 20000);
+                let surplus = eStorage + eTerminal - 40000;
+                if (hasStarving && eTerminal >= 20000 && surplus > 0) {
+                    sendAble[RESOURCE_ENERGY] = Math.min(eTerminal, surplus, 30000);
                 }
             }
             for (let targetRoom of targetRooms) {
                 for (let resType in sendAble) {
+                    // 低能量模式：能量只救 <2 万的饥饿房，不再 50k <-> 50k 互相搬运。
+                    if (resType == RESOURCE_ENERGY
+                        && !StationHive.isEnergyAbundant()
+                        && StationCarry.roomMassStoreCnt(targetRoom, RESOURCE_ENERGY) >= 20000) continue;
                     let requireCnt = pro.roomRequireCnt(targetRoom, resType)
                     if (requireCnt) {
                         let amount = Math.min(requireCnt, sendAble[resType])

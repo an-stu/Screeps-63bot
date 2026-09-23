@@ -1,3 +1,22 @@
+## v0.78.35 — Stop energy transaction-cost churn between healthy rooms
+
+### Fixed
+
+- `StrategyResourceBalance` used to create an emergency energy-send buffer
+  whenever a room had terminal >=20k and total >=60k, then send to any room
+  below the 100k requirement. With every room sitting around 40–60k, this
+  caused repeated room-to-room `terminal.send(energy, ...)` calls, each of
+  which burns transaction energy.
+- Low-energy mode now only allows energy sending to genuinely starving
+  rooms (<20k storage+terminal) and only from rooms with a >40k reserve.
+  Healthy rooms are no longer shuffled around just to satisfy the 100k
+  requirement, so transaction energy is preserved.
+
+### Notes
+
+- Normal energy balancing resumes once `StationHive.isEnergyAbundant()`
+  is true.
+
 ## v0.78.34 — Stop duplicate keeper/deposit spawns and stuck factories
 
 ### Fixed
