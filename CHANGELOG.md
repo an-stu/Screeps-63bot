@@ -1,3 +1,31 @@
+## v0.78.34 — Stop duplicate keeper/deposit spawns and stuck factories
+
+### Fixed
+
+- **Energy keepers:** `trySpawnOuterHarKeeper` now counts existing keepers
+  by `headTask().id` before spawning. Spawning creeps are not yet in the
+  source `data.creeps` array, so the old code could queue two or three
+  keepers for the same source during the spawn window. E53S21 and W33N53
+  were each carrying 4 keepers for 2 sources.
+- **Deposit harvesters:** `StrategyDeposits` now includes unregistered
+  spawning `harDeposits` in its active count and recycles registered
+  over-cap harvesters back down to `walkableAroundCnt`. E49S31's deposit
+  had 6 harvesters against a cap of 3.
+- **Factory deadlock:** when energy is not abundant, `StationFactory.exec`
+  now clears `FILL` and unpowered `PRODUCE` states back to `clear`.
+  Previously a high-level `produce` batch waiting for `PWR_OPERATE_FACTORY`
+  could stay stuck forever while the energy-surplus gate kept OP disabled
+  (E41S32 `phlegm` was stuck with `lastCooldown` 24k ticks in the past).
+- **Power spawn energy:** `processPowerSpawn` is paused while the energy
+  surplus flag is off, so power is not turned into ops at 50 energy/tick
+  while the economy is trying to build its energy reserve.
+
+### Notes
+
+- These changes reduce wasted spawn energy from duplicate creeps and stop
+  the last non-essential energy sink (power processing) until energy is
+  abundant again.
+
 ## v0.78.33 — Cheaper PB detection for spawn power
 
 ### Changed

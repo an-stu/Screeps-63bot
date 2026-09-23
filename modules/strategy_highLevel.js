@@ -416,6 +416,8 @@ let pro = {
         room.memory.carryBusy.push(room.creeps("carrier").filter(e => !e.isFree()).reduce((a) => a + 1, 0))
     },
     processPowerSpawn(room) {
+        // 能量不充裕时暂停 power 处理：50 energy/tick 换 ops 的优先级低于保能量。
+        if (!StationHive.isEnergyAbundant()) return;
         if (room.powerSpawn) {
             if (room.powerSpawn.store[RESOURCE_ENERGY] >= 50 && room.powerSpawn.store[RESOURCE_POWER] >= 1) {
                 room.powerSpawn.processPower()

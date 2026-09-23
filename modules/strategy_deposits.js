@@ -212,6 +212,26 @@ let pro = {
                 if (flag.memory.beAttackTime + ATTACKED_SLEEP > Game.time) return;
                 let harTtlCreepCnt = flag.memory.harvesters.map(id => Game.getObjectById(id)).filter(e => e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 150).length
                 let carrierTtlCreepCnt = flag.memory.carriers.map(id => Game.getObjectById(id)).filter(e => e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 300).length
+                // spawning creep 不在 flag.memory 数组里，按 headTask.id 补算，
+                // 避免 3 tick 生一只导致 deposit 爬超编。
+                let harActiveCnt = room.creeps("harDeposits", false).filter(c => {
+                    let t = c.headTask && c.headTask();
+                    return t && t.id == flag.memory.id;
+                }).length;
+                let carrierActiveCnt = room.creeps("carrierDeposits", false).filter(c => {
+                    let t = c.headTask && c.headTask();
+                    return t && t.id == flag.memory.id;
+                }).length;
+                harTtlCreepCnt = Math.max(harTtlCreepCnt, harActiveCnt);
+                carrierTtlCreepCnt = Math.max(carrierTtlCreepCnt, carrierActiveCnt);
+                // 已经存在的超编 harDeposits 直接淘汰，保留 TTL 最长的那些。
+                if (harActiveCnt > flag.memory.walkableAroundCnt) {
+                    let extraHars = room.creeps("harDeposits", false).filter(c => {
+                        let t = c.headTask && c.headTask();
+                        return t && t.id == flag.memory.id && !c.spawning;
+                    }).sort((a, b) => (a.ticksToLive || 0) - (b.ticksToLive || 0));
+                    extraHars.slice(0, harActiveCnt - flag.memory.walkableAroundCnt).forEach(c => c.suicide());
+                }
                 if (harTtlCreepCnt < flag.memory.walkableAroundCnt && (carrierTtlCreepCnt || harTtlCreepCnt < 2)) {
                     let needBoost = flag.memory.lastCooldown > BOOST_COOL_DOWN // 超过一定值后才boost，避免浪费资源
                         && !flag.memory.harvesters.map(id => Game.getObjectById(id)).find(e => e.memory.isBoost && (e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 150))

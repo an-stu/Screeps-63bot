@@ -1304,6 +1304,13 @@ let pro = {
             if (!data || typeof data != "object" || !data["id"]) return;
             // 净化被污染的 spawnTime（重复 concat 造成的极端负数会让生爬条件恒真）
             if (!data["spawnTime"] || data["spawnTime"] < -1000 || data["spawnTime"] > Game.time) data["spawnTime"] = Game.time;
+            // 防止 spawn 完成/注册前重复补员：spawning creep 也有 memory.tasks，
+            // 直接按目标 source id 计数，避免同一矿点一次生 2~3 只 keeper。
+            let existingKeepers = spawnRoom.creeps("harvestEnergyKeeper", false).filter(e => {
+                let t = e.headTask && e.headTask();
+                return t && t.id == data.id;
+            }).length;
+            if (existingKeepers > 0) return;
             if (Game.time - data["spawnTime"] > 1500 || (data["creeps"] || []).length == 0) {
                 // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。
                 // 按当前可用能量收缩体型，至少保证 550 能量的基础 keeper，

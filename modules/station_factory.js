@@ -299,6 +299,16 @@ let pro={
         // HelperVisual.showText(room.factory,sm.stat)
         if(!sm.lastCooldown)sm.lastCooldown = Game.time
         if(!sm.stat) sm.stat = STAT_CLEAR
+        // 能量不充裕时，把尚未真正开始的 FILL / 未上电 PRODUCE 退回 clear，
+        // 否则会卡在 produce + !powered 状态，等待永远不会来的 OP。
+        if (!StationHive.isEnergyAbundant()
+            && (sm.stat == STAT_FILL || (sm.stat == STAT_PRODUCE && !sm.powered))) {
+            sm.stat = STAT_CLEAR;
+            sm.produce = undefined;
+            sm.powered = false;
+            sm.lastCooldown = Game.time;
+            return;
+        }
         if (sm.lastCooldown<=Game.time) {
             // log(pro.generatorFillTask(room))
             // HelperVisual.showText(room.factory,sm.stat)
