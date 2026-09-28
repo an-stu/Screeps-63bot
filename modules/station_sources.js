@@ -1,5 +1,14 @@
 
-
+/**
+ * 外矿防守爬的轮换参数。
+ *
+ * REPLACE_TTL：最老的防守爬剩余寿命低于这个值时，派一只接替，保证防守不断档。
+ * 需要覆盖「生成时间（50 部件约 150 tick）+ boost 搬运（约 50~100 tick）+ 行军到外矿房（约 50 tick）」，
+ * 取 250 比较稳妥。
+ * TARGET_CNT：中间九房（Source Keeper / invader 房）的常驻防守爬数量。轮换时会有两只同时在场。
+ */
+const OUTER_DEFENSE_REPLACE_TTL = 250;
+const OUTER_DEFENSE_TARGET_CNT = 2;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -389,11 +398,17 @@ Creep.prototype.outerDefense = function () {
         }
         let em = Game.getObjectById(this.memory.targetId);
         if (em) {
-            if (this.attack(em) == ERR_NOT_IN_RANGE) {
-                this.moveTo(em)
-                this.heal(this)
-            }
-            this.rangedAttack(em)
+            // Creep.attack 只有相邻（range 1）才返回 OK，够不着才返回
+            // ERR_NOT_IN_RANGE 需要走过去。
+            //
+            // 原来的写法把 heal(this) 放在 ERR_NOT_IN_RANGE 分支里：于是
+            // 「贴身近战」时 attack 返回 OK、不进分支，**反而完全不自愈**，
+            // 一边硬吃 keeper 的近战+远程（约 400/发）一边不回血，防守爬
+            // 必然被打死，然后被补员逻辑再生成一只 —— 死循环。
+            // 自愈必须无条件执行；autoHeal 内部已做「满血且附近无敌人就跳过」。
+            if (this.attack(em) == ERR_NOT_IN_RANGE) this.moveTo(em);
+            if (this.pos.inRangeTo(em, 3)) this.rangedAttack(em);
+            this.heal(this);
             return;
         }
         // let injuredCreep =  this.findC(FIND_MY_CREEPS).filter(e=>e.hits!=e.hitsMax).head();
@@ -785,9 +800,68 @@ let pro = {
         }
         return ManagerCreeps.calcBodyPart({ [WORK]: 2, [CARRY]: (num < 17 ? num * 2 : num * 2 - 1) - 2, [MOVE]: num });
     },
-    getOuterHarDefenseBodyConfig(isInvader) {
-        if (isInvader) return ManagerCreeps.calcBodyPart({ [MOVE]: 17, [ATTACK]: 22, [HEAL]: 11 });
-        return ManagerCreeps.calcBodyPart({ [ATTACK]: 9, [MOVE]: 10, [HEAL]: 1 });
+    /**
+     * 外矿防守爬的体型与 boost 需求。
+     *
+     * 原来只有两套写死的体型（invader 房 50 部件 ATTACK 型、普通房 20 部件），
+     * 和房间里实际驻守的 NPC 强度完全无关。中间九房（Source Keeper 房）常驻的
+     * keeper 是 tough17 / attack10 / ranged_attack10 / move13 的满编 50 部件单位，
+     * 两只同时贴上来约 800 伤害/发，而固定体型只带 11 个 HEAL（132 奶/发）——
+     * 防守爬进去就被打死，然后又被无脑补员，形成「生一只、死一只」的循环。
+     *
+     * 现在按房间里的实际敌情估算：
+     *   ATTACK 数 = 打穿对面「能奶起来的最大有效血量」所需的量（ATTACK 部件 30 伤）
+     *   HEAL 数   = 扛住入射伤害所需的量（带上 XGHO2 后只有 30% 真正掉血，HEAL 部件 12 奶）
+     *
+     * 没有视野、或房间里没有活体敌人时退回原来的固定体型，行为不变。
+     *
+     * @return {{body: string[], boostRes: Object}}
+     */
+    getOuterHarDefenseBodyConfig(isInvader, harRoom) {
+        const bigBody = () => ({body: ManagerCreeps.calcBodyPart({[MOVE]: 17, [ATTACK]: 22, [HEAL]: 11}), boostRes: {}});
+        const smallBody = () => ({body: ManagerCreeps.calcBodyPart({[ATTACK]: 9, [MOVE]: 10, [HEAL]: 1}), boostRes: {}});
+        if (!harRoom) return isInvader ? bigBody() : smallBody();
+
+        let hostiles = harRoom.getHostileCreeps();
+        if (!hostiles.length) {
+            // 没有活体敌人：只有 lair / invaderCore 时用能拆掉它的配置即可
+            let hasNest = harRoom.find(FIND_HOSTILE_STRUCTURES)
+                .some(e => e.structureType == STRUCTURE_KEEPER_LAIR || e.structureType == STRUCTURE_INVADER_CORE);
+            if (!hasNest) return {body: ManagerCreeps.calcBodyPart({[ATTACK]: 5, [MOVE]: 6, [HEAL]: 1}), boostRes: {}};
+            return isInvader ? bigBody() : smallBody();
+        }
+
+        let sumDamage = hostiles.map(e => e.possibleDamage(false, 2)).sum();      // 距离 2 时的全部伤害
+        let sumHeal = hostiles.map(e => e.possibleHealDamage(1, false)).sum();    // 对面全部奶量
+        let maxTough = hostiles.map(e => e.possibleToughBeHitsDamage(sumHeal)).maxBy(e => e) || 0;
+        let attackCnt = Math.max(1, Math.ceil(maxTough / 30) + Math.ceil(sumDamage * 0.3 / 30));
+        let healCnt = Math.max(1, Math.ceil(sumDamage * 0.3 / 12));
+        let moveCnt = Math.ceil((attackCnt + healCnt) / 2);
+        let boostRes = {};
+
+        // 装不进 50 部件就上 boost：先 boost 奶（1 部件顶 4），再 boost 攻击。
+        // 与 getDefenseHighWayData 的思路一致。
+        if (attackCnt + healCnt + moveCnt > 50) {
+            let boostedHeal = Math.ceil(healCnt / 4);
+            let boostedAttack = Math.ceil(attackCnt / 4);
+            let boostedMove = Math.ceil((boostedAttack + boostedHeal) / 2);
+            if (boostedAttack + boostedHeal + boostedMove <= 50) {
+                boostRes[BOOST_RES["heal"][2]] = boostedHeal * 30;
+                boostRes[BOOST_RES["attack"][2]] = boostedAttack * 30;
+                boostRes[BOOST_RES["damage"][2]] = boostedAttack * 30;
+                let body = ManagerCreeps.calcBodyPart([
+                    [TOUGH, boostedAttack], [ATTACK, boostedAttack], [HEAL, boostedHeal], [MOVE, boostedMove]
+                ]);
+                return {body: body, boostRes: boostRes};
+            }
+            // 还是装不下：按比例压到 50 部件，宁可弱一点也别生成不出来的配置
+            let scale = 50 / (attackCnt + healCnt + moveCnt);
+            attackCnt = Math.max(1, Math.floor(attackCnt * scale));
+            healCnt = Math.max(1, Math.floor(healCnt * scale));
+            moveCnt = Math.max(1, Math.ceil((attackCnt + healCnt) / 2));
+            if (attackCnt + healCnt + moveCnt > 50) attackCnt = Math.max(1, 50 - healCnt - moveCnt);
+        }
+        return {body: ManagerCreeps.calcBodyPart([[ATTACK, attackCnt], [HEAL, healCnt], [MOVE, moveCnt]]), boostRes: boostRes};
     },
     generatorHarTask(data) {
         return [
@@ -1423,33 +1497,70 @@ let pro = {
             }
         })
     },
+    /**
+     * 外矿防守爬的派发与轮换。
+     *
+     * 原来的轮换条件有 bug：
+     *   if (defenser && ttl>170 && !hasSendSpawn && length>1) return;
+     * 一旦 hasSendSpawn 被置成 true，`!hasSendSpawn` 恒为 false → 条件恒假 →
+     * 每 6 tick（本文件的 exec 频率）补生一只防守爬。加上防守爬进去就被 keeper
+     * 打死（体型与敌情脱节 + 贴身不自愈，见 getOuterHarDefenseBodyConfig 与
+     * outerDefense 的注释），就成了「生一只、死一只」的无限补员。
+     *
+     * 现在的规则：
+     *   - 一只都没有 → 生
+     *   - 最老的快死了（ttl <= OUTER_DEFENSE_REPLACE_TTL）且还没派过接替 → 生一只接替，并打标记（**一次只派一只**）
+     *   - 数量不足常驻目标（中间九房 2 只）→ 生
+     *   - 普通外矿房：只有真的看到敌人 / lair / invaderCore 才派，且已有就不派
+     */
     trySpawnOuterDefenser(roomName, spawnRoom, isInvader) {
         if (spawnRoom.spawnFailure) return null;
-        let harRoom = Game.rooms[roomName.name || roomName]
-        let sourceMemory = Memory.rooms[roomName.name || roomName];
+        let targetName = roomName.name || roomName;
+        let harRoom = Game.rooms[targetName];
+        let sourceMemory = Memory.rooms[targetName];
         let data = sourceMemory && sourceMemory[pro.stationName]
             && _.values(sourceMemory[pro.stationName]).find(e => e && e.id);
         if (!data) return;
+
+        // 已在场（含正在出生的）的防守爬。Game.creeps 按名字顺序，head() 即最老的一只。
+        let defensers = spawnRoom.creeps("outerHarvestDefenser", false).filter(e => {
+            let t = e.headTask && e.headTask();
+            return t && t.roomName == targetName;
+        });
+        let front = defensers.head();
+
+        let needSpawn = false;
+        let replacingFront = false;
         if (isInvader) {
-            let defensers = spawnRoom.creeps("outerHarvestDefenser", false).filter(e => e.headTask().roomName == (roomName.name || roomName))
-            let defenser = defensers.head()
-            if (defenser && defenser.ticksToLive > 170 && !defenser.memory.hasSendSpawn && defensers.length > 1) return;
-            let carrierBody = pro.getOuterHarDefenseBodyConfig(isInvader)
-            let tasks = pro.generatorOuterHarDefenseTask(data)
-            StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestDefenser", tasks)
-            if (defenser) defenser.memory.hasSendSpawn = true
-            return;
+            if (!front) needSpawn = true;
+            else if (front.ticksToLive <= OUTER_DEFENSE_REPLACE_TTL) {
+                // 派接替：hasSendSpawn 保证对同一只只派一次
+                if (!front.memory.hasSendSpawn) {
+                    needSpawn = true;
+                    replacingFront = true;
+                }
+            }
+            else if (defensers.length < OUTER_DEFENSE_TARGET_CNT) needSpawn = true;
+        } else {
+            // 普通外矿：确认有威胁才派
+            if (!harRoom) return;
+            let em = harRoom.find(FIND_HOSTILE_CREEPS).head();
+            if (!em) em = harRoom.find(FIND_HOSTILE_STRUCTURES)
+                .filter(e => e.structureType == STRUCTURE_INVADER_CORE || e.structureType == STRUCTURE_KEEPER_LAIR).head();
+            if (em && !front) needSpawn = true;
         }
-        if (!harRoom) return;
-        let em = harRoom.find(FIND_HOSTILE_CREEPS).head();
-        if (!em) em = harRoom.find(FIND_HOSTILE_STRUCTURES).filter(e => e.structureType == STRUCTURE_INVADER_CORE || e.structureType == STRUCTURE_KEEPER_LAIR).head();
-        if (em) {
-            let defenser = spawnRoom.creeps("outerHarvestDefenser", false).filter(e => e.headTask().roomName == harRoom.name).head()
-            if (defenser) return;
-            let carrierBody = pro.getOuterHarDefenseBodyConfig(isInvader)
-            let tasks = pro.generatorOuterHarDefenseTask(data)
-            StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestDefenser", tasks)
+        if (!needSpawn) return;
+
+        // 体型按房间实际敌情算（没有视野时退回固定体型），需要 boost 时先确认 lab 有货
+        let cfg = pro.getOuterHarDefenseBodyConfig(isInvader, harRoom);
+        let tasks = pro.generatorOuterHarDefenseTask(data);
+        if (cfg.boostRes && _.keys(cfg.boostRes).length && StationLab.boostAble(spawnRoom, cfg.boostRes)) {
+            tasks.push(StationLab.generatorBoostResTask(cfg.boostRes).head());
         }
+        let name = StationHive.trySpawn(spawnRoom, spawnRoom.name, cfg.body, "outerHarvestDefenser", tasks);
+        // 只有「为了接替最老那只而生的」才打标记，避免标记落到别的爬身上
+        if (replacingFront && name) front.memory.hasSendSpawn = true;
+        return name;
     },
     powerSource(room, source, level) {
         let tmp = room.memory[pro.stationName] = room.memory[pro.stationName] || {};

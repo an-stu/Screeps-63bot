@@ -507,15 +507,26 @@ let pro = {
         });
     },
     /**
-     * deposit 产出（silicon/metal/biomass/mist）超过保留量时自动挂卖单。
-     * 这些原料优先供给工厂合成高级商品，因此只卖 surplus，保留 3k/房。
+     * deposit 基础品（silicon / metal / biomass / mist）的溢出处理。
+     *
+     * 这四种是 **0 级基础原料**，是所有高级商品的合成起点 —— 卖掉它们等于
+     * 把整条商品链断掉，而且它们本身单价很低（biomass 之类利润极薄）。
+     * 原来这里 keep 只留 3000，结果只要有 surplus 就挂卖单，Biomass 就是
+     * 这么被卖掉的（E41S23 的 deposit 房 E40S22 产出后直接挂单卖）。
+     *
+     * 现在默认留 10 万：正常生产下工厂自己就消耗掉了，不会触发；只有在工厂
+     * 等级不足、产出远超消耗、快要爆仓时才作为泄压卖出。
+     * 可用 Memory.marketSettings.baseDepositKeep 调整（设为 -1 表示永不卖）。
      */
     autoSellDeposit(room) {
         if (!room.storage || !room.terminal || !room.terminal.my) return;
         if (!marketSlowPass(room)) return;
+        let keep = Number(Memory.marketSettings && Memory.marketSettings.baseDepositKeep !== undefined
+            ? Memory.marketSettings.baseDepositKeep
+            : 100000);
+        if (keep < 0) return;  // 永不卖
         for (let resType of [RESOURCE_SILICON, RESOURCE_METAL, RESOURCE_BIOMASS, RESOURCE_MIST]) {
             let total = (room.storage.store[resType] || 0) + (room.terminal.store[resType] || 0);
-            let keep = 3000;
             let sellAmount = total - keep;
             if (sellAmount < 100) continue;
             let hasOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
@@ -1184,8 +1195,15 @@ pro.getBestCommoditiesToSell = function(showDetail = false) {
         // 按利润率降序排序
         seriesItems.sort((a, b) => b.profitMargin - a.profitMargin);
         
-        // 取前两种（如果有利润的话）
-        let topTwo = seriesItems.filter(item => item.level > 0 && item.profit > 0 && item.profitMargin >= minimumMargin).slice(0, 2);
+        // 取前两种（如果有利润的话）。
+        //
+        // 商品等级门槛：只卖三级以上（含）的高级商品。一级/二级商品利润太薄
+        // （例如 tissue 是 level 2），卖掉它们还不如留着继续合成更高级的商品。
+        // 原来用 `item.level > 0`，等于把 level 1~2 的低级商品也放进卖价表，
+        // 于是 deal 卖出会卖掉这些本该继续合成的低级品。
+        // 可用 Memory.marketSettings.minSellCommodityLevel 调（默认 3）。
+        let minLevel = Number(Memory.marketSettings && Memory.marketSettings.minSellCommodityLevel || 3);
+        let topTwo = seriesItems.filter(item => item.level >= minLevel && item.profit > 0 && item.profitMargin >= minimumMargin).slice(0, 2);
         
         // 添加到最佳商品列表
         topTwo.forEach(item => {

@@ -1,3 +1,54 @@
+## v0.78.39 — Fix remote-mining defenders healing and stop selling low-tier commodities
+
+### Fixed
+
+- **Remote defenders stopped healing themselves while in melee range.**
+  `outerDefense` had `heal(this)` inside the `attack(...) == ERR_NOT_IN_RANGE`
+  branch. `Creep.attack()` only returns OK at range 1, so the moment the defender
+  closed into melee it stopped entering that branch and **stopped healing at
+  all** — while eating a Source Keeper's melee + ranged output (about 400/tick
+  for the tough17/attack10/ranged_attack10/move13 keepers in the sector's centre
+  nine rooms). Combined with the undersized fixed body below, defenders died on
+  arrival and were replaced forever. `heal(this)` is now unconditional, and
+  `rangedAttack` is only called within range 3.
+- **Defender bodies no longer ignore the actual garrison.**
+  `getOuterHarDefenseBodyConfig` returns body + boost requirement sized from the
+  room's live hostile creeps (damage at range 2, their heal, and the toughest
+  unit that heal can sustain). Falls back to the previous fixed bodies when
+  there is no vision or no live hostiles, so the unobserved path is unchanged.
+  When the unboosted body would not fit in 50 parts it asks for boost (heal
+  first, then attack) — matching the approach already used by
+  `getDefenseHighWayData`.
+- **Defender rotation could spawn an extra creep every 6 ticks.**
+  The guard read `if (defenser && ttl>170 && !hasSendSpawn && length>1) return;`
+  — once `hasSendSpawn` was set, `!hasSendSpawn` was permanently false, so the
+  condition never held and a defender was queued on every pass. Rewritten with
+  an explicit reason: spawn when none exists, when the oldest is within
+  `OUTER_DEFENSE_REPLACE_TTL` (250 ticks, enough for spawn + boost hauling +
+  march) **and** no replacement has been requested yet, or when the standing
+  count is below `OUTER_DEFENSE_TARGET_CNT` (2 for keeper/invader rooms). Plain
+  remote rooms still only spawn on a confirmed hostile / lair / core.
+- **Low-tier commodities are no longer sold.**
+  Two separate problems, both fixed:
+  - `autoSellDeposit` sold silicon / metal / biomass / mist — the level 0 base
+    deposits that every higher commodity is synthesised from. Its reserve was
+    only 3000, so any surplus was listed for sale; Biomass from the E41S23
+    deposit room (E40S22) was sold this way. The reserve is now 100000
+    (`Memory.marketSettings.baseDepositKeep`, -1 disables selling entirely):
+    normal production is consumed by the factory, and it only acts as a
+    blow-off valve when output hugely exceeds what the factory can take.
+  - `getBestCommoditiesToSell` accepted `item.level > 0`, so level 1 and 2
+    goods (for example tissue, level 2) entered the sell price table and were
+    sold by the instant-deal sell path even though they are worth more when
+    synthesised further up. Now gated at level >= 3
+    (`Memory.marketSettings.minSellCommodityLevel`).
+
+### Notes
+
+- Verified in game that no Biomass sell order remains (the earlier one had already
+  been filled and cleared by the zero-remaining cleanup), and the remaining orders
+  are the intended high-tier / energy ones.
+
 ## v0.78.38 — Stop the tower injured-creep scan in rooms with no hostile contact
 
 ### Fixed
