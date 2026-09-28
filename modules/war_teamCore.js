@@ -722,8 +722,13 @@ let action = {
         return !flag._creeps.find(e=>e.getPartCnt(WORK)+e.getPartCnt(ATTACK))
     },
     clearPathCache(){
-        if(Game.__clearPathCache) return;
-        Game.__clearPathCache = true
+        // 原来是 `if(Game.__clearPathCache) return; Game.__clearPathCache = true`：
+        // Game 上的属性每 tick 由引擎重建，但整个仓库都没有复位这个标记，所以
+        // 本函数在全局生命周期里只会真正执行一次，之后 teamPathCache 只增不减
+        // （一次性旗名 f4team_<time>_<rand> 会一直堆积）。
+        // 改成按 tick 门闩后每 tick 最多清理一次。
+        if(Game._clearPathCacheTick === Game.time) return;
+        Game._clearPathCacheTick = Game.time
         for(let flagName in teamPathCache){
             if(!Game.flags[flagName]){
                 delete teamPathCache[flagName]

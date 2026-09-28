@@ -101,6 +101,10 @@ let pro={
         // let t1 = Game.cpu.getUsed()
         ManagerFlags.getFlagsByPrefix("defense").forEach(flag=>{
             let room = flag.room
+            // flag.room 在房间不可见时是 undefined。原写法直接 room.hashCode() 会抛
+            // TypeError，被 catchError 吞掉后**其余防御旗子本 tick 全部不再处理**，
+            // 而这个旗子也永远清不掉（hasAnyPrefix 恒为 true，每 tick 白发 CPU）。
+            if(!room) return flag.remove();
             if((Game.time+room.hashCode())%3!=0)return;// 和tick同步，没创建的时候不计算，省点cpu
 
             if(!flag.memory.lastSpawnTime)flag.memory.lastSpawnTime=Game.time-290;
@@ -127,28 +131,47 @@ let pro={
             // flag.
         })
         ManagerFlags.getFlagsByPrefix("defenseAH").forEach(flag=>{
-            if(!flag.memory.attacker){
+            // 清掉已阵亡成员的名字。原实现只写不删：`!flag.memory.attacker` 判断的是
+            // 「存过的 id」而不是「活着的爬」，于是死掉的那一半永远补不回来；而删除
+            // flag 只在两人同时阵亡时发生，只死一个就留下一个僵死 flag，占住
+            // room.flags("defenseAH").length<2 的位置，后续防御队再也生不出来。
+            if(flag.memory.attacker && !Game.getObjectById(flag.memory.attacker)) delete flag.memory.attacker;
+            if(flag.memory.healer && !Game.getObjectById(flag.memory.healer)) delete flag.memory.healer;
+
+            let room = flag.room;
+            if(!room){ flag.remove(); return; }
+            // 威胁消失后收摊，否则开了补员就会无限重生
+            if(!room.getHostileCreeps().length){
+                flag.memory.noHostileSince = flag.memory.noHostileSince || Game.time;
+                if(Game.time - flag.memory.noHostileSince > 300){ flag.remove(); return; }
+            }else{
+                delete flag.memory.noHostileSince;
+            }
+
+            // 刚出生、register 还没跑到的空窗期：冷却窗口防止重复补员。
+            // 注意不能 return，否则下面的伤害/目标计算会被一起跳过。
+            let canSpawn = (flag.memory.lastSpawnTime||0)+10 <= Game.time;
+            let spawned = false;
+            if(canSpawn && !flag.memory.attacker){
                 let body = pro.getFullBoostAttack ();
                 let tasks=[
                     UtilsTask.taskData("doNothing","registerDefenseAttacker",{flagName:flag.name}),
                     UtilsTask.taskData("defenseAttacker","registerFlag1t",{flagName:flag.name}),
                     StationLab.generatorBoostFightBodyTask(body,2).head()
                 ]
-                StationHive.trySpawn(flag.room,flag.room.name,body,"team",tasks)
+                spawned = !!StationHive.trySpawn(room,room.name,body,"team",tasks) || spawned;
             }
-            if(!flag.memory.healer){
+            if(canSpawn && !flag.memory.healer){
                 let body = pro.getFullBoostHeal();
                 let tasks=[
                     UtilsTask.taskData("doNothing","registerDefenseHealer",{flagName:flag.name}),
                     UtilsTask.taskData("defenseHealer","registerFlag1t",{id:flag.name}),
                     StationLab.generatorBoostFightBodyTask(body,2).head()
                 ]
-                StationHive.trySpawn(flag.room,flag.room.name,body,"team",tasks)
+                spawned = !!StationHive.trySpawn(room,room.name,body,"team",tasks) || spawned;
             }
-            if(flag.memory.attacker&&!Game.getObjectById(flag.memory.attacker)
-                &&flag.memory.healer&&!Game.getObjectById(flag.memory.healer)){
-                flag.remove()
-            }
+            if(spawned) flag.memory.lastSpawnTime = Game.time;
+
             if(flag._creeps && flag._creeps.length){
                 ManageTeam.execCalDamage(flag);
                 ManageTeam.execCalTarget(flag);

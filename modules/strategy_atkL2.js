@@ -152,15 +152,17 @@ let pro = {
         return pro.healBody_boost
     },
     execSpawn (flag) {
-        if(flag.memory.healerName&&flag.memory.attackerName){
-            let t=0;
-            if(!Game.creeps[flag.memory.attackerName]&&flag.memory.attackerName)t++
-            if(!Game.creeps[flag.memory.healerName]&&flag.memory.healerName)t++
-            if(t==2){
-                // delete flag.memory.attackerName
-                // delete flag.memory.healerName
-                flag.remove()
-            }
+        // 死亡清理：原实现只读不删。某一只阵亡后 `!flag.memory.xxxName`
+        // 仍为 false，函数会一直走 t==1 的分支直接 return —— 缺员永远补不回来，
+        // flag 也永远删不掉（t 到不了 2）。
+        if(flag.memory.attackerName && !Game.creeps[flag.memory.attackerName]) delete flag.memory.attackerName;
+        if(flag.memory.healerName && !Game.creeps[flag.memory.healerName]) delete flag.memory.healerName;
+        // 刚出生、还没跑到 register 的爬会有一小段空窗期，用冷却窗口杜绝重复补员
+        if((flag.memory.lastSpawnTime||0)+10>Game.time) return;
+        let wasFull = !!flag.memory.wasFull;
+        if(wasFull && !flag.memory.attackerName && !flag.memory.healerName){
+            // 两只都阵亡：本小队结束
+            flag.remove();
             return;
         }
         let lev=8
@@ -169,32 +171,29 @@ let pro = {
             log("no active able room");
             return;
         }
-        if(spawnRoom&&spawnRoom.length<=8){
-            // if(!flag.memory.healerName) {//生一个 治疗
-            //     let task =  [UtilsTask.taskFlag(flag,"heal2","registerHeal2")]
-            //     StationHive.trySpawn(spawnRoom,"global",pro.getHealBody(spawnRoom),"heal2",task)
-            // }
-            // if(!flag.memory.attackerName) {//生一个 近战
-            //     let task =  [UtilsTask.taskFlag(flag,"attack2","registerAtk2")]
-            //     StationHive.trySpawn(spawnRoom,"global",pro.getAttackBody(spawnRoom),"atk2",task)
-            // }
-
-            // boost版本
-            if(!flag.memory.healerName) {//生一个 治疗
-                let task =  [
-                    UtilsTask.taskFlag(flag,"heal2","registerHeal2"),
-                    StationLab.generatorBoostResTask(pro.healBoostRes).head()
-                ]
-                StationHive.trySpawn(spawnRoom,"global",pro.getHealBody(spawnRoom),"heal2",task)
-            }
-            if(!flag.memory.attackerName) {//生一个 近战
-                let task =  [
-                    UtilsTask.taskFlag(flag,"attack2","registerAtk2"),
-                    StationLab.generatorBoostResTask(pro.attackBoostRes).head()
-                ]
-                StationHive.trySpawn(spawnRoom,"global",pro.getAttackBody(spawnRoom),"atk2",task)
-            }
-
+        // 这里原本是 `if(spawnRoom && spawnRoom.length<=8)`。
+        // getClosestSpawnRoom 返回的是 Room 对象（station_hive.js:108-137），
+        // Room 上没有 length 属性 -> undefined<=8 恒为 false -> 整段生成逻辑
+        // 从未执行，l2 小队一次兵都没出过（线上 Game.rooms.W33N53.length 实测
+        // 为 undefined，(undefined<=8)===false）。
+        let spawned = false;
+        if(!flag.memory.healerName){//生一个 治疗（boost 版）
+            let task =  [
+                UtilsTask.taskFlag(flag,"heal2","registerHeal2"),
+                StationLab.generatorBoostResTask(pro.healBoostRes).head()
+            ]
+            spawned = !!StationHive.trySpawn(spawnRoom,"global",pro.getHealBody(spawnRoom),"heal2",task) || spawned
+        }
+        if(!flag.memory.attackerName){//生一个 近战（boost 版）
+            let task =  [
+                UtilsTask.taskFlag(flag,"attack2","registerAtk2"),
+                StationLab.generatorBoostResTask(pro.attackBoostRes).head()
+            ]
+            spawned = !!StationHive.trySpawn(spawnRoom,"global",pro.getAttackBody(spawnRoom),"atk2",task) || spawned
+        }
+        if(spawned){
+            flag.memory.lastSpawnTime = Game.time;
+            flag.memory.wasFull = true;
         }
     },
     exec () {

@@ -56,7 +56,10 @@ let funChangePos = (flag,creep)=>{
     else if(roundRoom[creep.memory.lastRoomIndex]==creep.room.name){
         creep.memory.lastRoomTick+=1;
         if(creep.memory.lastRoomTick>50){
-            creep.memory.lastRoomIndex+=1;
+            // roundRoom 只有 14 项，下标必须取模；原来一直自增，越界后
+            // roundRoom[i] 为 undefined，new RoomPosition(25,25,undefined) 抛错，
+            // 环形巡游直接停摆。
+            creep.memory.lastRoomIndex=(creep.memory.lastRoomIndex+1)%roundRoom.length;
             flag.setPositionNextTick(new RoomPosition(25,25,roundRoom[creep.memory.lastRoomIndex]))
         }
     }else {
