@@ -171,11 +171,18 @@ let pro = {
         //     —— 外矿矿物采集（StationSources.trySpawnOuterMineralKeeper）依赖这份
         //     数据来定位 mineral 与 container，删了就永远采不到外矿的 H / X / L。
         //
-        // 现在的规则：**有没有 extractor** 才是唯一判据。有 extractor 就建立/保留
-        // 记忆（不论是我方房还是我们在外矿建的），没有 extractor 或没有 mineral 才清理。
-        // Memory.rooms[room.name] 可能不存在，直接下标删除会抛异常，所以先取再判空。
+        // 现在的规则：
+        //   1) 没有 extractor、或没有 mineral → 清理，避免为「采不到矿」的房间留下记忆
+        //      （我上次修的就是这个：己方房没 extractor 时 trySpawnHarKeeper 会误派
+        //      harvestMineralKeeper）。
+        //   2) 外矿房（!room.my）必须**挂了 har 旗**才记录。否则别人家的 extractor
+        //      （observer 扫到的敌房）也会留下一条我们永远用不上的 stationMineral，
+        //      既不采也白占 Memory —— 这是上一版 `!room.my || !room.extractor` 之外
+        //      单独要补的边界：外矿物采集只认 har 旗标出来的目标房。
+        //   Memory.rooms[room.name] 可能不存在，直接下标删除会抛异常，所以先取再判空。
         let mineral = room.mineral;
-        if (!room.extractor || !mineral) {
+        let flagged = !room.my && room.flags && room.flags("har").length > 0;
+        if (!room.extractor || !mineral || (!room.my && !flagged)) {
             let rm = Memory.rooms[room.name];
             if (rm) delete rm[pro.stationName];
             return;

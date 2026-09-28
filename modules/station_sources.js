@@ -9,6 +9,16 @@
  */
 const OUTER_DEFENSE_REPLACE_TTL = 250;
 const OUTER_DEFENSE_TARGET_CNT = 2;
+/**
+ * 巡逻时在每个 keeperLair 驻守点停留多久（tick）。
+ *
+ * lair 每 300 tick 出一只 keeper。4 个 lair 一圈 = 移动时间（W34N55 约 100 tick）+ 4×停留。
+ * 停留 90 tick 时一圈 ≈ 460 tick，对每个 lair 的 300 tick 周期覆盖 ~30%——剩下的靠 keeper 主动来找我们的 miner，defenser 巡逻路上会撞见（findClosestByRange 会截住它们。
+ *
+ * 想提高覆盖率就调大这个值（一圈变长），或提高 OUTER_DEFENSE_TARGET_CNT 让多只错开巡逻。
+ * 可用 Memory.marketSettings.outerDefensePatrolDwell 调。
+ */
+const OUTER_DEFENSE_PATROL_DWELL = 90;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -412,18 +422,44 @@ Creep.prototype.outerDefense = function () {
             return;
         }
         // let injuredCreep =  this.findC(FIND_MY_CREEPS).filter(e=>e.hits!=e.hitsMax).head();
-        let injuredCreep = this.pos.findClosestByPath(FIND_MY_CREEPS, { filter: e => e.hits != e.hitsMax })
-        if (this.heal(injuredCreep) == ERR_NOT_IN_RANGE) {
-            this.moveTo(injuredCreep)
-            this.memory.dontPullMe = true;
+        let injuredCreep = this.pos.findClosestByRange(FIND_MY_CREEPS, { filter: e => e.hits != e.hitsMax })
+        if (injuredCreep) {
+            if (this.heal(injuredCreep) == ERR_NOT_IN_RANGE) {
+                this.moveTo(injuredCreep)
+                this.memory.dontPullMe = true;
+            } else {
+                this.memory.dontPullMe = false;
+            }
+            if (injuredCreep.name !== this.name) return;
         }
-        if (injuredCreep && injuredCreep.name !== this.name) return;
+        this.heal(this);
         this.memory.dontPullMe = false;
 
-        // move to the source keeper lair with the least spawn time
-        let sourceKeeper = this.room.find(FIND_HOSTILE_STRUCTURES).filter(e => e.structureType == STRUCTURE_KEEPER_LAIR).sort((a, b) => a.ticksToSpawn - b.ticksToSpawn).head();
-        if (sourceKeeper) {
-            this.moveTo(sourceKeeper)
+        // 没有敌人也没有伤员 → 按 keeperLair 路点巡逻（把 4 个 lair 在一圈内走完。
+        //
+        // 原实现是「移动到 ticksToSpawn 最小的 lair」—— 一旦那个 lair 的 keeper 没出，defenser 就一直站着等，另外 3 个 lair 出 keeper 时它不在场，miner 会被打。改成按序巡逻，一圈覆盖全部驻守点。
+
+        let lairs = this.room.find(FIND_HOSTILE_STRUCTURES)
+            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
+            .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));   // 固定顺序，避免路点抖动
+        if (lairs.length) {
+            let idx = this.memory.patrolIdx || 0;
+            if (idx >= lairs.length) idx = 0;
+            let wp = lairs[idx];
+            // 还没到当前路点 → 走过去
+            if (!this.pos.inRangeTo(wp.pos, 3)) {
+                this.moveTo(wp.pos, { range: 3 });
+                return;
+            }
+            // 已到路点 → 驻守一段时间（等 keeper 出窝），期间原地治疗自己
+            let dwell = Number(Memory.marketSettings && Memory.marketSettings.outerDefensePatrolDwell || OUTER_DEFENSE_PATROL_DWELL);
+            if (this.memory.patrolArrive === undefined) { this.memory.patrolArrive = Game.time; return; }
+            let waited = Game.time - this.memory.patrolArrive;
+            if (waited < dwell) return;
+            // 停留结束 → 切到下一个路点
+            this.memory.patrolIdx = (idx + 1) % lairs.length;
+            delete this.memory.patrolArrive;
+            this.moveTo(lairs[this.memory.patrolIdx].pos, { range: 3 });
             return;
         }
 
