@@ -197,23 +197,9 @@ let pro = {
         // 的决策延迟变为 400 tick（组件 200 tick），对以小时计的挂单成交
         // 毫无影响。
         _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
-        // 同房同资源只保留一张买单。多张买单会各自冻结信用点、互相压价，而且每张
-        // 都已经付过 5% 创建费。各条建单路径虽然都有去重，但都只能防新增、无法
-        // 收敛已经存在的重复（线上 E55S31 就有两张完全相同的 energy 买单，创建
-        // 时间戳一致）。这里统一收敛，只留剩余量最大的那张。
-        let bestBuy = {};
-        _.values(Game.market.orders).forEach(e => {
-            if (e.type != ORDER_BUY || !e.remainingAmount) return;
-            let key = e.roomName + "|" + e.resourceType;
-            let cur = bestBuy[key];
-            if (!cur || e.remainingAmount > cur.remainingAmount) bestBuy[key] = e;
-        });
-        let keepBuyIds = new Set(_.values(bestBuy).map(e => e.id));
-        _.values(Game.market.orders).forEach(e => {
-            if (e.type != ORDER_BUY || !e.remainingAmount || keepBuyIds.has(e.id)) return;
-            console.log(`[cancel] duplicate buy ${e.roomName} ${e.resourceType} ${e.id}`);
-            Game.market.cancelOrder(e.id);
-        });
+        // 先清一遍历史遗留的重复买单；本轮所有建单路径跑完之后还会再收敛一次
+        // （见本函数末尾），确保一轮结束时必然收敛。
+        pro.convergeBuyOrders();
         // 能量不充裕时进入低采购模式：只保留 energy 买单，商品/中间产物买单全部撤掉，
         // 等 energy surplus 恢复后由 autoBuyMineral / 工厂链重新按需买入。
         if (!StationHive.isEnergyAbundant()) pro.pauseCommodityBuys();
@@ -239,7 +225,35 @@ let pro = {
         for (let i = 0; i < 2; i++) pro.autoBuyMineral(MINERALS[(batch * 2 + i) % MINERALS.length]);
         // 利润套利：买入利润率超阈值商品的展开基础原料，供工厂合成后售卖
         if (batch % 2 == 0) pro.autoBuyHighProfitComponents();
+        // 所有建单路径跑完后再收敛一次。放在开头是不够的：autoBuyLowRclEnergy
+        // 会在「旧单远大于当前缺口」时先撤销再重建，而它排在建单路径的最前面，
+        // 于是重出来的那张要等到下一轮开头才会被收拾——中间这段窗口里
+        // Game.market.orders 里仍能看到两张同房间的 energy 买单。
+        pro.convergeBuyOrders();
         // if((Game.time)%3==0)pro.autoBuyPixel();
+    },
+    /**
+     * 同房同资源只保留一张买单。
+     *
+     * 多张买单会各自冻结信用点、互相压价，而且每张都已经付过 5% 创建费。各条
+     * 建单路径虽然都有自己的去重，但都只能防新增、无法收敛已经存在的重复（线上
+     * E55S31 出现过两张创建时间戳完全一致的 energy 买单）。这里统一收敛，只留
+     * 剩余量最大的那张；autoBuy 在开头和结尾各调一次。
+     */
+    convergeBuyOrders() {
+        let bestBuy = {};
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount) return;
+            let key = e.roomName + "|" + e.resourceType;
+            let cur = bestBuy[key];
+            if (!cur || e.remainingAmount > cur.remainingAmount) bestBuy[key] = e;
+        });
+        let keepBuyIds = new Set(_.values(bestBuy).map(e => e.id));
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount || keepBuyIds.has(e.id)) return;
+            console.log(`[cancel] duplicate buy ${e.roomName} ${e.resourceType} ${e.id}`);
+            Game.market.cancelOrder(e.id);
+        });
     },
     /**
      * 低能量模式：撤销所有非 energy 买单，避免继续采购 lab/工厂商品链。
