@@ -1,0 +1,18 @@
+# 行尾约定：工作区一律 CRLF，入库（index）一律 LF。
+#
+# 为什么两边不一样：本机的编辑/工具默认写 CRLF，而我改文件时会整份写成 LF。
+# 只要工作区是混的（原来 53/70 个模块是 CRLF 里掺 LF），任何一次全文件重写
+# 都会把几千行变成纯空白 diff，真正改动反而看不出来（最严重一次 3263 行）。
+#
+# `text` 让 git 在 add 时把 CRLF 规范化成 LF 存进 index，checkout 时再按
+# `eol=crlf` 展开。于是：
+#   - 用 CRLF 工具改 → 工作区 CRLF → 入 index 变 LF → 与历史一致 → diff 干净
+#   - 用 LF 工具改   → 工作区 LF   → 入 index 仍是 LF → 与历史一致 → diff 干净
+# 两边都不再产生行尾噪声，不需要每次改完手动还原字节。
+#
+# 只列文本类型；其余文件 git 自己判二进制，不受影响。
+*.js   text eol=crlf
+*.cjs  text eol=crlf
+*.json text eol=crlf
+*.md   text eol=crlf
+*.tsv  text eol=crlf
