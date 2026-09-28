@@ -814,13 +814,28 @@ let pro = {
         // 基础矿物：采集由 station_minetral 控制在单房 2 万以内；这里只处理
         // 已有库存超过保留量的部分，避免“边采边卖”。
         let sellable = ["U", "L", "K", "Z", "X", "O", "H"];
-        // 每房间保留量：自用/合成缓冲，避免自买自卖（买入线约 6000/房间）
-        let keep = 30000;
+        // 每房间保留量：只有「矿物过多」才卖。原来是 30000，太容易触发，
+        // 结果每个房间都在边采边卖；改成 150000 后单房要攒到 15 万以上才出 surplus。
+        // 可用 Memory.marketSettings.mineralKeep 调整。
+        let keep = Number((Memory.marketSettings && Memory.marketSettings.mineralKeep) || 150000);
         for (let resType of sellable) {
             let storeCnt = room.storage.store[resType] || 0;
             let termCnt = room.terminal.store[resType] || 0;
             let total = storeCnt + termCnt;
-            if (total <= keep) continue;
+            if (total <= keep) {
+                // 存量回落到保留量以下：把本房该资源的残留卖单撤掉。否则下面
+                // 会直接 continue，旧单继续成交，矿物被卖到 keep 以下。
+                // 边界在 total == keep：撤单用 <=、建单要求 total > keep 且
+                // sellAmount >= 1000，两侧不重叠，不会出现撤销-重挂抖动。
+                let belowKeep = _.values(Game.market.orders).filter(e =>
+                    e.resourceType == resType && e.type == ORDER_SELL
+                    && e.roomName == room.name && e.remainingAmount > 0);
+                belowKeep.forEach(e => {
+                    Game.market.cancelOrder(e.id);
+                    console.log(`[cancel] ${room.name} ${resType} below keep ${e.id}`);
+                });
+                continue;
+            }
             // 全局存量不足买入线时保留，避免卖出后又触发 autoBuyMineral 自买自卖
             if (!global._resCnt) global._resCnt = { tick: -1 };
             if (global._resCnt.tick != Game.time) {

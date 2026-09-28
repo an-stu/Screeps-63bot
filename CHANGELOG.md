@@ -1,3 +1,103 @@
+## v0.78.36 — Make the market passes reachable, replenish combat squads, raise the mineral keep
+
+### Fixed
+
+- **Per-room market gates were mathematically unreachable.** `autoSellMineral`,
+  `autoSellDeposit`, the per-room buy block and commodity deals all gate on
+  `(Game.time + room.hashCode()) % 80`. `StrategyMarket.exec` is only called when
+  `shouldRun(10)` fires, i.e. `Game.time % 10 == 0`, so the congruence needs
+  `hash % 10 == 0` to have any solution. Of the 13 owned rooms only E55S39
+  (hash -99040) satisfied it. Instrumented in game: 4/4 calls landed on
+  `Game.time % 10 == 0` ticks and only that room ever evaluated to 0.
+  `autoBuy()`'s own comment records the same class of mistake.
+  Replaced with `marketSlowPass()`, built on `Math.floor(Game.time / 40)` which
+  increments once per room per 40 ticks and therefore visits every value; rooms
+  are spread by hash into `period` phases. Period is tunable via
+  `Memory.marketSettings.slowPassTicks` (default 80). `autoSell` moved from a
+  `Game.time % 290` gate that only landed on exec's first batch to a 280 tick
+  phase.
+  Confirmed live: within minutes, rooms that could never sell before
+  (E41S23, E41S32, E55S31, E49S31, E59S38, W34N52) started creating sell orders.
+  E41S23 is the clean proof: hash -140668, zero hits across 80000 valid exec
+  ticks under the old gate, and its X stock of 35955 minus the 30000 keep
+  produced exactly the 5955 unit order that appeared.
+- **Minerals were sold far too eagerly.** The mineral keep is now 150000 per
+  room instead of 30000, so only genuine surplus leaves a room. Orders that fall
+  back below the keep are now cancelled - previously the function returned early
+  and the stale order kept selling the room down past its retention target.
+  Override with `Memory.marketSettings.mineralKeep`.
+- **`strategy_atkL2` never spawned anything.** `execSpawn` gated its spawn block
+  on `spawnRoom.length <= 8`, but `StationHive.getClosestSpawnRoom` returns a
+  Room object, so the comparison was `undefined <= 8 === false` forever.
+  Verified in game.
+- **Half-dead squads never replenished.** `atkL2`, `defenseAH` and the defense
+  flags cleared nothing when a member died: `!flag.memory.attacker` tested a
+  stored id rather than a live creep, so the missing half was never rebuilt and
+  the flag was never released. A single dead defender was enough to hold
+  `room.flags("defenseAH").length < 2` and block every future team. Dead ids are
+  now dropped so the member is respawned, with a short cooldown window against
+  duplicate spawns before `register*` runs, plus a 300 tick no-hostile cleanup so
+  replenished flags do not live forever.
+- **`war_defenseCore.exec` aborted its whole pass.** `flag.room` is undefined
+  without vision and `room.hashCode()` threw; the exception escaped the `forEach`,
+  so every other defense flag went unprocessed that tick and the bad flag was
+  never cleaned up.
+- **`clearPathCache` ran exactly once per global lifetime.** It latched on
+  `Game.__clearPathCache`, which nothing ever reset, so `teamPathCache` grew
+  unbounded with one-shot flag names. Now latched per tick.
+- **`team_raL1` round-trip patrol index was unbounded**; past `roundRoom.length`
+  it built `new RoomPosition(25, 25, undefined)` and threw, stopping the patrol.
+- **`delete Game.creeps[name]` did nothing and raised every tick.**
+  `pro.init()` had already snapshotted `Game._coreObjects` before
+  `ManagerCreeps.init()` ran, so the creep still executed, and with
+  `memory.tasks` undefined both `execRegFun`'s `for...of` and `execLastTask`'s
+  `.length` threw a TypeError each tick. The memory is now backfilled so the
+  creep idles safely until the shard manager fills it in.
+- **MIN_CPU silently froze unlisted roles.** The filter used
+  `ROLE_PRIORITY[role] > 0`, which is `undefined > 0 === false`, so `reserver`,
+  `harvestMineralKeeper`, `outerHarvestEnergyCarrier`, `minRoomWorker` and
+  `pillager` were frozen with no log even though the table only marks
+  worker/upgrader as pausable. Unlisted roles now run by default via
+  `ROLE_PRIORITY_ALLOWED`; the `bucket <= 40` branch keeps its strict whitelist.
+- **`HelperError.throwAllError` skipped the whole loop tail.** It threw when
+  `pro_err.print === 0` while its call site sits before `HelperCpuUsed.exec`,
+  `recordLongTerm`, `updateCodeHealth` and `Memory.stats`, so every throwing tick
+  lost telemetry and stats. It also had an unreachable `if(!tmp.length)` branch.
+  It now only records and rate-limits logging, so no call site had to move.
+- **`station_minetral.update` used `&&` where `||` was meant**, so owned rooms
+  without an extractor kept a `stationMineral` entry that `trySpawnHarKeeper`
+  would then staff. Also guards a missing `Memory.rooms` entry.
+- **`strategy_deposits`** carrier removal was a no-op by construction
+  (`if (!contains(id)) without(id)`); the intent was to remove self.
+- **Power Creeps carried on after discarding their task.** `OpSource`,
+  `OpPowerSpawn`, `OpFactory` and `OpMineral` called `popTask().execLastTask()`
+  without returning and then went on to `moveTo`/`usePower` an already-discarded
+  (or undefined) target. `needOpMineral` dereferenced
+  `room.memory[stationMineral]` without a guard.
+- **`RoomPosition.hashCode` ignored `roomCoordinate.y`** and used
+  `roomCoordinate.x` twice, so rooms in the same column collided. The value is
+  used as a Set key in `war_teamCore` and `strategy_GCLRoom`.
+- **`manager_rooms`** wrote `room.Memory` (capital M) - a typo that was never
+  read anywhere and did not achieve its stated purpose.
+
+### Changed
+
+- `Memory.codeHealth.moduleCpu` and `cpuLongTerm` were full copies of
+  `HelperCpuUsed.profileSummary()` / `longTermSummary()`, duplicating what
+  `Memory.cpuModuleTelemetry` and `Memory.cpuTelemetry` already store. Both are
+  gone; the dashboard computes them on demand. Measured Memory payload dropped
+  from 147215 to 139918 bytes (-5.0%), and both legacy keys are deleted on the
+  next code-health write.
+
+### Notes
+
+- Deployed and monitored: `errorCount` stayed at 0, `missingTaskHandlers` empty,
+  bucket returned to 10000 and the CPU average settled at 16.84 - below the 17.64
+  measured before the change.
+- Adds `test/market-phase.test.cjs`, whose negative control proves the old
+  formula can never fire for any hash that is not a multiple of 10, while the new
+  phase is reachable for every room and lands on an exact period.
+
 ## v0.78.35 — Stop energy transaction-cost churn between healthy rooms
 
 ### Fixed
