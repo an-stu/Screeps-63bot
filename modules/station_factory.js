@@ -190,8 +190,9 @@ let pro={
         return undefined;
     },
     highLevel (room){
-        // 动态平衡：只有全局能量充裕且本房 >=10 万时才做高级商品合成。
-        if(!StationHive.isEnergyAbundant())return undefined;
+        // 动态平衡：只有本房 >=10 万能量时才做高级商品合成。
+        // 原来还叠加了账号级 isEnergyAbundant()，会把「别处一房缺能」变成
+        // 「本房工厂停产」——本房能量充足就应当继续生产。
         if(StationCarry.roomMassStoreCnt(room,RESOURCE_ENERGY)<100000)return undefined;
         let flag = room.find(FIND_FLAGS,{filter:e=>e.name.indexOf("OPF")>=0}).head();
         if(!flag)return undefined;
@@ -241,8 +242,8 @@ let pro={
 
     },
     noLevel (room){
-        // 动态平衡：只有全局能量充裕且本房 >=10 万时才做基础商品/压缩合成。
-        if(!StationHive.isEnergyAbundant())return undefined;
+        // 动态平衡：只有本房 >=10 万能量时才做基础商品/压缩合成（同 highLevel，
+        // 不再叠加账号级能量门）。
         if(StationCarry.roomMassStoreCnt(room,RESOURCE_ENERGY)<100000)return undefined;
         for(let com of BASE_DEPOSITS){
             if (StationCarry.roomMassStoreCnt(room,com) >= BASE_BATCH_SIZE) {

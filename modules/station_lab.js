@@ -455,7 +455,13 @@ let pro={
         // 动态平衡：全局能量不充裕，或本房能量低于 10 万时暂停 lab 合成。
         let roomEnergy = (room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0)
             + (room.terminal ? (room.terminal.store[RESOURCE_ENERGY] || 0) : 0);
-        if (!StationHive.isEnergyAbundant() || roomEnergy < 100000) {
+        // 只看本房能量，不再叠加账号级 isEnergyAbundant()：那个信号取的是全账号
+        // 任一房的最低值，任何一房缺能都会把所有房间正在进行的反应打成 clear 并
+        // 把 center 原料抽回 storage，恢复后还要再搬回去（RCL7 十 lab 房一次翻转
+        // 约 3 万单位双向搬运 ≈ 20 趟 carrier，还会作废进行中的反应批次）。
+        // 本房能量充足时根本没有停的理由；账号级信号仍用于采购 / OPF / powerSpawn
+        // 这些真正账号级的决策。
+        if (roomEnergy < 100000) {
             if (obj["reacting"]) {
                 obj["stat"] = "clear";
                 delete obj["reacting"];
