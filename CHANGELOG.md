@@ -23,6 +23,16 @@
   check time `lastHostileTimeMap` held W32N56 and E48S41, both ~90 ticks after
   real contacts, while the other eleven rooms skipped the scan.
 
+- **Duplicate buy orders now converge at the end of the pass as well.**
+  De-duplication only ran at the start of `autoBuy`, but `autoBuyLowRclEnergy` -
+  the first of the creation paths - cancels an order whose remaining amount
+  overshoots the current shortfall and immediately replaces it, so the replacement
+  was only cleaned up at the start of the *next* pass. In between,
+  `Game.market.orders` showed two energy buy orders for the same room (observed on
+  E55S31, two orders with identical `createdTimestamp`). The logic is now
+  `pro.convergeBuyOrders()`, run before and after the creation paths. Verified
+  across 110 ticks spanning an autoBuy pass: duplicates stayed at 0.
+
 ### Investigated and deliberately not changed
 
 - **The resource-balance terminal transfers have no in-flight accounting, but it
