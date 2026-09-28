@@ -1212,11 +1212,16 @@ function betterMoveTo(firstArg, secondArg, opts) {
         toPos = { x: firstArg, y: secondArg, roomName: this.room.name };
         ops = opts || {};
     }
-    // Many legacy callers always provide a visualizePathStyle. Cloning only
-    // those option objects keeps visuals truly opt-in without mutating caller
-    // data or adding allocation to normal moveTo calls.
-    if (ops.visualizePathStyle && global.isCpuFeatureEnabled && !isCpuFeatureEnabled("visual")) {
-        ops = Object.assign({}, ops, {visualizePathStyle: undefined});
+    // Many legacy callers always provide a visualizePathStyle. Rendering the
+    // path is pure debug output, so it must obey the global visual gate.
+    //
+    // 原实现是 `ops = Object.assign({}, ops, {visualizePathStyle: undefined})`：
+    // 关掉 visual 只是把「画路的开销」换成了「克隆一个 ops 对象 + 一个字面量」
+    // 的开销，每 tick 上百次 moveTo 就是上百次多余的分配。现在改成算一个本地
+    // 变量，ops 全程只读、零分配，下面的 10 处读取一律走 visualStyle。
+    let visualStyle = ops.visualizePathStyle;
+    if (visualStyle && global.isCpuFeatureEnabled && !isCpuFeatureEnabled("visual")) {
+        visualStyle = undefined;
     }
     ops.bypassHostileCreeps = ops.bypassHostileCreeps === undefined || ops.bypassHostileCreeps;    // 设置默认值为true
     ops.ignoreCreeps = ops.ignoreCreeps === undefined || ops.ignoreCreeps;
@@ -1241,12 +1246,17 @@ function betterMoveTo(firstArg, secondArg, opts) {
     }
     ops.range = ops.range || 1;
 
-    if (!hasActiveBodypart(this.body, MOVE)) {
+    // 每次 moveTo 都全量扫一遍 body：健康的大爬有 30-50 个部件，而 MOVE 通常在
+    // 数组前段（body 由 calcBodyPart 按配置顺序拼接），反向扫描要几乎走满。
+    // body 在一 tick 内不会变，把结果缓存在 creep 实例上即可 —— 实例每 tick 由
+    // 引擎重建，天然按 tick 失效，不需要手动清理。
+    if (this._hasMovePart === undefined) this._hasMovePart = hasActiveBodypart(this.body, MOVE);
+    if (!this._hasMovePart) {
         return ERR_NO_BODYPART;
     }
 
     if (this.fatigue) {
-        if (!ops.visualizePathStyle) {    // 不用画路又走不动，直接return
+        if (!visualStyle) {    // 不用画路又走不动，直接return
             return ERR_TIRED;
         } // else 要画路，画完再return
     }
@@ -1267,20 +1277,20 @@ function betterMoveTo(firstArg, secondArg, opts) {
                         }
                     }
                     //this.say('正常');
-                    return moveOneStep(this, ops.visualizePathStyle, toPos);
+                    return moveOneStep(this, visualStyle, toPos);
                 } else if (idx + 1 in posArray && idx + 2 in posArray && isEqual(this.pos, posArray[idx + 1])) {  // 跨房了
                     creepCache.idx++;
                     if (!path.directionArray[idx + 2]) {  // 第一次见到该房则检查房间
                         if (checkRoom(this.room, path, creepCache.idx)) {   // 传creep所在位置的idx
                             //this.say('新房 可走');
                             //console.log(`${Game.time}: ${this.name} check room ${this.pos.roomName} OK`);
-                            return moveOneStep(this, ops.visualizePathStyle, toPos);  // 路径正确，继续走
+                            return moveOneStep(this, visualStyle, toPos);  // 路径正确，继续走
                         }   // else 检查中发现房间里有建筑挡路，重新寻路
                         //console.log(`${Game.time}: ${this.name} check room ${this.pos.roomName} failed`);
                         deletePath(path);
                     } else {
                         //this.say('这个房间见过了');
-                        return moveOneStep(this, ops.visualizePathStyle, toPos);  // 路径正确，继续走
+                        return moveOneStep(this, visualStyle, toPos);  // 路径正确，继续走
                     }
                 } else if (isNear(this.pos, posArray[idx])) {  // 堵路了
                     let code = trySwap(this, posArray[idx], ops.bypassHostileCreeps, ops.ignoreCreeps);  // 检查挡路creep
@@ -1293,7 +1303,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
                         }
                         if (findTemporalPath(this, toPos, ops)) { // 有路，creepCache的内容会被这个函数更新
                             //this.say('开始绕路');
-                            return startRoute(this, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+                            return startRoute(this, creepCache, visualStyle, toPos, ops.ignoreCreeps);
                         } else {  // 没路
                             //this.say('没路啦');
                             return ERR_NO_PATH;
@@ -1304,8 +1314,8 @@ function betterMoveTo(firstArg, secondArg, opts) {
                         deletePath(path);
                     } // else 上tick移动失败但也不是建筑物和creep/pc挡路。有2个情况：1.下一格路本来是穿墙路并碰巧消失了；2.下一格是房间出口，有另一个creep抢路了然后它被传送到隔壁了。不处理第1个情况，按第2个情况对待。
                     //this.say('对穿' + getDirection(this.pos, posArray[idx]) + '-' + originMove.call(this, getDirection(this.pos, posArray[idx])));
-                    if (ops.visualizePathStyle) {
-                        showVisual(this, toPos, posArray, idx, 1, ops.visualizePathStyle);
+                    if (visualStyle) {
+                        showVisual(this, toPos, posArray, idx, 1, visualStyle);
                     }
                     creepMoveCache[this.name] = Game.time;
                     return originMove.call(this, getDirection(this.pos, posArray[idx]));  // 有可能是第一步就没走上路or通过略过moveTo的move操作偏离路线，直接call可兼容
@@ -1314,8 +1324,8 @@ function betterMoveTo(firstArg, secondArg, opts) {
                     if (this.pos.roomName == posArray[idx - 1].roomName && ops.ignoreCreeps) {    // 不是跨房而是偏离，检查对穿
                         trySwap(this, posArray[idx - 1], false, true);
                     }
-                    if (ops.visualizePathStyle) {
-                        showVisual(this, toPos, posArray, idx, 1, ops.visualizePathStyle);
+                    if (visualStyle) {
+                        showVisual(this, toPos, posArray, idx, 1, visualStyle);
                     }
                     creepMoveCache[this.name] = Game.time;
                     return originMove.call(this, getDirection(this.pos, posArray[idx - 1]));    // 同理兼容略过moveTo的move
@@ -1382,7 +1392,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
         found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
     }
 
-    return startRoute(this, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+    return startRoute(this, creepCache, visualStyle, toPos, ops.ignoreCreeps);
 }
 
 /**
@@ -1613,7 +1623,10 @@ global.BetterMove = {
 if (!Creep.prototype.$moveTo) {
     Creep.prototype.originMoveTo = originMoveTo;
     Creep.prototype.$moveTo = Creep.prototype.moveTo;
-    Creep.prototype.moveTo = function (...e) {
+    // 用固定形参而不是 rest：moveTo 最多三个参数 (x, y, opts) 或 (target, opts)，
+    // 而 `...e` 每次调用都要新建一个数组、`$moveTo(...e)` 又要展开一次。
+    // 每 tick 上百次 moveTo，就是上百次多余的数组分配。
+    Creep.prototype.moveTo = function (arg0, arg1, arg2) {
         // 卡位检测：只在数值真正变化时写 Memory，避免每个 moving creep
         // 每 tick 都无意义地重写 lastPos / dontPullMe 造成 Memory 抖动。
         let pos = this.pos;
@@ -1625,11 +1638,19 @@ if (!Creep.prototype.$moveTo) {
                 if (lastPos.time > 6 && memory.dontPullMe !== true) memory.dontPullMe = true;
             }
         } else {
-            memory.lastPos = { x: pos.x, y: pos.y, roomName: pos.roomName, time: 0 };
+            // 就地改写已有的 lastPos，省掉每次移动都要新建一个对象
+            if (lastPos) {
+                lastPos.x = pos.x;
+                lastPos.y = pos.y;
+                lastPos.roomName = pos.roomName;
+                lastPos.time = 0;
+            } else {
+                memory.lastPos = { x: pos.x, y: pos.y, roomName: pos.roomName, time: 0 };
+            }
             if (memory.dontPullMe) memory.dontPullMe = false;
         }
         // this.say(this.memory.lastPos.time)
-        return this.$moveTo(...e)
+        return this.$moveTo(arg0, arg1, arg2)
     };
 }
 
@@ -1639,51 +1660,61 @@ if (!Creep.prototype.$moveTo) {
 //     return this.$move(...e)
 // };
 
+// 下面这组包装的作用是「正在干活的爬不让位」。原来是 `this.memory.dontPullMe = true`
+// 无条件写：keeper 每 tick harvest、upgrader 每 tick upgradeController、builder 每 tick
+// build/repair，合计约 45~60 次「值没变也照写」的 Memory 脏写，而整份 Memory 每 tick
+// 都要序列化一遍。改成值真的翻转时才写（station_sources 里对同一字段已经这么做了）。
+// 同时把 rest 参数换成固定形参，这些 API 都只接受一个 target。
+function markDontPullMe(creep) {
+    let memory = creep.memory;
+    if (memory.dontPullMe !== true) memory.dontPullMe = true;
+}
+
 if (!Creep.prototype.$build) {
     Creep.prototype.$build = Creep.prototype.build;
-    Creep.prototype.build = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$build(...e)
+    Creep.prototype.build = function (target) {
+        markDontPullMe(this);
+        return this.$build(target)
     };
 }
 
 if (!Creep.prototype.$repair) {
     Creep.prototype.$repair = Creep.prototype.repair;
-    Creep.prototype.repair = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$repair(...e)
+    Creep.prototype.repair = function (target) {
+        markDontPullMe(this);
+        return this.$repair(target)
     };
 }
 
 if (!Creep.prototype.$upgradeController) {
     Creep.prototype.$upgradeController = Creep.prototype.upgradeController;
-    Creep.prototype.upgradeController = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$upgradeController(...e)
+    Creep.prototype.upgradeController = function (target) {
+        markDontPullMe(this);
+        return this.$upgradeController(target)
     };
 }
 
 if (!Creep.prototype.$dismantle) {
     Creep.prototype.$dismantle = Creep.prototype.dismantle;
-    Creep.prototype.dismantle = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$dismantle(...e)
+    Creep.prototype.dismantle = function (target) {
+        markDontPullMe(this);
+        return this.$dismantle(target)
     };
 }
 
 if (!Creep.prototype.$harvest) {
     Creep.prototype.$harvest = Creep.prototype.harvest;
-    Creep.prototype.harvest = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$harvest(...e)
+    Creep.prototype.harvest = function (target) {
+        markDontPullMe(this);
+        return this.$harvest(target)
     };
 }
 
 if (!Creep.prototype.$attack) {
     Creep.prototype.$attack = Creep.prototype.attack;
-    Creep.prototype.attack = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$attack(...e)
+    Creep.prototype.attack = function (target) {
+        markDontPullMe(this);
+        return this.$attack(target)
     };
 }
 

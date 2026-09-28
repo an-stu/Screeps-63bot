@@ -356,9 +356,21 @@ Creep.prototype.registerStationSourcesCarryOutRoom = function () {
     if (rm && rm[pro.stationName] && rm[pro.stationName][headTask.id]) {
         let source = rm[pro.stationName][headTask.id];
         let rmHarList = source["carryCreeps"] || [];
-        let alive = rmHarList.filter(id => Game.getObjectById(id));
-        if (!alive.contains(this.id)) alive.push(this.id)
-        source["carryCreeps"] = alive; // 必须始终写回
+        // 只在内容真的变化时写回。原来是每 tick 无条件重写整个数组（注释还写着
+        // "必须始终写回"），满编 carrier 会让 Memory 持续处于脏状态——而整份
+        // Memory 每 tick 都要序列化一次。同一文件的 registerStationSources 已经
+        // 用了 "changed 才写" 的写法，这里对齐。
+        let changed = false;
+        let alive = [];
+        for (let id of rmHarList) {
+            if (Game.getObjectById(id)) alive.push(id);
+            else changed = true;
+        }
+        if (!alive.includes(this.id)) {
+            alive.push(this.id);
+            changed = true;
+        }
+        if (changed) source["carryCreeps"] = alive;
     }
 };
 
@@ -412,9 +424,18 @@ Creep.prototype.registerStationSourcesDefenseOutRoom = function () {
     if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
         let source = rm[pro.stationName][this.headTask().id];
         let rmHarList = source["defenseCreeps"] || [];
-        let alive = rmHarList.filter(id => Game.getObjectById(id));
-        if (!alive.contains(this.id)) alive.push(this.id)
-        source["defenseCreeps"] = alive; // 必须始终写回
+        // 同 registerStationSourcesCarryOutRoom：内容变化才写回
+        let changed = false;
+        let alive = [];
+        for (let id of rmHarList) {
+            if (Game.getObjectById(id)) alive.push(id);
+            else changed = true;
+        }
+        if (!alive.includes(this.id)) {
+            alive.push(this.id);
+            changed = true;
+        }
+        if (changed) source["defenseCreeps"] = alive;
     }
 };
 
