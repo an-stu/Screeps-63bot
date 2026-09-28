@@ -55,6 +55,37 @@ let GREEN = [RESOURCE_ORGANISM,RESOURCE_ORGANOID,RESOURCE_MUSCLE,RESOURCE_TISSUE
 
 })();
 
+/**
+ * 市场慢通道相位。
+ *
+ * exec() 由 main.js 以 shouldRun(10) + batch=(Game.time/10)%4 驱动，所以
+ * **每个房间每 40 tick 恰好被调用一次**：房间在 objects.rooms 里的下标 i 决定
+ * 它只在 (Game.time/10)%4 === i%4 的 tick 执行，于是 Math.floor(Game.time/40)
+ * 对每个房间都是一个「每 40 tick 递增 1」的独立计数器，必然取遍所有整数。
+ *
+ * 原写法 `(Game.time + room.hashCode()) % 80` 永远不成立：exec 只在
+ * Game.time % 10 == 0 的 tick 运行，该同余式要有解必须 hash % 10 == 0。
+ * 线上实测 13 个自有房里只有 E55S39（hash -99040）满足，其余 12 个房间的
+ * per-room 买入 / 矿物卖出 / deposit 卖出 / 商品 deal 全部静默失效。
+ * 插桩验证：4/4 次 autoSellMineral 调用都发生在 Game.time % 10 == 0 的 tick，
+ * 且只有 hash % 10 == 0 的房间能取到 v == 0。
+ * autoBuy 上方那段「(Game.time)%100==0 与调用偏移互斥」的注释是同一类错误。
+ *
+ * 改为按 slot 取模后每个房间都必然可达；再用 hash 对 period 取模把房间分成
+ * period 组错峰，避免所有房间挤在同一个 slot 抢 CPU。
+ * 周期可用 Memory.marketSettings.slowPassTicks 调整（默认 80 tick）。
+ */
+function marketSlowPassTicks() {
+    let v = Memory.marketSettings && Memory.marketSettings.slowPassTicks;
+    return v > 0 ? v : 80;
+}
+function marketSlowPass(room, ticks) {
+    let period = Math.max(1, Math.round((ticks || marketSlowPassTicks()) / 40));
+    if (period <= 1) return true;
+    let slot = Math.floor(Game.time / 40);
+    return (slot % period) === (((room.hashCode() % period) + period) % period);
+}
+
 let getSeriesMap = function() {
     return {
         "blue": BLUE,
@@ -440,7 +471,7 @@ let pro = {
      */
     autoSellDeposit(room) {
         if (!room.storage || !room.terminal || !room.terminal.my) return;
-        if ((Game.time + room.hashCode()) % 80 != 0) return;
+        if (!marketSlowPass(room)) return;
         for (let resType of [RESOURCE_SILICON, RESOURCE_METAL, RESOURCE_BIOMASS, RESOURCE_MIST]) {
             let total = (room.storage.store[resType] || 0) + (room.terminal.store[resType] || 0);
             let keep = 3000;
@@ -499,7 +530,7 @@ let pro = {
         let myRooms = _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == RESOURCE_POWER)
             .map(e => e.roomName).filter(e => myRoomSet.has(e)).toSet();
         let maxPrice = StrategyMarket.getAllOrdersCacheList(RESOURCE_POWER, ORDER_BUY)
-            .filter(e => !myRoomSet.has(e))
+            .filter(e => !myRoomSet.has(e.roomName))
             .map(e => e.price).maxBy(e => e) || 0
         maxPrice += StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
         if (maxPrice > 2200) maxPrice = 2200;
@@ -532,7 +563,7 @@ let pro = {
         let myRooms = _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt)
             .map(e => e.roomName).filter(e => myRoomSet.has(e)).toSet();
         let maxPrice = StrategyMarket.getAllOrdersCacheList(resType, ORDER_BUY)
-            .filter(e => !myRoomSet.has(e))
+            .filter(e => !myRoomSet.has(e.roomName))
             .map(e => e.price).maxBy(e => e) || 0
         maxPrice += StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY) * 0.1
         _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt).forEach(e => {
@@ -585,7 +616,7 @@ let pro = {
         let myRooms = _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt)
             .map(e => e.roomName).filter(e => myRoomSet.has(e)).toSet();
         let maxPrice = StrategyMarket.getAllOrdersCacheList(resType, ORDER_BUY)
-            .filter(e => !myRoomSet.has(e))
+            .filter(e => !myRoomSet.has(e.roomName))
             .map(e => e.price).maxBy(e => e) || 0
         maxPrice += StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY) * 0.1
         // lab 缺原料时酌情加价到历史价水平，否则挂单永远等不到卖单
@@ -616,7 +647,7 @@ let pro = {
             let bar = { "U": "utrium_bar", "L": "lemergium_bar", "K": "keanium_bar", "Z": "zynthium_bar", "X": "purifier", "O": "oxidant", "H": "reductant" }
             let barResType = bar[resType]
             let barPrice = maxPrice * 5 + StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
-            let barMaxPrice = StrategyMarket.getAllOrdersCacheList(barResType, ORDER_BUY).filter(e => !myRoomSet.has(e)).map(e => e.price).maxBy(e => e) || 0;
+            let barMaxPrice = StrategyMarket.getAllOrdersCacheList(barResType, ORDER_BUY).filter(e => !myRoomSet.has(e.roomName)).map(e => e.price).maxBy(e => e) || 0;
             if (barMaxPrice < barPrice) StrategyMarket.autoBuySome(barResType, 3000)
         }
     },
@@ -778,8 +809,8 @@ let pro = {
         if (!room.storage || !room.terminal || !room.terminal.my) return;
         // 矿物挂单/补货也是 CPU 大头（7 种矿物 × 市场订单查询）。
         // 按房间错开每 100 tick 检查一次：矿物产量低、卖单成交慢，
-        // 每 100 tick 更新一次价格与数量足够
-        if ((Game.time + room.hashCode()) % 80 != 0) return;
+        // 每 80 tick 更新一次价格与数量足够（见 marketSlowPass 的说明）
+        if (!marketSlowPass(room)) return;
         // 基础矿物：采集由 station_minetral 控制在单房 2 万以内；这里只处理
         // 已有库存超过保留量的部分，避免“边采边卖”。
         let sellable = ["U", "L", "K", "Z", "X", "O", "H"];
@@ -898,7 +929,7 @@ let pro = {
     // 1000 tick 刷新一次，deal 检查也按房间错开节流到约 100 tick 一次，
     // 不每 20 tick 重复全量扫描——buy 单价格变化慢，低频足够吃到高价。
     // 注意：此节流只包住商品 deal 段，后面的能量/矿物挂单与买入不受影响
-    let doCommodityDeal = (Game.time + room.hashCode()) % 80 == 0;
+    let doCommodityDeal = marketSlowPass(room);
     let sellPrice = pro.getOnSellPrice();
     let bestCommodities = sellPriceCache.bestCommodities || {};
     let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
@@ -983,7 +1014,10 @@ let pro = {
     
         // sell energy or battery
         const SELL_RES_TYPES=[RESOURCE_ENERGY, RESOURCE_BATTERY];
-        if (Game.time % 290 == 0) SELL_RES_TYPES.forEach(e => {pro.autoSell(e, room)})
+        // 原来的 `Game.time % 290 == 0` 只落在 exec 的第 1 个 batch 上，实际每个
+        // 房间要 4*290 tick 才轮一次；改用 marketSlowPass(280) 后每个房间稳定
+        // 每 280 tick 一次，并按 hash 分散到 7 个相位。
+        if (marketSlowPass(room, 280)) SELL_RES_TYPES.forEach(e => {pro.autoSell(e, room)})
         // 基础矿物：能采就采，超出保留量自动挂卖单（矿物采集已不再因存量暂停）
         pro.autoSellMineral(room);
         pro.autoSellDeposit(room);
@@ -992,7 +1026,7 @@ let pro = {
         // 是 CPU 大头。买入只需每 100 tick 一次（与矿物挂单同频）——
         // 库存缺口变化慢，100 tick 内买到就够，不必每 20 tick 全量扫描
         if (StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY) < 80000) return;
-        if ((Game.time + room.hashCode()) % 80 != 0) return;
+        if (!marketSlowPass(room)) return;
         // 买东西
         if (Game.market.credits > 100000)
             for (let resType in RES_BUY_AMOUNT_ROOM) {
