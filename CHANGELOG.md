@@ -1,3 +1,40 @@
+## v0.78.41 — Remote defence: patrol the lairs, scope the mineral record, size the keepers
+
+### Fixed
+
+- **Outer defenders camped on a single lair and missed the others.**
+  `outerDefense` used to stand at the lair with the smallest `ticksToSpawn` and wait
+  there. When a keeper came out of any of the other three lairs the defender was not
+  present and the miners took hits. It now patrols the lairs in a fixed order (sorted
+  by position so the route does not jitter), dwelling at each for
+  `OUTER_DEFENSE_PATROL_DWELL` (90 ticks, `Memory.marketSettings.outerDefensePatrolDwell`)
+  while healing itself, so all four spawn points are covered within one lap. Also:
+  picking an injured ally to heal uses `findClosestByRange` instead of `findClosestByPath`
+  (no pathfinding needed to choose a nearby ally), and self-healing is unconditional, so
+  the defender tops up while dwelling rather than only while out of melee range.
+- **`StationMineral` records now only cover rooms we actually mine.**
+  The previous change kept a mineral record whenever an extractor existed, which meant an
+  enemy room's extractor (seen through the observer) left a `stationMineral` entry we can
+  never mine but still pay to serialise. A non-owned room now only keeps the record when
+  it carries a `har` flag. Owned rooms are unchanged: extractor present → record written,
+  no extractor → cleared, so `trySpawnHarKeeper` still never dispatches a mineral keeper
+  for a room that cannot mine.
+- **Outer keepers were too small to drain a Source Keeper source.**
+  A source in a Source Keeper room holds 4000 energy and resets every 300 ticks, i.e. a
+  reset rate of ~13.33 energy/tick. `outerMaxPartCnt` was 3, producing
+  `{MOVE:3, WORK:6, CARRY:1}` — 6 WORK parts = 12 energy/tick, **below the reset rate**, so
+  the source never drained and the keeper permanently chased regeneration. Three sources
+  together only produced ~36 energy/tick while costing three keepers plus their defenders.
+  Raised to 5 → `{MOVE:5, WORK:10, CARRY:2}` = 20 energy/tick, comfortably above the reset
+  rate: a source drains in ~200 ticks, leaving ~100 ticks of slack. Overridable via
+  `Memory.marketSettings.outerMaxPartCnt`.
+
+### Notes
+
+- The three outer keepers alive at deploy time keep the old body until they expire, then
+  respawn at the new size. Home-room keepers are untouched (`innerMaxPartCnt`), and
+  `getMineralHarvesterBodyConfig` is unchanged.
+
 ## v0.78.40 — Remote mining: harvest only high-priced minerals (H / X / L)
 
 ### Added
