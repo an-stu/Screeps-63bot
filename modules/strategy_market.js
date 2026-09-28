@@ -237,6 +237,16 @@ let pro = {
         });
     },
     /**
+     * 本轮是否处于「低能量暂停采购」状态。
+     *
+     * pauseCommodityBuys 在同一个 autoBuy 里撤掉了所有非 energy 买单，但紧随其后
+     * 的 autoBuyMineral 会立刻把矿物买单重新挂回来。建单路径用这个标记让路，
+     * 否则低能量期间每 100 tick 白烧一次 cancel + create 的 5% 创建费（撤销不退）。
+     */
+    commodityBuysPaused() {
+        return Game._pauseCommodityBuysTick === Game.time;
+    },
+    /**
      * 利润驱动买入：从商品利润分析中挑出利润率 ≥ threshold 的商品
      * （默认 1000%，Memory.marketSettings.highProfitMargin 可调），
      * 把其展开后的基础原料（depo 基础品/bar/原矿）买到有 OPF 工厂的
@@ -535,6 +545,8 @@ let pro = {
         maxPrice += StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
         if (maxPrice > 2200) maxPrice = 2200;
         _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == RESOURCE_POWER && e.type == ORDER_BUY).forEach(e => {
+            // 价格没变就不调：抬价时引擎按 (新价-旧价)×剩余量×5% 收信用点
+            if (Math.abs(e.price - maxPrice) < 0.001) return;
             Game.market.changeOrderPrice(e.id, maxPrice)
         });
 
@@ -560,17 +572,26 @@ let pro = {
      */
     autoBuySome(resType, buyCnt = 6000) {
         let myRoomSet = ManagerRooms.getNormalRoom().map(e => e.name).toSet()
-        let myRooms = _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt)
-            .map(e => e.roomName).filter(e => myRoomSet.has(e)).toSet();
+        // 同 autoBuyMineral：只按本房**买单**的剩余量判断「已有单」，并且补上
+        // 缺失的 type 过滤（否则本房一张 SELL 单会让该房再也补不到货）。
+        let myBuyRemain = {};
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount || e.resourceType != resType) return;
+            if (!myRoomSet.has(e.roomName)) return;
+            myBuyRemain[e.roomName] = (myBuyRemain[e.roomName] || 0) + e.remainingAmount;
+        });
         let maxPrice = StrategyMarket.getAllOrdersCacheList(resType, ORDER_BUY)
             .filter(e => !myRoomSet.has(e.roomName))
             .map(e => e.price).maxBy(e => e) || 0
         maxPrice += StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY) * 0.1
-        _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt).forEach(e => {
+        // 只改自己的买单，且价格真的变了才调（抬价按增量收 5% 信用点）
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount || e.resourceType != resType) return;
+            if (Math.abs(e.price - maxPrice) < 0.001) return;
             Game.market.changeOrderPrice(e.id, maxPrice)
         });
 
-        ManagerRooms.getNormalRoom().filter(e => !myRooms.has(e.name) && e.terminal).map(room => {
+        ManagerRooms.getNormalRoom().filter(e => !myBuyRemain[e.name] && e.terminal).map(room => {
             let resCnt = StationCarry.roomMassStoreCnt(room, resType)
             if (resCnt <= 3000) {
                 let isBuy = pro.buySome(room, resType, maxPrice * 1.05, buyCnt)
@@ -613,8 +634,19 @@ let pro = {
 
         let buyCnt = Math.min(need - global._resCnt[resType], 30000)
         let myRoomSet = ManagerRooms.getNormalRoom().map(e => e.name).toSet()
-        let myRooms = _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt)
-            .map(e => e.roomName).filter(e => myRoomSet.has(e)).toSet();
+        // 本房该资源**买单**的剩余量合计。原来的写法有两个坑：
+        //  1. 用 `remainingAmount <= buyCnt` 当「已有单」判据，而 buyCnt 每轮都变：
+        //     上轮挂得多、这轮缺口变小时 remainingAmount > buyCnt，该房就被误判成
+        //     「没有单」→ 再挂一张。同房同资源多张买单会各自冻结信用点、互相压价，
+        //     而且每张都要再付 5% 创建费。
+        //  2. 漏了 type 过滤：本房一张 SELL 单（数量只要 <= buyCnt）也会把该房从
+        //     买入名单里剔掉，导致该房永远补不到货。
+        let myBuyRemain = {};
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount || e.resourceType != resType) return;
+            if (!myRoomSet.has(e.roomName)) return;
+            myBuyRemain[e.roomName] = (myBuyRemain[e.roomName] || 0) + e.remainingAmount;
+        });
         let maxPrice = StrategyMarket.getAllOrdersCacheList(resType, ORDER_BUY)
             .filter(e => !myRoomSet.has(e.roomName))
             .map(e => e.price).maxBy(e => e) || 0
@@ -624,11 +656,23 @@ let pro = {
             let ref = StrategyMarketPrice.getResTypeHistory(resType)
             maxPrice = Math.max(maxPrice, ref * 0.95)
         }
-        _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == resType && e.remainingAmount <= buyCnt).forEach(e => {
+        // 只改我们自己的**买单**，而且价格真的变了才调。原来同样漏了 type 过滤，
+        // 会把自家同资源的 SELL 单价格改写成买入价（等于贱卖），另外抬价时引擎按
+        // (新价-旧价)×剩余量×5% 收信用点，价格没变也调属于白花。
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount || e.resourceType != resType) return;
+            if (Math.abs(e.price - maxPrice) < 0.001) return;
             Game.market.changeOrderPrice(e.id, maxPrice)
         });
 
-        ManagerRooms.getNormalRoom().filter(e => !myRooms.has(e.name) && e.terminal).map(room => {
+        // 低能量模式下本轮 autoBuy 已在 pauseCommodityBuys 里撤掉所有非 energy 买单，
+        // 这里不能再挂回去：撤销不退那 5% 创建费，重新挂又要再付一次，
+        // 每 100 tick 白烧一轮。
+        if (pro.commodityBuysPaused()) return;
+
+        ManagerRooms.getNormalRoom().filter(e => e.terminal).map(room => {
+            // 该房已有在挂的买单：交给上面的改价逻辑，不再新建
+            if (myBuyRemain[room.name] > 0) return;
             let resCnt = StationCarry.roomMassStoreCnt(room, resType)
             if (resCnt <= 6000) {
                 let isBuy = pro.buySome(room, resType, maxPrice * 1.05, buyCnt)
