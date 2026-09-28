@@ -73,13 +73,44 @@ let pro = {
                     if (!defenser) continue;
                     // console.log(defenser.name)
                     StationSources.trySpawnOuterHarKeeper(targetRoomName, spawnRoom, true);
-                    // StationSources.trySpawnOuterMineralKeeper(flag.pos.roomName, room);
+                }
+                // 外矿矿物：只采**市场价格高**的矿（H / X / L）。低价矿（K / Z / O / U）
+                // 采回来不值钱，却要占 spawn、carrier 与防守配置，见 shouldHarvestRemoteMineral 的说明。
+                if (pro.shouldHarvestRemoteMineral(targetRoomName)) {
+                    StationSources.trySpawnOuterMineralKeeper(targetRoomName, spawnRoom);
                 }
                 StationSources.trySpawnOuterHarCarrier(targetRoomName, spawnRoom);
 
             }
         }
-    }
+    },
+    /**
+     * 这个外矿房的矿物值不值得采。
+     *
+     * 矿物之间的价格差一个数量级以上，低价矿（K≈15、Z≈12、U≈9）采回来基本
+     * 不值钱，却要占用外矿的 spawn 配额、carrier 运力，在中间九房还要额外
+     * 承担 keeper 威胁下的防守成本。所以只采贵矿（H≈205、X≈266、L≈160）。
+     *
+     * **价格必须取真实市场最低卖价，不能用 StrategyMarketPrice.getResTypeHistory**：
+     * 那份缓存严重失真 —— 它对 H 记的是 1.1，而 H 在市场上实际卖 200+。用缓存
+     * 会把 H 误判成「廉价矿」而漏采。getAllOrdersCacheList 有 100 tick 缓存，开销可控。
+     *
+     * 门槛用 Memory.marketSettings.minRemoteMineralPrice 调（默认 120，会选中
+     * X / H / L，排除 O / K / Z / U）。
+     */
+    shouldHarvestRemoteMineral(roomName) {
+        let roomMemory = Memory.rooms[roomName];
+        let data = roomMemory && roomMemory[StationMineral.stationName];
+        if (!data || !data["resType"]) return false;
+        let resType = data["resType"];
+        let threshold = Number(Memory.marketSettings && Memory.marketSettings.minRemoteMineralPrice || 120);
+        let sellList = StrategyMarket.getAllOrdersCacheList(resType, ORDER_SELL).filter(e => e.amount > 0);
+        let floor = sellList.length
+            ? sellList.reduce((min, o) => Math.min(min, o.price), Infinity)
+            : 0;
+        if (!(floor > 0)) floor = StrategyMarketPrice.getResTypeHistory(resType);   // 没有挂单时退回历史价
+        return floor >= threshold;
+    },
 }
 
 

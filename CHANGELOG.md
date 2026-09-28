@@ -1,3 +1,27 @@
+## v0.78.40 — Remote mining: harvest only high-priced minerals (H / X / L)
+
+### Added
+
+- **`shouldHarvestRemoteMineral` gate for remote mineral mining.** Mineral prices
+  differ by more than an order of magnitude, and cheap ones (K≈15, Z≈12, U≈9) are
+  not worth the spawn quota, carrier trips, and — in the sector's centre nine rooms —
+  the extra defenders needed to work under Source Keepers. Only minerals at or
+  above `Memory.marketSettings.minRemoteMineralPrice` (default 120) are mined,
+  which selects X≈266 / H≈205 / L≈160 and skips O≈38 / K≈15 / Z≈12 / U≈8.6.
+- The price is taken from the **live market floor** (lowest sell order, via the
+  existing 100-tick order cache), not from `StrategyMarketPrice.getResTypeHistory`.
+  That cache was badly wrong for H: it recorded 1.1 while H actually trades around
+  205, which would have made the bot skip one of the most valuable minerals. The
+  history value is only a fallback when a mineral has no sell orders at all.
+- `StationSources.trySpawnOuterMineralKeeper` is now actually called
+  (`strategy_outerHarvest` had it commented out), behind the gate above.
+
+### Notes
+
+- W34N55 (4 keeper lairs, Source Keepers resident, H mineral) is being brought up
+  first via `har_W33N55_invader_W34N55`. The centre room W35N55 (no lairs, K
+  mineral — too cheap to mine) is deferred until W34N55 is stable.
+
 ## v0.78.39 — Fix remote-mining defenders healing and stop selling low-tier commodities
 
 ### Fixed
