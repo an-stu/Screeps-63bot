@@ -1,3 +1,70 @@
+## v0.78.37 — Cut market fee waste, decouple lab/factory from account-wide energy
+
+### Fixed
+
+- **Duplicate market buy orders.** `autoBuyMineral` and `autoBuySome` tested
+  "does this room already have an order" with `remainingAmount <= buyCnt`, but
+  `buyCnt` is recomputed every pass. When the previous round ordered more than
+  this round's gap, `remainingAmount > buyCnt` and the room was counted as having
+  no order at all, so another one was created - each duplicate paying the 5%
+  creation fee again, freezing more credits and competing with itself on price.
+  The test is now the sum of that room's BUY remaining, independent of `buyCnt`.
+- **Both of those filters omitted `e.type == ORDER_BUY`.** Our own SELL order for
+  the resource (whenever its remaining amount happened to be `<= buyCnt`) removed
+  that room from the buy list, so it could never restock.
+- **`changeOrderPrice` was called unconditionally and without a type filter.**
+  The missing type filter meant our own sell orders were repriced to the buy
+  price - quietly marked down for sale. Screeps also charges 5% of
+  `(newPrice - oldPrice) x remainingAmount` on any price *increase*, so
+  re-issuing an unchanged price is pure loss. Both call sites now filter by
+  `ORDER_BUY` and skip unless the price moved by at least 0.001 (the minimum
+  increment); `autoBuyPower` got the same idempotency guard.
+- **`pauseCommodityBuys` was immediately undone.** It cancels every non-energy
+  buy order when energy is tight, but `autoBuyMineral` ran later in the same
+  `autoBuy` pass and created them again - a cancel/create cycle every 100 ticks,
+  where the cancelled order's 5% is not refunded. The creation path now yields
+  while the pause marker is set for the current tick.
+- **Labs and factories stopped account-wide on a single starving room.**
+  `isEnergyAbundant()` takes the minimum storage+terminal energy across every
+  owned room, so one low room forced every lab with a reaction in progress to
+  `stat='clear'` and had its centre reagents hauled back to storage, and stopped
+  both factory levels from starting batches. Recovering then hauled the same
+  reagents straight back in: for an RCL7 ten-lab room that is up to 3000 units in
+  each of 10 labs, roughly 30k units moved twice (~20 carrier trips each way),
+  plus whatever reaction batch was in flight being voided.
+  Labs and the two factory levels now gate on their own room's energy, which is
+  what actually constrains them (`station_lab` already tested
+  `roomEnergy < 100000`, `station_factory` already tested
+  `roomMassStoreCnt(energy) < 100000` - the account signal was stacked on top).
+  `isEnergyAbundant()` stays account-wide for genuinely account-level decisions:
+  commodity purchasing, factory OP power, powerSpawn processing and the OPF power
+  creep - and the paired `exec()` rollback in `station_factory` keeps using the
+  same condition, so a factory can never land in the "no OP, no rollback" state.
+
+### Changed
+
+- Movement and action wrappers no longer allocate per call: `betterMoveTo`
+  computes the visual gate into a local instead of cloning the options object,
+  `Creep.prototype.moveTo` uses plain parameters instead of a rest array plus
+  spread, `lastPos` is mutated in place, and the build/repair/upgradeController/
+  dismantle/harvest/attack wrappers only write `dontPullMe` when the value
+  actually flips (keepers and upgraders were writing it ~45-60 times per tick).
+  `hasActiveBodypart` is cached per creep per tick instead of rescanning a 30-50
+  part body on every `moveTo`. `registerStationSourcesCarryOutRoom` and
+  `registerStationSourcesDefenseOutRoom` only rewrite their arrays on change.
+
+### Notes
+
+- **Measurement honesty:** the 100-tick `cpuTelemetry` buckets have a noise band
+  of roughly +/-1 CPU, so the movement-layer work above is *not* resolvably
+  faster in the bucket data - an early 83-sample reading suggested ~0.75 CPU but
+  it did not survive at 245 samples (17.067 vs 17.023 for the previous stage).
+  The allocation and Memory-write reductions are provable by inspection; the CPU
+  claim is not. The market phase fix genuinely added work (13 rooms now run the
+  per-room passes that previously only ran for one), so the net CPU is expected
+  to sit at or slightly above where it started. `Memory.marketSettings
+  .slowPassTicks` (default 80) is the knob if that needs to be traded back.
+
 ## v0.78.36 — Make the market passes reachable, replenish combat squads, raise the mineral keep
 
 ### Fixed
