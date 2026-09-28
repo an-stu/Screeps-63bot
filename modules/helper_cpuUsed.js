@@ -144,7 +144,13 @@ let pro={
         if(!bucket || bucket.id != id){
             bucket = {id:id, samples:0, sum:0, max:0, overLimit:0};
             telemetry.buckets.push(bucket);
-            if(telemetry.buckets.length > pro.longTermMaxBuckets)telemetry.buckets.shift();
+            // 一次裁到位。原来只 shift 一个：数组长度只会「push 到 N+1 再减回 N」，
+            // 所以一旦它已经超长（比如历史上限从 100 调到 50 之前攒下的），就
+            // 永远收敛不回上限。线上正卡在 100 桶（上限 50），多占约 4.7KB，
+            // 而整份 Memory 每 tick 都要序列化一遍。
+            if(telemetry.buckets.length > pro.longTermMaxBuckets){
+                telemetry.buckets.splice(0, telemetry.buckets.length - pro.longTermMaxBuckets);
+            }
         }
         bucket.samples++;
         bucket.sum += cpu;
