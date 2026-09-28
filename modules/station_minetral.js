@@ -162,17 +162,24 @@ let pro = {
         }
     },
     update(room) {
-        // 原来是 `!room.my && !room.extractor`，只有两个条件同时成立才清理：
-        // 己方房没有 extractor 时不会走进来，于是会为「采不到矿」的房间写下
-        // stationMineral 记忆，trySpawnHarKeeper 再据此派 harvestMineralKeeper。
-        // 同时 Memory.rooms[room.name] 可能不存在，直接下标删除会抛异常。
-        if (!room.my || !room.extractor) {
+        // 清理条件演进：
+        //  1) 最早是 `!room.my && !room.extractor`：只有两个条件同时成立才清理，
+        //     于是**己方房没有 extractor** 时不会走进来，会为「采不到矿」的房间
+        //     写下 stationMineral 记忆，trySpawnHarKeeper 再据此派 harvestMineralKeeper
+        //     （我上次修的就是这个）。
+        //  2) 但改成 `!room.my || !room.extractor` 又会把**外矿房**的矿物记忆直接删掉
+        //     —— 外矿矿物采集（StationSources.trySpawnOuterMineralKeeper）依赖这份
+        //     数据来定位 mineral 与 container，删了就永远采不到外矿的 H / X / L。
+        //
+        // 现在的规则：**有没有 extractor** 才是唯一判据。有 extractor 就建立/保留
+        // 记忆（不论是我方房还是我们在外矿建的），没有 extractor 或没有 mineral 才清理。
+        // Memory.rooms[room.name] 可能不存在，直接下标删除会抛异常，所以先取再判空。
+        let mineral = room.mineral;
+        if (!room.extractor || !mineral) {
             let rm = Memory.rooms[room.name];
             if (rm) delete rm[pro.stationName];
             return;
         }
-        let mineral = room.mineral;
-        if (!mineral) return;
         let usedContainer = {};
         let tmp = room.memory[pro.stationName] = room.memory[pro.stationName] || {};
 
