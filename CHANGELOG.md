@@ -1,3 +1,73 @@
+## v0.78.42 — Remote minerals: one container, a crew that can build it, and a way home
+
+Remote mineral harvesting was dead end to end: **zero `harvestMineralOuterKeeper`
+existed account-wide**, and W34N55's 35000 H had never been touched. Four
+separate defects, each independently sufficient to stop it.
+
+### Fixed
+
+- **A container site was dropped on every non-wall tile around the mineral.**
+  `trySpawnOuterMineralKeeper` looped over all 9 neighbours and called
+  `createConstructionSite` on each one that was not a wall, with no `break`.
+  W34N55 measured: 5 of the 9 tiles are wall, the centre is the mineral itself,
+  so it landed **three** sites — `(42,15)`, `(43,15)`, `(43,16)` — 15000 of build
+  work that nothing could finish, two of them permanently burning construction
+  site quota. `ensureOuterMineralContainerSite` now picks **one** tile (skip the
+  mineral tile, skip walls, prefer the tile with the most open neighbours) and
+  additionally collapses any legacy duplicates on sight.
+- **The "worker" sent to build it never left the home room.** When a site
+  already existed the code spawned a `worker` **with an empty task list**, in the
+  spawn room. A worker with no tasks just builds whatever is next to it at home;
+  it never walks to the remote room. Every mineral container therefore sat at
+  `0/5000` forever, and since the harvester's own spawn condition was
+  `container` existing, the harvester was never spawned either. Replaced with a
+  dedicated `outerMineralContainerBuilder` role.
+- **`harvestMineralOuterKeeper` read the wrong Memory path and would have thrown
+  every tick.** It did
+  `Memory.rooms[room][StationSources.stationName][mineralId]` — but a mineral
+  record lives under `StationMineral.stationName` as one flat object per room,
+  not keyed by id. That lookup returns `undefined`, so the next line
+  `station["container"]` is a guaranteed `TypeError`. Latent only because no
+  mineral keeper ever spawned; it would have detonated the moment this chain
+  started working. Now reads `stationMineral` and null-checks it.
+- **`generatorOuterMineTask` filed the mineral under `stationSources`.** Its
+  `regFun` was `registerStationSources`, which writes
+  `stationSources[mineralId]`. `trySpawnOuterHarKeeper` iterates
+  `stationSources` looking for anything with an `id`, so it would have treated
+  the mineral as a mining spot and dispatched an energy keeper to harvest it.
+  `regFun` is now empty; remote mineral replenishment is decided by role + task
+  room instead.
+
+### Added
+
+- **`outerMineralContainerBuilder`** — `{WORK:16, CARRY:17, MOVE:17}`, 50 parts.
+  The container is 5000 progress at 1 energy per progress, and a creep carries
+  at most 850, so a single trip cannot finish it. The task
+  (`buildOuterMineralContainer`) is a self-repeating loop rather than a fixed
+  stack: when it runs dry it pushes one `carryRes` against the home storage,
+  which pops itself on withdrawal and hands control back. Verified in game —
+  it spawned, withdrew a full 850 energy, and set off for W34N55. Six trips
+  finish the container; it then recycles itself instead of idling.
+- **`harvestMineralOuterCarry`** — the transport link that did not exist at all.
+  Nothing in the codebase carried a remote mineral home: the harvester is a
+  static `{MOVE:15, WORK:30, CARRY:4}` that only fills the container, and
+  `trySpawnOuterHarCarrier` walks `stationSources` and never sees
+  `stationMineral`. Without this the container just fills up and the whole
+  chain is pointless. A `{CARRY:25, MOVE:25}` shuttle moves 1250 per ~160 tick
+  round trip (≈7.8 H/tick), about 6× faster than letting the harvester do it
+  itself (200 per trip). It only spawns once a harvester is already on site, so
+  it never idles in an empty room.
+
+### Notes
+
+- Verified after deploy: the three mineral sites collapsed to one at `(43,15)`,
+  `containerSite` recorded in `Memory.rooms.W34N55.stationMineral`, the builder
+  spawned with the intended body and left carrying 850 energy.
+- Source `(32,32)`'s container completed during this window. That matters beyond
+  minerals: `trySpawnOuterHarCarrier` is gated on `data["container"]`, and road
+  sites are only laid by the road-builder carrier, so a new remote room has no
+  roads at all until its first container finishes.
+
 ## v0.78.41 — Remote defence: patrol the lairs, scope the mineral record, size the keepers
 
 ### Fixed

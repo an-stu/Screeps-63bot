@@ -141,8 +141,13 @@ Creep.prototype.harvestMineralOuterKeeper = function () {
         return;
     } else {
         let mineral = Game.getObjectById(task["id"]);
-        let station = Memory.rooms[this.headTask().roomName][pro.stationName][task["id"]];
-        let container = Game.getObjectById(station["container"]);
+        // 矿物记录挂在 StationMineral.stationName（一房一条、不按 id 分桶），
+        // 不是本模块的 "stationSources"。原来按 [pro.stationName][task["id"]] 取，
+        // 拿到的是 undefined，下一行 station["container"] 必定抛 TypeError ——
+        // 外矿矿物爬一旦出生就会每 tick 报错。改成取 stationMineral 并判空。
+        let station = Memory.rooms[this.headTask().roomName]
+            && Memory.rooms[this.headTask().roomName][StationMineral.stationName];
+        let container = station && Game.getObjectById(station["container"]);
         if (container && !container.pos.isEqualTo(this)) {
             this.addTask(UtilsTask.task(container, "concatStationSources"));
             this.addTaskAndExec(UtilsTask.task(container, "goToPop"));
@@ -168,6 +173,90 @@ Creep.prototype.harvestMineralOuterKeeper = function () {
             this.pickup(dropEnergy);
         }
     }
+};
+
+/**
+ * 外矿矿物搬运：矿物容器 -> 主房 storage，来回跑。
+ *
+ * 外矿的矿物**没有任何搬运链**（全代码库搜不到第二个 MineralOuter / 矿物 carrier）：
+ * harvestMineralOuterKeeper 是 {MOVE:15,WORK:30,CARRY:4} 的固定采集爬，只会把 H 塞进
+ * 旁边的容器；trySpawnOuterHarCarrier 只遍历 stationSources，不认 stationMineral。
+ * 也就是说容器满了之后 H 就永远堆在外矿，一条链白建。这里补上搬运那一环。
+ *
+ * 不走 harvestEnergyOuterCarry 那条路是因为它整条链路都把 RESOURCE_ENERGY 写死了
+ * （fillRes / 路点缓存 / 修路任务），改成通用资源要动十几处，风险大得多。
+ */
+Creep.prototype.harvestMineralOuterCarry = function () {
+    let task = this.headTask();
+    let rm = Memory.rooms[task.roomName];
+    let data = rm && rm[StationMineral.stationName];
+    let resType = data && data["resType"];
+    let container = data && Game.getObjectById(data["container"]);
+    // 记录被清 / 容器没了 → 回主房回收，不留闲爬
+    if (!data || !resType || !container) {
+        return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
+    if (this.store[resType] > 0) {
+        let home = Game.rooms[task.homeRoom] || this.mainRoom();
+        let storage = home && home.storage;
+        if (!storage) return;
+        if (!this.pos.isNearTo(storage)) {
+            this.moveTo(storage, { reusePath: 20, visualizePathStyle: { stroke: '#fffa00' } });
+            return;
+        }
+        this.transfer(storage, resType);
+        return;
+    }
+    if (!this.pos.isNearTo(container)) {
+        this.moveTo(container, { reusePath: 20, visualizePathStyle: { stroke: '#fffa00' } });
+        return;
+    }
+    let cap = this.store.getCapacity(resType) || this.store.getCapacity();
+    let stored = container.store[resType] || 0;
+    if (stored <= 0) return;
+    // 还没攒够一趟：矿物还在就继续等（30 WORK 的采集爬 ~67 tick 就能填满 2000 的容器），
+    // 矿物已经采空就把剩下的清回来，避免尾量永远留在外矿
+    if (stored < cap * 0.8) {
+        let mineral = Game.getObjectById(data["id"]);
+        if (mineral && mineral.mineralAmount > 0) return;
+    }
+    this.withdraw(container, resType);
+};
+
+/**
+ * 修外矿矿物容器（自循环，不写死任务栈）。
+ *
+ * 容器 5000 进度，build 是 1 能量换 1 进度，而爬身上只有几百容量，所以必须来回运。
+ * 每 tick 看状态自己补一步：能量空了就插一条回主房 storage 取能量的 carryRes，
+ * 那条任务取完自己 pop 掉，下一 tick 又回到本任务继续修。
+ * 容器建成后（data["container"] 由 StationMineral.update 写上）回收，不留闲爬。
+ */
+Creep.prototype.buildOuterMineralContainer = function () {
+    let task = this.headTask();
+    let rm = Memory.rooms[task.roomName];
+    let data = rm && rm[StationMineral.stationName];
+    let container = data && Game.getObjectById(data["container"]);
+    if (!data || container) {
+        return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
+    let site = (data["containerSite"] && Game.getObjectById(data["containerSite"]))
+        || Game.getObjectById(task.id);
+    if (!site) {
+        return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
+    if (this.store[RESOURCE_ENERGY] == 0) {
+        let home = Game.rooms[task.homeRoom];
+        let storage = home && home.storage;
+        // 主房也没能量就原地等，别空跑去取
+        if (!storage || storage.store[RESOURCE_ENERGY] == 0) return;
+        this.addTask(UtilsTask.task(storage, "carryRes", undefined, { resType: RESOURCE_ENERGY }));
+        return this.execLastTask();
+    }
+    if (!this.pos.inRangeTo(site, 3)) {
+        this.moveTo(site, { range: 3, visualizePathStyle: { stroke: '#fffa00' } });
+        return;
+    }
+    this.build(site);
 };
 
 Creep.prototype.harvestEnergyKeeper = function () {
@@ -927,8 +1016,13 @@ let pro = {
         ]
     },
     generatorOuterMineTask(data) {
+        // regFun 原来是 "registerStationSources"：它把矿物 id 当成 source id 写进
+        // stationSources[mineralId]，于是 trySpawnOuterHarKeeper 遍历 stationSources
+        // 时会把矿物当成一个矿点，给它派 harvestEnergyKeeper（对着 mineral 挖能量）。
+        // 外矿矿物爬的补员由 trySpawnOuterMineralKeeper 按 role + 任务房间判断，
+        // 不需要登记表，所以 regFun 置空。
         return [
-            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestMineralOuterKeeper", "registerStationSources")
+            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestMineralOuterKeeper", undefined)
         ]
     },
     generatorOuterHarCarryTask(data) {
@@ -1470,45 +1564,158 @@ let pro = {
             }
         });
     },
+    /**
+     * 外矿矿物：容器工地只放**一个**，并派一只带 WORK 的爬去修。
+     *
+     * 原实现有两个致命问题，合起来让外矿矿物采集完全跑不起来：
+     *  1) 没有容器时，对 mineral 周围**每一格非墙格子**都 createConstructionSite。
+     *     W34N55 实测一次落下 (42,15)/(43,15)/(43,16) 三个 container 工地（其余 5 格
+     *     是墙、正中那格是 mineral 自己），5000×3 的工程量没人修得完，而且
+     *     `isNearTo(mineral)` 只随机命中其中一个，另外两个永久占着工地配额。
+     *  2) 工地存在时 spawn 的是 "worker" 且 tasks 是**空数组**：在主房出生、没有任何
+     *     任务，只会去修主房自己的工地，永远不会走到外矿房。于是矿物容器永远停在
+     *     0/5000，而下面矿爬的生出条件又是 `container` 存在 —— 全服 0 只
+     *     harvestMineralOuterKeeper 就是这么来的（W34N55 的 35000 H 一直没人动）。
+     */
     trySpawnOuterMineralKeeper(roomName, spawnRoom) {
         if (spawnRoom.spawnFailure) return null;
         let harRoom = Game.rooms[roomName.name || roomName];
         if (!harRoom) return;
-        let data = Memory.rooms[roomName][StationMineral.stationName];
-        /** 
+        let data = Memory.rooms[roomName] && Memory.rooms[roomName][StationMineral.stationName];
+        if (!data || !data["id"]) return;
+        /**
             @type {Mineral}
         */
         let mineral = Game.getObjectById(data["id"]);
+        if (!mineral) return;
         let container = Game.getObjectById(data["container"]);
+        // 容器被拆/过期时把记录清掉，下次重新走建容器流程
+        data["container"] = container ? container.id : undefined;
         if (!container) {
-            // find construction site near the mineral
-            let constructionSite = harRoom.constructionSite ? harRoom.constructionSite.filter(e => e.pos.isNearTo(mineral)).head() : undefined;
-            if (!constructionSite) {
-                // create construction site near to the mineral and not the TerrainWall
-                let pos = mineral.pos;
-                const terrian = new Room.Terrain(harRoom.name);
-                for (let x = pos.x - 1; x <= pos.x + 1; x++) {
-                    for (let y = pos.y - 1; y <= pos.y + 1; y++) {
-                        if (terrian.get(x, y) != TERRAIN_MASK_WALL) {
-                            harRoom.createConstructionSite(x, y, STRUCTURE_CONTAINER);
-                        }
+            let site = pro.ensureOuterMineralContainerSite(harRoom, mineral, data);
+            if (site && mineral.mineralAmount > 0) pro.trySpawnOuterMineralContainerBuilder(roomName, spawnRoom, site);
+            return;
+        }
+        if (mineral.mineralAmount > 0) {
+            // 原写法 e.headTask().roomName 在爬还在出生时 headTask() 可能为 undefined
+            let harCreeps = spawnRoom.creeps("harvestMineralOuterKeeper", false).filter(e => {
+                let t = e.headTask && e.headTask();
+                return t && t.roomName == harRoom.name;
+            });
+            if (harCreeps.length == 0) {
+                let harBody = pro.getMineralHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable());
+                let tasks = pro.generatorOuterMineTask(data);
+                StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestMineralOuterKeeper", tasks);
+            }
+            // 采集爬之外还得有搬运，否则 H 只是从矿物搬进了外矿的容器
+            pro.trySpawnOuterMineralCarrier(roomName, spawnRoom, data);
+        }
+    },
+    /**
+     * 外矿矿物搬运爬。体型纯 CARRY/MOVE：一趟 1250，来回约 160 tick，
+     * 约 7.8 H/tick —— 35000 的矿点 28 趟搬完，比让 {CARRY:4} 的采集爬自己
+     * 往返（200/趟，1.25 H/tick）快 6 倍。
+     */
+    trySpawnOuterMineralCarrier(roomName, spawnRoom, data) {
+        const role = "outerMineralCarrier";
+        let targetName = roomName.name || roomName;
+        let carriers = spawnRoom.creeps(role, false).filter(e => {
+            let t = e.headTask && e.headTask();
+            return t && t.roomName == targetName;
+        });
+        if (carriers.length) return;
+        if (!spawnRoom.storage) return;    // 没有 storage 就没有卸货点
+        if (spawnRoom.creeps("harvestMineralOuterKeeper", false).filter(e => {
+            let t = e.headTask && e.headTask();
+            return t && t.roomName == targetName;
+        }).length == 0) return;            // 采集爬不在就先别派搬运，免得空转
+        let body = ManagerCreeps.calcBodyPart({ [CARRY]: 25, [MOVE]: 25 });
+        if (Utils.getBodyEnergyNeed(body) > spawnRoom.getEnergyCapacityAvailable()) {
+            body = ManagerCreeps.calcBodyPart({ [CARRY]: 15, [MOVE]: 15 });
+        }
+        let tasks = [UtilsTask.taskOutView(data["id"], targetName, data["x"], data["y"],
+            "harvestMineralOuterCarry", undefined, { homeRoom: spawnRoom.name })];
+        StationHive.trySpawn(spawnRoom, spawnRoom.name, body, role, tasks);
+    },
+    /**
+     * 外矿矿物容器：整房只保留**一个**工地，id 写进 data["containerSite"]。
+     *
+     * 选格规则（固定顺序，多只爬同时进来也只会选中同一格）：
+     *   1. 必须是 mineral 的相邻格（keeper 站上去挖，carrier 贴着取货）
+     *   2. 排除墙、排除 mineral 自己那一格（那格只能放 extractor）
+     *   3. 候选里挑「周围可走格子最多」的那格，保证 keeper / carrier 站得开
+     *   4. 已有 container → 记 id 返回 undefined；已有工地 → 复用，多余的一律清掉
+     */
+    ensureOuterMineralContainerSite(harRoom, mineral, data) {
+        let nearMineral = e => e.pos.isNearTo(mineral.pos);
+        let container = harRoom.find(FIND_STRUCTURES)
+            .find(e => e.structureType == STRUCTURE_CONTAINER && nearMineral(e));
+        if (container) {
+            data["container"] = container.id;
+            delete data["containerSite"];
+            return undefined;
+        }
+        let sites = harRoom.find(FIND_MY_CONSTRUCTION_SITES)
+            .filter(e => e.structureType == STRUCTURE_CONTAINER && nearMineral(e));
+        if (sites.length) {
+            // 历史遗留的多工地只留一个（留进度最高的），其余清掉
+            sites.sort((a, b) => b.progress - a.progress);
+            sites.slice(1).forEach(e => e.remove());
+            data["containerSite"] = sites[0].id;
+            return sites[0];
+        }
+        let terrain = new Room.Terrain(harRoom.name);
+        let candidates = [];
+        for (let x = mineral.pos.x - 1; x <= mineral.pos.x + 1; x++) {
+            for (let y = mineral.pos.y - 1; y <= mineral.pos.y + 1; y++) {
+                if (x == mineral.pos.x && y == mineral.pos.y) continue;   // mineral 自己那格不能盖
+                if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                if (terrain.get(x, y) == TERRAIN_MASK_WALL) continue;
+                let open = 0;
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        if (!dx && !dy) continue;
+                        if (terrain.get(x + dx, y + dy) != TERRAIN_MASK_WALL) open++;
                     }
                 }
-            }
-            else if (harRoom.creeps('worker', false).length == 0) {
-                // if the construction site is exist, then spawn a worker to build it
-                let workerBody = StationWork.getLowLevelWorkerBodyConfig(spawnRoom)
-                StationHive.trySpawn(spawnRoom, spawnRoom.name, workerBody, "worker", [])
+                candidates.push({ x: x, y: y, open: open });
             }
         }
-        if (mineral && mineral.mineralAmount > 0 && container) {
-            let harCreeps = spawnRoom.creeps("harvestMineralOuterKeeper", false).filter(e => e.headTask().roomName == harRoom.name)
-            if (harCreeps.length == 0) {
-                let harBody = pro.getMineralHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable())
-                let tasks = pro.generatorOuterMineTask(data)
-                StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestMineralOuterKeeper", tasks)
-            }
+        if (!candidates.length) return undefined;
+        candidates.sort((a, b) => b.open - a.open || (a.x - b.x) || (a.y - b.y));
+        let pick = candidates[0];
+        if (harRoom.createConstructionSite(pick.x, pick.y, STRUCTURE_CONTAINER) != OK) return undefined;
+        let site = harRoom.find(FIND_MY_CONSTRUCTION_SITES)
+            .find(e => e.structureType == STRUCTURE_CONTAINER && e.pos.x == pick.x && e.pos.y == pick.y);
+        if (site) data["containerSite"] = site.id;
+        return site;
+    },
+    /**
+     * 派一只带 WORK 的爬去修外矿矿物容器。
+     *
+     * 任务是一条自循环（见 Creep.prototype.buildOuterMineralContainer）：
+     *   能量空了 → 回主房 storage 取（carryRes）→ 回到工地修 → 空了再去取 …
+     * 容器建成后走 recycleCreep 回主房回收，不留闲爬。
+     *
+     * 体型 WORK/CARRY 各半、MOVE 补齐：CARRY 决定一趟能修多少（1 能量 = 1 进度，
+     * 5000 的容器要运 5000 能量），MOVE 保证在还没修路的外矿房走得动。
+     */
+    trySpawnOuterMineralContainerBuilder(roomName, spawnRoom, site) {
+        const role = "outerMineralContainerBuilder";
+        let targetName = roomName.name || roomName;
+        let builders = spawnRoom.creeps(role, false).filter(e => {
+            let t = e.headTask && e.headTask();
+            return t && t.roomName == targetName;
+        });
+        if (builders.length) return;
+        if (!spawnRoom.storage) return;   // 没有 storage 就没有取能量的地方
+        let body = ManagerCreeps.calcBodyPart({ [WORK]: 16, [CARRY]: 17, [MOVE]: 17 });
+        if (Utils.getBodyEnergyNeed(body) > spawnRoom.getEnergyCapacityAvailable()) {
+            body = StationWork.getMiddleLevelWorkerBodyConfig(spawnRoom);
         }
+        let tasks = [UtilsTask.taskOutView(site.id, site.pos.roomName, site.pos.x, site.pos.y,
+            "buildOuterMineralContainer", undefined, { homeRoom: spawnRoom.name })];
+        StationHive.trySpawn(spawnRoom, spawnRoom.name, body, role, tasks);
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
         // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
