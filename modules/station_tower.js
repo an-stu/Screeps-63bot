@@ -18,6 +18,8 @@ let lastAttackCreepMap={}
 // 一次（带房间哈希错峰），敌袭出现时 scanTick 会自动连续运行不受影响。
 const TOWER_SCAN_INTERVAL=10;
 const SAFE_MODE_CHECK_INTERVAL=3;
+// 敌情消失后还要保持多久的「受伤扫描」。见 exec 里的说明。
+const PEACEFUL_HEAL_WINDOW=400;
 
 let pro={
     stationName:"stationTower",
@@ -25,6 +27,8 @@ let pro={
     towerRepairMap:{},
     lastUpdateMap:{},
     lastActiveMap:{},
+    // 每房最后一次见到敌人的 tick，用于判断是否还需要做「受伤扫描」
+    lastHostileTimeMap:{},
     update (room) {
         pro.lastUpdateMap[room.name] = (pro.lastUpdateMap[room.name] || 0) - 1;
 
@@ -63,7 +67,19 @@ let pro={
             }
 
             let injured = undefined;
-            if(!hostiles.length){
+            if(hostiles.length){
+                pro.lastHostileTimeMap[room.name] = Game.time;
+            }
+            // 只在「本房最近出现过敌人」时才扫描受伤的己方 creep。
+            //
+            // 依据：房间内的结构/塔都无法跨房攻击，所以本房 creep 受伤必定意味着
+            // 本房当时有敌人。和平房里这两次带 filter 的全房 find
+            // （FIND_MY_CREEPS + FIND_MY_POWER_CREEPS，每次都要新建 options 对象和
+            // 闭包）纯粹是浪费，而它们是扫描 tick 的主要开销。
+            //
+            // 保留 400 tick 的窗口：任何一次敌情出现都会重新武装一段时间的治疗，
+            // 远程战斗后带伤回城的 creep 仍能被塔奶到。
+            if(!hostiles.length && (pro.lastHostileTimeMap[room.name]||0) + PEACEFUL_HEAL_WINDOW > Game.time){
                 let damaged = room.find(FIND_MY_CREEPS, {filter:e=>e.hits < e.hitsMax})
                     .concat(room.find(FIND_MY_POWER_CREEPS, {filter:e=>e.hits < e.hitsMax}));
                 injured = damaged.minBy(e=>e.hits/e.hitsMax);
