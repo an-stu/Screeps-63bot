@@ -1,3 +1,52 @@
+## v0.78.38 — Stop the tower injured-creep scan in rooms with no hostile contact
+
+### Fixed
+
+- **`StationTower.exec` was the largest per-room cost after the economy pass**
+  (0.706 CPU/tick measured with runtime instrumentation) in a colony where every
+  owned room is peaceful. On each scan tick (every 10 ticks per room) it ran two
+  filtered full-room finds:
+  `room.find(FIND_MY_CREEPS, {filter: hits < hitsMax})` concat the same for
+  power creeps. Structures and towers cannot attack across a room boundary, so a
+  creep inside an owned room can only be damaged if a hostile was in that room at
+  the time - in a room that has been quiet those two finds, each building an
+  options object and a closure for the engine to call back into, cannot return
+  anything.
+  They now run only while the room has seen a hostile within
+  `PEACEFUL_HEAL_WINDOW` (400 ticks), which re-arms on any contact, so a creep
+  that limps home after remote combat still gets healed and a room with hostiles
+  present always scans.
+  Measured with the same instrumentation before and after: 0.408 -> 0.242 mCPU
+  per call (-41%), i.e. 0.706 -> 0.394 CPU/tick. Towers kept repairing
+  throughout (6 towers per room with live repair targets, repair queues intact).
+  Verified live that the guard is exercised rather than just always-true: at
+  check time `lastHostileTimeMap` held W32N56 and E48S41, both ~90 ticks after
+  real contacts, while the other eleven rooms skipped the scan.
+
+### Investigated and deliberately not changed
+
+- **The resource-balance terminal transfers have no in-flight accounting, but it
+  is not worth fixing here.** `balanceWithOtherRoom` records nothing about goods
+  already in transit, and the destination's `processRoom` recomputes its demand
+  from live stock every 10 ticks, so in principle the same shortfall can be
+  filled repeatedly while the first shipment is still travelling. Measured over
+  225 ticks with `StructureTerminal.prototype.send` instrumented: 10 sends
+  total, every gap between sends to the same destination (20/48/82 ticks) far
+  exceeding the transit time (2-26 ticks), and no repeated fill of the same
+  gap. The rooms are close enough that transit is shorter than the refresh
+  cadence, transaction cost is essentially linear in amount, and the extra
+  `ceil` rounding across 10 small sends came to roughly 5 energy per 225 ticks.
+  Adding Memory-backed in-flight tracking would cost more than it saves.
+
+### Notes
+
+- Full per-function CPU breakdown from the same instrumentation run, for the
+  next round of work: `rooms` 6.079 (of which `hl` 2.130 with a 5.78 single-call
+  peak, `tower` 0.706, `resBal` 0.498, `lab` 0.477, `factory` 0.431, `obsOver`
+  0.196, and about 1.64 of `ManagerRooms.exec`'s own overhead - largely the
+  every-61-tick `refreshRoom`). The instrumentation itself inflates every call by
+  roughly 0.005 CPU, so treat these as relative weights, not absolutes.
+
 ## v0.78.37 — Cut market fee waste, decouple lab/factory from account-wide energy
 
 ### Fixed
