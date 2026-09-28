@@ -461,7 +461,13 @@ let pro={
         // 约 3 万单位双向搬运 ≈ 20 趟 carrier，还会作废进行中的反应批次）。
         // 本房能量充足时根本没有停的理由；账号级信号仍用于采购 / OPF / powerSpawn
         // 这些真正账号级的决策。
-        if (roomEnergy < 100000) {
+        //
+        // 另加滞回：已在反应的房间 10 万就停，还没起反应的房间要 13 万才起。
+        // 单一阈值会让能量恰好压在 10 万附近的房间在门槛两侧反复抖动——
+        // 每抖一次就要「起反应 → 抽原料 → 停 → 搬回去」。（线上 E55S31 就停在
+        // 100580，正贴在这个门槛上。）
+        let minEnergy = obj["reacting"] ? 100000 : 130000;
+        if (roomEnergy < minEnergy) {
             if (obj["reacting"]) {
                 obj["stat"] = "clear";
                 delete obj["reacting"];

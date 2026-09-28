@@ -197,6 +197,23 @@ let pro = {
         // 的决策延迟变为 400 tick（组件 200 tick），对以小时计的挂单成交
         // 毫无影响。
         _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
+        // 同房同资源只保留一张买单。多张买单会各自冻结信用点、互相压价，而且每张
+        // 都已经付过 5% 创建费。各条建单路径虽然都有去重，但都只能防新增、无法
+        // 收敛已经存在的重复（线上 E55S31 就有两张完全相同的 energy 买单，创建
+        // 时间戳一致）。这里统一收敛，只留剩余量最大的那张。
+        let bestBuy = {};
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount) return;
+            let key = e.roomName + "|" + e.resourceType;
+            let cur = bestBuy[key];
+            if (!cur || e.remainingAmount > cur.remainingAmount) bestBuy[key] = e;
+        });
+        let keepBuyIds = new Set(_.values(bestBuy).map(e => e.id));
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount || keepBuyIds.has(e.id)) return;
+            console.log(`[cancel] duplicate buy ${e.roomName} ${e.resourceType} ${e.id}`);
+            Game.market.cancelOrder(e.id);
+        });
         // 能量不充裕时进入低采购模式：只保留 energy 买单，商品/中间产物买单全部撤掉，
         // 等 energy surplus 恢复后由 autoBuyMineral / 工厂链重新按需买入。
         if (!StationHive.isEnergyAbundant()) pro.pauseCommodityBuys();
