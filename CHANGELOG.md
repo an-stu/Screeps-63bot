@@ -41,6 +41,26 @@
   creep - and the paired `exec()` rollback in `station_factory` keeps using the
   same condition, so a factory can never land in the "no OP, no rollback" state.
 
+- **`Memory.cpuTelemetry.buckets` could never shrink back to its cap.** The trim
+  was `push(); if (length > cap) shift()`, which only ever holds the array at
+  whatever length it already had - push makes it N+1 and shift brings it back to
+  N. Once it was over the cap (which happens whenever the cap is lowered, as it
+  was when `longTermMaxBuckets` went from 100 to 50) it stayed there. It was
+  sitting at 100 buckets against a cap of 50, about 4.7KB of payload that the
+  whole Memory tree re-serialises every tick. `splice()` now trims in one go.
+- **Duplicate buy orders are converged, not just prevented.** Every creation path
+  had some de-duplication, but none could clean up orders that already existed:
+  E55S31 was carrying two byte-identical energy buy orders with the same
+  `createdTimestamp`. Both freeze credits, both paid the 5% creation fee, and
+  they undercut each other. `autoBuy` now keeps only the largest remaining buy
+  per (room, resource) and cancels the rest. Verified live: 9 orders -> 7, no
+  duplicates.
+- **The per-room lab energy gate now has hysteresis.** A single 100000 threshold
+  means a room parked on the line flaps - it starts a reaction, has reagents
+  hauled in, drops below the line, is forced to clear and has them hauled back
+  out. E55S31 was sitting at 100580, right on the boundary. A room already
+  reacting stops at 100000; an idle room needs 130000 to start.
+
 ### Changed
 
 - Movement and action wrappers no longer allocate per call: `betterMoveTo`
