@@ -746,7 +746,20 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
 
 
 
-let outerMaxPartCnt = 3
+/**
+ * 外矿 keeper 的 WORK 组数上限。
+ *
+ * 中间九房（Source Keeper 房）的 source 容量是 4000，每 300 tick 重置一次
+ * —— 也就是重置速率 4000/300 ≈ **13.33 能量/tick**。
+ *
+ * 这个值原来是 3，算出来的体型是 {MOVE:3, WORK:6, CARRY:1}，只有 6 个 WORK = 12 能量/tick，**低于重置速率**：source 永远采不完，keeper 一直被 regen 追着跑，3 个矿点合计只出 ~36/tick，却要占 3 个 keeper 的 spawn 与防守成本。
+ *
+ * 提到 5 → 体型 {MOVE:5, WORK:10, CARRY:2}，10 个 WORK = 20 能量/tick > 13.33，能在 ~200 tick 内把一个矿点采空（留 100 tick 缓冲应对往返与骚扰）。
+ *
+ * 主房 keeper 不受影响（下面 innerMaxPartCnt）。
+ * 想再保守/激进可用 Memory.marketSettings.outerMaxPartCnt 覆盖。
+ */
+let outerMaxPartCnt = 5
 let innerMaxPartCnt = 3
 let saveCpuLevel = 8
 if (isSaveCpu) innerMaxPartCnt = 13
@@ -784,7 +797,11 @@ let pro = {
         if (data["lastPowerTime"] + 3000 > Game.time)
             regPerTick += data["lastPowerLevel"] * 50 / 15 // power了
         // log(regPerTick,Math.max(Math.ceil(regPerTick+0.1)/2,innerMaxPartCnt))
-        let maxPart = isOutRoom ? outerMaxPartCnt : Math.max(Math.ceil(regPerTick / 4 + 0.1), innerMaxPartCnt);
+        // 外矿：默认 outerMaxPartCnt（见上面注释里 4000/300 tick 的重置速率推导），
+        // 可用 Memory.marketSettings.outerMaxPartCnt 覆盖。
+        let maxPart = isOutRoom
+            ? Number(Memory.marketSettings && Memory.marketSettings.outerMaxPartCnt || outerMaxPartCnt)
+            : Math.max(Math.ceil(regPerTick / 4 + 0.1), innerMaxPartCnt);
         if (level < saveCpuLevel && isSaveCpu) maxPart = 4;
         let current = 0;
         let cost = BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE];
