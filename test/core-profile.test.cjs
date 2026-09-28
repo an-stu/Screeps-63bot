@@ -149,7 +149,12 @@ assert.equal(new Set(controllerSigns).size, controllerSigns.length, "controller 
 assert.ok(controllerSigns.every(sign => !sign.includes("—") && sign.length <= 100), "controller signs must omit authors and fit the API limit");
 assert.ok(stationUpgrade.includes("Memory.controllerSignAssignments") && stationUpgrade.includes("used.has(sign)"), "owned rooms must reserve unique controller signs");
 assert.ok(prototypeCreep.includes("StationUpgrade.trySignController(this)"), "all owned rooms need a creep-independent signing hook");
-assert.ok(main.includes("&& shouldRunCreep(e)"), "creep execution must apply the safe adaptive throttle");
+// MIN_CPU 下按「只有显式标负数的角色才停」过滤（未列出的角色默认继续运行），
+// 但桶见底的极限分支（bucket <= 40）仍保留严格白名单作为最后一层保险。
+assert.ok(main.includes("ROLE_PRIORITY_ALLOWED(e.memory.role)") && main.includes("return shouldRunCreep(e);"),
+    "creep execution must apply the safe adaptive throttle");
+assert.ok(main.includes("objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0)"),
+    "bucket-critical mode must keep the strict role whitelist");
 assert.ok(mainMount.includes("global.isCpuFeatureEnabled"), "optional modules must share one runtime feature gate");
 assert.ok(mainMount.includes("observer: true"), "observer scanning must be switchable without another upload");
 assert.ok(mainMount.includes("outerHarvest: true"), "remote harvesting must be switchable without another upload");
@@ -228,7 +233,7 @@ assert.ok(warTeamCore.includes("SPAWN_TEAM_TTL") && warTeamCore.includes("Removi
 assert.ok(main.includes("global.TeamRaL1 && isCpuFeatureEnabled(\"combat\")"), "RaL combat spawning honours the emergency combat switch");
 assert.ok(teamRaL1.includes("if (!flag) {") && teamRaL1.includes("this.suicide()"), "orphaned RaL creeps must stop safely when their flag is removed");
 assert.ok(warTeamFlag.includes("hasPendingSpawnTeam") && warTeamFlag.includes("!pro.hasPendingSpawnTeam(r4.room.name)"), "persistent r4 flags cannot accumulate spawn queues");
-assert.ok(consoleDashboard.includes("moduleCpu && Memory.codeHealth.moduleCpu.rooms") && consoleDashboard.includes("avg profile CPU"), "dashboard uses stable room CPU aggregates instead of a single spike");
+assert.ok(consoleDashboard.includes("HelperCpuUsed.profileSummary()") && consoleDashboard.includes("avg profile CPU"), "dashboard uses stable room CPU aggregates instead of a single spike");
 assert.ok(!highwayDefense.includes("log(code,PathFinder.search"), "highway flee must never repeat PathFinder just for logging");
 assert.ok(attackRoom.includes("attackRoomTargetUntil"), "attack-room creeps must keep a short-lived selected target");
 assert.ok(warCache.includes("cacheStructsTime[roomName] != Game.time"), "combat structure snapshots must refresh at most once per room per tick");
@@ -265,7 +270,11 @@ assert.ok(loggerOutput[1].includes("[ERROR]") && loggerOutput[1].includes("power
 
 assert.ok(main.includes("HelperCpuUsed.recordLongTerm(Game.cpu.getUsed())"), "long-window CPU telemetry must record every completed tick");
 assert.ok(main.includes("HelperCpuUsed.recordProfile(Game._coreCpuProfile)"), "low-frequency profiles must feed persistent module telemetry");
-assert.ok(main.includes("moduleCpu: HelperCpuUsed.profileSummary()"), "module CPU averages must remain inspectable in code health");
+// moduleCpu / cpuLongTerm 曾经在 codeHealth 里存一份完整派生副本（4.6KB+），
+// 与 Memory.cpuModuleTelemetry / cpuTelemetry 完全重复；现在改为按需计算，
+// 这里锁定「不要再写回 codeHealth」。
+assert.ok(!main.includes("moduleCpu:") && !main.includes("cpuLongTerm:"), "derived CPU summaries must not be persisted twice in code health");
+assert.ok(manifest.includes("helper_cpuUsed"), "module CPU telemetry source must keep shipping");
 assert.ok(main.includes("Game.time - previousHealth.lastErrorTick > 5000"), "stale code-health errors must expire from Memory");
 assert.equal((fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8").match(/Creep\.prototype\.headTask =/g) || []).length, 1, "headTask must have one canonical definition");
 assert.ok(!main.includes("space_action") && !main.includes("let P0"), "dead account-specific tick actions must stay removed");

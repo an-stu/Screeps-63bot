@@ -162,7 +162,15 @@ let pro = {
         }
     },
     update(room) {
-        if (!room.my&&!room.extractor) return delete Memory.rooms[room.name][pro.stationName];
+        // 原来是 `!room.my && !room.extractor`，只有两个条件同时成立才清理：
+        // 己方房没有 extractor 时不会走进来，于是会为「采不到矿」的房间写下
+        // stationMineral 记忆，trySpawnHarKeeper 再据此派 harvestMineralKeeper。
+        // 同时 Memory.rooms[room.name] 可能不存在，直接下标删除会抛异常。
+        if (!room.my || !room.extractor) {
+            let rm = Memory.rooms[room.name];
+            if (rm) delete rm[pro.stationName];
+            return;
+        }
         let mineral = room.mineral;
         if (!mineral) return;
         let usedContainer = {};

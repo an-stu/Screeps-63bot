@@ -246,7 +246,10 @@ RoomPosition.prototype.coverRampart = function () {
 
 RoomPosition.prototype.hashCode = function () {
     let roomCoordinate = this.getRoomCoordinate();
-    return (roomCoordinate.x<<18)+(roomCoordinate.x<<12)+(this.x<<6)+this.y
+    // 原写法 `(x<<18)+(x<<12)+(x<<6)+y`：roomCoordinate.y 从未参与、x 用了两次，
+    // 于是同一列（同 x 不同 y）的房间 + 相同房内坐标会得到同一个哈希。该值被
+    // war_teamCore / strategy_GCLRoom 当作 Set 键使用，会造成误判为同一点。
+    return (roomCoordinate.x<<18)+(roomCoordinate.y<<12)+(this.x<<6)+this.y
 }
 
 

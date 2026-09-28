@@ -105,7 +105,8 @@ function roomResources(room) {
 function header(title) {
     let health = Memory.codeHealth || {};
     let average = Number(health.averageCpu || 0);
-    let longTerm = health.cpuLongTerm || {};
+    // 按需计算，不再依赖 Memory.codeHealth.cpuLongTerm 的持久副本
+    let longTerm = HelperCpuUsed.longTermSummary() || {};
     let avgTone = average <= Game.cpu.limit ? "good" : average <= Game.cpu.limit * 1.2 ? "warn" : "bad";
     return `<div style="background:${COLORS.bg};color:${COLORS.text};padding:8px 10px;border:1px solid ${COLORS.line};font:12px/1.5 monospace">`
         + `<b style="color:${COLORS.cyan};font-size:14px">▣ ${escapeHtml(title)}</b> &nbsp; tick ${Game.time}`
@@ -136,7 +137,8 @@ function moduleStatus() {
 function overview() {
     // The old value was a single 97-tick snapshot and could catch a pathing
     // spike. The persisted aggregate gives a stable room-level value.
-    let profile = (Memory.codeHealth && Memory.codeHealth.moduleCpu && Memory.codeHealth.moduleCpu.rooms) || {};
+    // 按需计算，不再依赖 Memory.codeHealth.moduleCpu 的持久副本（省 4.6KB/tick）
+    let profile = (HelperCpuUsed.profileSummary() || {}).rooms || {};
     let rooms = Object.values(Game.rooms).filter(room => room.controller && room.controller.my)
         .sort((a, b) => a.name.localeCompare(b.name));
     let rows = rooms.map(room => {

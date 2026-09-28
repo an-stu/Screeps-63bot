@@ -83,7 +83,16 @@ let pro = {
             phaseStart = Game.cpu.getUsed();
         }
 
-        let activeCreeps = objects.creeps.filter(e => (!MIN_CPU || ROLE_PRIORITY[e.memory.role] > 0) && shouldRunCreep(e));
+        // MIN_CPU 下按 ROLE_PRIORITY 过滤：只停被显式标成负数的角色。
+        // 原写法 `ROLE_PRIORITY[e.memory.role] > 0` 对未列出的角色是
+        // `undefined > 0 === false`，会把 reserver / harvestMineralKeeper /
+        // outerHarvestEnergyCarrier / minRoomWorker / pillager 等一起静默冻死
+        // （没有任何日志），而 ROLE_PRIORITY 里只有 worker(-5)/upgrader(-10) 是
+        // 作者显式想停的，语义上「未列出 = 照常运行」。
+        let activeCreeps = objects.creeps.filter(e => {
+            if (MIN_CPU && !ROLE_PRIORITY_ALLOWED(e.memory.role)) return false;
+            return shouldRunCreep(e);
+        });
         if (cpuProfile) {
             cpuProfile.unitRoles = {};
             HelperError.runEachProfiled(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()), e => "power:" + (e.memory.role || "unknown"), cpuProfile.unitRoles);
@@ -242,15 +251,21 @@ let updateCodeHealth = function () {
         time: Game.time,
         cpu: Game.cpu.getUsed(),
         averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),
-        cpuLongTerm: HelperCpuUsed.longTermSummary(),
+        // cpuLongTerm / moduleCpu 曾经也落在这里，但它们是
+        // HelperCpuUsed.longTermSummary() / profileSummary() 的完整副本：
+        // moduleCpu(4.6KB) 与 Memory.cpuModuleTelemetry(4.5KB) 完全重复，
+        // cpuLongTerm 又派生自 Memory.cpuTelemetry。两者都改为 dashboard
+        // 按需计算（helper_consoleDashboard 里），每 tick 少序列化约 5KB。
         bucket: Game.cpu.bucket,
         creeps: objects.creeps.length,
         powerCreeps: objects.powerCreeps.filter(e => e.ticksToLive).length,
         upgraderInterval: Game._upgraderInterval || getUpgraderInterval(),
         missingTaskHandlers: missingTaskHandlers,
         phases: Game._coreCpuProfile || Memory.codeHealth.phases || {},
-        moduleCpu: HelperCpuUsed.profileSummary(),
     });
+    // 一次性清掉历史遗留的两份重复副本，避免老内存继续占体积
+    delete Memory.codeHealth.cpuLongTerm;
+    delete Memory.codeHealth.moduleCpu;
 }
 
 let main = function () {

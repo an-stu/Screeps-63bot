@@ -90,7 +90,9 @@ PowerCreep.prototype.OpSource = function () {
     let pcPower = this.powers[PWR_REGEN_SOURCE];
     let source = this.lastTaskObj();
     if (pcPower.cooldown > OP_SOURCE_WAIT_TIME || !source) {
+        // 必须 return：否则下面会拿着已弹出/undefined 的 source 继续 moveTo+usePower
         this.popTask().execLastTask();
+        return;
     }
     if (!this.pos.inRangeTo(source, 3)) {
         this.moveTo(source, { range: 3 });
@@ -242,6 +244,7 @@ PowerCreep.prototype.OpPowerSpawn = function () {
     let powerSpawn = this.lastTaskObj();
     if (pcPower.cooldown > 0 || !powerSpawn) {
         this.popTask().execLastTask();
+        return;
     }
     if (!this.pos.inRangeTo(powerSpawn, 3)) {
         this.moveTo(powerSpawn);
@@ -254,6 +257,7 @@ PowerCreep.prototype.OpFactory = function () {
     let factory = this.lastTaskObj();
     if (pcPower.cooldown > 0 || !factory) {
         this.popTask().execLastTask();
+        return;
     }
     if (!this.pos.inRangeTo(factory, 3)) {
         this.moveTo(factory);
@@ -340,6 +344,9 @@ PowerCreep.prototype.needOpMineral = function () {
     if (pcPower && pcPower.cooldown < OP_SOURCE_WAIT_TIME) {
         let room = this.mainRoom();
         let obj = room.memory[StationMineral.stationName]
+        // 没有矿物记忆的房间（新占/无 mineral）obj 为 undefined，直接取 .id 会抛
+        // TypeError，被 catchError 吞掉后本 PC 整 tick 后续分支全部跳过
+        if (!obj || !obj.id) return false;
         let mineral = Game.getObjectById(obj.id)
         if (mineral && !mineral.ticksToRegeneration && (!mineral.effects || !mineral.effects.length || mineral.effects.head().ticksRemaining < 5)) {
             return mineral;
@@ -353,6 +360,7 @@ PowerCreep.prototype.OpMineral = function () {
     let mineral = this.lastTaskObj();
     if (pcPower.cooldown > 5 || !mineral || !mineral.mineralAmount) {
         this.popTask().execLastTask();
+        return;
     }
     if (!this.pos.inRangeTo(mineral, 3)) {
         this.moveTo(mineral, { range: 3 });

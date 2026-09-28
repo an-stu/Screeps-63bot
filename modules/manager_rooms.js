@@ -30,7 +30,9 @@ const managerRooms = {
     },
 
     refreshRoom(room) {
-        if (!room.Memory) room.Memory = {};
+        // 原来写成 `room.Memory`（大写 M）—— 全仓库只此一处、无任何读取，
+        // 既没达到「确保 room.memory 存在」的目的，也在 room 对象上留了个垃圾属性。
+        if (!room.memory) room.memory = {};
         room.update();
         StationCarry.update(room);
         StationSources.update(room);

@@ -109,8 +109,9 @@ Creep.prototype.carryDeposit = function () {
         }
         if (this.ticksToLive < (flag.memory.pathTime || 600) * 1.2 || this.storeFull() || flag.memory.waitTime > 100) {// 回家
             flag.memory.carriers = flag.memory.carriers || []
-            if (!flag.memory.carriers.contains(this.id))
-                flag.memory.carriers = flag.memory.carriers.without(this.id)
+            // 原写法 `if (!contains(id)) without(id)` 恒为空操作：条件成立时该 id
+            // 本来就不在数组里。这里要的是「把自己摘掉」，直接移除即可。
+            flag.memory.carriers = flag.memory.carriers.without(this.id)
             this.popTask();
             this.addTask([UtilsTask.taskData("recycleCreep")])
             this.fillAllMainRoomStorage();

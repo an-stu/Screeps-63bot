@@ -14,6 +14,19 @@ global.ROLE_PRIORITY= {
     "upgrader":-10,
 }
 
+/**
+ * MIN_CPU 紧急模式下该角色是否继续执行。
+ *
+ * 语义：**只有被显式写成负数的角色才停**。未列出的角色（reserver、
+ * harvestMineralKeeper、outerHarvestEnergyCarrier、minRoomWorker、pillager 等
+ * 经济命脉）照常运行。原实现用 `ROLE_PRIORITY[role] > 0` 判断，未列出的角色是
+ * `undefined > 0 === false`，会被静默冻死且没有任何日志。
+ */
+global.ROLE_PRIORITY_ALLOWED = role => {
+    let priority = ROLE_PRIORITY[role];
+    return priority === undefined || priority > 0;
+};
+
 
 
 
@@ -74,9 +87,18 @@ let pro={
             let creep = Game.creeps[name];
             let creepMemory = Memory.creeps[name];
             if (!creepMemory || !creepMemory.tasks) {
-                // Cross-shard arrivals are initialized by the shard manager.
-                delete Game.creeps[name];
-                continue;
+                // 跨分片到达的爬由 shard manager 负责写入真正的任务。原来这里是
+                // `delete Game.creeps[name]; continue;`，三个问题：
+                //   1. pro.init() 里的 getTickObjects() 已经生成了 Game._coreObjects
+                //      快照，删除对后面的执行阶段毫无影响，pro.exec() 照样会跑到它；
+                //   2. memory.tasks 仍是 undefined，execRegFun（for...of undefined）
+                //      与 execLastTask（.length）每 tick 抛 TypeError，被 runEach
+                //      捕获后白烧 CPU 并污染 codeHealth.errorCount；
+                //   3. delete 引擎提供的 Game.creeps 对象属未定义行为。
+                // 改成补齐最小内存让它安全空转，真正的任务仍由 shard manager 写入。
+                if (!creepMemory) creepMemory = Memory.creeps[name] = {};
+                creepMemory.tasks = creepMemory.tasks || [];
+                creepMemory.role = creepMemory.role || "crossShardPending";
             }
             let roomName = creepMemory.roomName;
             let groupName = !name.startsWith("!") && roomName ? roomName : "global";
