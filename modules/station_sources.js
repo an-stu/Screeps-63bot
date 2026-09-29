@@ -58,8 +58,16 @@ const OUTER_DEFENSE_MAX_DWELL = 240;
  * 2 只是「修路能并行 + 不至于把路堵死」的折中，路修完后这里自然不再补。
  */
 const OUTER_ROAD_BUILDER_CNT = 2;
-/** 每轮最多立多少个外矿道路工地（避免一个 tick 里 createConstructionSite 刷爆 CPU） */
+/** 每轮每个矿点最多立多少个外矿道路工地（避免一个 tick 里 createConstructionSite 刷爆 CPU） */
 const OUTER_ROAD_SITE_BATCH = 30;
+/** 两次铺路间隔（tick）。铺路是幂等的，只是别每 tick 都全路线扫一遍 */
+const OUTER_ROAD_SITE_REFRESH = 100;
+/**
+ * 单个房间同时保留多少工地就停手。Screeps 每房上限 100 个工地，而多个外矿路线
+ * 常常共用主房（W33N55 同时是 3 个矿点的主房），全速铺很容易撞上限，
+ * `createConstructionSite` 会返回 ERR_FULL。留出余量给容器等其他工地。
+ */
+const OUTER_ROAD_SITE_ROOM_LIMIT = 85;
 /**
  * 外矿路点上连续卡住多久就改用移动优化器（而不是裸 creep.move）。
  * 单格宽单行道上一有互堵，裸 move 会被引擎静默取消；交给 BetterMove 的
@@ -1196,8 +1204,17 @@ let pro = {
      * carrier 走到那儿就被挡死、只能在原地来回蹭，同时因为路点永远"还没到"，
      * `outerRoadComplete` 也就永远为假 —— 路看起来"永远修不完"。
      *
-     * useBlueprint=true：首选搜索，按主房蓝图路网走（规划中的非路建筑给 50 的
-     *   软代价，避免把房间唯一出口当成绝对墙导致无解）。
+     * 代价约定（决定了路线长什么样）：
+     *   空地 2 / 沼泽 5 / 不可走建筑 255
+     *   已有的路、容器、己方 rampart、link → **1**（最低）
+     *   蓝图路网 → 1；蓝图里规划的非路建筑 → 50（软代价，避免把房间唯一出口当成
+     *   绝对墙导致无解）
+     *
+     * 空地故意比建筑高（2 > 1），这样寻路会**优先复用房间里已有的路**，
+     * 而不是在旁边的草地上另走一条、逼我们再多铺一段新路。规则对任何房间通用，
+     * 没有任何房间特定的部分。
+     *
+     * useBlueprint=true：首选搜索，按主房蓝图路网走。
      * useBlueprint=false：兜底搜索，不要蓝图，但**必须**保留「已建成建筑不可走」。
      */
     outerRoadRoomCallback(roomName, useBlueprint) {
@@ -1207,7 +1224,10 @@ let pro = {
         for (let y = 0; y < 50; y++) {
             for (let x = 0; x < 50; x++) {
                 let t = terrain.get(x, y);
-                cm.set(x, y, t == TERRAIN_MASK_WALL ? 255 : (t == TERRAIN_MASK_SWAMP ? 5 : 1));
+                // 空地给 2（不是 1）：下面会把「已有的路/容器/己方 rampart/link」压到 1，
+                // 空地必须留出一档差距，否则路和草地等价、寻路完全不会偏向已有的路，
+                // 于是它顺着草地走，逼我们另外铺一条新路。沼泽仍 5。
+                cm.set(x, y, t == TERRAIN_MASK_WALL ? 255 : (t == TERRAIN_MASK_SWAMP ? 5 : 2));
             }
         }
         if (!room) return cm;
@@ -1228,11 +1248,16 @@ let pro = {
                 }
             }
         }
-        // 已有建筑：路/容器/己方墙/链接可走，其余不可走
+        // 已有建筑：可走的压到最低代价 1，不可走的封死 255。
+        //
+        // **必须给可走建筑 1 而不是沿用地形代价**：否则房间内已有的路和旁边的草地
+        // 同价，寻路毫无理由偏向已有的路，就会在草地/沼泽上另走一条，逼我们为了
+        // 这一段又铺一条新路（还要额外占工地、多花能量）。这里是通用规则，
+        // 任何房间都是「能复用就复用」。
         room.getStructures().forEach(s => {
             let walkable = s.structureType == STRUCTURE_ROAD || s.structureType == STRUCTURE_CONTAINER
                 || (s.structureType == STRUCTURE_RAMPART && s.my) || s.structureType == STRUCTURE_LINK;
-            if (!walkable) cm.set(s.pos.x, s.pos.y, 255);
+            cm.set(s.pos.x, s.pos.y, walkable ? 1 : 255);
         });
         return cm;
     },
@@ -1374,27 +1399,48 @@ let pro = {
      *
      * 现在一次性把整条路线上缺失的点都立成工地，所有带 WORK 的 carrier
      * 就能并行去修。路修完后 outerRoadComplete 为真，这里自然不再动作。
-     * 每 100 tick 才跑一次，每轮最多 OUTER_ROAD_SITE_BATCH 个，避免
-     * createConstructionSite 在单个 tick 里刷爆 CPU。
+     *
+     * 通用性 / 健壮性要点（都是踩过坑补的，不针对任何具体房间）：
+     *  1. **不跳过主房**。原来有一句 `if (room.name == spawnRoom.name) continue;`，
+     *     把主房那段交给本地规划器。但外矿路线不一定完全落在蓝图路网上，凡是偏离的
+     *     格子就永远没有路、爬只能走空地。road（以及 container/rampart/wall）**不占
+     *     房间建筑配额**，整条路线铺是安全的；对规划的尊重改用通用判据
+     *     `roadBlockedByBlueprint`（规划了非路建筑的格子不铺）。
+     *  2. **尊重每房工地上限**：Screeps 每房最多 100 个工地，多个外矿路线常共用同一
+     *     个主房，全速铺会撞上限并让 `createConstructionSite` 返回 ERR_FULL。
+     *     见 OUTER_ROAD_SITE_ROOM_LIMIT。
+     *  3. **幂等**：已有建筑 / 已有工地 / 蓝图占位 / 边界格的都跳过，重复调用无副作用，
+     *     所以可以放心每隔 OUTER_ROAD_SITE_REFRESH tick 全路线扫一遍。
+     *  4. 每轮每个矿点最多 OUTER_ROAD_SITE_BATCH 个，避免 createConstructionSite
+     *     在单个 tick 里刷爆 CPU。
      */
     placeOuterRoadSites(data, spawnRoom) {
-        if (data.roadSiteBuildTick && Game.time - data.roadSiteBuildTick < 100) return;
+        if (data.roadSiteBuildTick && Game.time - data.roadSiteBuildTick < OUTER_ROAD_SITE_REFRESH) return;
         data.roadSiteBuildTick = Game.time;
         let path = pro.getOuterRoadPath(data);
         if (!path || !path.length) return;
         let created = 0;
+        let roomSites = {};
         for (let p of path) {
             if (created >= OUTER_ROAD_SITE_BATCH) break;
             // 边界格不能盖路
             if (p.x == 0 || p.x == 49 || p.y == 0 || p.y == 49) continue;
             let room = Game.rooms[p.roomName];
-            if (!room) continue;                              // 没视野的房跳过
-            if (room.name == spawnRoom.name) continue;        // 主房的路由本地规划器维护
+            if (!room) continue;                              // 没视野的房间跳过，等有视野再铺
+            // 每房工地余量（见 OUTER_ROAD_SITE_ROOM_LIMIT）
+            if (roomSites[p.roomName] === undefined) {
+                roomSites[p.roomName] = room.find(FIND_MY_CONSTRUCTION_SITES).length;
+            }
+            if (roomSites[p.roomName] >= OUTER_ROAD_SITE_ROOM_LIMIT) continue;
             if (room.lookForAt(LOOK_STRUCTURES, p.x, p.y).length) continue;          // 已有建筑（含路）
             if (room.lookForAt(LOOK_CONSTRUCTION_SITES, p.x, p.y).length) continue;
             if (pro.roadBlockedByBlueprint({ roomName: p.roomName, x: p.x, y: p.y })) continue;
-            if (room.createConstructionSite(p.x, p.y, STRUCTURE_ROAD) == OK) created++;
+            if (room.createConstructionSite(p.x, p.y, STRUCTURE_ROAD) == OK) {
+                created++;
+                roomSites[p.roomName]++;
+            }
         }
+        return created;
     },
     cleanupOuterRoadSites(data, spawnRoom) {
         if (data.roadSiteCleanupTick && Game.time - data.roadSiteCleanupTick < 250) return;
