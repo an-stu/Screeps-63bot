@@ -131,6 +131,10 @@ function loadMineralKeeper({ withContainer = true, harvestCode = 0 } = {}) {
         "mineral keeper must withdraw energy from a nearby tombstone");
     assert.ok(calls.some(c => c[0] === "pickup" && c[1] === "d1"),
         "mineral keeper must pick up a nearby dropped resource");
+    // 体型只有 CARRY:4（200）：捡到的能量若不立刻卸进容器，会占满 store 让
+    // harvest 永远 ERR_FULL，而 repair 在容器满血时倒不掉 —— 整只爬卡到老死。
+    assert.ok(calls.some(c => c[0] === "transfer" && c[1] === "c1" && c[2] === "energy"),
+        "energy looted by the mineral keeper must be offloaded into the container the same tick");
 }
 
 {

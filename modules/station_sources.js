@@ -326,6 +326,16 @@ Creep.prototype.harvestMineralOuterKeeper = function () {
             this.transfer(container, mineral.mineralType)
             this.pickup(dropEnergy);
         }
+        // 顺手捡到的能量必须当 tick 卸进容器，不能在身上过夜。
+        //
+        // 体型是 {MOVE:15, WORK:30, CARRY:4} —— 只有 200 容量。能量留在身上就占满
+        // store，之后每一 tick 的 harvest(mineral) 都返回 ERR_FULL；而兜底的
+        // this.repair(container) 在容器**满血**时是空操作（(43,15) 常态就是
+        // 250000/250000），能量永远倒不掉 —— 整只采集爬会卡到老死为止，而
+        // trySpawnOuterMineralKeeper 看到「有采集爬」就不会补员，矿物链断一整轮。
+        if (this.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+            this.transfer(container, RESOURCE_ENERGY);
+        }
     }
 };
 
