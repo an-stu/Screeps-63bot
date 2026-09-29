@@ -721,8 +721,16 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         return this.execLastTask();
     }
     // 到达端点：先填充所有能量到 storage（即使道路未修完也要先送货），
-    // 然后才决定掉头修路或返回矿区
-    if (this.pos.isNearTo(target) || this.store[RESOURCE_ENERGY] == 0) {
+    // 然后才决定掉头修路或返回矿区。
+    //
+    // 注意这里原来多了一个 `|| this.store[RESOURCE_ENERGY] == 0`：**空载时不论
+    // 人在哪**都会进这个分支并 `popTask()`。任务栈一旦被扒空，全代码库没有任何
+    // 地方会再给它补任务 —— 爬就永久闲置在原地。W33N55 实测 6 只空载 carrier
+    // （`lastTask()` 已经是 undefined）就这样趴在 storage 附近不动：0 能量、
+    // 占着格子、照常吃 CPU，从外面看就是「堵车」。
+    // 只有拿不到矿区信息（data 为空、无处可去）时才允许把任务清掉。
+    let noRoute = !data;
+    if (this.pos.isNearTo(target) || (this.store[RESOURCE_ENERGY] == 0 && noRoute)) {
         if (target && target.store && this.store[RESOURCE_ENERGY] > 0) {
             this.transfer(target, RESOURCE_ENERGY);
         }
@@ -1933,6 +1941,13 @@ let pro = {
                 pro.ensureOuterRoadPath(data, spawnRoom);
                 pro.placeOuterRoadSites(data, spawnRoom);
                 pro.cleanupOuterRoadSites(data, spawnRoom);
+                // 安全网：任务栈被扒空的 carrier 没有任何地方会补任务，会永久闲置
+                // 在原地（见 harvestEnergyOuterCarryRoadBuilder 里 store==0 分支的
+                // 注释）。这里发现就立刻把搬运任务派回去，比事后在控制台里一只只
+                // 救省事得多。
+                (data["carryCreeps"] || []).map(e => Game.getObjectById(e))
+                    .filter(e => e && (!e.memory.tasks || !e.memory.tasks.length))
+                    .forEach(e => { e.memory.tasks = pro.generatorOuterHarCarryTask(data); });
             }
             // 补员才需要空闲 Spawn：单 Spawn 房若先尝试本地补员，spawnFailure
             // 不能阻止已有外矿 carrier 修正其过期路径。
