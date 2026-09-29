@@ -1922,7 +1922,14 @@ let pro = {
                 let carrierCreeps = data["carryCreeps"].map(e => Game.getObjectById(e)).filter(e => e && (!e.ticksToLive || e.ticksToLive > e.body.length * 3))
                 let carrierBuildCreep = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).head()
                 let EnergyPerTick = 10;
-                let NeedCarryPartCnt = Math.ceil(pathTime * 2 * EnergyPerTick / 50) // 来回*2 每个要的tick数量
+                // pathTime 在写入端（concatStationSources）已经钳过一次，但**只钳写入端
+                // 不够**：Memory 里可能还留着历史畸形值（W33N55 实测 843，正常≈路线长度），
+                // 它会一直按老值算运力、继续过量补员 —— 表现就是「杀掉多余 carrier、
+                // 下一 tick 立刻又生一批」。两端都夹住才安全。
+                let capPath = pro.getOuterRoadPath(data);
+                let pathCap = capPath && capPath.length ? Math.round(capPath.length * 1.2) : (pathTime || 300);
+                let effPathTime = Math.min(pathTime, pathCap);
+                let NeedCarryPartCnt = Math.ceil(effPathTime * 2 * EnergyPerTick / 50) // 来回*2 每个要的tick数量
                 let CarryPartCnt = NeedCarryPartCnt - 2 // 两个被换成 work了
                 carrierCreeps.forEach(e => CarryPartCnt -= e.getPartCnt(CARRY))
                 let maxPart = Math.ceil(NeedCarryPartCnt / Math.ceil(NeedCarryPartCnt / 33)) // 每个 最大32 part 计算每只的数量
