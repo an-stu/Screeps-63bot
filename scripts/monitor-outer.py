@@ -27,8 +27,14 @@ PROBE_A = (
     "return (function(){var a={};Object.keys(Game.creeps).forEach(function(n){var c=Game.creeps[n];"
     "var t=c.headTask&&c.headTask();if(!(t&&t.roomName=='%s'))return;"
     "a[c.memory.role]=(a[c.memory.role]||0)+1;});"
+    # 真实存活 keeper 数：按 headTask.id（= 源 id）从 Game.creeps 全局统计。
+    # 不要用 data["creeps"].length —— 那是登记字段，registerStationSources 有延迟，
+    # 会在 keeper 明明已出生/在场时报 0，把「正常补员中」误判成「没有 keeper」。
+    "var live={};Object.keys(Game.creeps).forEach(function(n){var c=Game.creeps[n];"
+    "if(c.memory.role!='harvestEnergyKeeper')return;"
+    "var t=c.headTask&&c.headTask();if(!t||!t.id)return;live[t.id]=(live[t.id]||0)+1;});"
     "var ss=Memory.rooms['%s'].stationSources;var pt={};"
-    "for(var k in ss){pt[ss[k].x+','+ss[k].y]=[ss[k].pathTime||0,ss[k].creeps.length,ss[k].container?1:0];}"
+    "for(var k in ss){var d=ss[k];pt[d.x+','+d.y]=[d.pathTime||0,live[d.id]||0,d.container?1:0];}"
     "var mm=Memory.rooms['%s'].stationMineral;"
     "return {t:Game.time,roles:a,pathTime:pt,mineralContainer:mm.container?1:0};})();"
 ) % (TARGET, TARGET, TARGET)
@@ -39,11 +45,13 @@ PROBE_B = (
     "if(c.memory.role!='outerHarvestDefenser')return;var t=c.headTask&&c.headTask();"
     "if(!(t&&t.roomName=='%s'))return;var ps=StationSources.outerDefensePosts(c);"
     "var w=null;ps.forEach(function(e){if(e.ticksToSpawn!==undefined&&(!w||e.ticksToSpawn<w.ticksToSpawn))w=e;});"
-    "d.push([c.pos.x,c.pos.y,c.memory.defenseGroup,w?w.pos.x+','+w.pos.y+' d='+c.pos.getRangeTo(w.pos):'-']);});"
+    "d.push([c.pos.x,c.pos.y,c.memory.defenseGroup,c.ticksToLive,"
+    "w?w.pos.x+','+w.pos.y+' d='+c.pos.getRangeTo(w.pos):'-',c.memory.hasSendSpawn?1:0]);});"
     "return {lairs:r.find(FIND_HOSTILE_STRUCTURES).filter(function(e){return e.structureType=='keeperLair';})"
     ".map(function(e){return e.pos.x+','+e.pos.y+':'+e.ticksToSpawn;}),"
-    "defs:d,hostiles:r.find(FIND_HOSTILE_CREEPS).length};})();"
-) % (TARGET, TARGET)
+    "defs:d,hostiles:r.find(FIND_HOSTILE_CREEPS).length,"
+    "lead:StationSources.outerDefenseReplaceLead('%s',Game.rooms['%s'])};})();"
+) % (TARGET, TARGET, TARGET, HOME)
 
 
 def main():
@@ -85,13 +93,25 @@ def main():
         print("  !! 探针失败: %r" % (p,))
         return 1
     print("  roles=%s" % (p.get("roles"),))
-    print("  pathTime/keeper/container=%s" % (p.get("pathTime"),))
+    print("  pathTime/liveKeeper/container=%s   <- liveKeeper 是真实存活数" % (p.get("pathTime"),))
+    dead = [k for k, v in (p.get("pathTime") or {}).items() if v[1] == 0]
+    if dead:
+        print("     !! 无 keeper 的矿点: %s" % dead)
     print("  mineralContainer=%s" % (p.get("mineralContainer"),))
 
     q = probe(PROBE_B)
     if isinstance(q, dict):
         print("  lairs=%s" % (q.get("lairs"),))
-        print("  defenders=%s" % (q.get("defs"),))
+        # 防守爬：[x, y, group, ttl, 目标窝/距离, 是否已派过接替]
+        # ttl 低于提前量 lead 就该派接替了；这一栏专门用来提前发现「防守断档」——
+        # 老那只快死了、接替却还没到位，keeper 就会去打我们的矿工。
+        lead = q.get("lead")
+        print("  defenders(ttl / 提前量=%s)=%s" % (lead, q.get("defs"),))
+        for d in (q.get("defs") or []):
+            ttl = d[3] if len(d) > 3 else None
+            if isinstance(ttl, int) and isinstance(lead, int) and 0 < ttl <= lead:
+                print("     !! 防守爬 ttl=%s <= 提前量 %s（sendSpawn=%s）：确认接替是否已到位"
+                      % (ttl, lead, d[5] if len(d) > 5 else "?"))
         print("  hostiles=%s" % (q.get("hostiles"),))
     else:
         print("  !! 第二段探针失败: %r" % (q,))

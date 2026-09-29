@@ -10,6 +10,15 @@
 const OUTER_DEFENSE_REPLACE_TTL = 250;
 const OUTER_DEFENSE_TARGET_CNT = 2;
 /**
+ * 防守爬生成耗时（tick）：50 部件 × 3。
+ * 接替兵的提前量至少要覆盖它 + 行军时间，见 outerDefenseReplaceLead。
+ */
+const OUTER_DEFENSE_SPAWN_TICKS = 150;
+/** 接替兵提前量的缓冲（tick） */
+const OUTER_DEFENSE_REPLACE_MARGIN = 10;
+/** 拿不到路线缓存时的行军时间保守估计（tick） */
+const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
+/**
  * 巡逻时在每个 keeperLair 驻守点停留多久（tick）。
  *
  * lair 每 300 tick 出一只 keeper。4 个 lair 一圈 = 移动时间（W34N55 约 100 tick）+ 4×停留。
@@ -140,7 +149,24 @@ Creep.prototype.registerStationSourcesCarryInRoom = function () {
 Creep.prototype.concatStationSources = function () {
     let rm = Memory.rooms[this.headTask().roomName];
     if (rm) {
-        let data = rm[pro.stationName][this.headTask().id];
+        // 取不到登记表就跳过记账，但必须把任务弹掉再往下走。
+        //
+        // 任务 id 取的是**根任务**（headTask）的 id，而这个任务既可能挂在 source
+        // 上，也可能挂在 container 上（harvestEnergyOuterKeeper /
+        // harvestMineralOuterKeeper 都往栈里推过它）。外矿矿物爬的根任务是**矿物**，
+        // 登记在 stationMineral 而不是 stationSources —— 于是原来那句
+        // `rm[stationName][id]["spawnTime"]` 必然抛 TypeError。
+        //
+        // 后果不只是刷错误日志：execLastTask 只执行栈顶任务、**不 pop**，抛错的
+        // 栈顶会一直留着，爬卡在容器上一动不动直到老死 —— 矿物容器建好之后矿物爬
+        // 也永远采不到矿。Memory.codeHealth.lastError 里记的就是这一条
+        // （errorCount 4187，lastErrorTick 83305893）。
+        let data = rm[pro.stationName] && rm[pro.stationName][this.headTask().id];
+        if (!data) {
+            this.popTask();
+            this.execLastTask();
+            return;
+        }
         let pathTime = Game.time - data["spawnTime"];//（出生时间 - 接触时间 = 移动时间）
         // pathTime 是实测的「出生 → 抵达矿点」tick 数，正常应该≈路线长度（外矿无路时
         // 1 格/tick）。但它同时被 trySpawnOuterHarCarrier 当**运力需求**用：
@@ -2214,6 +2240,31 @@ let pro = {
      * 分组号写在 memory.defenseGroup；没有分组的爬（本次部署前出生的老爬）
      * 在这里**当场**挑人最少的那组，不需要等它自然死亡就能生效。
      */
+    /**
+     * 该提前多少 tick 派防守爬接替（老那只 ttl 降到这个值时就生接替兵）。
+     *
+     * 提前量 = **路线长度**（行军，外矿约 1 格/tick）+ **150**（50 部件生成）+ **10**（余量）。
+     * 例：路线 75 格 → 75 + 150 + 10 = 235。
+     *
+     * 原来是个拍脑袋的固定 250：路线一长就不够（75 格时只剩 25 tick 余量），
+     * 一旦路上再堵一下（曾经堵到 0.02 格/tick），接替兵必定赶不到，老那只先死就出现
+     * **防守空档**，keeper 直接去打我们的矿工。改成按实际路线长度算，路长多少就多提前多少。
+     *
+     * 可用 Memory.marketSettings.outerDefenseReplaceTtl 直接指定固定值覆盖。
+     */
+    outerDefenseReplaceLead(roomName, spawnRoom) {
+        let fixed = Number(Memory.marketSettings && Memory.marketSettings.outerDefenseReplaceTtl);
+        if (fixed > 0) return fixed;
+        let travel = OUTER_DEFENSE_TRAVEL_FALLBACK;
+        let mem = Memory.rooms[roomName.name || roomName];
+        let stations = mem && mem[pro.stationName];
+        if (stations) {
+            let d = _.values(stations).find(e => e && e.id && e.roadPathStr);
+            let path = d && pro.getOuterRoadPath(d);
+            if (path && path.length) travel = path.length;
+        }
+        return OUTER_DEFENSE_SPAWN_TICKS + travel + OUTER_DEFENSE_REPLACE_MARGIN;
+    },
     outerDefensePosts(creep) {
         let room = creep.room;
         let lairs = room.find(FIND_HOSTILE_STRUCTURES)
@@ -2373,9 +2424,13 @@ let pro = {
         let replacingFront = false;
         if (isInvader) {
             if (!front) needSpawn = true;
-            else if (front.ticksToLive <= OUTER_DEFENSE_REPLACE_TTL) {
-                // 派接替：hasSendSpawn 保证对同一只只派一次
-                if (!front.memory.hasSendSpawn) {
+            else if (front.ticksToLive <= pro.outerDefenseReplaceLead(targetName, spawnRoom)) {
+                // 派接替：hasSendSpawn 保证「对同一只老爬只派一次」，避免每 6 tick 重复生。
+                //
+                // 但光有这个标记会把补员锁死：如果那次派出的接替**已经死了**（被打死、
+                // 或者路上损耗），标记仍在，老那只又已经低于提前量，就再也不会补 ——
+                // 防守直接断档。所以场上数量掉回目标以下时，必须无视标记继续补。
+                if (!front.memory.hasSendSpawn || defensers.length < OUTER_DEFENSE_TARGET_CNT) {
                     needSpawn = true;
                     replacingFront = true;
                 }
