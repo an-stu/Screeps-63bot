@@ -5,6 +5,22 @@
  */
 
 let pro = {
+    /**
+     * 该外矿房是否**真的**需要防守。
+     *
+     * 判据用「实际威胁」而不是房间类别：有活体敌人，或有 lair / invaderCore。
+     *
+     * 为什么不能只看旗名：中间九房里有一种是**没有 lair / invaderCore** 的
+     * （W35N55 就是：3 个源 + 一个 K 矿，完全没有敌人）。按「入侵房」处理会
+     * 白白要求先派 2 只防守爬，既浪费兵力，又让矿工永远等不到出兵条件。
+     * 没有视野时保守返回 true（此时只能按旗名判断）。
+     */
+    roomNeedsDefense(room, flag) {
+        if (!room) return flag.name.includes('invader');
+        if (room.find(FIND_HOSTILE_CREEPS).length) return true;
+        return room.find(FIND_HOSTILE_STRUCTURES).some(e =>
+            e.structureType == STRUCTURE_KEEPER_LAIR || e.structureType == STRUCTURE_INVADER_CORE);
+    },
     exec(room) {
         if ((Game.time + room.hashCode()) % 6 != 0) return;
         let flags = ManagerFlags.getFlagsByPrefix("har");
@@ -25,7 +41,8 @@ let pro = {
             // 派发房间必须有 storage 接收外矿能量
             if (!spawnRoom || !spawnRoom.storage || spawnRoom.name != room.name) continue;
             if (Memory.rooms[targetRoomName]) {
-                let isInvader = flag.name.includes('invader');
+                // 按**实际威胁**判断，而不是按旗名/房间类别（见 roomNeedsDefense）
+                let isInvader = pro.roomNeedsDefense(Game.rooms[targetRoomName], flag);
                 StationSources.trySpawnOuterDefenser(targetRoomName, spawnRoom, isInvader);
             }
             // Scout 只负责首次建立 source Memory。已有坐标、container ID 与路径
@@ -50,7 +67,7 @@ let pro = {
                 }
                 // 普通外矿不依赖当前视野：任务中已有 source 坐标，keeper 会自行
                 // 进入目标房。reserve 仍只在看得见 controller 时决策。
-                if (!flag.name.includes('invader')) {
+                if (!pro.roomNeedsDefense(harRoom, flag)) {
                     StationSources.trySpawnOuterHarKeeper(targetRoomName, spawnRoom, false);
                 }
                 if (harRoom && harRoom.controller && !harRoom.my) { // 先生claimer 再生 har 保证能量获取效率 没有视野会先生 har
@@ -64,14 +81,19 @@ let pro = {
                         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "reserver", tasks)
                     }
                 }
-                else if (harRoom && !harRoom.controller && flag.name.includes('invader')) { // this is invader room
-                    // if there is defender, then spawn harvester
-                    let defenser = spawnRoom.creeps("outerHarvestDefenser", false).filter(e => {
-                        let task = e.headTask();
-                        return task && task.roomName == harRoom.name;
-                    }).head()
-                    if (!defenser) continue;
-                    // console.log(defenser.name)
+                else if (harRoom && !harRoom.controller) {
+                    // 无 controller 的房间（Source Keeper 房 / 无主中立房）。
+                    // 判据是「无 controller」而不是「旗名带 invader」—— 否则没有
+                    // lair / invaderCore 的中立房（W35N55）永远走不进这个分支，
+                    // 矿工根本不会被派出去。
+                    // 只有**真有威胁**时才要求「先有防守爬，再派矿工」。
+                    if (pro.roomNeedsDefense(harRoom, flag)) {
+                        let defenser = spawnRoom.creeps("outerHarvestDefenser", false).filter(e => {
+                            let task = e.headTask();
+                            return task && task.roomName == harRoom.name;
+                        }).head()
+                        if (!defenser) continue;
+                    }
                     StationSources.trySpawnOuterHarKeeper(targetRoomName, spawnRoom, true);
                 }
                 // 外矿矿物：只采**市场价格高**的矿（H / X / L）。低价矿（K / Z / O / U）
