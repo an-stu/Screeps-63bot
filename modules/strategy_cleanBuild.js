@@ -40,7 +40,23 @@ Creep.prototype.cleanBuild=function () {
         }
         let cs = this.pos.findClosestByPath(FIND_MY_CONSTRUCTION_SITES,{filter:e=>e,range:3,ignoreCreeps:true})
         if(cs)return this.addTaskAndExec(UtilsTask.task(cs,"buildConst"));
-        let struct = this.pos.findClosestByPath(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_ROAD&& e.hits/e.hitsMax<0.5,range:3})
+        // 只修**蓝图内**的路。
+        //
+        // 原来这条没有任何蓝图过滤：只要附近有血量 <50% 的路就去修，
+        // 于是会把「不该存在」的废路一直续命，它们永远消失不掉。
+        // W33N55 实测有 31 条这种路（既不在蓝图里、也不在任何外矿路线上，
+        // 例如 (2,22)）—— 全都该让它自然衰减。
+        //
+        // 判据复用 StationSources.blueprintWalkableSet（蓝图内 road/container 的坐标集），
+        // 与防御塔修路的过滤口径**同一份**，避免两处各写一套「什么算蓝图路」。
+        let plannedRoad = (room && room.memory && room.memory.structMap && room.memory.structMap[STRUCTURE_ROAD])
+            ? StationSources.blueprintWalkableSet(room)
+            : null;
+        let struct = this.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: e => e.structureType == STRUCTURE_ROAD && e.hits / e.hitsMax < 0.5
+                && (!plannedRoad || plannedRoad.has(e.pos.x + ":" + e.pos.y)),
+            range: 3,
+        })
         // this.say(struct)
         if(struct)return this.addTaskAndExec(UtilsTask.task(struct,"repairWall"));
         if(mainRoom&&mainRoom.storage&&mainRoom.storage.my)return this.fillAll(mainRoom.storage);
