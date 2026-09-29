@@ -35,9 +35,12 @@ PROBE_A = (
     "var t=c.headTask&&c.headTask();if(!t||!t.id)return;live[t.id]=(live[t.id]||0)+1;});"
     "var ss=Memory.rooms['%s'].stationSources;var pt={};"
     "for(var k in ss){var d=ss[k];pt[d.x+','+d.y]=[d.pathTime||0,live[d.id]||0,d.container?1:0];}"
-    "var mm=Memory.rooms['%s'].stationMineral;"
-    "return {t:Game.time,roles:a,pathTime:pt,mineralContainer:mm.container?1:0};})();"
-) % (TARGET, TARGET, TARGET)
+    "var mm=Memory.rooms['%s'].stationMineral;var rr=Game.rooms['%s'];"
+    # roadSites 一定要在游戏内数：REST /api/game/room-objects 会**少报工地**
+    # （实测真实 33 个它只给 2 个），拿它做判据会误报「工地偏少」。
+    "return {t:Game.time,roles:a,pathTime:pt,mineralContainer:mm.container?1:0,"
+    "roadSites:rr?rr.find(FIND_MY_CONSTRUCTION_SITES).filter(function(e){return e.structureType=='road';}).length:0};})();"
+) % (TARGET, TARGET, TARGET, TARGET)
 
 PROBE_B = (
     "return (function(){var r=Game.rooms['%s'];if(!r)return 'novision';var d=[];"
@@ -75,7 +78,8 @@ def main():
     objs = room_objects(TARGET)
     roads = sum(1 for o in objs if o.get("type") == "road")
     sites = [o for o in objs if o.get("type") == "constructionSite"]
-    road_sites = sum(1 for o in sites if o.get("structureType") == "road")
+    # REST 的工地列表不完整，道路工地以游戏内探针为准（见 PROBE_A）
+    rest_road_sites = sum(1 for o in sites if o.get("structureType") == "road")
     src = [(o["x"], o["y"], o.get("energy")) for o in objs if o.get("type") == "source"]
     ctr = [(o["x"], o["y"], round(o.get("store", {}).get("energy", 0)),
             round(o.get("store", {}).get("H", 0))) for o in objs if o.get("type") == "container"]
@@ -83,7 +87,7 @@ def main():
     tombs = [(o["x"], o["y"], o.get("deathTime")) for o in objs if o.get("type") == "tombstone"]
 
     print("== %s ==" % TARGET)
-    print("  roads=%d  roadSites=%d  containers=%s" % (roads, road_sites, ctr))
+    print("  roads=%d  containers=%s" % (roads, ctr))
     print("  sources=%s      <- 长期 4000 就是没在采" % (src,))
     print("  mineral=%s" % (mn,))
     print("  tombstones(最近 8)=%s" % (sorted(tombs, key=lambda x: -(x[2] or 0))[:8],))
@@ -121,7 +125,8 @@ def main():
     full = [s for s in src if s[2] == 4000]
     print("  carrier=%d %s" % (n_carrier, "OK" if n_carrier <= 6 else "!! 过量，pathTime 回路可能又失控"))
     print("  满仓源=%d/3 %s" % (len(full), "OK" if not full else "!! 有源没在采"))
-    print("  道路工地=%d %s" % (road_sites, "OK" if road_sites >= 10 or roads >= 90 else "!! 偏少，查 place/cleanup 是否打架"))
+    rs = p.get("roadSites", 0)
+    print("  道路工地=%d %s  (REST 同项=%d；以游戏内计数为准，REST 曾把 33 报成 2)" % (rs, "OK" if rs >= 10 or roads >= 90 else "!! 偏少，查 place/cleanup 是否打架", rest_road_sites))
     if mn and mn[0][1] is not None:
         print("  矿物 %s=%s %s" % (mn[0][0], mn[0][1], "OK(已开始采)" if mn[0][1] < 35000 else "尚未开采"))
     b = ch.get("bucket") or 0

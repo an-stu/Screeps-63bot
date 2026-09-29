@@ -14,8 +14,19 @@ const OUTER_DEFENSE_TARGET_CNT = 2;
  * 接替兵的提前量至少要覆盖它 + 行军时间，见 outerDefenseReplaceLead。
  */
 const OUTER_DEFENSE_SPAWN_TICKS = 150;
-/** 接替兵提前量的缓冲（tick） */
+/** 接替兵提前量的缓冲（tick），见 outerDefenseReplaceLead */
 const OUTER_DEFENSE_REPLACE_MARGIN = 10;
+/**
+ * 接替兵「重叠期」（tick）：新兵要比老兵**早这么多**站到岗位上。
+ *
+ * 只按「生成 + 行军」派兵，新兵恰好赶在老兵死的那一刻到 —— 余量为零，
+ * 出生队列排一下、或者路上比 1 格/tick 慢一点，就出现**防守空档**，
+ * 而空档期正是 keeper 打死我们矿工的时候。
+ *
+ * 留出重叠期就得到一条硬保证：新兵到位后老兵才死，该组**任何时刻都有防守爬**。
+ * 溢出期间同组两只 defenseGroup 会被分组逻辑摊到两组，等于两侧临时都有覆盖。
+ */
+const OUTER_DEFENSE_REPLACE_OVERLAP = 60;
 /** 拿不到路线缓存时的行军时间保守估计（tick） */
 const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
 /**
@@ -2243,8 +2254,9 @@ let pro = {
     /**
      * 该提前多少 tick 派防守爬接替（老那只 ttl 降到这个值时就生接替兵）。
      *
-     * 提前量 = **路线长度**（行军，外矿约 1 格/tick）+ **150**（50 部件生成）+ **10**（余量）。
-     * 例：路线 75 格 → 75 + 150 + 10 = 235。
+     * 提前量 = **实测行军时间**（pathTime，退回路线长度）+ **150**（50 部件生成）
+     *        + **10**（余量）+ **60**（重叠期，见 OUTER_DEFENSE_REPLACE_OVERLAP）。
+     * 例：W34N55 最长 pathTime 85 → 150 + 85 + 10 + 60 = **305**。
      *
      * 原来是个拍脑袋的固定 250：路线一长就不够（75 格时只剩 25 tick 余量），
      * 一旦路上再堵一下（曾经堵到 0.02 格/tick），接替兵必定赶不到，老那只先死就出现
@@ -2255,15 +2267,22 @@ let pro = {
     outerDefenseReplaceLead(roomName, spawnRoom) {
         let fixed = Number(Memory.marketSettings && Memory.marketSettings.outerDefenseReplaceTtl);
         if (fixed > 0) return fixed;
-        let travel = OUTER_DEFENSE_TRAVEL_FALLBACK;
+        // 行军时间优先用**实测值**：`pathTime` 是 keeper 实打实走完这条路花的 tick 数，
+        // 已经包含拥堵、沼泽、跨房这些真实因素；拿不到才退回路线长度（1 格/tick 的理想值）。
+        // keeper 与防守爬都是 1 格/tick 档，可以直接借用。
+        // 取该房**所有矿点里最长的那个** —— 防守爬要能覆盖全房，按最坏情况留提前量。
+        let travel = 0;
         let mem = Memory.rooms[roomName.name || roomName];
         let stations = mem && mem[pro.stationName];
         if (stations) {
-            let d = _.values(stations).find(e => e && e.id && e.roadPathStr);
-            let path = d && pro.getOuterRoadPath(d);
-            if (path && path.length) travel = path.length;
+            _.values(stations).forEach(e => {
+                if (!e || !e.id) return;
+                let t = e.pathTime > 0 ? e.pathTime : (pro.getOuterRoadPath(e) || []).length;
+                if (t > travel) travel = t;
+            });
         }
-        return OUTER_DEFENSE_SPAWN_TICKS + travel + OUTER_DEFENSE_REPLACE_MARGIN;
+        if (!travel) travel = OUTER_DEFENSE_TRAVEL_FALLBACK;
+        return OUTER_DEFENSE_SPAWN_TICKS + travel + OUTER_DEFENSE_REPLACE_MARGIN + OUTER_DEFENSE_REPLACE_OVERLAP;
     },
     outerDefensePosts(creep) {
         let room = creep.room;
