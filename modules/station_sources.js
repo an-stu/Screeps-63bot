@@ -1257,7 +1257,12 @@ let pro = {
      *   - placeOuterRoadSites：铺工地时跳过已有建筑
      */
     outerRoadTileWalkable(structures) {
-        return structures.some(s => s.structureType == STRUCTURE_ROAD
+        // **必须是 every，不是 some。** 一格上可以叠多个建筑（rampart 常盖在
+        // 其他建筑上），只要有**任何一个**不是路/容器/己方 rampart，爬就站不上去。
+        // 用 some 会被同格的 rampart 掩盖真实阻挡物 —— 实测 (22,30) 上 nuker 与
+        // 己方 rampart 共存，some 判定成「可走」，于是寻路堂而皇之地穿过 nuker，
+        // 缓存路线复检也放行，爬走到那儿全卡住。
+        return structures.every(s => s.structureType == STRUCTURE_ROAD
             || s.structureType == STRUCTURE_CONTAINER
             || (s.structureType == STRUCTURE_RAMPART && s.my));
     },
@@ -1347,6 +1352,11 @@ let pro = {
         room.getStructures().forEach(s => {
             // 可走判定统一走 outerRoadTileWalkable，别再各自维护一份清单
             if (!pro.outerRoadTileWalkable([s])) { cm.set(s.pos.x, s.pos.y, 255); return; }
+            // 已被判为不可走的格子不允许再被"降回"可走。同一格上可以叠多个建筑
+            // （rampart 常盖在别的建筑上），而这里是逐个建筑遍历、后写覆盖先写 ——
+            // 实测 (22,30) 上 nuker + 己方 rampart 共存，rampart 后写就把 nuker 的
+            // 255 覆盖成 1，于是寻路继续穿 nuker。必须显式保护，不能依赖遍历顺序。
+            if (cm.get(s.pos.x, s.pos.y) >= 254) return;
             // 主房里「蓝图之外」的历史遗留道路：不给优惠（略高于空地 2），
             // 寻路会走回蓝图路网，这些多余的路没人走就会自然衰减掉。
             // 主房**蓝图内**的路仍然是最低代价 1 —— 这就是「复用蓝图内的道路」。
