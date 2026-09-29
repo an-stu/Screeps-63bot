@@ -12,3 +12,6 @@ room-*.json
 .syntax-check.log
 .check-*.json
 .terrain-*.json
+
+# 本地工作笔记与临时脚本（tmp/ 里含 API token，绝不能入库）
+.workbuddy/
