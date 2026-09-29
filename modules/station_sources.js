@@ -50,8 +50,14 @@ const OUTER_DEFENSE_GUARD_RADIUS = 8;
 const OUTER_DEFENSE_LAIR_CYCLE = 300;
 const OUTER_DEFENSE_MIN_DWELL = 60;
 const OUTER_DEFENSE_MAX_DWELL = 240;
-/** 道路未完工时，至少保持几只带 WORK 的 carrier 在铺路 */
-const OUTER_ROAD_BUILDER_CNT = 3;
+/**
+ * 道路未完工时，至少保持几只带 WORK 的 carrier 在铺路。
+ *
+ * 别调太高：外矿路线是单格宽的单行道，去程（keeper）和回程（carrier）共用，
+ * 爬一多就互相堵死（W33N55 实测 13 只挤在 12×7 的范围里，19 tick 只挪 1~3 格）。
+ * 2 只是「修路能并行 + 不至于把路堵死」的折中，路修完后这里自然不再补。
+ */
+const OUTER_ROAD_BUILDER_CNT = 2;
 /** 每轮最多立多少个外矿道路工地（避免一个 tick 里 createConstructionSite 刷爆 CPU） */
 const OUTER_ROAD_SITE_BATCH = 30;
 /**
@@ -112,6 +118,17 @@ Creep.prototype.concatStationSources = function () {
     if (rm) {
         let data = rm[pro.stationName][this.headTask().id];
         let pathTime = Game.time - data["spawnTime"];//（出生时间 - 接触时间 = 移动时间）
+        // pathTime 是实测的「出生 → 抵达矿点」tick 数，正常应该≈路线长度（外矿无路时
+        // 1 格/tick）。但它同时被 trySpawnOuterHarCarrier 当**运力需求**用：
+        //   NeedCarryPartCnt = ceil(pathTime * 2 * 10 / 50)   // ≈ pathTime * 0.4 个 CARRY 部件
+        // 于是形成正反馈：路上堵 → pathTime 变大 → 派更多 carrier → 堵得更厉害。
+        // W33N55 实测 pathTime 飙到 843（应约 65），一次性堆了 8 只 carrier，
+        // keeper 走 843 tick 才到矿点，源在这期间一直是满的没人采。
+        // 用缓存路线长度做上界（留 3 倍余量）把回路掐断。
+        let path = pro.getOuterRoadPath(data);
+        let cap = path && path.length ? path.length * 3 : 300;
+        if (pathTime > cap) pathTime = cap;
+        if (pathTime < 1) pathTime = 1;
         data["spawnTime"] -= pathTime + this.body.length * 3 - 6;// （移动时间）+ 生的时间 -  这样下次走到那边就可以刚刚好前面那只死掉,再缓冲 10tick 理论上走到后寿命不足1500t 不和能量重生重合
         data["pathTime"] = pathTime;
     }

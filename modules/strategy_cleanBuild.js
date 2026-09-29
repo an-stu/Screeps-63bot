@@ -23,9 +23,12 @@ Creep.prototype.cleanBuild=function () {
         // A newly claimed room may contain an inactive hostile spawn or other
         // ruins that block our RCL structure limit. Dismantle every hostile
         // damageable structure, not only old walls and ramparts.
+        // 选目标时忽略 creep。移动优化器默认就是 ignoreCreeps=true（见
+        // 超级移动优化hotfix 的 ops.ignoreCreeps 初始化），这里显式写 false 会让
+        // 选路被爬的位置带偏、并在撞到爬时重新寻路。统一成忽略。
         let struct = this.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: structure => structure.hits && !structure.my && structure.structureType != STRUCTURE_CONTROLLER,
-            ignoreCreeps: false,
+            ignoreCreeps: true,
         });
         if(struct)this.addTaskAndExec(UtilsTask.task(struct,"collectStructEnergy"))
     }

@@ -640,7 +640,10 @@ Creep.prototype.buildConst = function () {
         && obj.progress + this.getActiveBodyparts(WORK) * BUILD_POWER >= obj.progressTotal;
     let code = this.build(obj);
     if (code == ERR_NOT_IN_RANGE) {
-        this.moveTo(obj, { visualizePathStyle: { stroke: '#00f3ff', ignoreCreeps: false }, range: 3 });
+        // 寻路忽略 creep：移动优化器默认 ignoreCreeps=true，这里显式写 false
+        // 会让 builder 一撞到爬就重新寻路（撞一次算一次 PathFinder），既费 CPU
+        // 又让爬在原地抖动 —— 外矿那种单格宽单行道上一堵就是一大片。
+        this.moveTo(obj, { visualizePathStyle: { stroke: '#00f3ff' }, range: 3 });
     }
     if (completesRampart && code == OK) {
         // 新 rampart 建成时只有 1 hits。不要把 builder 释放给普通升级任务：
