@@ -69,6 +69,14 @@ const OUTER_ROAD_SITE_REFRESH = 100;
  */
 const OUTER_ROAD_SITE_ROOM_LIMIT = 85;
 /**
+ * 缓存路线「还走不走得通」的复检间隔（tick）。
+ *
+ * 主房里随时会盖起新建筑（实测 nuker 一盖好，缓存路线当场被堵死），而路线缓存
+ * 原本要等 1000 tick 才重算 —— 期间所有外矿爬全卡在那一段。
+ * 每 50 tick 复检一次：3 个矿点 × ~76 个路点 ≈ 4.6 次 lookForAt/tick，开销可接受。
+ */
+const OUTER_ROAD_VALIDATE_INTERVAL = 50;
+/**
  * 外矿路点上连续卡住多久就改用移动优化器（而不是裸 creep.move）。
  * 单格宽单行道上一有互堵，裸 move 会被引擎静默取消；交给 BetterMove 的
  * 交通逻辑（对穿/让路）才解得开。见 moveToOuterRoadPoint 的说明。
@@ -1224,6 +1232,50 @@ let pro = {
      * 用途：主房的路网由本地规划器维护，我们只「复用蓝图内已有的路」；
      * 蓝图之外那些历史遗留的多余道路不修、不铺，让它自然衰减掉。
      */
+    /**
+     * 缓存路线是否仍然「整条都走得通」。
+     *
+     * 判据与代价矩阵同一套：路点上出现任何**不可走建筑**（不是 road / container /
+     * 己方 rampart / link）就算废了。与具体是什么建筑无关，所以 nuker、塔、lab、
+     * extension、墙……任何新盖起来的建筑都会被自动识别。
+     *
+     * 结果按 OUTER_ROAD_VALIDATE_INTERVAL 缓存，避免每 tick 全路线 lookForAt。
+     * 没视野的房间先放过（看不到就无从判断，等有视野再复检）。
+     */
+    /**
+     * 外矿路线上「爬能站上去」的判定 —— **全代码库只允许有这一份**。
+     *
+     * 只有三种：己方的 rampart、container、road。
+     * **link 不算**：Screeps 里除 road / container / 己方 rampart 之外，其余建筑
+     * 都会挡住移动。之前代价矩阵把 link 也算可走，等于默许路线穿过 link，爬到那儿
+     * 就卡住 —— 和 nuker / extension 是同一类坑。
+     *
+     * 这个判定被四处共用，任何一处不一致都会造成「寻路认为能走、实际走不了」：
+     *   - outerRoadRoomCallback：寻路代价矩阵（可走 → 1，其余 → 255）
+     *   - outerRoadWalkable：缓存路线复检
+     *   - outerRoadComplete：路线是否已全部铺成路
+     *   - placeOuterRoadSites：铺工地时跳过已有建筑
+     */
+    outerRoadTileWalkable(structures) {
+        return structures.some(s => s.structureType == STRUCTURE_ROAD
+            || s.structureType == STRUCTURE_CONTAINER
+            || (s.structureType == STRUCTURE_RAMPART && s.my));
+    },
+    outerRoadWalkable(path, data) {
+        if (data.roadValidateTick && Game.time - data.roadValidateTick < OUTER_ROAD_VALIDATE_INTERVAL) {
+            return data.roadValidateOk !== false;
+        }
+        data.roadValidateTick = Game.time;
+        for (let p of path) {
+            let room = Game.rooms[p.roomName];
+            if (!room) continue;
+            let st = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
+            if (!st.length) continue;
+            if (!pro.outerRoadTileWalkable(st)) { data.roadValidateOk = false; return false; }
+        }
+        data.roadValidateOk = true;
+        return true;
+    },
     blueprintWalkableSet(room) {
         if (!room._plannedRoadSet) {
             let set = new Set();
@@ -1260,15 +1312,26 @@ let pro = {
             let structMap = room.memory && room.memory.structMap;
             if (structMap) {
                 for (let type in structMap) {
-                    // Prefer the blueprint road network, but do not turn unbuilt
-                    // future structures into an absolute wall. A hard wall can
-                    // make the only room exit unreachable and yields an
-                    // incomplete path.
-                    let cost = (type == 'road' || type == 'container') ? 1 : 50;
+                    // 蓝图里的路/容器 → 1；**其余规划建筑 → 255，直接当墙**。
+                    //
+                    // 原来非路建筑给的是软代价 50（注释担心"硬墙会让房间唯一出口不可达"），
+                    // 但那是个误判：当时真正导致 incomplete 的是「storage 自己是建筑、
+                    // 目标格不可站」。判据改成 reachesDestination 之后，硬墙完全可行。
+                    //
+                    // 软代价 50 的后果很严重：路线会**穿过规划中还没盖的建筑**择优，
+                    // 等那栋建筑（nuker / 塔 / lab…）真的盖起来，这条缓存路线当场被堵死，
+                    // 而缓存要等 1000 tick 才重算 —— 期间所有外矿爬全卡在那儿。
+                    // 实测：nuker 一盖好路线就废了。
+                    // 规划建筑一并当墙后，路线从规划那一刻起就绕开它，建起来也不受影响。
+                    let walkablePlan = (type == 'road' || type == 'container');
                     pro.structMapPositions(structMap[type]).forEach(p => {
                         let x = p.x != undefined ? p.x : p[0];
                         let y = p.y != undefined ? p.y : p[1];
-                        if (cm.get(x, y) < 254) cm.set(x, y, cost);
+                        if (walkablePlan) {
+                            if (cm.get(x, y) < 254) cm.set(x, y, 1);
+                        } else {
+                            cm.set(x, y, 255);
+                        }
                     });
                 }
             }
@@ -1282,9 +1345,8 @@ let pro = {
         let isHome = homeRoom && roomName == homeRoom;
         let planned = pro.blueprintWalkableSet(room);
         room.getStructures().forEach(s => {
-            let walkable = s.structureType == STRUCTURE_ROAD || s.structureType == STRUCTURE_CONTAINER
-                || (s.structureType == STRUCTURE_RAMPART && s.my) || s.structureType == STRUCTURE_LINK;
-            if (!walkable) { cm.set(s.pos.x, s.pos.y, 255); return; }
+            // 可走判定统一走 outerRoadTileWalkable，别再各自维护一份清单
+            if (!pro.outerRoadTileWalkable([s])) { cm.set(s.pos.x, s.pos.y, 255); return; }
             // 主房里「蓝图之外」的历史遗留道路：不给优惠（略高于空地 2），
             // 寻路会走回蓝图路网，这些多余的路没人走就会自然衰减掉。
             // 主房**蓝图内**的路仍然是最低代价 1 —— 这就是「复用蓝图内的道路」。
@@ -1310,8 +1372,12 @@ let pro = {
             // PathFinder can return a non-empty but incomplete path. The old
             // code cached it anyway, making a road-builder stop at a room
             // entrance forever instead of ever reaching storage.
+            // 端点对 + **整条路线当前仍走得通** 才复用缓存。
+            // 只校验端点是不够的：主房随时会盖起新建筑，一次新建筑就能把中段堵死，
+            // 而缓存原本要等 1000 tick 才重算（实测 nuker 盖好后外矿爬全卡住）。
             if (end && to && end.roomName == to.roomName
-                && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1) return cached;
+                && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1
+                && pro.outerRoadWalkable(cached, data)) return cached;
             delete data.roadPathStr;
             delete data.roadPathTick;
         }
@@ -1725,7 +1791,9 @@ let pro = {
             if (!room) { data.roadComplete = false; return false; }
             let structures = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
             if (structures.find(s => s.structureType == STRUCTURE_ROAD)) continue; // 已有路
-            if (structures.find(s => s.structureType != STRUCTURE_ROAD)) continue; // 被建筑占位（容器等），无需修路
+            // 被「可走建筑」（容器 / 己方 rampart）占位：不需要也不该再铺路
+            // （rampart 上不能盖路）。判定与代价矩阵同一份，见 outerRoadTileWalkable。
+            if (structures.length && pro.outerRoadTileWalkable(structures)) continue;
             data.roadComplete = false;
             return false;
         }
