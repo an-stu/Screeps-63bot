@@ -1256,15 +1256,22 @@ let pro = {
      *   - outerRoadComplete：路线是否已全部铺成路
      *   - placeOuterRoadSites：铺工地时跳过已有建筑
      */
-    outerRoadTileWalkable(structures) {
-        // **必须是 every，不是 some。** 一格上可以叠多个建筑（rampart 常盖在
-        // 其他建筑上），只要有**任何一个**不是路/容器/己方 rampart，爬就站不上去。
-        // 用 some 会被同格的 rampart 掩盖真实阻挡物 —— 实测 (22,30) 上 nuker 与
-        // 己方 rampart 共存，some 判定成「可走」，于是寻路堂而皇之地穿过 nuker，
-        // 缓存路线复检也放行，爬走到那儿全卡住。
-        return structures.every(s => s.structureType == STRUCTURE_ROAD
+    /** 单个建筑能不能被爬踩：只有路、容器、**己方** rampart 三种。 */
+    outerRoadStructureWalkable(s) {
+        return s.structureType == STRUCTURE_ROAD
             || s.structureType == STRUCTURE_CONTAINER
-            || (s.structureType == STRUCTURE_RAMPART && s.my));
+            || (s.structureType == STRUCTURE_RAMPART && s.my);
+    },
+    outerRoadTileWalkable(structures) {
+        // 判据就一句：**把可走的建筑滤掉，只要还剩东西，这格就站不上人**。
+        //
+        // 一格最多只会有一个不可走建筑（rampart 是可以叠的，其他建筑不行），
+        // 所以不需要去数、也不需要管多个。
+        //
+        // 反例（踩过）：原来写的是「some 是路/容器/己方 rampart 就可走」——
+        // 等于「有一个可走就算可走」，同格的 rampart 会把 nuker 掩盖掉。
+        // 实测 (22,30) 上 nuker 与己方 rampart 共存，判定成可走，寻路直接穿过 nuker。
+        return !structures.some(s => !pro.outerRoadStructureWalkable(s));
     },
     outerRoadWalkable(path, data) {
         if (data.roadValidateTick && Game.time - data.roadValidateTick < OUTER_ROAD_VALIDATE_INTERVAL) {
@@ -1349,14 +1356,17 @@ let pro = {
         // 任何房间都是「能复用就复用」。
         let isHome = homeRoom && roomName == homeRoom;
         let planned = pro.blueprintWalkableSet(room);
+        // **分两遍写，按「格」而不是按「建筑」下结论。**
+        //
+        // 一遍写到底会出错：遍历顺序决定谁最后写，同一格上后写的可走建筑（rampart）
+        // 会把先写的不可走建筑（nuker）标记覆盖回可走。实测就是这么放过 nuker 的。
+        // 先把所有「不可走」的格钉死，再回头给可走的格打折，结果与遍历顺序无关。
         room.getStructures().forEach(s => {
-            // 可走判定统一走 outerRoadTileWalkable，别再各自维护一份清单
-            if (!pro.outerRoadTileWalkable([s])) { cm.set(s.pos.x, s.pos.y, 255); return; }
-            // 已被判为不可走的格子不允许再被"降回"可走。同一格上可以叠多个建筑
-            // （rampart 常盖在别的建筑上），而这里是逐个建筑遍历、后写覆盖先写 ——
-            // 实测 (22,30) 上 nuker + 己方 rampart 共存，rampart 后写就把 nuker 的
-            // 255 覆盖成 1，于是寻路继续穿 nuker。必须显式保护，不能依赖遍历顺序。
-            if (cm.get(s.pos.x, s.pos.y) >= 254) return;
+            if (!pro.outerRoadStructureWalkable(s)) cm.set(s.pos.x, s.pos.y, 255);
+        });
+        room.getStructures().forEach(s => {
+            if (!pro.outerRoadStructureWalkable(s)) return;
+            if (cm.get(s.pos.x, s.pos.y) >= 254) return;   // 该格另有不可走建筑，保持封死
             // 主房里「蓝图之外」的历史遗留道路：不给优惠（略高于空地 2），
             // 寻路会走回蓝图路网，这些多余的路没人走就会自然衰减掉。
             // 主房**蓝图内**的路仍然是最低代价 1 —— 这就是「复用蓝图内的道路」。
