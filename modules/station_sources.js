@@ -1587,10 +1587,20 @@ let pro = {
             if (p.x == 0 || p.x == 49 || p.y == 0 || p.y == 49) continue;
             let room = Game.rooms[p.roomName];
             if (!room) continue;                              // 没视野的房间跳过，等有视野再铺
-            // 主房：**只复用蓝图路网**。蓝图里没规划路的格子不新铺 —— 否则会在一堆
-            // 多余的格子上长出路来，白占工地、白花能量，而且和本地规划器的布局打架。
-            // 外墙房（矿区）不受此限：那边没有任何蓝图，能走的地方就该有路。
-            if (room.name == spawnRoom.name && !pro.blueprintWalkableSet(room).has(p.x + ":" + p.y)) continue;
+            // 注意：**这里不再要求主房必须是「蓝图内的路」**。
+            //
+            // 上一版加过 `if (room.name == spawnRoom.name && !blueprintWalkableSet.has(...)) continue;`，
+            // 想着"主房只复用蓝图路网"。但它把「路线怎么走」和「蓝图怎么规划」绑死了：
+            // 路线本身不会 100% 落在蓝图路网上（代价只是 1 vs 2 的偏好，不是硬约束），
+            // 凡是偏离的格子就**永远没有路**，爬只能走空地 —— 和"确保该路线 road 都要修"冲突。
+            // 实测 W33N55 (1,25)/(2,25) 就是这么留下的两个永久缺口。
+            //
+            // 「复用蓝图道路 + 多余的路自然衰减」这两件事由别处保证，不需要在这里卡：
+            //   · 复用：代价矩阵给蓝图内的路和已有的路都是最低代价 1，寻路自然优先走它们
+            //   · 冗余衰减：主房里蓝图外的既有道路代价设成 3（比空地 2 还差），
+            //     寻路不去踩 → 没有维护流量 → 自然衰减
+            // 所以主房也走下面那套通用判据（边界 / 已有建筑 / 已有工地 / 蓝图占位），
+            // 与矿区房完全一致，没有任何房间特定的分支。
             // 每房工地余量（见 OUTER_ROAD_SITE_ROOM_LIMIT）
             if (roomSites[p.roomName] === undefined) {
                 roomSites[p.roomName] = room.find(FIND_MY_CONSTRUCTION_SITES).length;
@@ -2496,21 +2506,45 @@ let pro = {
             return;
         }
         let stations = Memory.rooms[debug.roomName] && Memory.rooms[debug.roomName][pro.stationName];
-        let data = stations && (debug.stationId ? stations[debug.stationId] : _.values(stations).find(e => e && e.roadPathStr));
-        let path = data && pro.getOuterRoadPath(data);
-        if (!path || !path.length) return;
-        path.forEach((pos, index) => {
-            let previous = path[index - 1];
-            let visual = new RoomVisual(pos.roomName);
-            if (previous && previous.roomName == pos.roomName) {
-                visual.line(previous.x, previous.y, pos.x, pos.y, { color: "#00e5ff", width: 0.16, opacity: 0.8 });
-            }
-            if (index % 10 == 0) visual.text(index, pos.x, pos.y, { color: "#ffffff", font: 0.45, opacity: 0.9 });
+        if (!stations) return;
+        // 画**所有矿点**的路线（除非指定 stationId）。原来只取第一个有路线的矿点画一条，
+        // 看上去像「只有一条路」，主房出来后的分叉完全看不见。
+        let list = debug.stationId
+            ? [stations[debug.stationId]].filter(e => e && e.roadPathStr)
+            : _.values(stations).filter(e => e && e.id && e.roadPathStr);
+        if (!list.length) return;
+        let palette = ["#00e5ff", "#ff9f43", "#a78bfa", "#34d399", "#f472b6"];
+        list.forEach((data, si) => {
+            let path = pro.getOuterRoadPath(data);
+            if (!path || !path.length) return;
+            let lineColor = palette[si % palette.length];
+            path.forEach((pos, index) => {
+                let previous = path[index - 1];
+                let visual = new RoomVisual(pos.roomName);
+                if (previous && previous.roomName == pos.roomName) {
+                    visual.line(previous.x, previous.y, pos.x, pos.y, { color: lineColor, width: 0.12, opacity: 0.75 });
+                }
+                // 每个路点按**当前状态**上色，直接回答「这段路修好了没」：
+                //   绿 = 已经是路   黄 = 已立工地   红 = 既无路也无工地（缺口）
+                //   灰 = 被其它建筑占位（本来就无需铺路）
+                let room = Game.rooms[pos.roomName];
+                if (!room) return;
+                let state = "gap";
+                let st = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                if (st.some(s => s.structureType == STRUCTURE_ROAD)) state = "road";
+                else if (st.length) state = "other";
+                else if (room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y)
+                    .some(s => s.structureType == STRUCTURE_ROAD)) state = "site";
+                let color = state == "road" ? "#22c55e"
+                    : state == "site" ? "#eab308"
+                        : state == "other" ? "#94a3b8" : "#ef4444";
+                visual.circle(pos.x, pos.y, { radius: 0.12, fill: color, opacity: 0.9 });
+            });
+            let start = path[0];
+            let end = path.last();
+            new RoomVisual(start.roomName).circle(start.x, start.y, { radius: 0.42, fill: "#22c55e", opacity: 0.85 });
+            new RoomVisual(end.roomName).circle(end.x, end.y, { radius: 0.42, fill: "#f59e0b", opacity: 0.85 });
         });
-        let start = path[0];
-        let end = path.last();
-        new RoomVisual(start.roomName).circle(start.x, start.y, { radius: 0.42, fill: "#22c55e", opacity: 0.85 });
-        new RoomVisual(end.roomName).circle(end.x, end.y, { radius: 0.42, fill: "#f59e0b", opacity: 0.85 });
     },
     update(room) {
         let sources = room[LOOK_SOURCES];
