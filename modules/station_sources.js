@@ -125,8 +125,12 @@ Creep.prototype.concatStationSources = function () {
         // W33N55 实测 pathTime 飙到 843（应约 65），一次性堆了 8 只 carrier，
         // keeper 走 843 tick 才到矿点，源在这期间一直是满的没人采。
         // 用缓存路线长度做上界（留 3 倍余量）把回路掐断。
+        // 上界取 1.2×路线长度：路线长度本身就是「1 格/tick 走完」的最佳时间，
+        // 而 W33N55 实测一路畅通时也差不多就是这个数。取 3 倍时算出来的运力需求
+        // 仍然偏高 —— 3 个矿点会被派到 11 只 carrier，把单格宽的外矿道彻底堵死，
+        // 结果 3 个源全停在 4000 没人采。
         let path = pro.getOuterRoadPath(data);
-        let cap = path && path.length ? path.length * 3 : 300;
+        let cap = path && path.length ? Math.round(path.length * 1.2) : 300;
         if (pathTime > cap) pathTime = cap;
         if (pathTime < 1) pathTime = 1;
         data["spawnTime"] -= pathTime + this.body.length * 3 - 6;// （移动时间）+ 生的时间 -  这样下次走到那边就可以刚刚好前面那只死掉,再缓冲 10tick 理论上走到后寿命不足1500t 不和能量重生重合
@@ -1348,10 +1352,21 @@ let pro = {
         data.roadSiteCleanupTick = Game.time;
         let path = pro.getOuterRoadPath(data);
         if (!path || !path.length) return;
+        // 路线附近 ±1 格都算「在路上」。
+        //
+        // 原来只保留**精确**落在当前路线上的工地，而路线每 1000 tick 会重算一次；
+        // 重算时 PathFinder 的 roomCallback 会把「已建成的路」当可走、把蓝图建筑
+        // 当高代价，代价矩阵一有变化，解出来的路线就可能整体平移一格。于是刚批量
+        // 立好的 56 个工地被清理掉 41 个，路修到一半又没了（W34N55 实测 56 → 1）。
+        // 放宽到 ±1 格后，路线小幅漂移不会再把自己的工地删掉。
         let route = {};
         let rooms = {};
         path.forEach(p => {
-            route[p.roomName + ":" + p.x + ":" + p.y] = true;
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    route[p.roomName + ":" + (p.x + dx) + ":" + (p.y + dy)] = true;
+                }
+            }
             rooms[p.roomName] = true;
         });
         Object.keys(rooms).forEach(roomName => {
