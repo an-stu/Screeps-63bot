@@ -1184,6 +1184,59 @@ let pro = {
         return code;
     },
     /**
+     * 外矿路线的寻路代价矩阵（两次搜索都必须用）。
+     *
+     * 原来兜底那次 `PathFinder.search` **完全没有 roomCallback** —— 等于不加载
+     * 任何建筑代价。于是首选搜索因为主房蓝图约束返回 incomplete 时，兜底就会解出
+     * 一条**直接从 extension、甚至 constructedWall 上穿过去**的路线。
+     *
+     * 实测（W34N55 外矿路线，71 个路点）：其中 6 个压在自家建筑上 ——
+     * W33N55:(2,19) constructedWall、(13,28) rampart、
+     * (16,28)/(19,28)/(20,29)/(21,32) extension。
+     * carrier 走到那儿就被挡死、只能在原地来回蹭，同时因为路点永远"还没到"，
+     * `outerRoadComplete` 也就永远为假 —— 路看起来"永远修不完"。
+     *
+     * useBlueprint=true：首选搜索，按主房蓝图路网走（规划中的非路建筑给 50 的
+     *   软代价，避免把房间唯一出口当成绝对墙导致无解）。
+     * useBlueprint=false：兜底搜索，不要蓝图，但**必须**保留「已建成建筑不可走」。
+     */
+    outerRoadRoomCallback(roomName, useBlueprint) {
+        let room = Game.rooms[roomName];
+        let cm = new PathFinder.CostMatrix();
+        let terrain = Game.map.getRoomTerrain(roomName);
+        for (let y = 0; y < 50; y++) {
+            for (let x = 0; x < 50; x++) {
+                let t = terrain.get(x, y);
+                cm.set(x, y, t == TERRAIN_MASK_WALL ? 255 : (t == TERRAIN_MASK_SWAMP ? 5 : 1));
+            }
+        }
+        if (!room) return cm;
+        if (useBlueprint) {
+            let structMap = room.memory && room.memory.structMap;
+            if (structMap) {
+                for (let type in structMap) {
+                    // Prefer the blueprint road network, but do not turn unbuilt
+                    // future structures into an absolute wall. A hard wall can
+                    // make the only room exit unreachable and yields an
+                    // incomplete path.
+                    let cost = (type == 'road' || type == 'container') ? 1 : 50;
+                    pro.structMapPositions(structMap[type]).forEach(p => {
+                        let x = p.x != undefined ? p.x : p[0];
+                        let y = p.y != undefined ? p.y : p[1];
+                        if (cm.get(x, y) < 254) cm.set(x, y, cost);
+                    });
+                }
+            }
+        }
+        // 已有建筑：路/容器/己方墙/链接可走，其余不可走
+        room.getStructures().forEach(s => {
+            let walkable = s.structureType == STRUCTURE_ROAD || s.structureType == STRUCTURE_CONTAINER
+                || (s.structureType == STRUCTURE_RAMPART && s.my) || s.structureType == STRUCTURE_LINK;
+            if (!walkable) cm.set(s.pos.x, s.pos.y, 255);
+        });
+        return cm;
+    },
+    /**
      * 外矿修路路径：从矿区容器到主房间 storage 一次性寻路，
      * 主房间按蓝图路网走（规划的其他建筑不可走），结果按房间
      * serializePath 紧凑序列化存储，1000 tick 重算一次
@@ -1218,50 +1271,19 @@ let pro = {
             // 就提前结束。此搜索仅在缓存失效时运行，允许一次完整求解。
             maxOps: 8000,
             range: 1,
-            roomCallback(roomName) {
-                let room = Game.rooms[roomName];
-                let cm = new PathFinder.CostMatrix();
-                let terrain = Game.map.getRoomTerrain(roomName);
-                for (let y = 0; y < 50; y++) {
-                    for (let x = 0; x < 50; x++) {
-                        let t = terrain.get(x, y);
-                        cm.set(x, y, t == TERRAIN_MASK_WALL ? 255 : (t == TERRAIN_MASK_SWAMP ? 5 : 1));
-                    }
-                }
-                if (room) {
-                    // 主房间蓝图：沿规划路网走，规划的其他建筑视为不可走
-                    let structMap = room.memory && room.memory.structMap;
-                    if (structMap) {
-                        for (let type in structMap) {
-                            // Prefer the blueprint road network, but do not
-                            // turn unbuilt future structures into an absolute
-                            // wall. A hard wall can make the only room exit
-                            // unreachable and yields an incomplete path.
-                            let cost = (type == 'road' || type == 'container') ? 1 : 50;
-                            pro.structMapPositions(structMap[type]).forEach(p => {
-                                let x = p.x != undefined ? p.x : p[0];
-                                let y = p.y != undefined ? p.y : p[1];
-                                if (cm.get(x, y) < 254) cm.set(x, y, cost);
-                            });
-                        }
-                    }
-                    // 已有建筑：路/容器/己方墙/链接可走，其余不可走
-                    room.getStructures().forEach(s => {
-                        let walkable = s.structureType == STRUCTURE_ROAD || s.structureType == STRUCTURE_CONTAINER
-                            || (s.structureType == STRUCTURE_RAMPART && s.my) || s.structureType == STRUCTURE_LINK;
-                        if (!walkable) cm.set(s.pos.x, s.pos.y, 255);
-                    });
-                }
-                return cm;
-            },
+            roomCallback: roomName => pro.outerRoadRoomCallback(roomName, true),
         });
         } catch (e) {
             data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
             return undefined;
         }
-        // 蓝图约束可能把主房入口到 storage 的所有格子封死。只有在首选
-        // 路网确实无解时，退回 Screeps 原生障碍矩阵；这样仍是一条缓存的
-        // 唯一路线，但不会把外矿 carrier 永久卡在房间入口。
+        // 蓝图约束可能把主房入口到 storage 的所有格子封死。首选确实无解时，退回
+        // **不带蓝图但保留建筑代价**的搜索。
+        //
+        // 原来这里是一次**完全没有 roomCallback** 的搜索（注释写的是"退回原生障碍
+        // 矩阵"）—— 那等于彻底无视建筑，会解出直接穿过 extension / constructedWall
+        // 的路线。实测缓存路线 71 个路点里有 6 个压在自家建筑上，carrier 走到那儿
+        // 就卡死原地蹭，路也永远"修不完"。现在兜底同样带建筑代价，只是去掉蓝图软代价。
         if (!ret || ret.incomplete) {
             try {
                 ret = PathFinder.search(from, to, {
@@ -1270,6 +1292,7 @@ let pro = {
                     maxRooms: 4,
                     maxOps: 8000,
                     range: 1,
+                    roomCallback: roomName => pro.outerRoadRoomCallback(roomName, false),
                 });
             } catch (e) {
                 data.roadPathError = "fallback search threw: " + e.message + " tick=" + Game.time;
