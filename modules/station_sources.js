@@ -50,10 +50,10 @@ const OUTER_DEFENSE_GUARD_RADIUS = 8;
 const OUTER_DEFENSE_LAIR_CYCLE = 300;
 const OUTER_DEFENSE_MIN_DWELL = 60;
 const OUTER_DEFENSE_MAX_DWELL = 240;
-/** 已经把这一窝的 keeper 打掉后，至少还要待够这么久才换窝（防止刚清完就走） */
-const OUTER_DEFENSE_CLEARED_WAIT = 30;
 /** 道路未完工时，至少保持几只带 WORK 的 carrier 在铺路 */
 const OUTER_ROAD_BUILDER_CNT = 3;
+/** 每轮最多立多少个外矿道路工地（避免一个 tick 里 createConstructionSite 刷爆 CPU） */
+const OUTER_ROAD_SITE_BATCH = 30;
 /**
  * 沿缓存外矿路线走不通时，容忍多少 tick 才认定「路线真被堵死」并作废重算。
  *
@@ -585,26 +585,43 @@ Creep.prototype.outerDefense = function () {
         // 原来是「一只爬把 4 个窝走一圈」，一圈 463 tick，覆盖率只有 ~19%。
 
         if (posts.length) {
-            let idx = this.memory.patrolIdx || 0;
-            if (idx >= posts.length) idx = 0;
-            let wp = posts[idx];
-            // 还没到位：走过去，不开始计时
-            if (!this.pos.inRangeTo(wp.pos, 1)) {
-                this.moveTo(wp.pos, { range: 1 });   // 贴着窝站，隔三格打不到刚出窝的 keeper
-                return;
-            }
-            if (this.memory.patrolArrive === undefined) { this.memory.patrolArrive = Game.time; return; }
-            let waited = Game.time - this.memory.patrolArrive;
-            let dwell = pro.outerDefenseDwell(posts);
-            // 这一窝刚出过 keeper（倒计时被重置回 ~300），说明窝已经被清了：
-            // 不用把 dwell 等满，再待 OUTER_DEFENSE_CLEARED_WAIT 就换到另一个窝
-            let justSpawned = wp.ticksToSpawn !== undefined && wp.ticksToSpawn > OUTER_DEFENSE_LAIR_CYCLE * 0.8;
-            let early = justSpawned && waited >= OUTER_DEFENSE_CLEARED_WAIT;
-            if (waited < dwell && !early) return;
-            if (posts.length > 1) {
-                this.memory.patrolIdx = (idx + 1) % posts.length;
+            // 提前落位：keeperLair.ticksToSpawn 就是「下一只 keeper 还有多久出窝」，
+            // 直接站到**最快要出**的那个窝旁边等着。
+            //
+            // 为什么要提前：keeper 一出窝就扑最近的一只爬。defenser 已经贴着窝，
+            // 那最近的爬就是它自己 —— keeper 会原地跟它打，8 tick 内被 22 ATTACK
+            // （660/发）打掉，**不会**跑到矿工那边去乱杀。反过来如果出窝时
+            // defenser 不在（在另一个窝或路上），keeper 就会一路去找矿工。
+            //
+            // 这个「守最快出怪的窝」天然就实现了「杀完这只就换另一只」：
+            // 清掉之后该窝的倒计时被重置回 ~300，另一个窝立刻成为最小的那个，
+            // defenser 自己就走过去了，不需要额外的轮换状态机。
+            let counting = posts.filter(e => e.ticksToSpawn !== undefined);
+            let wp;
+            if (counting.length) {
+                wp = counting.reduce((a, b) => a.ticksToSpawn <= b.ticksToSpawn ? a : b);
                 delete this.memory.patrolArrive;
-                this.moveTo(posts[this.memory.patrolIdx].pos, { range: 1 });
+            } else {
+                // 组内两个窝都还没被激活（ticksToSpawn 为 undefined）→ 没有出怪时间
+                // 可依据，按 dwell 在两窝之间轮换，顺便把两个窝都「唤醒」，
+                // 免得附近的矿工一直在无防守的窝边上作业。
+                let idx = this.memory.patrolIdx || 0;
+                if (idx >= posts.length) idx = 0;
+                wp = posts[idx];
+                if (this.pos.inRangeTo(wp.pos, 1)) {
+                    if (this.memory.patrolArrive === undefined) { this.memory.patrolArrive = Game.time; return; }
+                    if (Game.time - this.memory.patrolArrive < pro.outerDefenseDwell(posts)) return;
+                }
+                if (posts.length > 1) {
+                    this.memory.patrolIdx = (idx + 1) % posts.length;
+                    delete this.memory.patrolArrive;
+                    wp = posts[this.memory.patrolIdx];
+                }
+            }
+            // 贴着窝站（range 1）。隔三格是打不到刚出窝的 keeper 的，
+            // 而且只有贴着才会成为「最近的爬」，把 keeper 钉在原地。
+            if (!this.pos.inRangeTo(wp.pos, 1)) {
+                this.moveTo(wp.pos, { range: 1, reusePath: 5 });
             }
             return;
         }
@@ -1276,6 +1293,39 @@ let pro = {
         return c.path;
     },
     /** 清除外矿房中不在缓存路线上的旧 road 工地，释放全局工地配额。 */
+    /**
+     * 按缓存路线**批量**把缺失的路点立成工地。
+     *
+     * 原来的做法是「修路爬走到哪个路点，就在那个路点立工地」，条件极其苛刻：
+     * 必须正好站在缓存路点上（onRoadPath）、脚下没有建筑和工地、而且
+     * `ticksToLive > 300`。W34N55 实测那只修路爬 ttl 只剩 154，于是**完全
+     * 不再立工地**，路就停在 34 条好几天。而且一次只立一格 —— 就算派了
+     * 3 只 carrier 也没法并行施工，前一只没修完，后一只走到那儿也不立。
+     *
+     * 现在一次性把整条路线上缺失的点都立成工地，所有带 WORK 的 carrier
+     * 就能并行去修。路修完后 outerRoadComplete 为真，这里自然不再动作。
+     * 每 100 tick 才跑一次，每轮最多 OUTER_ROAD_SITE_BATCH 个，避免
+     * createConstructionSite 在单个 tick 里刷爆 CPU。
+     */
+    placeOuterRoadSites(data, spawnRoom) {
+        if (data.roadSiteBuildTick && Game.time - data.roadSiteBuildTick < 100) return;
+        data.roadSiteBuildTick = Game.time;
+        let path = pro.getOuterRoadPath(data);
+        if (!path || !path.length) return;
+        let created = 0;
+        for (let p of path) {
+            if (created >= OUTER_ROAD_SITE_BATCH) break;
+            // 边界格不能盖路
+            if (p.x == 0 || p.x == 49 || p.y == 0 || p.y == 49) continue;
+            let room = Game.rooms[p.roomName];
+            if (!room) continue;                              // 没视野的房跳过
+            if (room.name == spawnRoom.name) continue;        // 主房的路由本地规划器维护
+            if (room.lookForAt(LOOK_STRUCTURES, p.x, p.y).length) continue;          // 已有建筑（含路）
+            if (room.lookForAt(LOOK_CONSTRUCTION_SITES, p.x, p.y).length) continue;
+            if (pro.roadBlockedByBlueprint({ roomName: p.roomName, x: p.x, y: p.y })) continue;
+            if (room.createConstructionSite(p.x, p.y, STRUCTURE_ROAD) == OK) created++;
+        }
+    },
     cleanupOuterRoadSites(data, spawnRoom) {
         if (data.roadSiteCleanupTick && Game.time - data.roadSiteCleanupTick < 250) return;
         data.roadSiteCleanupTick = Game.time;
@@ -1826,6 +1876,7 @@ let pro = {
             if (roomName != spawnRoom.name) {
                 // 预先计算并缓存固定修路路径（一次性寻路，避免多个修路爬各走各的路线）
                 pro.ensureOuterRoadPath(data, spawnRoom);
+                pro.placeOuterRoadSites(data, spawnRoom);
                 pro.cleanupOuterRoadSites(data, spawnRoom);
             }
             // 补员才需要空闲 Spawn：单 Spawn 房若先尝试本地补员，spawnFailure
