@@ -61,6 +61,14 @@ const OUTER_ROAD_BUILDER_CNT = 2;
 /** 每轮最多立多少个外矿道路工地（避免一个 tick 里 createConstructionSite 刷爆 CPU） */
 const OUTER_ROAD_SITE_BATCH = 30;
 /**
+ * 外矿路点上连续卡住多久就改用移动优化器（而不是裸 creep.move）。
+ * 单格宽单行道上一有互堵，裸 move 会被引擎静默取消；交给 BetterMove 的
+ * 交通逻辑（对穿/让路）才解得开。见 moveToOuterRoadPoint 的说明。
+ */
+const OUTER_ROAD_STUCK_FALLBACK = 3;
+/** 卡到这么久才认定路线真的不可达、去重算（原来也是 10，但它同时会删整条缓存） */
+const OUTER_ROAD_STUCK_INVALIDATE = 25;
+/**
  * 沿缓存外矿路线走不通时，容忍多少 tick 才认定「路线真被堵死」并作废重算。
  *
  * 这份缓存是**同一个矿点所有爬共用的一份**（keeper、carrier、修路爬都读它）。
@@ -1476,8 +1484,23 @@ let pro = {
         task.outerRoadMoveTarget = targetKey;
         // 同一路点反复无法到达（如路点被建筑永久占据）：返回 ERR_NO_PATH，
         // 让调用方失效缓存路径并触发重算（重算已剔除 storage/terminal 终点）
-        if (task.outerRoadStuck >= 10) {
+        // 连续卡住时**先交给移动优化器**，不要死磕裸 creep.move。
+        //
+        // moveToOuterRoadPoint 沿路点是「一格一格 creep.move(dir)」，完全绕过
+        // BetterMove 的交通逻辑（对穿 / 让路 / 绕障）。单格宽的外矿道上只要有
+        // 两只爬互相占住对方的下一格，裸 move 就直接被引擎静默取消，谁也过不去。
+        // 原来的唯一出路是卡满 10 tick 后返回 ERR_NO_PATH —— 而调用方拿到它
+        // 会**删掉整条共享路线缓存**（invalidateOuterRoadPath），于是所有爬一起
+        // 退化成原生寻路，路也白修了。一拥堵就更堵，就是这个回路。
+        //
+        // 现在：卡 OUTER_ROAD_STUCK_FALLBACK 个 tick 就改用 moveTo（仍朝同一路点），
+        // 把交通问题交给优化器；只有卡到 OUTER_ROAD_STUCK_INVALIDATE 才认定路线
+        // 真的不可达、去重算。
+        if (task.outerRoadStuck >= OUTER_ROAD_STUCK_INVALIDATE) {
             return ERR_NO_PATH;
+        }
+        if (task.outerRoadStuck >= OUTER_ROAD_STUCK_FALLBACK) {
+            return creep.moveTo(point, { range: 0, reusePath: 3 });
         }
         if (creep.pos.roomName == point.roomName) {
             let range = creep.pos.getRangeTo(point);
