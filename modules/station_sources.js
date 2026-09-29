@@ -1300,9 +1300,19 @@ let pro = {
             }
         }
         let end = ret && ret.path && ret.path.last();
+        // 判据只看「终点是否贴着 storage/terminal（≤1 格）」。
+        //
+        // **不能再用 `!ret.incomplete`**：storage 本身是建筑，在代价矩阵里是 255，
+        // PathFinder 够不到目标格时会返回 `incomplete=true`，但路径其实已经停在
+        // storage 旁边 —— 那正是我们要的（代码本来就会把终点那格 strip 掉）。
+        // 加上这个条件等于永远缓存不了路线：实测同一组参数下
+        //   inc=true, ops=2642, path.len=77, last=W33N55:(20,34)  ← 就在 storage 旁边
+        // 结果三个矿点全部 `no path`、路一直修不下去。
+        // `reachesDestination` 本身就是比 incomplete 更精确的判据：它明确要求
+        // 终点在目标 1 格以内，所以既不会缓存半途而废的路线，也不会漏掉合法路线。
         let reachesDestination = end && to && end.roomName == to.roomName
             && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1;
-        if (ret && !ret.incomplete && reachesDestination && ret.path.length > 1) {
+        if (ret && reachesDestination && ret.path.length > 1) {
             let roadPath = ret.path;
             // 剔除终点=storage/terminal 自身的位置：被建筑占位，爬永远走不上去会卡死。
             // PathFinder 会把被阻挡的 goal（range>0）也放进 path。

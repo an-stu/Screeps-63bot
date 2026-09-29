@@ -77,7 +77,11 @@ assert.ok(!main.includes("upgrade_E53S21_3") && !main.includes("createFlag(\"upg
 assert.ok(powerCreepPrototype.includes("code == OK || code == ERR_INVALID_ARGS || code == ERR_NOT_ENOUGH_RESOURCES"), "operate-storage tasks must terminate after success or a terminal error");
 assert.ok(prototypeCreep.includes("直到能量用尽") && !prototypeCreep.includes("if (code == OK) this.popTask().execLastTask();"), "a fresh rampart builder must spend its carried energy before resuming normal work");
 assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.includes("task.requireFullLoad"), "source-container carriers must wait for more than a full load before withdrawing");
-assert.ok(stationSources.includes("!ret.incomplete") && stationSources.includes("reachesDestination"), "external-road paths must never cache an incomplete route that stops before storage");
+// 原来断言要 `!ret.incomplete`，但那会**永远缓存不了路线**：storage 本身是建筑
+// （代价 255），PathFinder 够不到目标格就返回 incomplete=true，可路径其实已经停在
+// storage 旁边（实测 last=W33N55:(20,34)，紧邻 storage(21,34)）。改成断言以
+// `reachesDestination`（终点必须在目标 1 格内）为唯一判据 —— 更精确，也不漏合法路线。
+assert.ok(stationSources.includes("reachesDestination") && stationSources.includes("ret.path.length > 1"), "external-road paths must be cached only when the endpoint actually reaches storage");
 assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < stationSources.indexOf("if (spawnRoom.spawnFailure) return;"), "external-road route refresh must not be blocked by local spawn pressure");
 assert.ok(stationSources.includes("maxOps: 8000"), "cached external-route planning must have enough search budget to reach storage");
 assert.ok(stationSources.includes("if (!ret || ret.incomplete)") && stationSources.includes("fallback search threw"), "an unreachable blueprint route must retry using the native obstacle matrix");
