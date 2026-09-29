@@ -86,7 +86,15 @@ assert.ok(stationSources.includes("nearestOuterRoadSite") && stationSources.incl
 assert.ok(stationSources.includes("!pro.outerRoadComplete(data) && isRoadBuilder"), "only WORK-capable external carriers may enter the road-only loop");
 assert.ok(stationSources.includes("moveOuterCarrierOnRoad(this, task, data, -1)") && stationSources.includes("delete task.returnPathIndex"), "external carriers must return to the source via cached roads and invalidate only unusable routes");
 assert.ok(!stationSources.includes("maintainOuterRoads") && !stationSources.includes("road.destroy()"), "external road maintenance must let off-route roads decay naturally");
-assert.ok(stationSources.includes("moveToOuterRoadPoint") && stationSources.includes("creep.move(creep.pos.getDirectionTo(point))"), "external carriers must step exactly between cached road points before any recovery path search");
+// 原来这条断言要求用裸 `creep.move(creep.pos.getDirectionTo(point))` 逐格走。
+// 实测证明那是错的：裸 move 在目标格被别的爬占住时**返回 OK 但引擎静默取消
+// 移动**，函数对外报成功、爬却一格没动（6 只外矿 carrier 全部如此）；而且裸
+// move 无法对穿/拉人，单格宽单行道一堵就是死锁。改为断言逐格推进走
+// BetterMove 的 moveTo，并断言裸 move 已从该函数中移除。
+assert.ok(stationSources.includes("moveToOuterRoadPoint")
+    && stationSources.includes("return creep.moveTo(point, { range: 0, reusePath: 3")
+    && !stationSources.includes("creep.move(creep.pos.getDirectionTo(point))"),
+    "external carriers must advance between cached road points via the movement optimiser, not a raw creep.move that reports OK while the engine cancels it");
 assert.ok(stationSources.includes("if (dist > 1)") && stationSources.includes("if (range > 1)"), "an external carrier that leaves its route must reacquire the nearest cached point immediately");
 assert.ok(stationSources.includes("stepFromOuterRoadPoint") && stationSources.includes("this.pos.isBorder() && borderIndex.dist == 0"), "cached border waypoints must advance rather than repeatedly target themselves");
 assert.ok(stationSources.includes("let nextIndex = borderIndex.index + roadDir") && stationSources.includes("task.pathIndex = nextIndex"), "a boundary move must persist its next cached waypoint index");

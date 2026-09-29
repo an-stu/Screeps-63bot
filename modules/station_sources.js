@@ -1514,24 +1514,16 @@ let pro = {
             let range = creep.pos.getRangeTo(point);
             if (range == 0) return OK;
             if (range == 1) {
-                let code = creep.move(creep.pos.getDirectionTo(point));
-                // 单步 move 不经过 BetterMove，手动更新 lastPos 便于诊断
-                if (code == OK) {
-                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
-                    return code;
-                }
-                // 目标格被占/不可走：向目标方向的邻近方向（±45°）试探，
-                // 持续向目标靠拢，避免多个爬互相占住对方目标格而死锁
-                let dir = creep.pos.getDirectionTo(point);
-                for (let i = 1; i <= 7; i += 2) {
-                    let d = ((dir - 1 + i + 8) % 8) + 1;
-                    code = creep.move(d);
-                    if (code == OK) {
-                        creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
-                        return code;
-                    }
-                }
-                return OK;
+                // 这里原来是「creep.move(dir) 试 8 个方向，最后一个 return OK」。
+                // 问题：裸 creep.move **在目标格被别的爬占住时会返回 OK，但引擎
+                // 会把这次移动静默取消** —— 于是本函数对外报「走成功」，调用方
+                // moveOuterCarrierOnRoad 也 return true，可爬一格都没动。
+                // 实测 6 只外矿 carrier 全部处于「返回 true 但 pos 不变」，而且
+                // 下一格是空的（真正的目标格被同队爬占着）。
+                // 裸 move 也做不了对穿/拉人，单格宽单行道上一堵就是死锁。
+                // 统一交给 BetterMove 的 moveTo（reusePath 很短，开销可控），
+                // 它能做对穿、拉人、绕一格，正是解开这种堵所需的。
+                return creep.moveTo(point, { range: 0, reusePath: 3, visualizePathStyle: { stroke: '#fffa00' } });
             }
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
@@ -1556,7 +1548,9 @@ let pro = {
         let next = roadPath[index + direction];
         if (!next) return ERR_NO_PATH;
         if (next.roomName == creep.pos.roomName) {
-            return creep.move(creep.pos.getDirectionTo(next));
+            // 同 moveToOuterRoadPoint：不用裸 move（目标格被占时它返回 OK 但移动
+            // 被静默取消，且无法对穿/拉人），交给 BetterMove。
+            return creep.moveTo(next, { range: 0, reusePath: 3 });
         }
         let exit = Game.map.findExit(creep.pos.roomName, next.roomName);
         return exit >= TOP && exit <= TOP_LEFT ? creep.move(exit) : ERR_NO_PATH;
