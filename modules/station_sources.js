@@ -19,6 +19,55 @@ const OUTER_DEFENSE_TARGET_CNT = 2;
  * 可用 Memory.marketSettings.outerDefensePatrolDwell 调。
  */
 const OUTER_DEFENSE_PATROL_DWELL = 90;
+/**
+ * 每只外矿防守爬认领几个 keeperLair。
+ *
+ * 原来 1 只爬要在一圈里走完 4 个窝：W34N55 一圈约 103 格 + 4×90 停留 ≈ 463 tick，
+ * 而 lair 每 300 tick 出一只 keeper —— 某个窝最长要等 460 tick 才有人来，而外矿
+ * keeper 只有 17 部件（1700 血），被 source keeper 约 400/发打几下就没了。
+ *
+ * 改成对半分：组0 守西边两个窝（挨着源 (3,17)/(10,33)），组1 守东边两个窝
+ * （挨着源 (32,32) 和矿物 (42,16)），覆盖率从 ~19% 提到 ~45%。
+ */
+const OUTER_DEFENSE_LAIRS_PER_CREEP = 2;
+/**
+ * 只打离自己这组窝多近的敌人。
+ *
+ * 原来是 `findClosestByPath(FIND_HOSTILE_CREEPS)` 全房找最近的一只：defenser
+ * 会被另一头的 keeper 一路牵着走，自己该守的矿工反而没人管（W34N55 实测
+ * defenser 出现在 (16,3)/(24,32)/(33,2)，离它该守的窝很远）。
+ * 现在只在自己的窝附近接战，超出这个半径的交给另一只。
+ */
+const OUTER_DEFENSE_GUARD_RADIUS = 8;
+/**
+ * 在两个窝之间来回跑时，每个窝待多久。
+ *
+ * lair 每 300 tick 出一只 keeper。让「两个窝各待 D + 两趟路上 T」≈ 300，
+ * 回到同一个窝时正好赶上它下一次出怪 —— 这就是「确保时间足够」。
+ * T 用两窝之间的切比雪夫距离估（外矿还没修路时约 1 格/tick）。
+ * W34N55 实测：西组两窝相距 21 格 → D=129；东组相距 16 格 → D=134。
+ */
+const OUTER_DEFENSE_LAIR_CYCLE = 300;
+const OUTER_DEFENSE_MIN_DWELL = 60;
+const OUTER_DEFENSE_MAX_DWELL = 240;
+/** 已经把这一窝的 keeper 打掉后，至少还要待够这么久才换窝（防止刚清完就走） */
+const OUTER_DEFENSE_CLEARED_WAIT = 30;
+/** 道路未完工时，至少保持几只带 WORK 的 carrier 在铺路 */
+const OUTER_ROAD_BUILDER_CNT = 3;
+/**
+ * 沿缓存外矿路线走不通时，容忍多少 tick 才认定「路线真被堵死」并作废重算。
+ *
+ * 这份缓存是**同一个矿点所有爬共用的一份**（keeper、carrier、修路爬都读它）。
+ * 原来一遇到 ERR_NO_PATH / ERR_NO_BODYPART 就 delete roadPathStr：任何一只爬
+ * 在某一 tick 被 keeper 挡了一下、踩到工地或沼泽，整条路线就对所有爬一起消失。
+ * 而重建路线的唯一入口 ensureOuterRoadPath 挂在 trySpawnOuterHarCarrier 里，
+ * 那个函数开头就被 spawnFailure 挡住 —— 主房 spawn 忙时根本进不去。于是路线
+ * 长时间缺失，路点就一直铺不下去（W34N55 实测：3 个矿点 roadPathStr 全空，
+ * 路停在 34 条 / 约需 90 条）。
+ *
+ * 现在单次失败只回退到原生 moveTo（照样走得动），连续失败超过这个 tick 数才作废。
+ */
+const OUTER_ROAD_FAIL_TOLERANCE = 100;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -488,10 +537,13 @@ Creep.prototype.outerDefense = function () {
     if (task.roomName != this.room.name) {
         this.goTo(task);
     } else {
+        let posts = pro.outerDefensePosts(this);
         let target = Game.getObjectById(this.memory.targetId);
         if (this.memory.targetId && !target) delete this.memory.targetId;
         if (!this.memory.targetId) {
-            target = this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);
+            // 只打自己这组窝附近的敌人（见 OUTER_DEFENSE_GUARD_RADIUS 的说明）
+            let hostiles = this.room.find(FIND_HOSTILE_CREEPS).filter(e => pro.nearDefensePosts(e.pos, posts));
+            target = hostiles.length ? this.pos.findClosestByRange(hostiles) : undefined;
             if (!target) target = this.room.find(FIND_HOSTILE_STRUCTURES).filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
             if (target) this.memory.targetId = target.id;
         }
@@ -524,31 +576,36 @@ Creep.prototype.outerDefense = function () {
         this.heal(this);
         this.memory.dontPullMe = false;
 
-        // 没有敌人也没有伤员 → 按 keeperLair 路点巡逻（把 4 个 lair 在一圈内走完。
+        // 没有敌人也没有伤员 → 回到自己认领的窝旁边贴守。
         //
-        // 原实现是「移动到 ticksToSpawn 最小的 lair」—— 一旦那个 lair 的 keeper 没出，defenser 就一直站着等，另外 3 个 lair 出 keeper 时它不在场，miner 会被打。改成按序巡逻，一圈覆盖全部驻守点。
+        // 两级策略：
+        //  1) 有窝在倒计时（ticksToSpawn 有值）→ 守**最快要出**的那个，贴到 range 1。
+        //     keeper 出窝那一 tick 就能打到，不会让它先跑去打我们的 keeper。
+        //  2) 都没倒计时（窝还没被激活）→ 按 dwell 在这组窝之间轮换，两个都照看。
+        // 原来是「一只爬把 4 个窝走一圈」，一圈 463 tick，覆盖率只有 ~19%。
 
-        let lairs = this.room.find(FIND_HOSTILE_STRUCTURES)
-            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
-            .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));   // 固定顺序，避免路点抖动
-        if (lairs.length) {
+        if (posts.length) {
             let idx = this.memory.patrolIdx || 0;
-            if (idx >= lairs.length) idx = 0;
-            let wp = lairs[idx];
-            // 还没到当前路点 → 走过去
-            if (!this.pos.inRangeTo(wp.pos, 3)) {
-                this.moveTo(wp.pos, { range: 3 });
+            if (idx >= posts.length) idx = 0;
+            let wp = posts[idx];
+            // 还没到位：走过去，不开始计时
+            if (!this.pos.inRangeTo(wp.pos, 1)) {
+                this.moveTo(wp.pos, { range: 1 });   // 贴着窝站，隔三格打不到刚出窝的 keeper
                 return;
             }
-            // 已到路点 → 驻守一段时间（等 keeper 出窝），期间原地治疗自己
-            let dwell = Number(Memory.marketSettings && Memory.marketSettings.outerDefensePatrolDwell || OUTER_DEFENSE_PATROL_DWELL);
             if (this.memory.patrolArrive === undefined) { this.memory.patrolArrive = Game.time; return; }
             let waited = Game.time - this.memory.patrolArrive;
-            if (waited < dwell) return;
-            // 停留结束 → 切到下一个路点
-            this.memory.patrolIdx = (idx + 1) % lairs.length;
-            delete this.memory.patrolArrive;
-            this.moveTo(lairs[this.memory.patrolIdx].pos, { range: 3 });
+            let dwell = pro.outerDefenseDwell(posts);
+            // 这一窝刚出过 keeper（倒计时被重置回 ~300），说明窝已经被清了：
+            // 不用把 dwell 等满，再待 OUTER_DEFENSE_CLEARED_WAIT 就换到另一个窝
+            let justSpawned = wp.ticksToSpawn !== undefined && wp.ticksToSpawn > OUTER_DEFENSE_LAIR_CYCLE * 0.8;
+            let early = justSpawned && waited >= OUTER_DEFENSE_CLEARED_WAIT;
+            if (waited < dwell && !early) return;
+            if (posts.length > 1) {
+                this.memory.patrolIdx = (idx + 1) % posts.length;
+                delete this.memory.patrolArrive;
+                this.moveTo(posts[this.memory.patrolIdx].pos, { range: 1 });
+            }
             return;
         }
 
@@ -713,12 +770,11 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         }
         let code = pro.moveToOuterRoadPoint(this, task, wp);
         if (code == ERR_NO_PATH || code == ERR_NO_BODYPART) {
-            // 应急：路径不可达（被建筑堵死等），失效缓存退回旧逻辑
-            if (data) {
-                delete data.roadPathStr;
-                delete data.roadPathTick;
-            }
+            // 走不通：本 tick 先退回原生 moveTo（照样走得动），只有连续失败才作废缓存
+            pro.invalidateOuterRoadPath(data);
             this.moveTo(target, { visualizePathStyle: { stroke: '#fffa00' } })
+        } else {
+            pro.clearOuterRoadPathFail(data);
         }
         return;
     }
@@ -975,7 +1031,10 @@ let pro = {
 
         let sumDamage = hostiles.map(e => e.possibleDamage(false, 2)).sum();      // 距离 2 时的全部伤害
         let sumHeal = hostiles.map(e => e.possibleHealDamage(1, false)).sum();    // 对面全部奶量
-        let maxTough = hostiles.map(e => e.possibleToughBeHitsDamage(sumHeal)).maxBy(e => e) || 0;
+        // 注意：这里原来是 e.possibleToughBeHitsDamage(sumHeal)，那个方法
+        // **全代码库都不存在** —— 只要看得见敌人就抛 TypeError，外矿 defenser
+        // 直接生不出来。改用 WarDamageCal.possibleBreakDamage（见其注释）。
+        let maxTough = hostiles.map(e => WarDamageCal.possibleBreakDamage(e, sumHeal)).maxBy(e => e) || 0;
         let attackCnt = Math.max(1, Math.ceil(maxTough / 30) + Math.ceil(sumDamage * 0.3 / 30));
         let healCnt = Math.max(1, Math.ceil(sumDamage * 0.3 / 12));
         let moveCnt = Math.ceil((attackCnt + healCnt) / 2);
@@ -1003,7 +1062,17 @@ let pro = {
             moveCnt = Math.max(1, Math.ceil((attackCnt + healCnt) / 2));
             if (attackCnt + healCnt + moveCnt > 50) attackCnt = Math.max(1, 50 - healCnt - moveCnt);
         }
-        return {body: ManagerCreeps.calcBodyPart([[ATTACK, attackCnt], [HEAL, healCnt], [MOVE, moveCnt]]), boostRes: boostRes};
+        let body = ManagerCreeps.calcBodyPart([[ATTACK, attackCnt], [HEAL, healCnt], [MOVE, moveCnt]]);
+        // 中间九房的 source keeper 是满配 50 部件（约 5000 血，贴身时近战+远程
+        // 合计约 400/发）。上面是按「当前看得见的那几只、且按 dis=2 只算远程」
+        // 估的体型，实战一贴身就会奶量不足被反杀 —— 实测算出来只有
+        // 16 ATTACK + 5 HEAL，而满血打赢 keeper 的是 22 ATTACK + 11 HEAL。
+        // 所以入侵房（isInvader）一律不低于手工调好的 bigBody。
+        if (isInvader) {
+            let big = bigBody().body;
+            if (body.length < big.length) return { body: big, boostRes: {} };
+        }
+        return {body: body, boostRes: boostRes};
     },
     generatorHarTask(data) {
         return [
@@ -1278,11 +1347,32 @@ let pro = {
         task.returnPathIndex = index;
         point = path[index];
         let code = pro.moveToOuterRoadPoint(creep, task, point);
-        if (code != ERR_NO_PATH && code != ERR_NO_BODYPART) return true;
-        delete data.roadPathStr;
-        delete data.roadPathTick;
+        if (code != ERR_NO_PATH && code != ERR_NO_BODYPART) {
+            pro.clearOuterRoadPathFail(data);
+            return true;
+        }
+        // 同 harvestEnergyOuterCarryRoadBuilder：单次失败只作废本次移动，
+        // 连续失败超过 OUTER_ROAD_FAIL_TOLERANCE 才真的丢掉共享路线
+        pro.invalidateOuterRoadPath(data);
         delete task.returnPathIndex;
         return false;
+    },
+    /**
+     * 沿缓存路线走不通时的作废判定（见 OUTER_ROAD_FAIL_TOLERANCE 的说明）。
+     * 缓存是同矿点所有爬共用的，一次瞬时的挡路不该把它整份抹掉。
+     */
+    invalidateOuterRoadPath(data) {
+        if (!data || !data.roadPathStr) return;
+        if (!data.roadPathFailTick) data.roadPathFailTick = Game.time;
+        if (Game.time - data.roadPathFailTick < OUTER_ROAD_FAIL_TOLERANCE) return;
+        delete data.roadPathStr;
+        delete data.roadPathTick;
+        delete data.roadPathFailTick;
+        delete data.roadPathError;
+    },
+    /** 成功沿路线走了一步：清掉失败计时 */
+    clearOuterRoadPathFail(data) {
+        if (data && data.roadPathFailTick) delete data.roadPathFailTick;
     },
     /**
      * Walk an external route exactly one cached waypoint at a time. Adjacent
@@ -1721,18 +1811,25 @@ let pro = {
         // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
         // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）
         if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) return null;
-        if (spawnRoom.spawnFailure) return null;
+        // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
+        // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
+        // 主房 spawn 常年是忙的（spawnFailure 常真），把路线维护挡在后面等于
+        // 让路线长时间缺失（W34N55 实测三个矿点的 roadPathStr 同时为空）。
         let harRoom = Game.rooms[roomName.name || roomName]
         if (!harRoom) return;
         let sm = harRoom.memory[pro.stationName]
         _.values(sm).forEach(data => {
             let pathTime = data["pathTime"];
             let container = Game.getObjectById(data["container"]);
-            // 预先计算并缓存固定修路路径（一次性寻路，避免多个修路爬各走各的路线）
-            pro.ensureOuterRoadPath(data, spawnRoom);
-            pro.cleanupOuterRoadSites(data, spawnRoom);
-            // 路线验证/重算不依赖空闲 Spawn。单 Spawn 房若先尝试本地补员，
-            // spawnFailure 不能阻止已有外矿 carrier 修正其过期路径。
+            // 路线只在外矿（跨房）才用得上：主房自己的 keeper/carrier 不走这条缓存，
+            // 所以主房不做寻路维护，省掉无意义的 PathFinder 开销。
+            if (roomName != spawnRoom.name) {
+                // 预先计算并缓存固定修路路径（一次性寻路，避免多个修路爬各走各的路线）
+                pro.ensureOuterRoadPath(data, spawnRoom);
+                pro.cleanupOuterRoadSites(data, spawnRoom);
+            }
+            // 补员才需要空闲 Spawn：单 Spawn 房若先尝试本地补员，spawnFailure
+            // 不能阻止已有外矿 carrier 修正其过期路径。
             if (spawnRoom.spawnFailure) return;
             // container 不可见时仍可按缓存 ID / 坐标孵化；carrier 抵达矿区后
             // 再解析对象即可。否则 keeper 死后失去视野会再次把外矿锁死。
@@ -1754,8 +1851,154 @@ let pro = {
                     let tasks = pro.generatorOuterHarCarryTask(data)
                     StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestEnergyCarrier", tasks)
                 }
+                // 路没修完时再补专职修路的 carrier。
+                //
+                // 上面那套「还差多少 CARRY 才够搬」是**只按把矿运回主房**算的，
+                // 修路是额外的活。而修路的吞吐被「跑一趟能带多少能量」卡死
+                // （1 能量 = 1 进度），所以只能靠**多几只同时跑**来提速度，
+                // 加大 CARRY 或 WORK 都提不了多少（见 getOuterHarCarrierBuildBodyConfig）。
+                // W34N55 实测只有 1 只 carrier 带 WORK:2，好几天过去路还停在 34 条。
+                // 路修完后 outerRoadComplete 为真，这里自然就不再补了。
+                if (!pro.outerRoadComplete(data)) {
+                    let builderCnt = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).length;
+                    if (builderCnt < OUTER_ROAD_BUILDER_CNT && !spawnRoom.spawnFailure) {
+                        let body = pro.getOuterHarCarrierBuildBodyConfig(spawnRoom.getEnergyCapacityAvailable(), maxPart)
+                        let tasks = pro.generatorOuterHarCarryTask(data)
+                        StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "outerHarvestEnergyCarrier", tasks)
+                    }
+                }
             }
         })
+    },
+    /**
+     * 这只防守爬认领的 keeperLair（见 OUTER_DEFENSE_LAIRS_PER_CREEP）。
+     *
+     * 分组由 outerDefenseLairGroups 按**真实寻路距离**做最优两两配对（不按坐标切）。
+     * 分组号写在 memory.defenseGroup；没有分组的爬（本次部署前出生的老爬）
+     * 在这里**当场**挑人最少的那组，不需要等它自然死亡就能生效。
+     */
+    outerDefensePosts(creep) {
+        let room = creep.room;
+        let lairs = room.find(FIND_HOSTILE_STRUCTURES)
+            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
+            .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
+        if (!lairs.length) return [];
+        let groups = pro.outerDefenseLairGroups(room, lairs);
+        // 分组号：默认/越界/或者自己这组已经比别组挤，就重新挑人最少的那组。
+        // 统计时排除自己，否则两只爬会互相把对方挤走、来回抖。
+        let cnt = [];
+        for (let i = 0; i < groups.length; i++) cnt.push(0);
+        room.find(FIND_MY_CREEPS).forEach(c => {
+            if (c === creep) return;
+            if (c.memory.role == "outerHarvestDefenser" && c.memory.defenseGroup >= 0
+                && c.memory.defenseGroup < groups.length) cnt[c.memory.defenseGroup]++;
+        });
+        let least = Math.min.apply(null, cnt);
+        let g = creep.memory.defenseGroup;
+        if (g === undefined || g < 0 || g >= groups.length || cnt[g] > least) {
+            g = cnt.indexOf(least);
+            creep.memory.defenseGroup = g;
+        }
+        return groups[g] || [];
+    },
+    /**
+     * 把 lair 两两配对，使「每组内部来回要走的路」最短 —— **按真实寻路距离**，
+     * 不是按坐标排序后对半切。
+     *
+     * 坐标排序是拍脑袋的：W34N55 里 (7,17) 和 (7,38) 直线只差 21 格，看着像
+     * "西边一对"，但中间隔着一道墙，**实际要绕 83 格**；而 (36,29)↔(41,14)
+     * 只要 14 格。按坐标切出来的分组是
+     *   {(7,17),(7,38)}=83 + {(36,29),(41,14)}=14   合计 97
+     * 最优其实是
+     *   {(7,17),(41,14)}=42 + {(7,38),(36,29)}=26   合计 68
+     * 差了 30%。
+     *
+     * 这里是小规模（n ≤ 6）的最小权完美匹配：枚举所有「两两配对」的分法，
+     * 取代价（各组内部距离之和）最小的一种。lair 不会移动，结果按 lair id
+     * 集合缓存进 room.memory，只算一次 —— 不会每 tick 跑 PathFinder。
+     */
+    outerDefenseLairGroups(room, lairs) {
+        let key = lairs.map(e => e.id).join(",");
+        let mem = room.memory;
+        if (mem.defenseLairGroups && mem.defenseLairGroupsKey == key) {
+            let byId = {};
+            lairs.forEach(e => byId[e.id] = e);
+            let cached = mem.defenseLairGroups.map(ids => ids.map(id => byId[id]).filter(e => e));
+            if (cached.length && cached.every(x => x.length)) return cached;
+        }
+        let n = lairs.length;
+        let dist = [];
+        for (let i = 0; i < n; i++) {
+            dist.push([]);
+            for (let j = 0; j < n; j++) {
+                if (i == j) dist[i].push(0);
+                else if (j < i) dist[i].push(dist[j][i]);
+                else {
+                    let p = PathFinder.search(lairs[i].pos, lairs[j].pos,
+                        { maxRooms: 1, plainCost: 1, swampCost: 5, range: 1 });
+                    dist[i].push(p && p.path ? p.path.length : 999);
+                }
+            }
+        }
+        let target = Math.ceil(n / OUTER_DEFENSE_LAIRS_PER_CREEP);
+        let best = null, used = [], cur = [];
+        let evalCur = () => {
+            if (cur.length != target) return;
+            let cost = 0;
+            cur.forEach(g => {
+                let mx = 0;
+                for (let a = 0; a < g.length; a++) {
+                    for (let b = a + 1; b < g.length; b++) mx = Math.max(mx, dist[g[a]][g[b]]);
+                }
+                cost += mx;
+            });
+            if (!best || cost < best.cost) best = { cost: cost, groups: cur.map(g => g.slice()) };
+        };
+        let rec = () => {
+            if (cur.length > target) return;
+            let i = -1;
+            for (let k = 0; k < n; k++) if (!used[k]) { i = k; break; }
+            if (i < 0) { evalCur(); return; }
+            used[i] = true;
+            for (let j = i + 1; j < n; j++) {
+                if (used[j]) continue;
+                used[j] = true;
+                cur.push([i, j]);
+                rec();
+                cur.pop();
+                used[j] = false;
+            }
+            cur.push([i]);
+            rec();
+            cur.pop();
+            used[i] = false;
+        };
+        rec();
+        let groups = best ? best.groups.map(g => g.map(k => lairs[k])) : [lairs];
+        mem.defenseLairGroupsKey = key;
+        mem.defenseLairGroups = groups.map(g => g.map(e => e.id));
+        return groups;
+    },
+    /**
+     * 两个窝之间来回跑时，每个窝待多久（见 OUTER_DEFENSE_LAIR_CYCLE 的推导）。
+     * 可用 Memory.marketSettings.outerDefensePatrolDwell 直接指定固定值覆盖。
+     */
+    outerDefenseDwell(posts) {
+        let fixed = Number(Memory.marketSettings && Memory.marketSettings.outerDefensePatrolDwell);
+        if (fixed > 0) return fixed;
+        if (posts.length < 2) return OUTER_DEFENSE_PATROL_DWELL;
+        let a = posts[0].pos, b = posts[1].pos;
+        let travel = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+        let dwell = Math.round((OUTER_DEFENSE_LAIR_CYCLE - travel * 2) / 2);
+        return Math.max(OUTER_DEFENSE_MIN_DWELL, Math.min(OUTER_DEFENSE_MAX_DWELL, dwell));
+    },
+    /** 该位置是否在这组窝的接战半径内 */
+    nearDefensePosts(pos, posts) {
+        if (!posts || !posts.length) return true;   // 没有窝就不限制，退回原来的全房接战
+        for (let p of posts) {
+            if (pos.roomName == p.pos.roomName && pos.getRangeTo(p.pos) <= OUTER_DEFENSE_GUARD_RADIUS) return true;
+        }
+        return false;
     },
     /**
      * 外矿防守爬的派发与轮换。

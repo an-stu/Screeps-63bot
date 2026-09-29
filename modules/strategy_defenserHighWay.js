@@ -48,7 +48,9 @@ let pro = {
         let hostiles = room.getHostileCreeps();
         let sumDamage = hostiles.map(e=>e.possibleDamage(false,2)).sum();// ra的全部伤害
         let sumHeal = hostiles.map(e=>e.possibleHealDamage(1,false)).sum();// 全部奶量
-        let maxToughDamage = hostiles.map(e=>e.possibleToughBeHitsDamage(sumHeal)).maxBy(e=>e);// 单个能奶起来的最大值
+        // 原来这里是 e.possibleToughBeHitsDamage(sumHeal)，该方法**全代码库不存在**，
+        // 一有敌人就抛 TypeError。改用 WarDamageCal.possibleBreakDamage（见其注释）。
+        let maxToughDamage = hostiles.map(e=>WarDamageCal.possibleBreakDamage(e,sumHeal)).maxBy(e=>e);
         let rangeNeedCnt = Math.ceil(maxToughDamage/10+5)
         let toughNeedCnt = Math.ceil(sumDamage*0.3/100)
         let healNeedCnt = Math.ceil(sumDamage*0.3/12)||1
