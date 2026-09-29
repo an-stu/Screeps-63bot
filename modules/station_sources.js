@@ -1217,7 +1217,32 @@ let pro = {
      * useBlueprint=true：首选搜索，按主房蓝图路网走。
      * useBlueprint=false：兜底搜索，不要蓝图，但**必须**保留「已建成建筑不可走」。
      */
-    outerRoadRoomCallback(roomName, useBlueprint) {
+    /**
+     * 该房蓝图里**规划为可走**（road / container）的格子集合，形如 "x:y"。
+     * 按房间对象缓存，一个 tick 只算一次。
+     *
+     * 用途：主房的路网由本地规划器维护，我们只「复用蓝图内已有的路」；
+     * 蓝图之外那些历史遗留的多余道路不修、不铺，让它自然衰减掉。
+     */
+    blueprintWalkableSet(room) {
+        if (!room._plannedRoadSet) {
+            let set = new Set();
+            let sm = room.memory && room.memory.structMap;
+            if (sm) {
+                ['road', 'container'].forEach(type => {
+                    if (!sm[type]) return;
+                    pro.structMapPositions(sm[type]).forEach(p => {
+                        let x = p.x != undefined ? p.x : p[0];
+                        let y = p.y != undefined ? p.y : p[1];
+                        set.add(x + ":" + y);
+                    });
+                });
+            }
+            room._plannedRoadSet = set;
+        }
+        return room._plannedRoadSet;
+    },
+    outerRoadRoomCallback(roomName, useBlueprint, homeRoom) {
         let room = Game.rooms[roomName];
         let cm = new PathFinder.CostMatrix();
         let terrain = Game.map.getRoomTerrain(roomName);
@@ -1254,10 +1279,20 @@ let pro = {
         // 同价，寻路毫无理由偏向已有的路，就会在草地/沼泽上另走一条，逼我们为了
         // 这一段又铺一条新路（还要额外占工地、多花能量）。这里是通用规则，
         // 任何房间都是「能复用就复用」。
+        let isHome = homeRoom && roomName == homeRoom;
+        let planned = pro.blueprintWalkableSet(room);
         room.getStructures().forEach(s => {
             let walkable = s.structureType == STRUCTURE_ROAD || s.structureType == STRUCTURE_CONTAINER
                 || (s.structureType == STRUCTURE_RAMPART && s.my) || s.structureType == STRUCTURE_LINK;
-            cm.set(s.pos.x, s.pos.y, walkable ? 1 : 255);
+            if (!walkable) { cm.set(s.pos.x, s.pos.y, 255); return; }
+            // 主房里「蓝图之外」的历史遗留道路：不给优惠（略高于空地 2），
+            // 寻路会走回蓝图路网，这些多余的路没人走就会自然衰减掉。
+            // 主房**蓝图内**的路仍然是最低代价 1 —— 这就是「复用蓝图内的道路」。
+            if (isHome && s.structureType == STRUCTURE_ROAD && !planned.has(s.pos.x + ":" + s.pos.y)) {
+                cm.set(s.pos.x, s.pos.y, 3);
+                return;
+            }
+            cm.set(s.pos.x, s.pos.y, 1);
         });
         return cm;
     },
@@ -1296,7 +1331,7 @@ let pro = {
             // 就提前结束。此搜索仅在缓存失效时运行，允许一次完整求解。
             maxOps: 8000,
             range: 1,
-            roomCallback: roomName => pro.outerRoadRoomCallback(roomName, true),
+            roomCallback: roomName => pro.outerRoadRoomCallback(roomName, true, spawnRoom.name),
         });
         } catch (e) {
             data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
@@ -1317,7 +1352,7 @@ let pro = {
                     maxRooms: 4,
                     maxOps: 8000,
                     range: 1,
-                    roomCallback: roomName => pro.outerRoadRoomCallback(roomName, false),
+                    roomCallback: roomName => pro.outerRoadRoomCallback(roomName, false, spawnRoom.name),
                 });
             } catch (e) {
                 data.roadPathError = "fallback search threw: " + e.message + " tick=" + Game.time;
@@ -1401,11 +1436,13 @@ let pro = {
      * 就能并行去修。路修完后 outerRoadComplete 为真，这里自然不再动作。
      *
      * 通用性 / 健壮性要点（都是踩过坑补的，不针对任何具体房间）：
-     *  1. **不跳过主房**。原来有一句 `if (room.name == spawnRoom.name) continue;`，
-     *     把主房那段交给本地规划器。但外矿路线不一定完全落在蓝图路网上，凡是偏离的
-     *     格子就永远没有路、爬只能走空地。road（以及 container/rampart/wall）**不占
-     *     房间建筑配额**，整条路线铺是安全的；对规划的尊重改用通用判据
-     *     `roadBlockedByBlueprint`（规划了非路建筑的格子不铺）。
+     *  1. **主房只复用蓝图路网，矿区房全铺**。
+     *     主房的路网由本地规划器维护：只有蓝图里规划为 road/container 的格子才铺
+     *     （`blueprintWalkableSet`），蓝图之外的历史遗留道路不修、不铺，让它自然衰减。
+     *     矿区房没有任何蓝图，能走的地方就该有路，按通用判据铺即可
+     *     （`roadBlockedByBlueprint`：规划了非路建筑的格子不铺）。
+     *     注意 road / container / rampart / wall **不占房间建筑配额**，所以铺路不会
+     *     挤掉规划器要盖的建筑。
      *  2. **尊重每房工地上限**：Screeps 每房最多 100 个工地，多个外矿路线常共用同一
      *     个主房，全速铺会撞上限并让 `createConstructionSite` 返回 ERR_FULL。
      *     见 OUTER_ROAD_SITE_ROOM_LIMIT。
@@ -1427,6 +1464,10 @@ let pro = {
             if (p.x == 0 || p.x == 49 || p.y == 0 || p.y == 49) continue;
             let room = Game.rooms[p.roomName];
             if (!room) continue;                              // 没视野的房间跳过，等有视野再铺
+            // 主房：**只复用蓝图路网**。蓝图里没规划路的格子不新铺 —— 否则会在一堆
+            // 多余的格子上长出路来，白占工地、白花能量，而且和本地规划器的布局打架。
+            // 外墙房（矿区）不受此限：那边没有任何蓝图，能走的地方就该有路。
+            if (room.name == spawnRoom.name && !pro.blueprintWalkableSet(room).has(p.x + ":" + p.y)) continue;
             // 每房工地余量（见 OUTER_ROAD_SITE_ROOM_LIMIT）
             if (roomSites[p.roomName] === undefined) {
                 roomSites[p.roomName] = room.find(FIND_MY_CONSTRUCTION_SITES).length;
@@ -1465,13 +1506,20 @@ let pro = {
             rooms[p.roomName] = true;
         });
         Object.keys(rooms).forEach(roomName => {
-            // 主房蓝图中的道路由本地规划器维护，绝不在这里移除。
-            if (roomName == spawnRoom.name) return;
             let room = Game.rooms[roomName];
             if (!room) return;
+            // 主房要额外保护本地规划器：**蓝图内**的路（含规划中未建成的）绝不动。
+            //
+            // 但「主房一律不清理」是不对的：工地不像建成后的路那样会自然衰减，
+            // 一旦有历史遗留的、既不在路线上也没被蓝图规划的修路工地，它会永远
+            // 留在那儿白占每房 100 个工地的配额。所以主房里只清「路线外 + 蓝图外」
+            // 这种明确的垃圾工地。
+            let isHome = roomName == spawnRoom.name;
+            let planned = isHome ? pro.blueprintWalkableSet(room) : null;
             room.find(FIND_MY_CONSTRUCTION_SITES)
                 .filter(site => site.structureType == STRUCTURE_ROAD
-                    && !route[roomName + ":" + site.pos.x + ":" + site.pos.y])
+                    && !route[roomName + ":" + site.pos.x + ":" + site.pos.y]
+                    && (!isHome || !planned.has(site.pos.x + ":" + site.pos.y)))
                 .forEach(site => site.remove());
         });
     },
