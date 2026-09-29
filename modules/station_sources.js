@@ -30,6 +30,18 @@ const OUTER_DEFENSE_REPLACE_OVERLAP = 60;
 /** 拿不到路线缓存时的行军时间保守估计（tick） */
 const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
 /**
+ * 「我方矿工工作位」的寻路代价：矿点及其相邻一圈。
+ *
+ * 为什么要抬高：矿点旁的 container 在代价矩阵里是最低代价 1（为了让寻路复用已有路），
+ * 结果**外矿路线会特意从主房 keeper 的岗位上穿过去** —— 实测 W33N55 的路线压在
+ * (3,24) 上，而主房 keeper 正是站在那儿挖 (4,25) 的。两者互相挤占，影响正常挖矿。
+ *
+ * 取 8：比空地 2 / 沼泽 5 都高，足够让寻路宁可多走一两格绕开；但不封死，
+ * 万一真没有别的路也还走得通（不会把路线逼成 incomplete）。
+ * 这条对任何房间通用：矿区房里那也是我们矿工的工作位，同样不该被踩。
+ */
+const OUTER_ROAD_WORK_TILE_COST = 8;
+/**
  * 巡逻时在每个 keeperLair 驻守点停留多久（tick）。
  *
  * lair 每 300 tick 出一只 keeper。4 个 lair 一圈 = 移动时间（W34N55 约 100 tick）+ 4×停留。
@@ -1412,6 +1424,18 @@ let pro = {
                 return;
             }
             cm.set(s.pos.x, s.pos.y, 1);
+        });
+        // 最后再把「我方矿工工作位」（矿点及其相邻一圈）抬高，
+        // 免得外矿路线从 keeper 的岗位上穿过去挤占它。见 OUTER_ROAD_WORK_TILE_COST。
+        room.find(FIND_SOURCES).forEach(src => {
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    let x = src.pos.x + dx, y = src.pos.y + dy;
+                    if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                    if (cm.get(x, y) >= 254) continue;   // 已判不可走的别动
+                    cm.set(x, y, OUTER_ROAD_WORK_TILE_COST);
+                }
+            }
         });
         return cm;
     },
