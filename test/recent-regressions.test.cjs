@@ -55,4 +55,91 @@ function loadMissionHandler(store, costRate = 0.2) {
     assert.ok(sent[0].amount + Math.ceil(sent[0].amount * 0.2) <= 5000);
 }
 
+// harvestMineralOuterKeeper 的「捡尸体 / 捡掉落物」收尾块写在 if/else 之外，
+// 而 mineral / container 原本是 else 块里的 `let` —— 收尾块一执行就必然
+// `ReferenceError: container is not defined`（线上实测 errorCount 4198，
+// lastErrorTick 83308420）。下面直接在 VM 里跑一遍真实的模块源码：
+// 旧实现会抛 ReferenceError，新实现必须跑通并真的调用 transfer/withdraw/pickup。
+const stationSourcesSource = fs.readFileSync(path.join(root, "modules/station_sources.js"), "utf8");
+
+function loadMineralKeeper({ withContainer = true, harvestCode = 0 } = {}) {
+    const calls = [];
+    const mineral = { id: "m1", mineralType: "H", mineralAmount: 1000 };
+    const container = {
+        id: "c1",
+        pos: { isEqualTo: () => true },
+        hits: 100,
+        hitsMax: 100,
+    };
+    const tombstone = { id: "t1", store: { energy: 500 } };
+    const drop = { resourceType: "H", id: "d1" };
+
+    const context = {
+        console,
+        OK: 0,
+        // station_sources 顶层会读这两个全局（1040/1041 行），必须给上，
+        // 否则 VM 加载阶段就抛 isSaveCpu is not defined。
+        isSaveCpu: true,
+        RESOURCE_ENERGY: "energy",
+        FIND_TOMBSTONES: 4,
+        FIND_DROPPED_RESOURCES: 6,
+        StationMineral: { stationName: "stationMineral" },
+        UtilsTask: { task: (target, taskName) => ({ id: target.id, taskName }) },
+        Memory: {
+            rooms: {
+                W1N1: {
+                    stationMineral: withContainer ? { id: "m1", container: "c1", resType: "H" } : { id: "m1", resType: "H" },
+                },
+            },
+        },
+        Game: {
+            time: 1000,
+            shard: { name: "shard3" },
+            getObjectById: id => (id === "m1" ? mineral : id === "c1" ? container : null),
+        },
+        Creep: function () {},
+    };
+    context.global = context;
+    vm.runInNewContext(stationSourcesSource, context, { filename: "station_sources.js" });
+
+    const creep = {
+        name: "k1",
+        ticksToLive: 85,               // 85 % 17 == 0 && > 40 → 收尾块会执行
+        room: { name: "W1N1" },
+        store: { getUsedCapacity: () => 100 },
+        pos: {
+            isEqualTo: () => true,
+            findInRange: type => ({ head: () => (type === 4 ? tombstone : drop) }),
+        },
+        headTask: () => ({ id: "m1", roomName: "W1N1" }),
+        harvest: () => { calls.push(["harvest"]); return harvestCode; },
+        transfer: (t, res) => { calls.push(["transfer", t && t.id, res]); return 0; },
+        withdraw: (t, res) => { calls.push(["withdraw", t && t.id, res]); return 0; },
+        pickup: t => { calls.push(["pickup", t && t.id]); return 0; },
+        repair: t => { calls.push(["repair", t && t.id]); return 0; },
+        goTo: () => calls.push(["goTo"]),
+    };
+    context.Creep.prototype.harvestMineralOuterKeeper.call(creep);
+    return calls;
+}
+
+{
+    const calls = loadMineralKeeper();
+    assert.ok(calls.some(c => c[0] === "transfer" && c[1] === "c1" && c[2] === "H"),
+        "mineral keeper must move its mineral into the container instead of throwing ReferenceError");
+    assert.ok(calls.some(c => c[0] === "withdraw" && c[1] === "t1" && c[2] === "energy"),
+        "mineral keeper must withdraw energy from a nearby tombstone");
+    assert.ok(calls.some(c => c[0] === "pickup" && c[1] === "d1"),
+        "mineral keeper must pick up a nearby dropped resource");
+}
+
+{
+    // 容器被打掉（stationMineral 里没有 container）时不能抛 TypeError，也不能把 null
+    // 交给 repair —— 收尾块整段跳过，harvest 照旧执行。
+    const calls = loadMineralKeeper({ withContainer: false, harvestCode: -8 });
+    assert.ok(calls.some(c => c[0] === "harvest"), "mineral keeper must still harvest when its container is gone");
+    assert.ok(!calls.some(c => c[0] === "transfer" || c[0] === "repair"),
+        "a missing container must be skipped, not passed to transfer/repair");
+}
+
 console.log("recent regression checks passed");

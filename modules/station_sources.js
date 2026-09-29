@@ -279,39 +279,50 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
 
 Creep.prototype.harvestMineralOuterKeeper = function () {
     let task = this.headTask();
+    // 矿物记录挂在 StationMineral.stationName（一房一条、不按 id 分桶），
+    // 不是本模块的 "stationSources"。原来按 [pro.stationName][task["id"]] 取，
+    // 拿到的是 undefined，下一行 station["container"] 必定抛 TypeError ——
+    // 外矿矿物爬一旦出生就会每 tick 报错。改成取 stationMineral 并判空。
+    //
+    // mineral / container 必须声明在 if/else **之外**：下面「捡尸体 / 捡掉落物」的
+    // 收尾块在 else 块之外，也要用它们；而原来它们是 else 块里的 let，
+    // 收尾块一执行就必然 `ReferenceError: container is not defined`（310/315 行）。
+    // 症状（实测）：矿物爬身旁 3 格内在(43,15)(42,13)有带能量的墓碑时，
+    // 每 17 tick 抛一次异常 —— Memory.codeHealth 里记的就是这一条
+    // （errorCount 4198，lastErrorTick 83308420）。后果是收尾逻辑整段失效 +
+    // 错误日志污染健康面板。
+    let mineral = Game.getObjectById(task["id"]);
+    let station = Memory.rooms[task.roomName]
+        && Memory.rooms[task.roomName][StationMineral.stationName];
+    let container = station && Game.getObjectById(station["container"]);
     if (task.roomName != this.room.name) {
         this.goTo(task);
         return;
     } else {
-        let mineral = Game.getObjectById(task["id"]);
-        // 矿物记录挂在 StationMineral.stationName（一房一条、不按 id 分桶），
-        // 不是本模块的 "stationSources"。原来按 [pro.stationName][task["id"]] 取，
-        // 拿到的是 undefined，下一行 station["container"] 必定抛 TypeError ——
-        // 外矿矿物爬一旦出生就会每 tick 报错。改成取 stationMineral 并判空。
-        let station = Memory.rooms[this.headTask().roomName]
-            && Memory.rooms[this.headTask().roomName][StationMineral.stationName];
-        let container = station && Game.getObjectById(station["container"]);
         if (container && !container.pos.isEqualTo(this)) {
             this.addTask(UtilsTask.task(container, "concatStationSources"));
             this.addTaskAndExec(UtilsTask.task(container, "goToPop"));
             return;
         }
-        if (mineral.mineralAmount > 0) {
-            if (this.harvest(mineral) !== OK && this.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+        if (mineral && mineral.mineralAmount > 0) {
+            let res = this.harvest(mineral);
+            // 容器可能被 keeper 打掉（container 为 null）：harvest 照旧跑，
+            // 但不能拿 null 去 repair —— 那会另外抛 TypeError。
+            if (res !== OK && container && this.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
                 this.repair(container)
             }
         }
     }
-    if (this.ticksToLive % 17 == 0 && this.ticksToLive > 40) {
+    if (this.ticksToLive % 17 == 0 && this.ticksToLive > 40 && container) {
         // find tombstone range 3 and withdraw the energy
         let tombstone = this.pos.findInRange(FIND_TOMBSTONES, 3).head();
-        if (tombstone && tombstone.store[RESOURCE_ENERGY] > 0) {
+        if (tombstone && mineral && tombstone.store[RESOURCE_ENERGY] > 0) {
             // put the mineral into the container first
             this.transfer(container, mineral.mineralType)
             this.withdraw(tombstone, RESOURCE_ENERGY);
         }
         let dropEnergy = this.pos.findInRange(FIND_DROPPED_RESOURCES, 3).head();
-        if (dropEnergy) {
+        if (dropEnergy && mineral) {
             this.transfer(container, mineral.mineralType)
             this.pickup(dropEnergy);
         }
