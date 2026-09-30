@@ -655,11 +655,31 @@ Creep.prototype.outerDefense = function () {
         let posts = pro.outerDefensePosts(this);
         let target = Game.getObjectById(this.memory.targetId);
         if (this.memory.targetId && !target) delete this.memory.targetId;
-        if (!this.memory.targetId) {
-            // 只打自己这组窝附近的敌人（见 OUTER_DEFENSE_GUARD_RADIUS 的说明）
-            let hostiles = this.room.find(FIND_HOSTILE_CREEPS).filter(e => pro.nearDefensePosts(e.pos, posts));
-            target = hostiles.length ? this.pos.findClosestByRange(hostiles) : undefined;
-            if (!target) target = this.room.find(FIND_HOSTILE_STRUCTURES).filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
+        // 活体敌人**每 tick 重查**，优先级永远高于 invaderCore。
+        //
+        // 原来只在 `memory.targetId` 为空时才选目标，一旦落在 invaderCore 上就再也
+        // 不会换：core 有 10 万血、上面还压着 rampart，两只防守爬会围着它打上一辈子，
+        // 而**真正在屠杀外矿矿工的 source keeper 就在旁边满血站着**。
+        // 实测 W34N55（core 在 (11,44)）一晚上丢了 13 只爬，4 只 keeper 全部满血 5000
+        // —— 就是这么来的。
+        let hostileCreeps = this.room.find(FIND_HOSTILE_CREEPS)
+            .filter(e => pro.nearDefensePosts(e.pos, posts));
+        if (hostileCreeps.length) {
+            // 直接取**最近的**活体敌人。
+            //
+            // 不要「保留已有目标以求稳定」：实测 group0 的防守爬在 (6,14) 时，
+            // 因为 memory 里还留着远处的 (42,15)，它就去走 36 格，
+            // 而**旁边 2 格**就有一只 keeper 正在杀我们的矿工。
+            // 近战爬贴着打的时候距离就是 1，天然不会来回抖，贪心选最近是安全的。
+            let nearest = this.pos.findClosestByRange(hostileCreeps);
+            if (nearest && (!target || !target.body || target.id != nearest.id)) {
+                target = nearest;
+                this.memory.targetId = nearest.id;
+            }
+        } else if (!this.memory.targetId) {
+            // 没有活体敌人时才退而求其次去打 invaderCore
+            target = this.room.find(FIND_HOSTILE_STRUCTURES)
+                .filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
             if (target) this.memory.targetId = target.id;
         }
         let em = Game.getObjectById(this.memory.targetId);
