@@ -70,6 +70,9 @@ function loadMineralKeeper({ withContainer = true, harvestCode = 0 } = {}) {
         pos: { isEqualTo: () => true },
         hits: 100,
         hitsMax: 100,
+        // 新版收尾块会检查容器剩余空间（store.getFreeCapacity() > 50），
+        // mock 必须提供 store 才能走到 transfer/withdraw/pickup 分支。
+        store: { getFreeCapacity: () => 500 },
     };
     const tombstone = { id: "t1", store: { energy: 500 } };
     const drop = { resourceType: "H", id: "d1" };

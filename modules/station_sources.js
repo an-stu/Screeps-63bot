@@ -2026,6 +2026,12 @@ let pro = {
         let path = pro.getOuterRoadPath(data);
         if (!path || !path.length) { data.roadComplete = false; return false; }
         for (let p of path) {
+            // 房间边界格（x/y=0/49）在 Screeps 里不能放任何建筑，永远不可能有路。
+            // 不跳过它们 complete 永远为假：实测 W34N55/W35N55 六条外矿路线每条
+            // 都卡在 2-4 个边界格上（W34N55:49,19 / W33N55:0,19 这类配对），
+            // 系统因此一直补 WORK 型修路 carrier、修路爬永远跑 keepBuilding
+            // —— 把运力白白换成了修不了的"缺口"。
+            if (p.x == 0 || p.x == 49 || p.y == 0 || p.y == 49) continue;
             let room = Game.rooms[p.roomName];
             if (!room) { data.roadComplete = false; return false; }
             let structures = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
@@ -2419,7 +2425,12 @@ let pro = {
                 let NeedCarryPartCnt = Math.ceil(effPathTime * 2 * EnergyPerTick / 50) // 来回*2 每个要的tick数量
                 let CarryPartCnt = NeedCarryPartCnt - 2 // 两个被换成 work了
                 carrierCreeps.forEach(e => CarryPartCnt -= e.getPartCnt(CARRY))
-                let maxPart = Math.ceil(NeedCarryPartCnt / Math.ceil(NeedCarryPartCnt / 33)) // 每个 最大32 part 计算每只的数量
+                // 体型拉满：每只都按 50 部件上限（33 CARRY + 17 MOVE）生成，
+                // 运力缺口只决定**补几只**，不再把需求摊薄成多只小爬。
+                // 小爬多 = 在路上的 creep 多 = CPU 和单格外矿道拥堵都更差；
+                // 大爬少 = 同运力下 creep 数最少。生产时间变长由 PC 的
+                // operate spawn（needOpSpawn 对全忙 spawn 生效）兜底提速。
+                let maxPart = 50
                 let isNearToAny = carrierCreeps.filter(e => e.pos.isNearTo(container)).head()
                 if (CarryPartCnt > 0 && !isNearToAny) {
                     let carrierBody = carrierBuildCreep ?
