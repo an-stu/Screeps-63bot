@@ -117,11 +117,23 @@ PowerCreep.prototype.hasPBInRoom = function (room) {
 PowerCreep.prototype.needOpSpawn = function () {
     let pcPower = this.powers[PWR_OPERATE_SPAWN];
     if (!pcPower || pcPower.cooldown > 0) return false;
-    // ops 很贵：只用于 PB 任务房的 spawn，且至少保留 200 ops（两次效果）。
+    // ops 很贵：至少保留 200 ops（两次效果）。
     if ((this.store[RESOURCE_OPS] || 0) < 200) return false;
     let room = this.mainRoom();
     if (!room || !room.my) return false;
-    if (!this.hasPBInRoom(room)) return false;
+    // 什么时候值得花这笔 ops：
+    //  1) PB 任务房（原逻辑）：为了快速把抢 PB 的爬生出来。
+    //  2) **出兵压力大的房**。原来只认 PB 房，于是主房（W33N55 要同时给 W34N55 + W35N55
+    //     出 keeper / carrier / defenser，只有 3 个 spawn，排队严重。
+    //     用 OP_SPAWN（等级 4 ≈ 缩短 40% 生成时间）能直接缓解排队。
+    //
+    // 判据用「**所有 spawn 都忙**——说明确实在排队。平时不浪费 ops。
+    // 这是通用规则，与具体房间无关：任何房只要 spawn 全忙就值得加速。
+    if (!this.hasPBInRoom(room)) {
+        let spawns = room.spawn || [];
+        let busy = spawns.filter(s => s.spawning).length;
+        if (!spawns.length || busy < spawns.length) return false;
+    }
     let spawns = (room.spawn || []).filter(s => !s.effects || !s.effects.some(e => e.power == PWR_OPERATE_SPAWN));
     if (!spawns.length) return false;
     let spawning = spawns.filter(s => s.spawning);

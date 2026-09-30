@@ -375,6 +375,16 @@ Creep.prototype.harvestMineralOuterCarry = function () {
         this.moveTo(container, { reusePath: 20, visualizePathStyle: { stroke: '#fffa00' } });
         return;
     }
+    // 容器被**能量**挤满 → 矿物塞不进去，整条矿物链就卡死。
+    //
+    // 实测 (43,15)：2000/2000 里能量 1970、H 只有 30。矿物搬运爬只搬 resType（H），
+    // 能量没人清 → 越积越满，采集爬有货也塞不下。
+    // 这里让它在「矿物装不下、但容器里有能量」时顺手把能量拉回主房：能量本来就是我们要的（烧 power），不算浪费。
+    // 通用规则：任何外矿容器被**非目标资源**占满时都清，与具体房间/资源无关。
+    if ((container.store.getFreeCapacity(resType) || 0) <= 0 && (container.store.getUsedCapacity(RESOURCE_ENERGY) || 0) > 0) {
+        this.withdraw(container, RESOURCE_ENERGY);
+        return;
+    }
     let cap = this.store.getCapacity(resType) || this.store.getCapacity();
     let stored = container.store[resType] || 0;
     if (stored <= 0) return;
@@ -682,34 +692,43 @@ Creep.prototype.outerDefense = function () {
                 .filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
             if (target) this.memory.targetId = target.id;
         }
+        // ★ 治疗：**每一 tick 都要做**，不能放进「没有敌人」的分支里。
+        //
+        // 原来的写法是 `if (em) { attack...; return; }`，只要有目标就直接返回 ——
+        // 而那个目标经常是 10 万血、打不动的 invaderCore（见上面选敌的注释）。
+        // 于是治疗分支永远执行不到：挖矿爬被 source keeper 咬着掉血，旁边的防守爬
+        // 在自顾自地砍 core / 只自愈，矿工就这么被磨死（W34N55 一晚上丢了 13 只爬）。
+        //
+        // 现在：不管有没有敌人，都先救 3 格内**掉血比例最高**的己方爬（rangedHeal，
+        // ≤3 格；贴身时用 heal 效率更高）。没有伤员时才自愈。治疗和攻击是两个独立
+        // 意图，同 tick 可以同时进行，不会互相顶掉。
+        let hurt = this.pos.findInRange(FIND_MY_CREEPS, 3, { filter: e => e.hits < e.hitsMax });
+        let healingAlly = false;
+        if (hurt.length) {
+            hurt.sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax);
+            let ally = hurt[0];
+            let code = this.pos.getRangeTo(ally) <= 1 ? this.heal(ally) : this.rangedHeal(ally);
+            if (code == ERR_NOT_IN_RANGE) this.moveTo(ally, { range: 1 });
+            healingAlly = true;
+        } else if (this.hits < this.hitsMax) {
+            this.heal(this);
+        }
+        this.memory.dontPullMe = false;
+
         let em = Game.getObjectById(this.memory.targetId);
         if (em) {
             // Creep.attack 只有相邻（range 1）才返回 OK，够不着才返回
             // ERR_NOT_IN_RANGE 需要走过去。
-            //
-            // 原来的写法把 heal(this) 放在 ERR_NOT_IN_RANGE 分支里：于是
-            // 「贴身近战」时 attack 返回 OK、不进分支，**反而完全不自愈**，
-            // 一边硬吃 keeper 的近战+远程（约 400/发）一边不回血，防守爬
-            // 必然被打死，然后被补员逻辑再生成一只 —— 死循环。
-            // 自愈必须无条件执行；autoHeal 内部已做「满血且附近无敌人就跳过」。
             if (this.attack(em) == ERR_NOT_IN_RANGE) this.moveTo(em);
             if (this.pos.inRangeTo(em, 3)) this.rangedAttack(em);
-            this.heal(this);
+            // 自愈/救人都已在上面做过；这里只在还在掉血且没在救别人时补一次自愈。
+            if (!healingAlly && this.hits < this.hitsMax) this.heal(this);
             return;
         }
-        // let injuredCreep =  this.findC(FIND_MY_CREEPS).filter(e=>e.hits!=e.hitsMax).head();
-        let injuredCreep = this.pos.findClosestByRange(FIND_MY_CREEPS, { filter: e => e.hits != e.hitsMax })
-        if (injuredCreep) {
-            if (this.heal(injuredCreep) == ERR_NOT_IN_RANGE) {
-                this.moveTo(injuredCreep)
-                this.memory.dontPullMe = true;
-            } else {
-                this.memory.dontPullMe = false;
-            }
-            if (injuredCreep.name !== this.name) return;
+        // 有伤员在场（且自己不是那个伤员）就专心救人，先别去巡逻/贴窝。
+        if (healingAlly || hurt.length) {
+            return;
         }
-        this.heal(this);
-        this.memory.dontPullMe = false;
 
         // 没有敌人也没有伤员 → 回到自己认领的窝旁边贴守。
         //
