@@ -4,6 +4,9 @@
  * flag.pos.roomName = 矿区，flag.getRoomName() = 供给房间（旗名第二段）
  */
 
+/** 失去视野后，仍把该房按「有威胁」对待的时长（tick） */
+const OUTER_HOSTILE_MEMORY_TICKS = 3000;
+
 let pro = {
     /**
      * 该外矿房是否**真的**需要防守。
@@ -14,29 +17,51 @@ let pro = {
      * （W35N55 就是：3 个源 + 一个 K 矿，完全没有敌人）。按「入侵房」处理会
      * 白白要求先派 2 只防守爬，既浪费兵力，又让矿工永远等不到出兵条件。
      * 没有视野时保守返回 true（此时只能按旗名判断）。
+     *
+     * **没有视野 ≠ 没有威胁**（2026-09-30 W35N55 实测）：invader 小队把房里的
+     * 爬杀光后我们失去视野，若此时完全「失忆」，防守爬永远不会被派（isInvader
+     * 恒 false），keeper/搬运却仍按无威胁继续往里派，一只只走进怪堆。
+     * 所以：亲眼见到敌人的时刻记进 room.memory.lastHostileSeen；
+     * 失视野后 OUTER_HOSTILE_MEMORY_TICKS 内仍按有威胁处理 —— 防守爬照派、
+     * 采运暂停，等防守爬进场拿回视野、清完敌人，一切自动恢复。
      */
     roomNeedsDefense(room, flag) {
-        if (!room) return flag.name.includes('invader');
-        if (room.find(FIND_HOSTILE_CREEPS).length) return true;
+        if (!room) {
+            let mem = Memory.rooms[flag.pos.roomName];
+            return flag.name.includes('invader')
+                || !!(mem && mem.lastHostileSeen
+                    && Game.time - mem.lastHostileSeen < OUTER_HOSTILE_MEMORY_TICKS);
+        }
+        if (room.find(FIND_HOSTILE_CREEPS).length) {
+            let mem = Memory.rooms[room.name] || (Memory.rooms[room.name] = {});
+            mem.lastHostileSeen = Game.time;
+            return true;
+        }
         return room.find(FIND_HOSTILE_STRUCTURES).some(e =>
             e.structureType == STRUCTURE_KEEPER_LAIR || e.structureType == STRUCTURE_INVADER_CORE);
     },
     /**
      * 拆 invaderCore 的**专队规模**，按 core 等级定。
      *
-     * 一级 core：只要 ATTACK 就行，不用 HEAL —— 一级 core 不会反击到需要奶的程度，
-     * 带 HEAL 只是白占 50 个部件位（每只少 11 个 ATTACK。
-     * 二级及以上才加 HEAL。
+     * **单只大体型**（ATTACK = MOVE = 15），一次打完：
+     * core 固定 10 万血（INVADER_CORE_HITS），15 ATTACK = 450 伤害/tick，
+     * 贴身 222 tick 拆完；行军约 75 格（外矿道路为主，1:1 攻移比在路上全速）
+     * ≈ 150 tick；合计 ~400 tick ≪ 1500 tick 寿命 —— 一只一趟能独立完成。
+     *
+     * 原方案是 2 只 [ATTACK,ATTACK,MOVE] 小爬：合计 120 DPS（833 tick），
+     * 且 1 MOVE 拖 2 部件在平地 0.2 格/tick，光走路就要几百 tick，
+     * 实测其中一只十几个探针窗口纹丝不动 —— 拆 core 变成无限期工程。
+     *
+     * 一级 core 不刷怪（INVADER_CORE_CREEP_SPAWN_TIME lv1 = 0），不用奶；
+     * 二级起每 6/3/2/1 tick 刷一只 invader，补 5 HEAL 自奶续站。
+     * perCreep = 1：同一时刻只养一只，死了由 spawnCoreBuster 自动补。
      *
      * 通用规则，与具体房间无关：只看 core.level。
      */
     coreBusterPlan(coreLevel) {
         let lv = Math.max(0, coreLevel || 0);
-        // 一级：纯输出。二级起：补奶。
-        let needHeal = lv >= 2;
-        let attackCnt = lv <= 1 ? 2 : 2 + (lv - 1);
-        let healCnt = needHeal ? Math.min(4, lv) : 0;
-        return { attackCnt: attackCnt, healCnt: healCnt, perCreep: attackCnt + healCnt > 0 ? attackCnt + healCnt : 1 };
+        if (lv <= 1) return { attackCnt: 15, healCnt: 0, moveCnt: 15, perCreep: 1 };
+        return { attackCnt: 15, healCnt: 5, moveCnt: 20, perCreep: 1 };
     },
     /**
      * 外矿房里的 invaderCore 会持续刷 invader 出来打我们的矿工。检测到就派一队去拆。
@@ -57,9 +82,12 @@ let pro = {
         });
         let plan = pro.coreBusterPlan(core.level);
         if (busting.length >= plan.perCreep) return;
-        let body = ManagerCreeps.calcBodyPart(plan.healCnt
-            ? { [ATTACK]: plan.attackCnt, [HEAL]: plan.healCnt, [MOVE]: Math.ceil((plan.attackCnt + plan.healCnt) / 2) }
-            : { [ATTACK]: plan.attackCnt, [MOVE]: Math.ceil(plan.attackCnt / 2) });
+        let body = ManagerCreeps.calcBodyPart({
+            [ATTACK]: plan.attackCnt,
+            [HEAL]: plan.healCnt,
+            [MOVE]: plan.moveCnt
+                || Math.ceil((plan.attackCnt + plan.healCnt) / 2),
+        });
         let tasks = [UtilsTask.task(core, "coreBuster")];
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "coreBuster", tasks);
     },
@@ -140,12 +168,24 @@ let pro = {
                     }
                     StationSources.trySpawnOuterHarKeeper(targetRoomName, spawnRoom, true);
                 }
-                // 外矿矿物：只采**市场价格高**的矿（H / X / L）。低价矿（K / Z / O / U）
-                // 采回来不值钱，却要占 spawn、carrier 与防守配置，见 shouldHarvestRemoteMineral 的说明。
-                if (pro.shouldHarvestRemoteMineral(targetRoomName)) {
-                    StationSources.trySpawnOuterMineralKeeper(targetRoomName, spawnRoom);
+                // 矿物与搬运的派发有一道「盲区闸」：没视野但记忆里刚见过敌人的房
+                // （防守爬正在路上），先把采运停下来，免得新爬一只只走进怪堆。
+                // 有视野的威胁房不在这里挡 —— 上面 `!harRoom.controller` 分支的
+                // continue 已经统一要求「先有防守爬」；普通无威胁房照常派发。
+                //
+                // 矿物只采**市场价格高**的矿（H / X / L），低价矿不值得占
+                // spawn/carrier/防守配置，见 shouldHarvestRemoteMineral 的说明。
+                if (harRoom
+                    || !pro.roomNeedsDefense(harRoom, flag)
+                    || spawnRoom.creeps("outerHarvestDefenser", false).some(e => {
+                        let t = e.headTask();
+                        return t && t.roomName == targetRoomName;
+                    })) {
+                    if (harRoom && pro.shouldHarvestRemoteMineral(targetRoomName)) {
+                        StationSources.trySpawnOuterMineralKeeper(targetRoomName, spawnRoom);
+                    }
+                    StationSources.trySpawnOuterHarCarrier(targetRoomName, spawnRoom);
                 }
-                StationSources.trySpawnOuterHarCarrier(targetRoomName, spawnRoom);
 
             }
         }

@@ -72,6 +72,15 @@ const OUTER_DEFENSE_LAIRS_PER_CREEP = 2;
  */
 const OUTER_DEFENSE_GUARD_RADIUS = 8;
 /**
+ * 「友军遇袭」接战半径：敌人在任意己方爬这一距离内，就算威胁到我们的作业，
+ * 由**距它最近**的那只防守爬出手（见 outerDefense 的选敌注释）。
+ *
+ * 来源：invader 小队（1000 血 × 3~4 只）会游荡到窝区守卫半径之外、正卡在我们的
+ * 运输路线上（实测 W34N55 北缘 (11~16,3) 一队就贴着去 W35N55 的走廊），
+ * 原规则下防守爬在旁边 3 格也不理 —— 矿工/搬运被逐个咬死。
+ */
+const OUTER_DEFENSE_HELP_RADIUS = 8;
+/**
  * 在两个窝之间来回跑时，每个窝待多久。
  *
  * lair 每 300 tick 出一只 keeper。让「两个窝各待 D + 两趟路上 T」≈ 300，
@@ -662,7 +671,8 @@ Creep.prototype.registerStationSourcesCarryOutRoom = function () {
  *
  * 关键：core 上面压着 **rampart** 时，直接打 core 是打不动的 —— rampart 会挡住
  * 对其下方结构的伤害。所以先拆掉压在上面的 rampart，再打 core。
- * 规模由 StrategyOuterHarvest.coreBusterPlan 按 core 等级决定（一级只上 ATTACK、不带奶）。
+ * 规模由 StrategyOuterHarvest.coreBusterPlan 按 core 等级决定
+ * （一级单只 [ATTACK:15,MOVE:15]；二级起带 HEAL，见其注释）。
  */
 Creep.prototype.coreBuster = function () {
     let task = this.headTask();
@@ -678,6 +688,9 @@ Creep.prototype.coreBuster = function () {
     let barrier = core.pos.lookFor(LOOK_STRUCTURES)
         .filter(e => e.structureType == STRUCTURE_RAMPART && !e.my).head();
     let target = (barrier && barrier.hits > 0) ? barrier : core;
+    // 自愈是独立意图，和攻击同 tick 并行（lv2+ 体型带 HEAL 才实际生效；纯输出体型
+    // 没有 HEAL 部件，调了也只返回 ERR_NO_BODYPART，所以先查部件再调）。
+    if (this.hits < this.hitsMax && this.getActiveBodyparts(HEAL) > 0) this.heal(this);
     if (this.attack(target) == ERR_NOT_IN_RANGE) this.moveTo(target, { range: 1 });
 };
 
@@ -687,17 +700,45 @@ Creep.prototype.outerDefense = function () {
         this.goTo(task);
     } else {
         let posts = pro.outerDefensePosts(this);
-        let target = Game.getObjectById(this.memory.targetId);
-        if (this.memory.targetId && !target) delete this.memory.targetId;
-        // 活体敌人**每 tick 重查**，优先级永远高于 invaderCore。
+        // 防守爬只打**活体敌人**，不再去啃 invaderCore —— 拆 core 是 coreBuster
+        // 专队的活（规模按 core 等级，见 StrategyOuterHarvest.coreBusterPlan）。
         //
-        // 原来只在 `memory.targetId` 为空时才选目标，一旦落在 invaderCore 上就再也
-        // 不会换：core 有 10 万血、上面还压着 rampart，两只防守爬会围着它打上一辈子，
-        // 而**真正在屠杀外矿矿工的 source keeper 就在旁边满血站着**。
-        // 实测 W34N55（core 在 (11,44)）一晚上丢了 13 只爬，4 只 keeper 全部满血 5000
-        // —— 就是这么来的。
+        // 原来没有活体敌人时会退而求其次去打 core：core 10 万血根本拆不动，
+        // 两只防守爬于是离开岗位走几十格围着它敲（实测守 (41,14) 窝的爬走到了
+        // 房间东缘 (49,18)），窝区没人守，keeper 一出窝就屠杀矿工 ——
+        // 9-30 早上丢 13 只爬的根因之一。而且一级 core 本来就不刷怪
+        // （INVADER_CORE_CREEP_SPAWN_TIME lv1 = 0），它的威胁只在升级之后，
+        // 而那由专队在升级前拆掉。
+        let target = Game.getObjectById(this.memory.targetId);
+        if (this.memory.targetId && (!target || !target.body)) {
+            // 目标没了；或者还钉在 invaderCore 这类**结构**上（老 memory 遗留）
+            // → 一律丢弃，防守爬的 targetId 只会是活体敌人的 id。
+            delete this.memory.targetId;
+            target = undefined;
+        }
+        // 活体敌人**每 tick 重查**，优先级高于一切静态目标。
+        //
+        // 威胁范围有两类：
+        //  1) 守卫半径内的窝区敌人（keeper 出窝）；
+        //  2) **友军遇袭**：敌人贴着我们任何一只爬（OUTER_DEFENSE_HELP_RADIUS）。
+        //     invader 小队会游荡到窝区半径外、正卡在运输路线上——不扩范围的话，
+        //     防守爬在旁边 3 格也不理，矿工/搬运被逐个咬死。
+        // 然后只有**距目标最近**的那只防守爬出手（本组守窝是它的特例），
+        // 其余留在岗位，避免两只同时弃岗、全房失守。
+        let allies;
         let hostileCreeps = this.room.find(FIND_HOSTILE_CREEPS)
-            .filter(e => pro.nearDefensePosts(e.pos, posts));
+            .filter(e => pro.nearDefensePosts(e.pos, posts)
+                || (allies || (allies = this.room.find(FIND_MY_CREEPS)))
+                    .some(c => c.pos.getRangeTo(e.pos) <= OUTER_DEFENSE_HELP_RADIUS));
+        if (hostileCreeps.length) {
+            let mates = allies
+                || this.room.find(FIND_MY_CREEPS);
+            hostileCreeps = hostileCreeps.filter(h => {
+                let d = this.pos.getRangeTo(h.pos);
+                return mates.every(c => c === this || c.memory.role != "outerHarvestDefenser"
+                    || c.pos.getRangeTo(h.pos) >= d);
+            });
+        }
         if (hostileCreeps.length) {
             // 直接取**最近的**活体敌人。
             //
@@ -706,15 +747,15 @@ Creep.prototype.outerDefense = function () {
             // 而**旁边 2 格**就有一只 keeper 正在杀我们的矿工。
             // 近战爬贴着打的时候距离就是 1，天然不会来回抖，贪心选最近是安全的。
             let nearest = this.pos.findClosestByRange(hostileCreeps);
-            if (nearest && (!target || !target.body || target.id != nearest.id)) {
+            if (nearest && (!target || target.id != nearest.id)) {
                 target = nearest;
                 this.memory.targetId = nearest.id;
             }
-        } else if (!this.memory.targetId) {
-            // 没有活体敌人时才退而求其次去打 invaderCore
-            target = this.room.find(FIND_HOSTILE_STRUCTURES)
-                .filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
-            if (target) this.memory.targetId = target.id;
+        } else if (target) {
+            // 本 tick 没有活体 → 目标作废，回岗位贴窝（见下面的巡逻分支）。
+            // 「当前目标还有效」和「当前目标还值得打」是两回事，优先级必须每 tick 重算。
+            delete this.memory.targetId;
+            target = undefined;
         }
         // ★ 治疗：**每一 tick 都要做**，不能放进「没有敌人」的分支里。
         //
@@ -798,8 +839,9 @@ Creep.prototype.outerDefense = function () {
             }
             // 贴着窝站（range 1）。隔三格是打不到刚出窝的 keeper 的，
             // 而且只有贴着才会成为「最近的爬」，把 keeper 钉在原地。
+            // （reusePath 由超级移动优化接管，传了也会被忽略，不传。）
             if (!this.pos.inRangeTo(wp.pos, 1)) {
-                this.moveTo(wp.pos, { range: 1, reusePath: 5 });
+                this.moveTo(wp.pos, { range: 1 });
             }
             return;
         }

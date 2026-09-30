@@ -1,3 +1,49 @@
+## v0.78.43 — Outer defense: engagement rules, and a core buster that can actually finish
+
+W34N55 kept bleeding miners around the edges of the system: defenders stood next
+to invader squads without engaging, marched off to grind on the 100k-hit
+invaderCore they can never kill, and the two-part [ATTACK,ATTACK,MOVE] core
+buster squad crawled at 0.2 tiles/tick with no hope of out-damaging anything.
+
+### Changed
+
+- **Defenders never leave their posts to chew on the invaderCore any more.**
+  With no live hostiles around, the old target selection fell back to the core —
+  100k hits of invincible target — and both defenders walked 40+ tiles to stand
+  under it for the night (one measured at the east edge `(49,18)`, its lair
+  uncovered) while keepers slaughtered the miners. Core duty now belongs to the
+  coreBuster squad alone; a defender's `targetId` can only ever be a live creep,
+  and stale structure ids in old memory are dropped on the next tick.
+- **Engagement follows threats, not just lair proximity.** Hostiles within
+  `OUTER_DEFENSE_HELP_RADIUS` (8) of any of our creeps — invader squads camp
+  right on the haul routes — now count as threats, and of the defenders in the
+  room only the **closest one to the target** breaks off to fight; the others
+  hold their lair groups. Guard-radius threats work the same way, which also
+  removes the old "both defenders converge on one keeper" behavior.
+- **The core buster is one big creep, not two crawlers** (user spec:
+  ATTACK = MOVE = 15). 450 DPS kills the 100k-hit core in ~222 ticks of contact
+  and ~400 ticks door to door, well inside one creep's lifetime — the old pair
+  summed to 120 DPS and 0.2 tiles/tick on plains. A level-2+ core adds 5 HEAL
+  (invaders spawn from lv2, `INVADER_CORE_CREEP_SPAWN_TIME`), and the handler
+  now self-heals alongside attacking (independent intents, same tick). The
+  rampart-over-core barrier rule is unchanged and regression-locked.
+- **Rooms we lost vision of remember recent hostiles.** An invader squad in
+  W35N55 killed every creep we had there; with no vision, `roomNeedsDefense`
+  fell back to the flag name (no `invader` in it), so no defender was ever sent
+  while keeper/carrier spawns kept marching into the grinder. Seeing hostiles
+  now stamps `lastHostileSeen` in room memory; for `OUTER_HOSTILE_MEMORY_TICKS`
+  (3000) after losing vision the room still counts as threatened — defenders
+  spawn, and miner/mineral/carrier dispatch pauses until one arrives and
+  restores vision. No room-specific logic anywhere.
+
+### Test
+
+- New `test/outer-defense.test.cjs` (VM, real module sources): coreBuster plan
+  shape, rampart-before-core and self-heal, recycle on dead core; defenders
+  drop structure targets, re-acquire live ones per tick, and the
+  closest-defender-engages / others-hold rule; `lastHostileSeen` stamp and
+  expiry. 5/5 test files green, task audit clean, live sha256 MATCH.
+
 ## v0.78.42 — Remote minerals: one container, a crew that can build it, and a way home
 
 Remote mineral harvesting was dead end to end: **zero `harvestMineralOuterKeeper`
