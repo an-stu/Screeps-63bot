@@ -1,3 +1,39 @@
+## v0.78.44 — Invader cores are invulnerable until deployed; bust them on schedule
+
+The new [A15,M15] buster reached the core, stood adjacent, and dealt zero
+damage for 20+ minutes. Instrumented, the engine's answer was definitive:
+`attack` returns **ERR_INVALID_TARGET (-7) every tick** against an invader core
+with `ticksToDeploy > 0`, same room, range 1, ATTACK parts alive. The old
+two-crawler squad's hours of pounding only ever chipped the 100k rampart — the
+core itself was untouchable the whole time. It becomes attackable (and starts
+spawning invaders at lv2, every 6 ticks) when `ticksToDeploy` reaches 0.
+
+### Changed
+
+- **The buster squad deploys on the deploy countdown, not before.**
+  `spawnCoreBuster` gates on `ticksToDeploy > CORE_BUSTER_DEPLOY_LEAD (600)`,
+  which covers spawn (90 ticks) + cross-room travel (~300) + margin: the creep
+  arrives right as the core becomes vulnerable. Once the core has taken any
+  damage the gate no longer blocks replacements. Until then the parked buster
+  is recycled instead of idling to ttl death (its 1950 energy comes home).
+- **Cross-room oscillation at the border was fixed for real.** The buster
+  ping-ponged W33N55(0,24)↔W34N55(49,24) every ~15 ticks for 40 minutes:
+  its travel (`goTo`) and attack (`moveTo(core, {range:1})`) phases shared one
+  movement-cache target, the cross-room path got reused after the border
+  crossing with its index desynced, the creep stalled, and passers-by swapped
+  it back and forth like an obstacle. Travel now targets the task room's
+  centre (`range: 20`) — a different cache target — and the attack phase
+  repaths from scratch inside the room. Locked by test.
+- `attack` returns **-7, not -9, across a room border**; the handler now moves
+  on any non-OK attack result.
+
+### Test
+
+- `test/outer-defense.test.cjs` grows real Screeps error constants (inline
+  with the engine: NOT_IN_RANGE=-9, NO_BODYPART=-12, INVALID_TARGET=-7), a
+  travel/attack cache-separation case, and invulnerable-core cases: -7 with
+  `ticksToDeploy > 0` releases the buster; after deploy it keeps fighting.
+
 ## v0.78.43 — Outer defense: engagement rules, and a core buster that can actually finish
 
 W34N55 kept bleeding miners around the edges of the system: defenders stood next

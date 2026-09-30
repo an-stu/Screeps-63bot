@@ -7,6 +7,14 @@
 /** 失去视野后，仍把该房按「有威胁」对待的时长（tick） */
 const OUTER_HOSTILE_MEMORY_TICKS = 3000;
 
+/**
+ * 拆 core 队伍的**提前部署量**：core 在 ticksToDeploy 归零前是无敌的
+ * （实测 attack 恒返回 ERR_INVALID_TARGET，几千 tick 伤害为 0），归零时它升级
+ * （lv1→lv2，之后每 6 tick 刷 invader）并变为可攻击。提前量要覆盖
+ * 生成（30 部件 = 90 tick）+ 跨房行军（~300 tick）+ 余量 —— 到场正好赶上破防。
+ */
+const CORE_BUSTER_DEPLOY_LEAD = 600;
+
 let pro = {
     /**
      * 该外矿房是否**真的**需要防守。
@@ -75,6 +83,10 @@ let pro = {
         let core = harRoom.find(FIND_HOSTILE_STRUCTURES)
             .filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
         if (!core) return;
+        // 未部署的 core 打不动（见 CORE_BUSTER_DEPLOY_LEAD 注释），等它临近破防再派。
+        // 已破防（被打掉过血）后不受此闸限制，接替兵随时能补。
+        if (core.ticksToDeploy !== undefined && core.ticksToDeploy > CORE_BUSTER_DEPLOY_LEAD
+            && core.hits >= core.hitsMax) return;
 
         let busting = spawnRoom.creeps("coreBuster", false).filter(e => {
             let t = e.headTask && e.headTask();

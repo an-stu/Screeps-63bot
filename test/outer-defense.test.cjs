@@ -18,8 +18,12 @@ if (!Array.prototype.head) {
 
 const CONSTANTS = {
     OK: 0,
-    ERR_NOT_IN_RANGE: -2,
-    ERR_NO_BODYPART: -6,
+    ERR_NOT_OWNER: -1,
+    ERR_NO_PATH: -2,
+    ERR_BUSY: -4,
+    ERR_INVALID_TARGET: -7,
+    ERR_NOT_IN_RANGE: -9,
+    ERR_NO_BODYPART: -12,
     MOVE: "move",
     WORK: "work",
     CARRY: "carry",
@@ -165,7 +169,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         popTask() { calls.push(["pop"]); return this; },
         addTask(t) { calls.push(["add", t.length]); return this; },
         execLastTask() { calls.push(["exec"]); return this; },
-        attack(t) { calls.push(["attack", t && t.id]); return CONSTANTS.OK; },
+        attack(t) { calls.push(["attack", t && t.id]); return this.attackRet === undefined ? CONSTANTS.OK : this.attackRet; },
         rangedAttack(t) { calls.push(["rangedAttack", t && t.id]); return CONSTANTS.OK; },
         heal(t) { calls.push(["heal", t === this ? "self" : (t && t.id)]); return CONSTANTS.OK; },
         rangedHeal(t) { calls.push(["rangedHeal", t && t.id]); return CONSTANTS.OK; },
@@ -215,6 +219,54 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     ctx.Creep.prototype.coreBuster.call(done);
     assert.ok(done.calls.some(c => c[0] === "pop") && done.calls.some(c => c[0] === "add") && done.calls.some(c => c[0] === "exec"),
         "a dead core must pop the bust task and recycle the creep");
+}
+
+{
+    // === coreBuster：无敌期（未部署）的 core 打不动（attack 恒 -7），立刻回收 ===
+    // 实测：同一房间、距离 1、有 ATTACK 部件，attack 恒 ERR_INVALID_TARGET，
+    // 几千 tick 零伤害 —— 旧小爬一晚只磨掉了 rampart。与其站到 ttl 耗尽，
+    // 不如回收，spawnCoreBuster 在破防临近时重派。
+    const ctx = loadStation();
+    const core = {
+        id: "core1", level: 1, ticksToDeploy: 3000,
+        pos: Object.assign(makePos(11, 44, "W34N55"), { lookFor: () => [] }),
+    };
+    ctx.Game.getObjectById = id => (id === "core1" ? core : null);
+    const creep = makeCreep(ctx, { x: 12, y: 43, body: [{ type: "attack" }] });
+    creep.attackRet = -7;                      // ERR_INVALID_TARGET
+    creep.room = { name: "W34N55" };
+    ctx.Creep.prototype.coreBuster.call(creep);
+    assert.ok(creep.calls.some(c => c[0] === "pop") && creep.calls.some(c => c[0] === "add"),
+        "an invulnerable (undeployed) core must release the buster for recycling");
+
+    // 破防后（ticksToDeploy == 0）-7 不能再触发回收，必须继续走位攻击
+    const late = makeCreep(ctx, { x: 12, y: 44, body: [{ type: "attack" }] });
+    late.attackRet = -7;
+    late.room = { name: "W34N55" };
+    core.ticksToDeploy = 0;
+    ctx.Creep.prototype.coreBuster.call(late);
+    assert.ok(!late.calls.some(c => c[0] === "pop"),
+        "once the core is deployed -7 must not release the buster");
+    assert.ok(late.calls.some(c => c[0] === "moveTo"),
+        "a failed attack must still drive the creep toward the core");
+}
+
+{
+    // === coreBuster：行军段与攻击段的移动缓存目标必须分离 ===
+    // 若行军也指向 core 坐标，跨房路径缓存会被攻击段的同目标 moveTo 复用，
+    // 边界上原地不动、被过路爬对穿来回搬运（实测 40 分钟零进度）。
+    const ctx = loadStation();
+    const creep = makeCreep(ctx, { x: 0, y: 24 });
+    creep.room = { name: "W33N55" };
+    creep.headTask = () => ({ taskName: "coreBuster", id: "core1", roomName: "W34N55", x: 11, y: 44 });
+    ctx.Game.getObjectById = id => (id === "core1"
+        ? { id: "core1", pos: makePos(11, 44, "W34N55") } : null);
+    ctx.Creep.prototype.coreBuster.call(creep);
+    const mv = creep.calls.find(c => c[0] === "moveTo");
+    assert.ok(mv && mv[1] === 25 && mv[2] === 25,
+        "travel must target the task room's centre, not the core itself");
+    assert.ok(!creep.calls.some(c => c[0] === "attack"),
+        "no attack attempts while travelling (they return -7 across a border)");
 }
 
 {

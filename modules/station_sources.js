@@ -676,13 +676,21 @@ Creep.prototype.registerStationSourcesCarryOutRoom = function () {
  */
 Creep.prototype.coreBuster = function () {
     let task = this.headTask();
-    if (task.roomName != this.room.name) {
-        this.goTo(task);
-        return;
-    }
+    if (!task) return;
     let core = Game.getObjectById(task.id);
     if (!core) {
         return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
+    // 行军段与攻击段必须用**两个不同的移动缓存目标**：若都指向 core 坐标，
+    // 跨房路径缓存在跨过房间边界后会被攻击段的同目标 moveTo 复用，边界上
+    // idx 错位导致爬**原地不动**，再被过路爬的对穿来回搬运 —— 实测在
+    // W33N55(0,24)↔W34N55(49,24) 边界上每 15 tick 振荡一次，40 分钟没前进
+    // 一格（插桩证据：attack 每 tick 返回 -7、moveTo 从未被调用）。
+    // 行军只负责「进房间」，目标取房间中心；进房后改走攻击段的全新短路径。
+    // 被对穿弹回另一个房时也会自然走回这里，自愈。
+    if (task.roomName != this.room.name) {
+        this.moveTo(new RoomPosition(25, 25, task.roomName), { range: 20 });
+        return;
     }
     // 压在 core 上的己方外的 rampart（core 自带的护盾）必须先拆。
     let barrier = core.pos.lookFor(LOOK_STRUCTURES)
@@ -691,7 +699,17 @@ Creep.prototype.coreBuster = function () {
     // 自愈是独立意图，和攻击同 tick 并行（lv2+ 体型带 HEAL 才实际生效；纯输出体型
     // 没有 HEAL 部件，调了也只返回 ERR_NO_BODYPART，所以先查部件再调）。
     if (this.hits < this.hitsMax && this.getActiveBodyparts(HEAL) > 0) this.heal(this);
-    if (this.attack(target) == ERR_NOT_IN_RANGE) this.moveTo(target, { range: 1 });
+    // attack 隔着房间边界时返回的是 **-7 (ERR_INVALID_TARGET)** 而不是
+    // -2 (ERR_NOT_IN_RANGE) —— 只判 -2 会把爬钉死在边界格上。所以只要
+    // attack 没真正生效就继续向 core 移动。
+    let ret = this.attack(target);
+    if (ret == ERR_INVALID_TARGET && !barrier && core.ticksToDeploy > 0) {
+        // core 还在无敌期（未部署，attack 恒 -7，实测几千 tick 零伤害）。
+        // 与其让这只爬在旁边站到 ttl 耗尽，不如现在就回收，
+        // spawnCoreBuster 会在破防临近（剩 CORE_BUSTER_DEPLOY_LEAD）时重新派队。
+        return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
+    if (ret != OK && ret != ERR_NO_BODYPART) this.moveTo(core, { range: 1 });
 };
 
 Creep.prototype.outerDefense = function () {
