@@ -322,7 +322,10 @@ Creep.prototype.harvestMineralOuterKeeper = function () {
             }
         }
     }
-    if (this.ticksToLive % 17 == 0 && this.ticksToLive > 40 && container) {
+    if (this.ticksToLive % 17 == 0 && this.ticksToLive > 40 && container
+        && container.store.getFreeCapacity() > 50) {
+        // 容器没空位就不捡（捡了卸不下，200 容量的爬会被自己拿的东西塞死，
+        // harvest ERR_FULL + repair 空操作 = 卡到老死）。搬运爬会来清出空间。
         // find tombstone range 3 and withdraw the energy
         let tombstone = this.pos.findInRange(FIND_TOMBSTONES, 3).head();
         if (tombstone && mineral && tombstone.store[RESOURCE_ENERGY] > 0) {
@@ -369,7 +372,12 @@ Creep.prototype.harvestMineralOuterCarry = function () {
     if (!data || !resType || !container) {
         return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
     }
-    if (this.store[resType] > 0) {
+    // 身上有**任何**货就回家卸干净。
+    //
+    // 原来回家条件是 `store[resType] > 0`（只认 H）：「清能量」分支取到身上的能量
+    // 永远不算货 → 爬扛着能量站在容器边 withdraw→ERR_FULL 死循环，能量清了但
+    // 一克都运不回家，容器照样被堵死（实测 (43,15)：能量 1840 / H 160）。
+    if (this.store.getUsedCapacity() > 0) {
         let home = Game.rooms[task.homeRoom] || this.mainRoom();
         let storage = home && home.storage;
         if (!storage) return;
@@ -377,33 +385,36 @@ Creep.prototype.harvestMineralOuterCarry = function () {
             this.moveTo(storage, { reusePath: 20, visualizePathStyle: { stroke: '#fffa00' } });
             return;
         }
-        this.transfer(storage, resType);
+        // 每种资源都卸（H + 顺手清的能量/伴生矿）
+        for (let res in this.store) {
+            if (this.store[res] > 0) this.transfer(storage, res);
+        }
         return;
     }
     if (!this.pos.isNearTo(container)) {
         this.moveTo(container, { reusePath: 20, visualizePathStyle: { stroke: '#fffa00' } });
         return;
     }
-    // 容器被**能量**挤满 → 矿物塞不进去，整条矿物链就卡死。
+    let cap = this.store.getCapacity(resType) || this.store.getCapacity();
+    let storedH = container.store[resType] || 0;
+    let mineral = Game.getObjectById(data["id"]);
+    let mining = mineral && mineral.mineralAmount > 0;
+    // H 攒够一趟就搬；矿已采空则把尾量清回来，避免永远留在外矿
+    if (storedH > 0 && (storedH >= cap * 0.8 || !mining)) {
+        this.withdraw(container, resType);
+        return;
+    }
+    // 容器被**能量**占掉近半 → 主动清能量（这次会真的运回家）。
     //
-    // 实测 (43,15)：2000/2000 里能量 1970、H 只有 30。矿物搬运爬只搬 resType（H），
-    // 能量没人清 → 越积越满，采集爬有货也塞不下。
-    // 这里让它在「矿物装不下、但容器里有能量」时顺手把能量拉回主房：能量本来就是我们要的（烧 power），不算浪费。
-    // 通用规则：任何外矿容器被**非目标资源**占满时都清，与具体房间/资源无关。
-    if ((container.store.getFreeCapacity(resType) || 0) <= 0 && (container.store.getUsedCapacity(RESOURCE_ENERGY) || 0) > 0) {
+    // 能量是采集爬捡 keeper/invader 尸体的伴生品，随它积攒会把 2000 的容器
+    // 堵死：H 塞不进去、采集爬也卸不下来，整条矿物链双双卡死
+    // （实测 (43,15)：2000/2000 里能量 1840、H 160，谁都出不来）。
+    // 通用规则：任何外矿容器被非目标资源占满一半以上就清，与房间/资源无关。
+    if ((container.store[RESOURCE_ENERGY] || 0) > container.store.getCapacity() / 2) {
         this.withdraw(container, RESOURCE_ENERGY);
         return;
     }
-    let cap = this.store.getCapacity(resType) || this.store.getCapacity();
-    let stored = container.store[resType] || 0;
-    if (stored <= 0) return;
-    // 还没攒够一趟：矿物还在就继续等（30 WORK 的采集爬 ~67 tick 就能填满 2000 的容器），
-    // 矿物已经采空就把剩下的清回来，避免尾量永远留在外矿
-    if (stored < cap * 0.8) {
-        let mineral = Game.getObjectById(data["id"]);
-        if (mineral && mineral.mineralAmount > 0) return;
-    }
-    this.withdraw(container, resType);
+    // 剩下的情况：等 H 攒批。矿没在产、容器也没能量可清时，站到容器边待命。
 };
 
 /**

@@ -1,3 +1,32 @@
+## v0.78.45 — The mineral container clog actually delivers this time
+
+The outer mineral container kept filling with energy (1840 of 2000) until the
+mined H tail (160) could not get out either. The earlier "clear crowded
+containers" fix withdrew energy into the carrier — but the trip-home condition
+counted only `store[H]`, so the energy rode the creep's back forever: withdraw
+→ ERR_FULL → stand there. Cleared energy never left the room.
+
+### Fixed
+
+- **Anything on board counts as cargo.** `harvestMineralOuterCarry` now goes
+  home whenever `store.getUsedCapacity() > 0` and unloads every carried
+  resource at storage (H, the looted energy, anything else). Withdrawn energy
+  actually reaches home now.
+- **Clog is cleared proactively, not only at 100%.** When the container is
+  over half full of energy (loot from dead keepers/invaders; while mining is
+  active it competes with H for the same 2000 slots), the carrier hauls a load
+  home instead of waiting for the next H batch. H keeps priority: full batch,
+  or tail-clearing once the mineral runs dry.
+- **The keeper stops looting into a full container** (`getFreeCapacity()`
+  guard) — grabbing energy it cannot place is what wedged its 200-capacity
+  store in the first place.
+
+### Verified live
+
+W34N55 (43,15): H tail 160 → 0 and one full 1150-energy haul reached home
+within a minute of deployment; the chain then idled by design with the mineral
+deposit exhausted (keeper/carrier respawn gates require `mineralAmount > 0`).
+
 ## v0.78.44 — Invader cores are invulnerable until deployed; bust them on schedule
 
 The new [A15,M15] buster reached the core, stood adjacent, and dealt zero
