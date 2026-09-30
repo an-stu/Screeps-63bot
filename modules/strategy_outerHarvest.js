@@ -69,7 +69,18 @@ let pro = {
     coreBusterPlan(coreLevel) {
         let lv = Math.max(0, coreLevel || 0);
         if (lv <= 1) return { attackCnt: 15, healCnt: 0, moveCnt: 15, perCreep: 1 };
-        return { attackCnt: 15, healCnt: 5, moveCnt: 20, perCreep: 1 };
+        // 二级 core 有塔（150~300/tick 随距离）。破核爬的生存判据：
+        //   · TOUGH 强化**先结算减伤**（XGHO2：伤害×0.3），塔伤 300 → 实际 90；
+        //   · HEAL T3（XLHO2）每部件 48/tick：3 部件 144 > 90，塔永远打不穿；
+        //   · RANGED T3（XUHO2 ×4）20 部件 = 800 dps，10 万血 core 125 tick，
+        //     且在 range 3 就能输出（近战爬贴脸 1 格才会挨塔最狠的那档）；
+        //   · MOVE 25 = 部件一半，铺好的外矿道路上全程 1 格/tick。
+        // 无 T3 强化时奶量 36 远低于塔伤 —— needsT3：派不出强化就不派，
+        // 宁可等 lab 攒够化合物也不送死（死亡循环既丢爬又拆不动）。
+        return {
+            toughCnt: 2, healCnt: 3, rangedCnt: 20, moveCnt: 25, perCreep: 1,
+            needsT3: true,
+        };
     },
     /**
      * 外矿房里的 invaderCore 会持续刷 invader 出来打我们的矿工。检测到就派一队去拆。
@@ -94,13 +105,33 @@ let pro = {
         });
         let plan = pro.coreBusterPlan(core.level);
         if (busting.length >= plan.perCreep) return;
-        let body = ManagerCreeps.calcBodyPart({
-            [ATTACK]: plan.attackCnt,
-            [HEAL]: plan.healCnt,
-            [MOVE]: plan.moveCnt
-                || Math.ceil((plan.attackCnt + plan.healCnt) / 2),
-        });
+        let body, boostRes = undefined;
+        if (plan.rangedCnt) {
+            body = ManagerCreeps.calcBodyPart({
+                [TOUGH]: plan.toughCnt,
+                [HEAL]: plan.healCnt,
+                [RANGED_ATTACK]: plan.rangedCnt,
+                [MOVE]: plan.moveCnt,
+            });
+            boostRes = {
+                [BOOST_RES["tough"][3]]: plan.toughCnt * 30,
+                [BOOST_RES["heal"][3]]: plan.healCnt * 30,
+                [BOOST_RES["rangedAttack"][3]]: plan.rangedCnt * 30,
+            };
+        } else {
+            body = ManagerCreeps.calcBodyPart({
+                [ATTACK]: plan.attackCnt,
+                [HEAL]: plan.healCnt,
+                [MOVE]: plan.moveCnt
+                    || Math.ceil((plan.attackCnt + plan.healCnt) / 2),
+            });
+        }
         let tasks = [UtilsTask.task(core, "coreBuster")];
+        if (boostRes) {
+            // 塔 (L2+) 对无强化的奶量是碾压：没有 T3 化合物就不派，等 lab。
+            if (!global.StationLab || !StationLab.boostAble(spawnRoom, boostRes)) return;
+            tasks.unshift(StationLab.generatorBoostResTask(boostRes).head());
+        }
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "coreBuster", tasks);
     },
     exec(room) {

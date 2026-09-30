@@ -710,17 +710,20 @@ Creep.prototype.coreBuster = function () {
     // 自愈是独立意图，和攻击同 tick 并行（lv2+ 体型带 HEAL 才实际生效；纯输出体型
     // 没有 HEAL 部件，调了也只返回 ERR_NO_BODYPART，所以先查部件再调）。
     if (this.hits < this.hitsMax && this.getActiveBodyparts(HEAL) > 0) this.heal(this);
-    // attack 隔着房间边界时返回的是 **-7 (ERR_INVALID_TARGET)** 而不是
-    // -2 (ERR_NOT_IN_RANGE) —— 只判 -2 会把爬钉死在边界格上。所以只要
-    // attack 没真正生效就继续向 core 移动。
-    let ret = this.attack(target);
+    // ranged 体型在 range 3 就能输出：不必贴脸 1 格（塔伤随距离衰减，
+    // 而且远程对刷出来的 invader 守卫也能对射）。attack/rangedAttack 隔着
+    // 房间边界时返回的都是 **-7 (ERR_INVALID_TARGET)** 而不是 -2
+    // (ERR_NOT_IN_RANGE) —— 只判 -2 会把爬钉死在边界格上。所以只要
+    // 攻击没真正生效就继续向 core 移动。
+    let ranged = this.getActiveBodyparts(RANGED_ATTACK) > 0;
+    let ret = ranged ? this.rangedAttack(target) : this.attack(target);
     if (ret == ERR_INVALID_TARGET && !barrier && core.ticksToDeploy > 0) {
-        // core 还在无敌期（未部署，attack 恒 -7，实测几千 tick 零伤害）。
+        // core 还在无敌期（未部署，attack/rangedAttack 恒 -7，实测几千 tick 零伤害）。
         // 与其让这只爬在旁边站到 ttl 耗尽，不如现在就回收，
         // spawnCoreBuster 会在破防临近（剩 CORE_BUSTER_DEPLOY_LEAD）时重新派队。
         return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
     }
-    if (ret != OK && ret != ERR_NO_BODYPART) this.moveTo(core, { range: 1 });
+    if (ret != OK && ret != ERR_NO_BODYPART) this.moveTo(target, { range: ranged ? 3 : 1 });
 };
 
 Creep.prototype.outerDefense = function () {
@@ -1290,7 +1293,22 @@ let pro = {
      * @return {{body: string[], boostRes: Object}}
      */
     getOuterHarDefenseBodyConfig(isInvader, harRoom) {
-        const bigBody = () => ({body: ManagerCreeps.calcBodyPart({[MOVE]: 17, [ATTACK]: 22, [HEAL]: 11}), boostRes: {}});
+        // invader 4~5 人小队是**远程风筝**打法：纯近战追不上（对方保持 3+ 格
+        // 边退边打，我们一格都摸不到），实测被活活磨死。防守改远程对射：
+        //   · ranged 在 range 3 与小队对轰，不追、不脱岗；
+        //   · TOUGH 强化**先结算减伤**（XGHO2 ×0.3），前排吸收对射伤害；
+        //   · heal 续航。
+        // 无强化兜底也有 220 dps（近战版在风筝战术下实际 dps ≈ 0）；
+        // T3 强化（boostRes 由 trySpawnOuterDefenser 按 boostAble 决定是否附加）
+        // 后 880 dps + 288 奶 + tough 减伤，对小队是碾压。
+        const bigBody = () => ({
+            body: ManagerCreeps.calcBodyPart({[MOVE]: 20, [RANGED_ATTACK]: 22, [HEAL]: 6, [TOUGH]: 2}),
+            boostRes: {
+                [BOOST_RES["tough"][3]]: 2 * 30,
+                [BOOST_RES["heal"][3]]: 6 * 30,
+                [BOOST_RES["rangedAttack"][3]]: 22 * 30,
+            },
+        });
         const smallBody = () => ({body: ManagerCreeps.calcBodyPart({[ATTACK]: 9, [MOVE]: 10, [HEAL]: 1}), boostRes: {}});
         if (!harRoom) return isInvader ? bigBody() : smallBody();
 
