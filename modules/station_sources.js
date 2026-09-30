@@ -657,6 +657,30 @@ Creep.prototype.registerStationSourcesCarryOutRoom = function () {
 };
 
 /** 防御 */
+/**
+ * 拆 invaderCore 的专队（任务处理器）。
+ *
+ * 关键：core 上面压着 **rampart** 时，直接打 core 是打不动的 —— rampart 会挡住
+ * 对其下方结构的伤害。所以先拆掉压在上面的 rampart，再打 core。
+ * 规模由 StrategyOuterHarvest.coreBusterPlan 按 core 等级决定（一级只上 ATTACK、不带奶）。
+ */
+Creep.prototype.coreBuster = function () {
+    let task = this.headTask();
+    if (task.roomName != this.room.name) {
+        this.goTo(task);
+        return;
+    }
+    let core = Game.getObjectById(task.id);
+    if (!core) {
+        return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
+    // 压在 core 上的己方外的 rampart（core 自带的护盾）必须先拆。
+    let barrier = core.pos.lookFor(LOOK_STRUCTURES)
+        .filter(e => e.structureType == STRUCTURE_RAMPART && !e.my).head();
+    let target = (barrier && barrier.hits > 0) ? barrier : core;
+    if (this.attack(target) == ERR_NOT_IN_RANGE) this.moveTo(target, { range: 1 });
+};
+
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
     if (task.roomName != this.room.name) {
@@ -1533,10 +1557,10 @@ let pro = {
             ret = PathFinder.search(from, to, {
             plainCost: 1,
             swampCost: 5,
-            maxRooms: 4,
+            maxRooms: 8,
             // 两房路线叠加主房蓝图代价时，默认 2,000 ops 会在刚进主房
             // 就提前结束。此搜索仅在缓存失效时运行，允许一次完整求解。
-            maxOps: 8000,
+            maxOps: 20000,
             range: 1,
             roomCallback: roomName => pro.outerRoadRoomCallback(roomName, true, spawnRoom.name),
         });
@@ -1556,8 +1580,8 @@ let pro = {
                 ret = PathFinder.search(from, to, {
                     plainCost: 1,
                     swampCost: 5,
-                    maxRooms: 4,
-                    maxOps: 8000,
+                    maxRooms: 8,
+                    maxOps: 20000,
                     range: 1,
                     roomCallback: roomName => pro.outerRoadRoomCallback(roomName, false, spawnRoom.name),
                 });
@@ -2299,7 +2323,28 @@ let pro = {
                 data["carryCreeps"] = data["carryCreeps"].filter(e => Game.getObjectById(e))
                 let carrierCreeps = data["carryCreeps"].map(e => Game.getObjectById(e)).filter(e => e && (!e.ticksToLive || e.ticksToLive > e.body.length * 3))
                 let carrierBuildCreep = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).head()
-                let EnergyPerTick = 10;
+                // 产出速率：**动态算**，不能写死。
+                //
+                // 原来这里是个常量 `EnergyPerTick = 10`，与实际产出脱节，于是 carrier
+                // 数量长期偏少（W34N55 + W35N55 共 6 个矿点只有 2 只 carrier →
+                // 容器堆满 → keeper 有货塞不下 → 源回到 4000 没人采）。
+                //
+                // 真实产出 = min(采集爬的采集速率, 矿点的重生速率)：
+                //   · 采集爬速率 = WORK 部件数 × HARVEST_POWER(2)
+                //   · 矿点重生速率 = energyCapacity / ticksToRegeneration（源 4000/300 ≈ 13.33/tick）
+                //
+                // 需求运力 = 往返时间 × 产出速率 / 每个 CARRY 部件容量(50)。
+                // 通用规则，与具体房间无关。
+                let harBody = StationSources.getHarvesterBodyConfig(spawnRoom.getEnergyCapacityAvailable(), true, spawnRoom.level, data);
+                let workCnt = harBody.filter(p => p == WORK).length;
+                let harvestRate = workCnt * HARVEST_POWER;                       // 采集爬能挖多快
+                let sourceObj = Game.getObjectById(data.id);
+                let regenRate = sourceObj
+                    ? sourceObj.energyCapacity / (sourceObj.ticksToRegeneration || 300)   // 矿点能生多快
+                    : harvestRate;
+                let EnergyPerTick = Math.max(1, Math.min(harvestRate, regenRate) || 10);
+
+
                 // pathTime 在写入端（concatStationSources）已经钳过一次，但**只钳写入端
                 // 不够**：Memory 里可能还留着历史畸形值（W33N55 实测 843，正常≈路线长度），
                 // 它会一直按老值算运力、继续过量补员 —— 表现就是「杀掉多余 carrier、

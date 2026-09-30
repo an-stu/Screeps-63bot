@@ -83,7 +83,10 @@ assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.inc
 // `reachesDestination`（终点必须在目标 1 格内）为唯一判据 —— 更精确，也不漏合法路线。
 assert.ok(stationSources.includes("reachesDestination") && stationSources.includes("ret.path.length > 1"), "external-road paths must be cached only when the endpoint actually reaches storage");
 assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < stationSources.indexOf("if (spawnRoom.spawnFailure) return;"), "external-road route refresh must not be blocked by local spawn pressure");
-assert.ok(stationSources.includes("maxOps: 8000"), "cached external-route planning must have enough search budget to reach storage");
+// 原来的预算是 maxRooms:4 / maxOps:8000。外矿房可能隔好几房（W35N55 要走
+// W35N55 → W34N55 → W33N55 三房。maxRooms=4 余量太小，搜索空间被截断 → incomplete=true
+// 直接缓存不了路线（实测 W35N55 的两个源就是这么变成 NOPATH 的）。预算放宽到 maxRooms:8 / maxOps:20000。
+assert.ok(stationSources.includes("maxRooms: 8") && stationSources.includes("maxOps: 20000"), "cached external-route planning must have enough room and op budget to reach storage across several rooms");
 assert.ok(stationSources.includes("if (!ret || ret.incomplete)") && stationSources.includes("fallback search threw"), "an unreachable blueprint route must retry using the native obstacle matrix");
 assert.ok(stationSources.includes("drawOuterRoadDebug") && main.includes("Memory.visualOuterRoad"), "external road visuals must be opt-in and temporary");
 assert.ok(stationSources.includes("nearestOuterRoadSite") && stationSources.includes("task.keepBuilding && !canBuild"), "external road builders must finish the nearest route site while legacy haulers resume delivery");

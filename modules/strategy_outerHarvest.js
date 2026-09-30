@@ -21,6 +21,48 @@ let pro = {
         return room.find(FIND_HOSTILE_STRUCTURES).some(e =>
             e.structureType == STRUCTURE_KEEPER_LAIR || e.structureType == STRUCTURE_INVADER_CORE);
     },
+    /**
+     * 拆 invaderCore 的**专队规模**，按 core 等级定。
+     *
+     * 一级 core：只要 ATTACK 就行，不用 HEAL —— 一级 core 不会反击到需要奶的程度，
+     * 带 HEAL 只是白占 50 个部件位（每只少 11 个 ATTACK。
+     * 二级及以上才加 HEAL。
+     *
+     * 通用规则，与具体房间无关：只看 core.level。
+     */
+    coreBusterPlan(coreLevel) {
+        let lv = Math.max(0, coreLevel || 0);
+        // 一级：纯输出。二级起：补奶。
+        let needHeal = lv >= 2;
+        let attackCnt = lv <= 1 ? 2 : 2 + (lv - 1);
+        let healCnt = needHeal ? Math.min(4, lv) : 0;
+        return { attackCnt: attackCnt, healCnt: healCnt, perCreep: attackCnt + healCnt > 0 ? attackCnt + healCnt : 1 };
+    },
+    /**
+     * 外矿房里的 invaderCore 会持续刷 invader 出来打我们的矿工。检测到就派一队去拆。
+     *
+     * 规模按 core 等级（见 coreBusterPlan）：一级只上 ATTACK；更高等级补 HEAL。
+     */
+    spawnCoreBuster(targetRoomName, spawnRoom) {
+        if (spawnRoom.spawnFailure) return;
+        let harRoom = Game.rooms[targetRoomName];
+        if (!harRoom) return;   // 没视野就无从判断，也不该盲派
+        let core = harRoom.find(FIND_HOSTILE_STRUCTURES)
+            .filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
+        if (!core) return;
+
+        let busting = spawnRoom.creeps("coreBuster", false).filter(e => {
+            let t = e.headTask && e.headTask();
+            return t && t.roomName == targetRoomName;
+        });
+        let plan = pro.coreBusterPlan(core.level);
+        if (busting.length >= plan.perCreep) return;
+        let body = ManagerCreeps.calcBodyPart(plan.healCnt
+            ? { [ATTACK]: plan.attackCnt, [HEAL]: plan.healCnt, [MOVE]: Math.ceil((plan.attackCnt + plan.healCnt) / 2) }
+            : { [ATTACK]: plan.attackCnt, [MOVE]: Math.ceil(plan.attackCnt / 2) });
+        let tasks = [UtilsTask.task(core, "coreBuster")];
+        StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "coreBuster", tasks);
+    },
     exec(room) {
         if ((Game.time + room.hashCode()) % 6 != 0) return;
         let flags = ManagerFlags.getFlagsByPrefix("har");
@@ -44,6 +86,8 @@ let pro = {
                 // 按**实际威胁**判断，而不是按旗名/房间类别（见 roomNeedsDefense）
                 let isInvader = pro.roomNeedsDefense(Game.rooms[targetRoomName], flag);
                 StationSources.trySpawnOuterDefenser(targetRoomName, spawnRoom, isInvader);
+                // core 专队：房里有 invaderCore 就派一队去拆（规模按 core 等级）。
+                pro.spawnCoreBuster(targetRoomName, spawnRoom);
             }
             // Scout 只负责首次建立 source Memory。已有坐标、container ID 与路径
             // 后，keeper 本身可以直接走入不可见的矿区；为重新拿视野而多派 scout
