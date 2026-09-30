@@ -193,7 +193,10 @@ let pro = {
                         let t = e.headTask();
                         return t && t.roomName == targetRoomName;
                     })) {
-                    if (harRoom && pro.shouldHarvestRemoteMineral(targetRoomName)) {
+                    // Memory.stopOuterMineral = true 一键暂停外矿矿物链的补员
+                    // （keeper / carrier / container builder 全部不再生成）。
+                    // 在役矿物爬自然老化退役；能量采集线不受影响。
+                    if (harRoom && !Memory.stopOuterMineral && pro.shouldHarvestRemoteMineral(targetRoomName)) {
                         StationSources.trySpawnOuterMineralKeeper(targetRoomName, spawnRoom);
                     }
                     StationSources.trySpawnOuterHarCarrier(targetRoomName, spawnRoom);
