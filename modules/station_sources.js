@@ -26,7 +26,7 @@ const OUTER_DEFENSE_REPLACE_MARGIN = 10;
  * 留出重叠期就得到一条硬保证：新兵到位后老兵才死，该组**任何时刻都有防守爬**。
  * 溢出期间同组两只 defenseGroup 会被分组逻辑摊到两组，等于两侧临时都有覆盖。
  */
-const OUTER_DEFENSE_REPLACE_OVERLAP = 60;
+const OUTER_DEFENSE_REPLACE_OVERLAP = 100;
 /** 拿不到路线缓存时的行军时间保守估计（tick） */
 const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
 /**
@@ -1314,22 +1314,15 @@ let pro = {
         let moveCnt = Math.ceil((attackCnt + healCnt) / 2);
         let boostRes = {};
 
-        // 装不进 50 部件就上 boost：先 boost 奶（1 部件顶 4），再 boost 攻击。
-        // 与 getDefenseHighWayData 的思路一致。
+        // 需求超过 50 部件时**不做 T3 强化**，按比例压到 50 部件即可。
+        //
+        // T3 强化一只 50 部件的爬要消耗 ~1500 单位化合物（30/部件），市价
+        // 150 万信用点起，而外矿的真实威胁（source keeper ~600 伤、invader
+        // 小队 1000 血×3~4）实测 50 体型无强化就稳赢（keeper 墓碑远多于我们的）。
+        // 临时多出的伤害需求（invader 小队路过）由「最近的防守爬出手」+
+        // 第二只防守爬覆盖，多派一只 50 体型 = 7010 能量，比强化便宜三个数量级。
+        // 玩家级威胁本来就归 defenseHighWay 的强化体系管，不在这里烧化合物。
         if (attackCnt + healCnt + moveCnt > 50) {
-            let boostedHeal = Math.ceil(healCnt / 4);
-            let boostedAttack = Math.ceil(attackCnt / 4);
-            let boostedMove = Math.ceil((boostedAttack + boostedHeal) / 2);
-            if (boostedAttack + boostedHeal + boostedMove <= 50) {
-                boostRes[BOOST_RES["heal"][2]] = boostedHeal * 30;
-                boostRes[BOOST_RES["attack"][2]] = boostedAttack * 30;
-                boostRes[BOOST_RES["damage"][2]] = boostedAttack * 30;
-                let body = ManagerCreeps.calcBodyPart([
-                    [TOUGH, boostedAttack], [ATTACK, boostedAttack], [HEAL, boostedHeal], [MOVE, boostedMove]
-                ]);
-                return {body: body, boostRes: boostRes};
-            }
-            // 还是装不下：按比例压到 50 部件，宁可弱一点也别生成不出来的配置
             let scale = 50 / (attackCnt + healCnt + moveCnt);
             attackCnt = Math.max(1, Math.floor(attackCnt * scale));
             healCnt = Math.max(1, Math.floor(healCnt * scale));
@@ -2465,7 +2458,14 @@ let pro = {
      * 该提前多少 tick 派防守爬接替（老那只 ttl 降到这个值时就生接替兵）。
      *
      * 提前量 = **实测行军时间**（pathTime，退回路线长度）+ **150**（50 部件生成）
-     *        + **10**（余量）+ **60**（重叠期，见 OUTER_DEFENSE_REPLACE_OVERLAP）。
+     *        + **实测 spawn 排队耗时**（见 defSpawnQueueWait）+ **10**（余量）
+     *        + **100**（重叠期，见 OUTER_DEFENSE_REPLACE_OVERLAP）。
+     *
+     * 只算「生成+行军」是不够的：提前量到了还得**等 spawn 空出来**——主房三个
+     * spawn 一忙就是上百 tick 的干等，老兵死了接替还在排队，防守空档照旧。
+     * 所以接替请求首次发出时记时刻，成功生成后把差值写回
+     * spawnRoom.memory.defSpawnQueueWait（封顶 600），提前量自动长出这一段。
+     * 例：W34N55 最长 pathTime 85、排队实测 150 → 150+85+150+10+100 = **495**。
      * 例：W34N55 最长 pathTime 85 → 150 + 85 + 10 + 60 = **305**。
      *
      * 原来是个拍脑袋的固定 250：路线一长就不够（75 格时只剩 25 tick 余量），
@@ -2492,7 +2492,11 @@ let pro = {
             });
         }
         if (!travel) travel = OUTER_DEFENSE_TRAVEL_FALLBACK;
-        return OUTER_DEFENSE_SPAWN_TICKS + travel + OUTER_DEFENSE_REPLACE_MARGIN + OUTER_DEFENSE_REPLACE_OVERLAP;
+        // 排队耗时用**实测值**：没观测过就先给 150 的保守底（首次接替按这个算），
+        // 每次成功接替后自动校准（见 trySpawnOuterDefenser 的记录逻辑）。
+        let queueWait = spawnRoom.memory && spawnRoom.memory.defSpawnQueueWait || 0;
+        return OUTER_DEFENSE_SPAWN_TICKS + travel + Math.max(queueWait, 150)
+            + OUTER_DEFENSE_REPLACE_MARGIN + OUTER_DEFENSE_REPLACE_OVERLAP;
     },
     outerDefensePosts(creep) {
         let room = creep.room;
@@ -2674,6 +2678,11 @@ let pro = {
             if (em && !front) needSpawn = true;
         }
         if (!needSpawn) return;
+        // 首次提出接替请求时记下时刻：成功生成后，差值就是「排队+生成」的真实
+        // 耗时，写回 spawnRoom.memory.defSpawnQueueWait 供提前量使用（见上）。
+        if (replacingFront && front && !front.memory.replaceRequestAt) {
+            front.memory.replaceRequestAt = Game.time;
+        }
 
         // 体型按房间实际敌情算（没有视野时退回固定体型），需要 boost 时先确认 lab 有货
         let cfg = pro.getOuterHarDefenseBodyConfig(isInvader, harRoom);
@@ -2683,7 +2692,17 @@ let pro = {
         }
         let name = StationHive.trySpawn(spawnRoom, spawnRoom.name, cfg.body, "outerHarvestDefenser", tasks);
         // 只有「为了接替最老那只而生的」才打标记，避免标记落到别的爬身上
-        if (replacingFront && name) front.memory.hasSendSpawn = true;
+        if (replacingFront && name) {
+            front.memory.hasSendSpawn = true;
+            // 实测本次「请求→成功生成」的排队耗时，回写进提前量公式。
+            // 取历史最大值（封顶 600）：宁可提前量偏大多站一会，也不要空档。
+            if (front.memory.replaceRequestAt) {
+                let mem = spawnRoom.memory;
+                let wait = Game.time - front.memory.replaceRequestAt;
+                mem.defSpawnQueueWait = Math.min(600, Math.max(wait, mem.defSpawnQueueWait || 0));
+                delete front.memory.replaceRequestAt;
+            }
+        }
         return name;
     },
     powerSource(room, source, level) {

@@ -1,3 +1,25 @@
+## v0.78.46 — Outer defenders: no T3 compounds, and a lead that waits for the spawn queue
+
+### Changed
+
+- **Outer mining defenders never consume compounds.** When a transient hostile
+  crowd (an invader squad visiting while a keeper is up) pushed the computed
+  body past 50 parts, the config escalated to T3 (XLHO2/XUH2O/XGHO2): ~1500
+  units of compounds, 1.5M+ credits, for a threat the unboosted 50-part body
+  already beats (keeper tombstones outnumber ours; the 3-invader squad died to
+  two unboosted defenders). The config now scales the body to 50 parts instead;
+  an extra 50-part defender costs 7010 energy — three orders of magnitude
+  cheaper. Player-scale threats remain the business of the defenseHighWay
+  boost system.
+- **The replacement lead now includes the measured spawn-queue wait.** The old
+  lead (spawn 150 + travel + 10 + overlap 60) assumed a spawn is free the tick
+  the request fires; with three busy spawns the replacement queued for
+  hundreds of uncounted ticks and the old defender died first. The request
+  now stamps its time, a successful replacement writes the measured wait back
+  into `spawnRoom.memory.defSpawnQueueWait` (max observed, capped 600, floor
+  150), and the lead adds it. Overlap raised 60 → 100. W34N55: lead 310 → 500,
+  replacements request at ttl 500 and are on station before the old one dies.
+
 ## v0.78.45 — The mineral container clog actually delivers this time
 
 The outer mineral container kept filling with energy (1840 of 2000) until the
