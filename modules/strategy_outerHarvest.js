@@ -114,7 +114,8 @@ let pro = {
                 [MOVE]: plan.moveCnt,
             });
             boostRes = {
-                [BOOST_RES["tough"][3]]: plan.toughCnt * 30,
+                // 键是动作名："damage"（tough 的动作），不是 "tough"。
+                [BOOST_RES["damage"][3]]: plan.toughCnt * 30,
                 [BOOST_RES["heal"][3]]: plan.healCnt * 30,
                 [BOOST_RES["rangedAttack"][3]]: plan.rangedCnt * 30,
             };

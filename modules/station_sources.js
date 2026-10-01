@@ -1304,7 +1304,9 @@ let pro = {
         const bigBody = () => ({
             body: ManagerCreeps.calcBodyPart({[MOVE]: 20, [RANGED_ATTACK]: 22, [HEAL]: 6, [TOUGH]: 2}),
             boostRes: {
-                [BOOST_RES["tough"][3]]: 2 * 30,
+                // BOOST_RES 的键是**动作名**（BOOSTS[tough] 的动作是 "damage"，
+                // 这正是 FIGHT_BOOST_RES_MAP[TOUGH]="damage" 的原因），不是部位名。
+                [BOOST_RES["damage"][3]]: 2 * 30,
                 [BOOST_RES["heal"][3]]: 6 * 30,
                 [BOOST_RES["rangedAttack"][3]]: 22 * 30,
             },
