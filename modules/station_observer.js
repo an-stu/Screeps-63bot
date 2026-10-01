@@ -147,6 +147,14 @@ let pro={
     observeLastRoom (room){
         if(AVOID_ROOMS.has(room.name))return;
         pro.watchRoom(room.name).u= Game.time
+        // 优先观测只给 **1 tick** 视觉，而 StrategyOuterHarvest 的决策周期是
+        // 每 6 tick —— 两个节拍几乎必然错开，观测看到的威胁永远进不了决策。
+        // 趁有视野在这里就地刷新威胁记忆（与 roomNeedsDefense 的盲区分支
+        // 同一个键），观测到敌人 = 盲区房间也能自动触发"先防守后采运"。
+        if (room.find(FIND_HOSTILE_CREEPS).length) {
+            Memory.rooms[room.name] = Memory.rooms[room.name] || {};
+            Memory.rooms[room.name].lastHostileSeen = Game.time;
+        }
         let deposits = global.StrategyDeposits && isCpuFeatureEnabled("deposits") ? room.find(FIND_DEPOSITS) : [];
         let powerBanks = global.StrategyPowerBank && isCpuFeatureEnabled("powerBank")
             ? room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_POWER_BANK}) : [];
