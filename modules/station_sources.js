@@ -1304,11 +1304,12 @@ let pro = {
         const bigBody = () => ({
             body: ManagerCreeps.calcBodyPart({[MOVE]: 20, [RANGED_ATTACK]: 22, [HEAL]: 6, [TOUGH]: 2}),
             boostRes: {
-                // BOOST_RES 的键是**动作名**（BOOSTS[tough] 的动作是 "damage"，
-                // 这正是 FIGHT_BOOST_RES_MAP[TOUGH]="damage" 的原因），不是部位名。
-                [BOOST_RES["damage"][3]]: 2 * 30,
-                [BOOST_RES["heal"][3]]: 6 * 30,
-                [BOOST_RES["rangedAttack"][3]]: 22 * 30,
+                // BOOST_RES 的键是**动作名**（tough 的动作是 "damage"，这正是
+                // FIGHT_BOOST_RES_MAP[TOUGH]="damage" 的原因），索引 0/1/2 =
+                // T1/T2/T3（见 boostAbleLevel 的 maxLevel=2）。
+                [BOOST_RES["damage"][2]]: 2 * 30,
+                [BOOST_RES["heal"][2]]: 6 * 30,
+                [BOOST_RES["rangedAttack"][2]]: 22 * 30,
             },
         });
         const smallBody = () => ({body: ManagerCreeps.calcBodyPart({[ATTACK]: 9, [MOVE]: 10, [HEAL]: 1}), boostRes: {}});

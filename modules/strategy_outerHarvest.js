@@ -114,10 +114,10 @@ let pro = {
                 [MOVE]: plan.moveCnt,
             });
             boostRes = {
-                // 键是动作名："damage"（tough 的动作），不是 "tough"。
-                [BOOST_RES["damage"][3]]: plan.toughCnt * 30,
-                [BOOST_RES["heal"][3]]: plan.healCnt * 30,
-                [BOOST_RES["rangedAttack"][3]]: plan.rangedCnt * 30,
+                // 键是动作名（"damage" 而非 "tough"）；索引 0/1/2 = T1/T2/T3。
+                [BOOST_RES["damage"][2]]: plan.toughCnt * 30,
+                [BOOST_RES["heal"][2]]: plan.healCnt * 30,
+                [BOOST_RES["rangedAttack"][2]]: plan.rangedCnt * 30,
             };
         } else {
             body = ManagerCreeps.calcBodyPart({
