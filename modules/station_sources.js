@@ -729,7 +729,14 @@ Creep.prototype.coreBuster = function () {
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
     if (task.roomName != this.room.name) {
-        this.goTo(task);
+        // 行军只负责「进房间」，目标取房间中心 —— 和 coreBuster 同一修法。
+        //
+        // 原来 goTo(task) 直奔任务里的源点坐标，而房间内攻击/贴窝的 moveTo 目标
+        // （keeper 就站在源旁）经常就是同一个格子：跨房长路径缓存被房间内的
+        // 同目标 moveTo 复用，跨界后 idx 错位，爬钉死在边境门格上被过路爬对穿
+        // 搬来搬去 —— 实测 W33N55(0,18) 这一个格 20 分钟里先后困住两只防守爬，
+        // 其中一只 ttl 剩 27 老死在门口，replacement 永远进不了场。
+        this.moveTo(new RoomPosition(25, 25, task.roomName), { range: 20 });
     } else {
         let posts = pro.outerDefensePosts(this);
         // 防守爬只打**活体敌人**，不再去啃 invaderCore —— 拆 core 是 coreBuster
@@ -814,10 +821,17 @@ Creep.prototype.outerDefense = function () {
 
         let em = Game.getObjectById(this.memory.targetId);
         if (em) {
-            // Creep.attack 只有相邻（range 1）才返回 OK，够不着才返回
-            // ERR_NOT_IN_RANGE 需要走过去。
-            if (this.attack(em) == ERR_NOT_IN_RANGE) this.moveTo(em);
-            if (this.pos.inRangeTo(em, 3)) this.rangedAttack(em);
+            // 攻击手段跟着**实际体型**走：远程体型（风筝反制，RA 部件没有 ATTACK）
+            // 在 range 3 用 rangedAttack 对射，近战体型贴身 attack。
+            //
+            // 原来只调 this.attack(em)：远程体型没有 ATTACK 部件，attack 恒返回
+            // **ERR_NO_BODYPART（-12）≠ ERR_NOT_IN_RANGE（-9）**，moveTo 永远不会
+            // 被调用 —— 防守爬在门口锁定目标后一步都不走，满血站到 ttl 耗尽
+            // （实测两只钉死在 (0,17)/(49,17) 门格对上，接替兵进来也接着站）。
+            // attack/rangedAttack 没真正生效（含跨房边界的 -7）就继续接近目标。
+            let ranged = this.getActiveBodyparts(RANGED_ATTACK) > 0;
+            let ret = ranged ? this.rangedAttack(em) : this.attack(em);
+            if (ret != OK && ret != ERR_NO_BODYPART) this.moveTo(em, { range: ranged ? 3 : 1 });
             // 自愈/救人都已在上面做过；这里只在还在掉血且没在救别人时补一次自愈。
             if (!healingAlly && this.hits < this.hitsMax) this.heal(this);
             return;

@@ -172,7 +172,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         addTask(t) { calls.push(["add", t.length]); return this; },
         execLastTask() { calls.push(["exec"]); return this; },
         attack(t) { calls.push(["attack", t && t.id]); return this.attackRet === undefined ? CONSTANTS.OK : this.attackRet; },
-        rangedAttack(t) { calls.push(["rangedAttack", t && t.id]); return CONSTANTS.OK; },
+        rangedAttack(t) { calls.push(["rangedAttack", t && t.id]); return this.rangedRet === undefined ? CONSTANTS.OK : this.rangedRet; },
         heal(t) { calls.push(["heal", t === this ? "self" : (t && t.id)]); return CONSTANTS.OK; },
         rangedHeal(t) { calls.push(["rangedHeal", t && t.id]); return CONSTANTS.OK; },
         moveTo(t) { calls.push(["moveTo", (t.pos || t) && (t.pos || t).x, (t.pos || t) && (t.pos || t).y]); return CONSTANTS.OK; },
@@ -279,6 +279,64 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         "travel must target the task room's centre, not the core itself");
     assert.ok(!creep.calls.some(c => c[0] === "attack"),
         "no attack attempts while travelling (they return -7 across a border)");
+}
+
+{
+    // === outerDefense 行军段：目标取房间中心，与房间内目标缓存分离 ===
+    // 原来直奔源点坐标，而 keeper 就站在源旁——同目标的跨房缓存跨界后卡死，
+    // 防守爬被对穿钉在边境门格上（实测 (0,18) 一个格困死两只，ttl 27 老死在门口）。
+    const ctx = loadStation();
+    const creep = makeCreep(ctx, { x: 0, y: 18 });
+    creep.room = { name: "W33N55" };
+    creep.headTask = () => ({ taskName: "outerDefense", id: "src1", roomName: "W34N55", x: 3, y: 17 });
+    ctx.Creep.prototype.outerDefense.call(creep);
+    assert.ok(creep.calls.some(c => c[0] === "moveTo" && c[1] === 25 && c[2] === 25),
+        "travel must target the task room's centre, not the source tile");
+    assert.ok(!creep.calls.some(c => c[0] === "goTo"),
+        "the source-tile goTo is exactly what wedged defenders at the border door");
+}
+
+{
+    // === 接战手段跟着体型走：远程体型没有 ATTACK 部件，attack 恒 -12，
+    // 原来只判 ERR_NOT_IN_RANGE → moveTo 永远不执行，防守爬站死在门口 ===
+    const ctx = loadStation();
+    const lair = { pos: makePos(41, 14, "W34N55") };
+    ctx.StationSources.outerDefensePosts = () => [lair];
+    const keeper = { id: "k1", body: [{ type: "attack" }], pos: makePos(40, 15, "W34N55") };
+    ctx.Game.getObjectById = id => (id === "k1" ? keeper : null);
+
+    // 远程体型、目标在射程内：rangedAttack 直接输出，不移动
+    const inRange = makeCreep(ctx, { x: 41, y: 15, body: [{ type: "ranged_attack" }] });
+    inRange.room = {
+        name: "W34N55",
+        find(c) {
+            if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [keeper];
+            if (c == CONSTANTS.FIND_MY_CREEPS) return [inRange];
+            return [];
+        },
+    };
+    ctx.Creep.prototype.outerDefense.call(inRange);
+    assert.ok(inRange.calls.some(c => c[0] === "rangedAttack" && c[1] === "k1"),
+        "ranged body must engage with rangedAttack");
+    assert.ok(!inRange.calls.some(c => c[0] === "moveTo"),
+        "in-range ranged attack must not move");
+
+    // 远程体型、目标超出射程：必须推进到 range 3（-12 死锁的回归测试）
+    const far = makeCreep(ctx, { x: 49, y: 17, body: [{ type: "ranged_attack" }] });
+    far.rangedRet = CONSTANTS.ERR_NOT_IN_RANGE;
+    far.room = {
+        name: "W34N55",
+        find(c) {
+            if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [keeper];
+            if (c == CONSTANTS.FIND_MY_CREEPS) return [far];
+            return [];
+        },
+    };
+    ctx.Creep.prototype.outerDefense.call(far);
+    assert.ok(far.calls.some(c => c[0] === "rangedAttack" && c[1] === "k1"),
+        "ranged body attempts the shot even out of range");
+    assert.ok(far.calls.some(c => c[0] === "moveTo" && c[1] === 40),
+        "out-of-range ranged attack must close to range 3 (the -12 stall regression)");
 }
 
 {

@@ -1,3 +1,34 @@
+## v0.78.47 — Ranged defenders must actually walk into range; adopt live 0.78.40
+
+Two independent stalls, both caught on 10-02 after adopting the parallel
+session's ranged-defender body:
+
+### Fixed
+
+- **The ranged defender never closed distance.** The engagement code called
+  only `this.attack(em)` and moved on `ERR_NOT_IN_RANGE` — but the new kiting
+  body has no ATTACK parts, so `attack` returns ERR_NO_BODYPART (-12) forever
+  and the move never fires. Both defenders stood at the cross-room door pair
+  (0,17)/(49,17) with a locked target, full HP, until ttl ran out (one died
+  in place; replacements inherited the same parking spot). The attack method
+  now follows the body: ranged bodies use `rangedAttack` at range 3 and close
+  to it when out of range; melee bodies attack at range 1. Any non-OK result
+  (including the cross-border -7) drives movement. Verified live within
+  minutes: the (9,34) keeper died and the squad moved onto the last one.
+- **Out-of-room travel targets the room centre** (same fix as the core
+  buster): `goTo(task)` aimed at the source tile, which is exactly where the
+  hostile keeper stands, so the cross-room cache collided with the in-room
+  engage move.
+
+### Adopted from the parallel session (live build 0.78.40)
+
+Ranged core buster plan for lv2+ cores (2 TOUGH + 3 HEAL + 20 RA + 25 MOVE,
+needsT3 gate), ranged kiting defender body, road-border tiles excluded from
+`outerRoadComplete` (six routes were permanently "missing" 2-4 impossible
+tiles), 50-part outer carriers, `Memory.stopOuterMineral` kill switch, and
+observer-side `lastHostileSeen` refresh. Local + git synced to it (rebased
+over its 6 commits, tests updated to the new plan shapes).
+
 ## v0.78.46 — Outer defenders: no T3 compounds, and a lead that waits for the spawn queue
 
 ### Changed
