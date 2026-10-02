@@ -7,6 +7,13 @@
 /** 失去视野后，仍把该房按「有威胁」对待的时长（tick） */
 const OUTER_HOSTILE_MEMORY_TICKS = 3000;
 
+/** 拥堵熔断：主房内原地不动多久算堵死（tick） */
+const OUTER_CONGESTION_TICKS = 90;
+/** 同时堵死多少只就触发暂停 */
+const OUTER_CONGESTION_PAUSE_CNT = 4;
+/** 暂停派发的时长（tick），到期自动恢复 */
+const OUTER_CONGESTION_PAUSE_TICKS = 600;
+
 /**
  * 拆 core 队伍的**提前部署量**：core 在 ticksToDeploy 归零前是无敌的
  * （实测 attack 恒返回 ERR_INVALID_TARGET，几千 tick 伤害为 0），归零时它升级
@@ -154,6 +161,29 @@ let pro = {
             }
             // 派发房间必须有 storage 接收外矿能量
             if (!spawnRoom || !spawnRoom.storage || spawnRoom.name != room.name) continue;
+            // 拥堵熔断（用户 10-02 指示）：该矿的爬在主房里原地不动超过
+            // OUTER_CONGESTION_TICKS 即视为堵死——先**处决堵路爬**（尸体能量
+            // 顺路可捡），再暂停该矿派发一段时间，防止主房门口被钉死、
+            // spawn 网络被饿死（实测 11~15 只外矿爬挤在 storage 周边时，
+            // 防守接替兵和矿物链全部生成不出来）。暂停到期自动恢复，
+            // 再堵再熔断。已在矿区里干活的爬不受影响。
+            let stuckCnt = 0;
+            room.find(FIND_MY_CREEPS).forEach(c => {
+                let t = c.headTask && c.headTask();
+                if (!t || t.roomName != targetRoomName) return;
+                let m = c.memory.outerStuck;
+                if (m && m.x == c.pos.x && m.y == c.pos.y && Game.time - m.t >= OUTER_CONGESTION_TICKS) {
+                    stuckCnt++;
+                    c.suicide();
+                } else if (!m || m.x != c.pos.x || m.y != c.pos.y) {
+                    c.memory.outerStuck = { x: c.pos.x, y: c.pos.y, t: Game.time };
+                }
+            });
+            if (Memory.outerPaused && Memory.outerPaused[targetRoomName] > Game.time) continue;
+            if (stuckCnt >= OUTER_CONGESTION_PAUSE_CNT) {
+                Memory.outerPaused[targetRoomName] = Game.time + OUTER_CONGESTION_PAUSE_TICKS;
+                continue;
+            }
             if (Memory.rooms[targetRoomName]) {
                 // 按**实际威胁**判断，而不是按旗名/房间类别（见 roomNeedsDefense）
                 let isInvader = pro.roomNeedsDefense(Game.rooms[targetRoomName], flag);
