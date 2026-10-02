@@ -92,10 +92,12 @@ function loadHarvest(memory) {
     // VM realm 的对象原型与宿主不同，deepEqual 要先摊平成宿主对象
     assert.deepEqual({ ...lv1 }, { attackCnt: 15, healCnt: 0, moveCnt: 15, perCreep: 1 },
         "level-1 core: one [A15,M15] creep, 450 DPS kills 100k hits in ~222 ticks");
+    // lv2 起有塔（150~300/tick 随距离）：远程体型在 range 3 输出，TOUGH 先结算
+    // 减伤、3 HEAL（T3 ×48）= 144 > 90 塔打不穿。无 T3 化合物就不派（needsT3）。
     const lv2 = ctx.StrategyOuterHarvest.coreBusterPlan(2);
-    assert.equal(lv2.healCnt, 5, "level-2+ core spawns invaders, the buster must self-heal");
-    assert.equal(lv2.moveCnt, 20, "level-2+ buster keeps a 1:1 move ratio for travel speed");
-    assert.equal(lv2.perCreep, 1, "one buster at a time; spawner replaces it when it dies");
+    assert.deepEqual({ ...lv2 }, {
+        toughCnt: 2, healCnt: 3, rangedCnt: 20, moveCnt: 25, perCreep: 1, needsT3: true,
+    }, "level-2+ core: ranged T3 plan that out-sustains the tower");
 }
 
 {
@@ -211,6 +213,16 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         "with no rampart the core itself is the target");
     assert.ok(!fresh.calls.some(c => c[0] === "heal"),
         "no HEAL parts -> no wasted heal call");
+
+    // 远程体型（lv2+ 方案）在 range 3 用 rangedAttack 输出，不浪费近战意图
+    core.pos.lookFor = () => [];
+    const ranged = makeCreep(ctx, { x: 13, y: 43, hits: 4000, hitsMax: 4000, body: [{ type: "ranged_attack" }] });
+    ranged.room = { name: "W34N55" };
+    ctx.Creep.prototype.coreBuster.call(ranged);
+    assert.ok(ranged.calls.some(c => c[0] === "rangedAttack" && c[1] === "core1"),
+        "ranged busters must use rangedAttack against the core");
+    assert.ok(!ranged.calls.some(c => c[0] === "attack"),
+        "a body without ATTACK parts must not attempt melee");
 
     // core 没了 → 弹任务回收
     ctx.Game.getObjectById = () => null;
