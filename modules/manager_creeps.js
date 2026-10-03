@@ -103,6 +103,19 @@ let pro={
             let roomName = creepMemory.roomName;
             let groupName = !name.startsWith("!") && roomName ? roomName : "global";
             (creeps[groupName] || (creeps[groupName] = [])).push(creep);
+            // 受伤标记：StationTower 的「受伤扫描」在 0.78.38 之后只在**本房**
+            // 最近见过敌人时才跑，但外矿战斗全部发生在外矿房 —— 主房永远不会
+            // 因此打上 lastHostileTimeMap，带伤回城的 keeper / 防守爬 / 搬运爬
+            // 一只都奶不到（用户 10-04 报告）。这里在「每 tick 本来就要遍历
+            // 全部 Game.creeps」的循环里顺手记一下哪个房间有己方受伤爬，塔按
+            // 这个标记决定扫不扫：成本只有一次 hits 比较，而且对伤害来源
+            // （外矿 keeper、invader、摔落……）完全免疫。
+            if (creep.hits < creep.hitsMax) {
+                let p = creep.pos;
+                if (p && Game.rooms[p.roomName]) {
+                    (Game._injuredRoomTick || (Game._injuredRoomTick = {}))[p.roomName] = Game.time;
+                }
+            }
         }
         for (let groupName in creeps) {
             if (groupName == "global") pro.otherCreeps = creeps[groupName];

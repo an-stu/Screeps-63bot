@@ -10,6 +10,16 @@ const missionSource = fs.readFileSync(path.join(root, "modules/manager_missions.
 for (const [name, fn] of [
     ["head", function () { return this.length ? this[0] : undefined; }],
     ["sum", function () { return this.reduce((a, b) => a + b, 0); }],
+    ["minBy", function (f) {
+        let best, bestV;
+        this.forEach(x => { let v = f(x); if (best === undefined || v < bestV) { best = x; bestV = v; } });
+        return best;
+    }],
+    ["maxBy", function (f) {
+        let best, bestV;
+        this.forEach(x => { let v = f(x); if (best === undefined || v > bestV) { best = x; bestV = v; } });
+        return best;
+    }],
     ["toMap", function () { return this.reduce((m, e) => { m[e[0]] = e[1]; return m; }, {}); }],
 ]) {
     if (!Array.prototype[name]) Object.defineProperty(Array.prototype, name, {
@@ -215,6 +225,79 @@ Array.prototype.head = function () { return this.length ? this[0] : undefined; }
     assert.ok(calls.some(c => c[0] === "pop"), "missing target must pop the leaf task");
     assert.ok(!calls.some(c => c[0] === "build"), "must not call build() with a null target");
     assert.equal(creep.memory.tasks.length, 0, "the dead task must really be gone");
+}
+
+// ── StationTower：塔必须奶「本房受伤的爬」，包括从**外矿**带伤回城的 ──
+//
+// 0.78.38 为了省 CPU 把「扫描受伤 creep」改成只在**本房**最近 400 tick 内见过
+// 敌人时才跑。判据是错的：外矿战斗全部发生在外矿房，主房的 lastHostileTimeMap
+// 永远打不上，于是带伤回城的 keeper / 防守爬 / 搬运爬一只都奶不到（用户 10-04
+// 报告）。现在改用 ManagerCreeps.init 每 tick 打好的 Game._injuredRoomTick[房名]。
+const stationTowerSource = fs.readFileSync(path.join(root, "modules/station_tower.js"), "utf8");
+function towerScene({ injured, markTick, lastHostileTime }) {
+    const healed = [];
+    const damaged = { name: "outer", hits: 100, hitsMax: 500 };
+    const tower = { id: "t1", _used: false, heal: c => healed.push(c), attack: () => {}, repair: () => {} };
+    const room = {
+        name: "W33N55",
+        memory: {},
+        tower: [tower],
+        getHostileCreeps: () => [],
+        getStructures: () => [],
+        hashCode: () => 1,                             // (100000+1)%3 != 0 → 不跑 safeMode
+        find: (type, opts) => {
+            if (type !== "FIND_MY_CREEPS") return [];
+            const list = injured ? [damaged] : [];
+            return opts && opts.filter ? list.filter(opts.filter) : list;
+        },
+    };
+    const ctx = {
+        console, global: null,
+        Game: { time: 100000, getObjectById: () => null,
+                _injuredRoomTick: markTick === undefined ? {} : { W33N55: markTick } },
+        Memory: { rooms: { W33N55: {} } },
+        Creep: function () {},
+        StructureTower: function () {},
+        FIND_MY_CREEPS: "FIND_MY_CREEPS", FIND_MY_POWER_CREEPS: "FIND_MY_POWER_CREEPS",
+        LOOK_STRUCTURES: "structures", LOOK_CONSTRUCTION_SITES: "constructionSite",
+        STRUCTURE_WALL: "constructedWall", STRUCTURE_RAMPART: "rampart", STRUCTURE_ROAD: "road",
+        isCpuFeatureEnabled: () => false,
+        StationDefense: { checkSafeMode: () => {} },
+        Utils: { decodePosArray: () => [] },
+        WarDamageCal: { calTowerDamage: () => 600 },
+        _: { values: o => Object.values(o || {}), keys: o => Object.keys(o || {}) },
+    };
+    ctx.global = ctx;
+    vm.runInNewContext(`
+Array.prototype.head = function () { return this.length ? this[0] : undefined; };
+Array.prototype.minBy = function (fn) {
+    let best, bestV;
+    this.forEach(x => { let v = fn(x); if (best === undefined || v < bestV) { best = x; bestV = v; } });
+    return best;
+};
+`, ctx);
+    vm.runInNewContext(stationTowerSource, ctx, { filename: "station_tower.js" });
+    if (lastHostileTime !== undefined) ctx.StationTower.lastHostileTimeMap.W33N55 = lastHostileTime;
+    ctx.StationTower.update(room);
+    ctx.StationTower.exec(room);
+    return healed;
+}
+
+{
+    // 外矿带伤回城：主房从没见过敌人（lastHostileTimeMap 为空），但 ManagerCreeps
+    // 已经在本 tick 给「本房有受伤爬」打了标记 → 必须开奶
+    const healed = towerScene({ injured: true, markTick: 100000 });
+    assert.equal(healed.length, 1, "外矿战斗受伤后回城的爬必须被塔奶到（0.78.38 的判据漏掉了这一整类）");
+}
+{
+    // 本房确实见过敌人 → 400 tick 窗口内照旧扫描（原行为保留）
+    const healed = towerScene({ injured: true, lastHostileTime: 99950 });
+    assert.equal(healed.length, 1, "本房刚打过 → 400 tick 窗口内继续奶");
+}
+{
+    // 和平房、没受伤标记 → 一次全房 find 都不做（省 CPU 的初衷不能回退）
+    const healed = towerScene({ injured: false, lastHostileTime: 90000 });
+    assert.equal(healed.length, 0, "和平房不许开扫描");
 }
 
 console.log("recent regression checks passed");

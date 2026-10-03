@@ -118,6 +118,20 @@ const OUTER_ROAD_SITE_REFRESH = 100;
  */
 const OUTER_ROAD_SITE_ROOM_LIMIT = 85;
 /**
+ * 外矿路「掉到满血的这个比例以下」就算未完成，要派修路爬补回来。
+ *
+ * 原判据只看**有没有** road：有路 = 完成 → 不派修路爬 → 路面一直衰减到 0 消失，
+ * 那时这一格才是"没有 road"，爬得走空地/沼泽，而且重建一格要 5000 进度
+ * （≈5000 能量）。崩到 50% 就修回来的话：修 2500 血只花 250 能量
+ * （REPAIR_COST=0.1：1 能量 = 10 血），比从 0 重建便宜一个数量级，
+ * 而且用户永远看不到"这里没有路"的空窗（用户 10-04 报的 W34N55 (34,29) 就是
+ * 一条刚刚从 0 重建起来的路，hits 4800 而两侧老路面只有 2100~2600）。
+ *
+ * 取 50% 是因为它给了 ~2500 tick 的余量（路衰减 1 血/tick）：修路爬排队、
+ * 赶路、施工都来得及，也不会让修路爬长期占着 spawn。
+ */
+const OUTER_ROAD_KEEP_HITS = 0.5;
+/**
  * 缓存路线「还走不走得通」的复检间隔（tick）。
  *
  * 主房里随时会盖起新建筑（实测 nuker 一盖好，缓存路线当场被堵死），而路线缓存
@@ -125,6 +139,14 @@ const OUTER_ROAD_SITE_ROOM_LIMIT = 85;
  * 每 50 tick 复检一次：3 个矿点 × ~76 个路点 ≈ 4.6 次 lookForAt/tick，开销可接受。
  */
 const OUTER_ROAD_VALIDATE_INTERVAL = 50;
+/**
+ * 路线缓存本身的有效期（tick）—— 超过就重算。
+ *
+ * 重算意味着**路线可能整体换道**：原本空着、或只是一格没人走的废路的位置，
+ * 重算后完全可能被路线穿过。依赖「某个格子不在路线上」的长期记录（当前是
+ * 主房边缘 link 的位置）必须跟着这个周期复检，见 edgeLinkPosStale。
+ */
+const OUTER_ROAD_PATH_TTL = 1000;
 /**
  * 外矿路点上连续卡住多久就改用移动优化器（而不是裸 creep.move）。
  * 单格宽单行道上一有互堵，裸 move 会被引擎静默取消；交给 BetterMove 的
@@ -172,6 +194,27 @@ const OUTER_EDGE_LINK_WAIT = 12;
  * 等够这个数就说明真的没得等了，带走总比空转强。
  */
 const OUTER_CARRY_DRY_WAIT = 60;
+/**
+ * 矿区还在出货时，搬运爬最多在容器边等多少个 tick **装满**再回主房。
+ *
+ * 原来只要求「半仓」就出发，于是「容器里当时有 1300」就变成「这一趟只运 1300」
+ * —— 一趟的固定成本（来回 ~150 tick + 主房卸货）完全一样，少运的 400 能量是
+ * 纯损失。矿区单源产出 13.3~20/tick，而搬运爬的均摊运力只有 5~11/tick，
+ * 所以**多等一会永远划算**；这个上限只用来兜住「keeper 还活着但一直不出货」
+ * （被打跑 / 卡住 / 容器被拆）的情况，到点就带着手上的货走，绝不楔死。
+ *
+ * 取值 150 > 从空仓装满 1700 所需的 85~128 tick，正常情况都能等满。
+ */
+const OUTER_CARRY_FILL_WAIT = 150;
+/**
+ * 地面掉落能量「值得专门捡」的门槛。
+ *
+ * keeper 站在容器上挖矿，容器满时溢出的能量全部掉在**容器那一格**；实测
+ * W35N55 三个矿点地上分别堆着 4758 / 6261 / 719 能量，一起被漏掉。
+ * 500 以上的大堆值得让搬运爬停一下（引擎 pickup 判定是切比雪夫 ≤1，
+ * 站在容器旁边就能捡容器格上的掉落）。
+ */
+const OUTER_CARRY_DROP_PICK = 500;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -1289,7 +1332,16 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 // 身上的能量可能来自路上捡的墓碑/掉落，属于正常状态，不能当"空手"判。
                 if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
                     // 优先捡地上的掉落（keeper 掉落的能量堆），再拿 container 里的
-                    let drop = this.pos.lookFor(LOOK_ENERGY).head();
+                    //（Overmind 的 hauler 同样是 drops first）。
+                    //
+                    // **必须按范围找，不能只看自己脚下**：keeper 站在容器上挖矿，
+                    // 容器满时溢出的能量全部掉在**容器那一格**；而容器格被 keeper
+                    // 占着，搬运爬只能停在旁边 —— 原来用 `this.pos.lookFor(LOOK_ENERGY)`
+                    // 永远看不到这堆货。实测 W35N55 三个矿点的容器格上分别堆着
+                    // 4758 / 6261 / 719 能量没人捡。引擎的 pickup 判定是
+                    // |dx|<=1 && |dy|<=1（engine/src/processor/intents/creeps/pickup.js），
+                    // 所以站在容器旁边就能直接捡走。
+                    let drop = pro.outerCarryNearbyDrop(this);
                     if (drop) this.pickup(drop);
                     if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && container.store[RESOURCE_ENERGY] > 0) {
                         let code = this.withdraw(container, RESOURCE_ENERGY)
@@ -1314,9 +1366,25 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         }
     }
 
-    // 拾取路径附近的尸体能量 / 掉落能量：寿命终止在路径上的旧 carrier
-    // 会留下 tombstone 或掉落堆，新 carrier 顺路捡起即可接续搬运，避免
-    // 能量白白滞留在外矿。范围限当前房间内 8 格，只捡能量，不偏离路线
+    // 周围地上的掉落能量：**随时捡**（不再每 4 tick 才看一次）。门槛 500：
+    // 大堆值得让搬运爬绕一下，小堆不值得它偏离固定路线；容器边上 500 以下的
+    // 小堆已经由容器分支无条件捡掉（outerCarryNearbyDrop）。
+    if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+        let dropEnergy = this.pos.findInRange(FIND_DROPPED_RESOURCES, 8, {
+            filter: e => e.resourceType == RESOURCE_ENERGY && e.amount > OUTER_CARRY_DROP_PICK
+        }).head();
+        if (dropEnergy) {
+            if (this.pos.isNearTo(dropEnergy)) {
+                this.pickup(dropEnergy);
+            } else {
+                this.goTo(dropEnergy);
+                return;
+            }
+        }
+    }
+    // 拾取路径附近的尸体能量：寿命终止在路径上的旧 carrier 会留下 tombstone，
+    // 新 carrier 顺路捡起即可接续搬运，避免能量白白滞留在外矿。范围限当前房间内
+    // 8 格，只捡能量，不偏离路线。尸体不像掉落那样天天堆，扫得稀一点省 CPU。
     if (this.ticksToLive % 4 == 0) {
         let tombstone = this.pos.findInRange(FIND_TOMBSTONES, 8, {
             filter: e => e.store[RESOURCE_ENERGY] > 0
@@ -1330,37 +1398,27 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 return;
             }
         }
-        let dropEnergy = this.pos.findInRange(FIND_DROPPED_RESOURCES, 8, {
-            filter: e => e.resourceType == RESOURCE_ENERGY && e.amount > 50
-        }).head();
-        if (dropEnergy) {
-            if (this.pos.isNearTo(dropEnergy)) {
-                this.pickup(dropEnergy);
-            } else {
-                this.goTo(dropEnergy);
-                return;
-            }
-        }
     }
     if (this.store[RESOURCE_ENERGY] > 0) {
-        // 只要有能量就准备回程。keeper 不在时 container 能量少、难以攒满，
-        // 不等能量超过自身容量，取到就回（避免 carrier 卡在矿区空转）；
-        // keeper 在时攒满再回，减少碎片往返。
+        // 只要有能量就准备回程。
         let sm = rm && rm[pro.stationName] && rm[pro.stationName][task.id];
         let keeperAlive = sm && sm["creeps"] && Game.getObjectById(sm["creeps"][0]);
-        // 攒批再回（别搬碎货）：
-        //   · 有 keeper：等半仓（它会把容器灌满）。
-        //   · **没有 keeper**：原来写成「取到就回」，于是容器只剩几十能量时
+        // 攒批再回（别搬碎货），而且**要装满**：
+        //   · 矿区还在出货（容器里有货，或 keeper 还活着）：等到装满为止，
+        //     上限 OUTER_CARRY_FILL_WAIT。原来只要求半仓就走，于是"到场时容器里
+        //     有 1300"就变成"这趟只运 1300" —— 一趟的固定成本完全相同，少运的
+        //     400 是纯损失（实测容量 1700 的搬运爬常态化只带 1300 回主房）。
+        //   · 矿区确实干涸（没有 keeper 且容器空的）：只等 OUTER_CARRY_DRY_WAIT，
+        //     到点带着手上的货走。原来写成「取到就回」，于是容器只剩几十能量时
         //     carrier 会在主房与矿区之间来回搬 10 能量的碎货（实测一只
-        //     shard3_83402075_3 一直往返挂机）。改成同样等半仓，但矿区确实
-        //     干涸（容器里没能量）且已经等够 OUTER_CARRY_DRY_WAIT tick 才走，
-        //     避免它永远等着。
-        let halfLoad = this.store.getCapacity(RESOURCE_ENERGY) / 2;
-        if (this.store[RESOURCE_ENERGY] < halfLoad) {
+        //     shard3_83402075_3 一直往返挂机）。
+        // 两个上限都只为「绝不楔死」：keeper 活着但被打跑/卡住时到点就撤。
+        if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
             let cont = sm && Game.getObjectById(sm[STRUCTURE_CONTAINER]);
             let dry = !cont || !(cont.store[RESOURCE_ENERGY] > 0);
             this.memory.carryWait = (this.memory.carryWait || 0) + 1;
-            if (keeperAlive || !dry || this.memory.carryWait < OUTER_CARRY_DRY_WAIT) return;
+            let limit = (keeperAlive || !dry) ? OUTER_CARRY_FILL_WAIT : OUTER_CARRY_DRY_WAIT;
+            if (this.memory.carryWait < limit) return;
         }
         this.memory.carryWait = 0;
         let data = task.roomName && task.id
@@ -1874,12 +1932,12 @@ let pro = {
     /**
      * 外矿修路路径：从矿区容器到主房间 storage 一次性寻路，
      * 主房间按蓝图路网走（规划的其他建筑不可走），结果按房间
-     * serializePath 紧凑序列化存储，1000 tick 重算一次
+     * serializePath 紧凑序列化存储，OUTER_ROAD_PATH_TTL tick 重算一次
      */
     ensureOuterRoadPath(data, spawnRoom) {
         let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
         if (data.roadPathStr && data.roadPathStr.indexOf("undefined") < 0
-            && data.roadPathTick && Game.time - data.roadPathTick < 1000) {
+            && data.roadPathTick && Game.time - data.roadPathTick < OUTER_ROAD_PATH_TTL) {
             let cached = pro.getOuterRoadPath(data);
             let end = cached && cached.last();
             // PathFinder can return a non-empty but incomplete path. The old
@@ -2301,7 +2359,8 @@ let pro = {
         return container ? container : new RoomPosition(data.x, data.y, data.roomName);
     },
     /**
-     * 外矿道路是否完整：路径上每个可修路的位置都已有 road。
+     * 外矿道路是否完整：路径上每个可修路的位置都有一格**血量够**的 road
+     *（低于 OUTER_ROAD_KEEP_HITS 视为未完成，提前派修路爬补，见该常量的说明）。
      * 每 10 tick 检查一次并缓存；force 强制刷新；有房间不可见时视为未完成（不搬运）。
      */
     outerRoadComplete(data, force) {
@@ -2319,7 +2378,11 @@ let pro = {
             let room = Game.rooms[p.roomName];
             if (!room) { data.roadComplete = false; return false; }
             let structures = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
-            if (structures.find(s => s.structureType == STRUCTURE_ROAD)) continue; // 已有路
+            let road = structures.find(s => s.structureType == STRUCTURE_ROAD);
+            // 有路也要看血量：崩到 OUTER_ROAD_KEEP_HITS 以下就算未完成，让修路爬
+            // 提前补回来，而不是等它烂到 0 消失（那时这一格是真的"没有路"）。
+            if (road && road.hits >= road.hitsMax * OUTER_ROAD_KEEP_HITS) continue; // 已有健康的路
+            if (road) { data.roadComplete = false; return false; }
             // 被「可走建筑」（容器 / 己方 rampart）占位：不需要也不该再铺路
             // （rampart 上不能盖路）。判定与代价矩阵同一份，见 outerRoadTileWalkable。
             if (structures.length && pro.outerRoadTileWalkable(structures)) continue;
@@ -2379,54 +2442,38 @@ let pro = {
         return pro.outerEdgeLink(home) || home.storage;
     },
     /**
-     * 边缘 link 的选址与工地（幂等；只在外矿生产 pass 里调用）。
+     * 搬运爬**身边**值得捡的地面掉落能量堆（只挑能量，且量够大）。
      *
-     * 选址规则（全部满足，取「离矿区入口最近」的一个）：
-     *   1. 在主房内（外矿路线在主房的那一段）
-     *   2. 与**所有**矿点共用的那段路相邻（切比雪夫 ≤1）—— 一个 link 服务以本房
-     *      为主房的全部矿点；只贴某一条路线会漏掉其它矿点的搬运爬
-     *   3. 空地、无建筑、无工地
-     *   4. **不能压在路点上**：link 不像 road/container 那样能踩上去（见
-     *      outerRoadStructureWalkable），压上去等于把外矿单行道堵死；贴在旁边时
-     *      搬运爬在路上经过就是 range 1，transfer 照常成立
+     * 用途见 harvestEnergyOuterCarry：keeper 站在容器上、容器满时溢出的能量全部
+     * 掉在容器那一格，而那一格被 keeper 占着，搬运爬只能停在旁边。引擎的 pickup
+     * 判定是切比雪夫 ≤1（engine/src/processor/intents/creeps/pickup.js：
+     * `Math.abs(target.x - object.x) > 1 || ...`），所以站在旁边就能捡。
      *
-     * 建好之前返回工地对象。建工地的活不需要专门派爬：工地一出现在主房，
-     * strategy_highLevel 就会补 worker，idle 的 worker 走
-     * StationWork.generatorBuildTask（挑最近的工地），主房里通常就这一个工地。
+     * 取**最大**的一堆：范围 1 内通常只有一堆（容器格），但被挤开时可能有两堆。
      */
-    ensureOuterEdgeLink(spawnRoom) {
-        if (!spawnRoom || !spawnRoom.my || !spawnRoom.controller) return undefined;
-        if (Memory.marketSettings && Memory.marketSettings.edgeLink === false) return undefined;
-        if (spawnRoom.level < 5) return undefined;                       // link 要 RCL5
-        if (pro.outerEdgeLink(spawnRoom)) return undefined;              // 已经有 link
-        let sc = spawnRoom.memory[StationCarry.stationName]
-            || (spawnRoom.memory[StationCarry.stationName] = {});
-        let cap = CONTROLLER_STRUCTURES[STRUCTURE_LINK][spawnRoom.level] || 0;
-        let used = spawnRoom.link.length + spawnRoom.find(FIND_MY_CONSTRUCTION_SITES)
-            .filter(s => s.structureType == STRUCTURE_LINK).length;
-        if (used >= cap) return undefined;
-        // 选过一次就不再重算（路线解码开销不小）：先按记录的位置确认
-        if (sc.edgeLinkPos) {
-            let xy = sc.edgeLinkPos.split(":");
-            let x = parseInt(xy[0], 10), y = parseInt(xy[1], 10);
-            let structures = spawnRoom.lookForAt(LOOK_STRUCTURES, x, y);
-            let link = structures.find(s => s.structureType == STRUCTURE_LINK);
-            if (link) { sc.edgeLink = link.id; return undefined; }
-            let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).find(s => s.structureType == STRUCTURE_LINK);
-            if (site) { sc.edgeLinkSite = site.id; return site; }
-            // 位置空着：通常是上一 tick 刚把那格冗余 road 拆掉 —— 直接在这儿立工地，
-            // **不要重选**（road 一消失，排序里的「优先回收废路」就不再成立，
-            // 会漂到旁边别的格子上去）。
-            if (!structures.length && spawnRoom.createConstructionSite(x, y, STRUCTURE_LINK) == OK) {
-                let fresh = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y)
-                    .find(s => s.structureType == STRUCTURE_LINK);
-                if (fresh) sc.edgeLinkSite = fresh.id;
-                return fresh;
-            }
-            delete sc.edgeLinkPos;      // 被别的东西占了 / 立不起来 → 重新选
-            delete sc.edgeLinkSite;
-        }
-        // 以本房为主房的矿点：缓存路线的**终点**落在本房（一条矿点 = 一条路线）
+    outerCarryNearbyDrop(creep) {
+        if (!creep || !creep.pos) return undefined;
+        return creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
+            filter: e => e.resourceType == RESOURCE_ENERGY && e.amount > OUTER_CARRY_DROP_PICK
+        }).maxBy(e => e.amount);
+    },
+    /**
+     * 以本房为主房的外矿路线，在**主房内**那一段的路点并集。
+     *
+     * 一条矿点 = 一条路线（`stationSources[*].roadPathStr`）；「以本房为主房」的
+     * 判据是路线的**终点**落在本房 —— 缓存里存的正是「外矿容器 → 主房
+     * storage/terminal 旁边」这一整条。
+     *
+     * 返回 `{routeIdx, routeSets}`：`routeIdx[tile]` 是该格在任何一条路线里的
+     * **最早序号**（越小 = 越靠矿区入口，因为路径是从外矿那头开始编号的），
+     * `routeSets` 是逐条路线的路点集合（用来数「这一格服务几条路线」）。
+     * 一条可用路线都没有时返回 undefined。
+     *
+     * 先用**序列化字符串里的房间清单**做一次廉价预筛（只切字符串、不解码坐标），
+     * 只对真的会经过本房的站点调 getOuterRoadPath —— 全号 30+ 条路线如果全解码
+     * 一次要上千次 RoomPosition 构造，而本函数在 MIN_CPU 期间每 tick 都会被调。
+     */
+    outerRouteUnion(spawnRoom) {
         let routes = [];
         for (let roomName in Memory.rooms) {
             if (roomName == spawnRoom.name) continue;                    // 主房自己的矿点没有外矿路线
@@ -2434,6 +2481,9 @@ let pro = {
             if (!stations) continue;
             _.values(stations).forEach(data => {
                 if (!data || !data.id || !data.roadPathStr) return;
+                let sep = data.roadPathStr.indexOf(";");
+                if (sep < 0) return;
+                if (data.roadPathStr.slice(0, sep).split(",").indexOf(spawnRoom.name) < 0) return;
                 let path = pro.getOuterRoadPath(data);
                 if (!path || !path.length) return;
                 if (path.last().roomName != spawnRoom.name) return;
@@ -2457,6 +2507,149 @@ let pro = {
             });
             routeSets.push(set);
         });
+        return {routeIdx: routeIdx, routeSets: routeSets};
+    },
+    /**
+     * 记录下来的 edge link 位置**是否已经压到外矿路线上**（= 必须作废重选）。
+     *
+     * 只在两个前提同时成立时才真去解码路线，其余情况一律返回 false ——
+     * 「选过一次就不再重算」这条规则要保住：
+     *   1. link 还没建成（`sc.edgeLink` 没写）。已经落地的 link 不搬。
+     *   2. 选址之后**至少有一条相关路线重算过**：判据是它的 `roadPathTick`
+     *      比 `edgeLinkPosTick` 新。没有这一条就只看 Memory，不解码。
+     *
+     * 为什么非要管这件事：路线重算跑的是**当下**的代价矩阵（主房随时会盖起新
+     * 建筑、废路会衰减、路网会被修），原本空着的位置重算后完全可能被路线选中；
+     * 而 link 不是 road，爬走不上去 —— 压在路线上就是把外矿单行道堵死。
+     * 线上实例：W33N55 (4,22) 选址时不在任何路线上（cover=6、entry=3 的废路），
+     * 1000 tick 后路线重算，W34N55(3,17) 那条的对角线正好穿过它，于是这格
+     * 从「废路」变成了「路点」，工地就立在单行道上了。
+     */
+    edgeLinkPosStale(spawnRoom, sc, x, y) {
+        if (sc.edgeLink) return false;                                   // 建好了就不搬
+        let since = Number(sc.edgeLinkPosTick) || 0;
+        let newer = false;
+        for (let roomName in Memory.rooms) {
+            if (newer) break;
+            if (roomName == spawnRoom.name) continue;
+            let stations = Memory.rooms[roomName][pro.stationName];
+            if (!stations) continue;
+            _.values(stations).forEach(data => {
+                if (newer || !data || !data.roadPathStr) return;
+                let sep = data.roadPathStr.indexOf(";");
+                if (sep < 0) return;
+                if (data.roadPathStr.slice(0, sep).split(",").indexOf(spawnRoom.name) < 0) return;
+                if ((data.roadPathTick || 0) > since) newer = true;
+            });
+        }
+        if (!newer) return false;
+        let union = pro.outerRouteUnion(spawnRoom);
+        return !!union && union.routeIdx[x + ":" + y] != undefined;
+    },
+    /**
+     * 拆掉**不属于当前记录位置**的 link 工地。
+     *
+     * 蓝图里的 link 由规划器负责（`structMap.link`），所以只有「蓝图之外」的 link
+     * 工地需要在这里管 —— 那种工地**只可能**由 ensureOuterEdgeLink 自己创建。
+     * 位置记录一旦挪走（拆废路与立工地跨了两个 tick、路线重算导致重选），旧工地
+     * 就会留在原地变成一颗钉子：它占着一个 link 名额，而且如果那格正好在路线上，
+     * 那格的路就永远铺不了（placeOuterRoadSites 见到任何工地都跳过）→
+     * outerRoadComplete 永远为假 → 修路爬一直补员。
+     *
+     * 实测 W33N55 (2,22)：位置记录已经挪到 (5,22)，(2,22) 上却还杵着一个
+     * 0/5000 的 link 工地，而那格正好是 route 2d16 的路点 —— 那一段路一直没有
+     * road（用户 10-04 报「为什么没有 road」时看到的就是这一类钉子）。
+     *
+     * @param keepPos 当前记录位置 "x:y"；为空时本函数不动手（宁可漏删不可误删）
+     */
+    pruneStaleEdgeLinkSites(spawnRoom, keepPos) {
+        if (!keepPos || !spawnRoom || !spawnRoom.memory || !spawnRoom.memory.structMap) return;
+        let planned = {};
+        pro.structMapPositions(spawnRoom.memory.structMap[STRUCTURE_LINK])
+            .forEach(p => planned[p.x + ":" + p.y] = true);
+        spawnRoom.find(FIND_MY_CONSTRUCTION_SITES)
+            .filter(s => s.structureType == STRUCTURE_LINK)
+            .filter(s => !planned[s.pos.x + ":" + s.pos.y])
+            .filter(s => (s.pos.x + ":" + s.pos.y) != keepPos)
+            .forEach(s => s.remove());
+    },
+    /**
+     * 边缘 link 的选址与工地（幂等；只在外矿生产 pass 里调用）。
+     *
+     * 选址规则：
+     *   1. 在主房内（外矿路线在主房的那一段）
+     *   2. 与路线相邻（切比雪夫 ≤1）—— 一个 link 服务以本房为主房的全部矿点，
+     *      所以**覆盖的路线数越多越好**；只贴某一条会漏掉其它矿点的搬运爬。
+     *      （这是排序里的第一关键字，不是硬过滤：覆盖 5/6 但更靠入口，
+     *       通常比覆盖 6/6 但更远更值。）
+     *   3. 空白地，或者一格**废路**（不在蓝图里的 road）—— 废路优先：拆掉它
+     *      比占一块干净空地好，位置往往更靠入口，而且这格路本来也没人在维护。
+     *      有其它建筑 / 有工地 / 是蓝图规划的路 → 让开。
+     *   4. **不能压在路点上**：link 不像 road/container 那样能踩上去（见
+     *      outerRoadStructureWalkable），压上去等于把外矿单行道堵死；贴在旁边时
+     *      搬运爬在路上经过就是 range 1，transfer 照常成立
+     *
+     * 建好之前返回工地对象。建工地的活不需要专门派爬：工地一出现在主房，
+     * strategy_highLevel 就会补 worker，idle 的 worker 走
+     * StationWork.generatorBuildTask（挑最近的工地），主房里通常就这一个工地。
+     *
+     * ⚠️ 位置只选一次，但**不是永久有效**：外矿路线每 OUTER_ROAD_PATH_TTL tick
+     * 重算一次，重算后旧位置可能已经压到路线上。这种情况必须作废重选，
+     * 判据与实现见 edgeLinkPosStale。
+     */
+    ensureOuterEdgeLink(spawnRoom) {
+        if (!spawnRoom || !spawnRoom.my || !spawnRoom.controller) return undefined;
+        if (Memory.marketSettings && Memory.marketSettings.edgeLink === false) return undefined;
+        if (spawnRoom.level < 5) return undefined;                       // link 要 RCL5
+        if (pro.outerEdgeLink(spawnRoom)) return undefined;              // 已经有 link
+        let sc = spawnRoom.memory[StationCarry.stationName]
+            || (spawnRoom.memory[StationCarry.stationName] = {});
+        // 先把**不属于当前记录位置**的 link 工地清掉（见 pruneStaleEdgeLinkSites）。
+        // 放在最前面是因为它必须在任何 return 之前执行：残留工地占着 link 名额、
+        // 又钉在路线格上，不先拆掉的话后面每条分支都会提前 return 走掉。
+        HelperError.catchError(() => pro.pruneStaleEdgeLinkSites(spawnRoom, sc.edgeLinkPos),
+            "pruneEdgeLinkSites:" + spawnRoom.name);
+        // 先把**已记录的位置**处理掉，再算 link 名额 —— 顺序不能反：
+        // 一个已经失效的旧工地本身就占着名额，先判名额会让它永远清不掉。
+        if (sc.edgeLinkPos) {
+            let xy = sc.edgeLinkPos.split(":");
+            let x = parseInt(xy[0], 10), y = parseInt(xy[1], 10);
+            let structures = spawnRoom.lookForAt(LOOK_STRUCTURES, x, y);
+            let link = structures.find(s => s.structureType == STRUCTURE_LINK);
+            if (link) { sc.edgeLink = link.id; return undefined; }
+            let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).find(s => s.structureType == STRUCTURE_LINK);
+            // 「选过一次就不再重算」有个前提：**外矿路线没变过**。路线缓存最多
+            // 1000 tick 就重算一次（见 getOuterRoadPath），重算后原本空着的格子
+            // 完全可能已经被某条路线穿过 —— 而 link 不是 road、爬走不上去，
+            // 压在路线上就是把外矿单行道堵死。这时位置必须作废重选。
+            if (pro.edgeLinkPosStale(spawnRoom, sc, x, y)) {
+                if (site) site.remove();    // 旧工地拆掉，别白占一个 link 名额
+                delete sc.edgeLinkPos;
+                delete sc.edgeLinkSite;
+                delete sc.edgeLinkPosTick;
+            } else {
+                if (site) { sc.edgeLinkSite = site.id; return site; }
+                // 位置空着：通常是上一 tick 刚把那格冗余 road 拆掉 —— 直接在这儿立工地，
+                // **不要重选**（road 一消失，排序里的「优先回收废路」就不再成立，
+                // 会漂到旁边别的格子上去）。
+                if (!structures.length && spawnRoom.createConstructionSite(x, y, STRUCTURE_LINK) == OK) {
+                    let fresh = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y)
+                        .find(s => s.structureType == STRUCTURE_LINK);
+                    if (fresh) sc.edgeLinkSite = fresh.id;
+                    return fresh;
+                }
+                delete sc.edgeLinkPos;      // 被别的东西占了 / 立不起来 → 重新选
+                delete sc.edgeLinkSite;
+                delete sc.edgeLinkPosTick;
+            }
+        }
+        let cap = CONTROLLER_STRUCTURES[STRUCTURE_LINK][spawnRoom.level] || 0;
+        let used = spawnRoom.link.length + spawnRoom.find(FIND_MY_CONSTRUCTION_SITES)
+            .filter(s => s.structureType == STRUCTURE_LINK).length;
+        if (used >= cap) return undefined;
+        let union = pro.outerRouteUnion(spawnRoom);
+        if (!union) return undefined;
+        let routeIdx = union.routeIdx, routeSets = union.routeSets;
         // 蓝图里的路/容器是规划器在维护的，不能占（见 blueprintWalkableSet）
         let planned = pro.blueprintWalkableSet(spawnRoom);
         let terrain = new Room.Terrain(spawnRoom.name);
@@ -2499,12 +2692,14 @@ let pro = {
             if (pick.road) {
                 if (pick.road.destroy() == OK) {
                     sc.edgeLinkPos = pick.x + ":" + pick.y;
+                    sc.edgeLinkPosTick = Game.time;      // 见 edgeLinkPosStale
                     return undefined;
                 }
                 continue;                    // 拆不掉（不该发生）→ 换下一个候选
             }
             if (spawnRoom.createConstructionSite(pick.x, pick.y, STRUCTURE_LINK) != OK) continue;
             sc.edgeLinkPos = pick.x + ":" + pick.y;
+            sc.edgeLinkPosTick = Game.time;              // 见 edgeLinkPosStale
             let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, pick.x, pick.y)
                 .find(s => s.structureType == STRUCTURE_LINK);
             if (site) sc.edgeLinkSite = site.id;
@@ -2807,31 +3002,27 @@ let pro = {
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, role, tasks);
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
-        // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
-        // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）
-        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) return null;
-        // 外矿搬运爬**全局硬上限**（跨所有矿点统计，Memory.marketSettings.outerCarrierMax
-        // 可调，缺省 6）：每只 50 部件 = 1650 容量，往返 ~150 tick ≈ 11 能量/tick，
-        // 一个 20/tick 的源 2 只就够，三个矿点 6 只封顶。需求公式里 pathTime 一旦
-        // 被拥堵抬高就会正反馈多派（10-03 实测涨到 16 只），CPU 与 bucket 双输，
-        // 这里一刀切住。短缺靠 50 部件的单体运力兜，不再靠数量。
-        let roomCarriers = spawnRoom.creeps("outerHarvestEnergyCarrier", false);
-        // 容量 1700/只（2:1 间隔排列），上限同步放宽到 8
-        let carrierMax = Number(Memory.marketSettings && Memory.marketSettings.outerCarrierMax) || 8;
-        if (roomCarriers.length >= carrierMax) return null;
-        // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
-        // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
-        // 主房 spawn 常年是忙的（spawnFailure 常真），把路线维护挡在后面等于
-        // 让路线长时间缺失（W34N55 实测三个矿点的 roadPathStr 同时为空）。
-        let harRoom = Game.rooms[roomName.name || roomName]
+        let targetName = roomName.name || roomName;
+        let harRoom = Game.rooms[targetName];
         if (!harRoom) return;
-        let sm = harRoom.memory[pro.stationName]
-        _.values(sm).forEach(data => {
-            let pathTime = data["pathTime"];
-            let container = Game.getObjectById(data["container"]);
-            // 路线只在外矿（跨房）才用得上：主房自己的 keeper/carrier 不走这条缓存，
-            // 所以主房不做寻路维护，省掉无意义的 PathFinder 开销。
-            if (roomName != spawnRoom.name) {
+        let sm = harRoom.memory[pro.stationName];
+        // ── 维护（路线缓存 / 路上工地 / 主房边缘 link）必须先于任何「补员闸」──
+        //
+        // 这一段原来写在下面的补员循环里，被上面 `outerMineStarvesSpawnRoom` 与
+        // `roomCarriers.length >= carrierMax` 两个早返回一起挡掉了。实测后果：
+        // carrier 数一到上限 8 就**整条外矿路的维护全停** ——
+        //   · 路线换道后新路面永远没有工地（用户 10-04 报的 W34N55 (34,29) 没有
+        //     road 就是这个窗口：route 2d16 在 83403755 换道经过 (34,29)，可那
+        //     之后 carrier 数已到 8，placeOuterRoadSites 一次都没再跑）；
+        //   · 旧路面衰减到 0 也没人补（outerRoadComplete 现在按血量判，见
+        //     OUTER_ROAD_KEEP_HITS，但判定再准也没用 —— 修路爬同样生不出来）；
+        //   · 主房边缘 link 的工地卡在半路：W33N55 的 (2,22) 旧工地留在路线上、
+        //     而 (5,22) 的新工地一直没立起来。
+        // 维护是幂等且便宜的（每个矿点最多 100 tick 一次），和出不出兵无关，
+        // 所以放在早返回之前。路线只在外矿（跨房）才用得上：主房自己的
+        // keeper/carrier 不走这条缓存，所以主房不做寻路维护。
+        if (targetName != spawnRoom.name) {
+            _.values(sm).forEach(data => {
                 // 预先计算并缓存固定修路路径（一次性寻路，避免多个修路爬各走各的路线）
                 pro.ensureOuterRoadPath(data, spawnRoom);
                 pro.placeOuterRoadSites(data, spawnRoom);
@@ -2848,7 +3039,29 @@ let pro = {
                 (data["carryCreeps"] || []).map(e => Game.getObjectById(e))
                     .filter(e => e && (!e.memory.tasks || !e.memory.tasks.length))
                     .forEach(e => { e.memory.tasks = pro.generatorOuterHarCarryTask(data); });
-            }
+            });
+        }
+        // ─────────────── 以下才是补员，可以被能量 / 上限 / spawn 挡住 ───────────────
+        // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
+        // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）
+        if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) return null;
+        // 外矿搬运爬**全局硬上限**（跨所有矿点统计，Memory.marketSettings.outerCarrierMax
+        // 可调，缺省 8）：每只 50 部件 = 1650 容量，往返 ~150 tick ≈ 11 能量/tick，
+        // 一个 20/tick 的源 2 只就够，三个矿点 6 只封顶。需求公式里 pathTime 一旦
+        // 被拥堵抬高就会正反馈多派（10-03 实测涨到 16 只），CPU 与 bucket 双输，
+        // 这里一刀切住。短缺靠 50 部件的单体运力兜，不再靠数量。
+        let roomCarriers = spawnRoom.creeps("outerHarvestEnergyCarrier", false);
+        // 容量 1700/只（2:1 间隔排列），上限同步放宽到 8
+        let carrierMax = Number(Memory.marketSettings && Memory.marketSettings.outerCarrierMax) || 8;
+        if (roomCarriers.length >= carrierMax) return null;
+        // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
+        // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
+        // 主房 spawn 常年是忙的（spawnFailure 常真），把路线维护挡在后面等于
+        // 让路线长时间缺失（W34N55 实测三个矿点的 roadPathStr 同时为空）。
+        // （路线维护已经挪到上面的早返回之前，这里只保留补员。）
+        _.values(sm).forEach(data => {
+            let pathTime = data["pathTime"];
+            let container = Game.getObjectById(data["container"]);
             // 补员才需要空闲 Spawn：单 Spawn 房若先尝试本地补员，spawnFailure
             // 不能阻止已有外矿 carrier 修正其过期路径。
             if (spawnRoom.spawnFailure) return;
@@ -3055,6 +3268,9 @@ let pro = {
      *
      * 这个数同时给「派兵」和「满员闸」用：编制不满 → 该矿只守不产，keeper
      * 先被打掉、防守到位后才放矿工进去。没有视野时退回基线（不凭想象加派）。
+     *
+     * 例外：房里出现 ≥2 只 Invader 爬（远程风筝小队）时编制固定 **1** —— 那时
+     * 防守爬会换 T3 远程体型，一只就够（见下面 invader 分支的说明）。
      */
     outerDefenseQuota(room) {
         // 基线可用 Memory.marketSettings.outerDefenseBase 覆盖（缺省 2）：
@@ -3067,8 +3283,19 @@ let pro = {
             || OUTER_DEFENSE_TARGET_CNT;
         base = Math.max(1, Math.min(4, base));
         if (!room) return base;
-        let keepers = room.find(FIND_HOSTILE_CREEPS)
-            .filter(c => c.owner && c.owner.username == "Source Keeper").length;
+        let hostiles = room.find(FIND_HOSTILE_CREEPS);
+        // invader **远程风筝小队**（≥2 只 Invader 爬）：防守爬这时会换成 T3 远程
+        // 体型（getOuterHarDefenseBodyConfig 的 squadBody）—— 一只就是 880 dps +
+        // 288 奶 + TOUGH 的 XGHO2 减伤，对小队是碾压；第二只只是把同一套化合物
+        // 再烧一遍（30 部件 × 30 单位 ≈ 900 单位 T3，市价百万信用点以上）。
+        // 用户 10-04 指示：一只就够，不要随意浪费 T3。
+        //
+        // 必须写在**编制**里而不是 trySpawnOuterDefenser 里：这个数同时喂给
+        // strategy_outerHarvest.outerDefendersFull 的「满员闸」。只在派兵侧夹 1，
+        // 闸门仍按 2 判满，外矿生产会被永久锁死（allDefendersFull 那次的教训）。
+        let invaders = hostiles.filter(c => c.owner && c.owner.username == "Invader");
+        if (invaders.length >= 2) return 1;
+        let keepers = hostiles.filter(c => c.owner && c.owner.username == "Source Keeper").length;
         return Math.max(base, Math.min(4, keepers));
     },
     /**

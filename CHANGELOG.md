@@ -1,3 +1,205 @@
+## v0.78.58 — Outer haulers collect the container-tile pile, fill up, and the road never goes bare
+
+Four live reports from W33N55 / W34N55 / W35N55, plus the T3 spend on an invader squad.
+
+### 1. The energy that falls on the container tile was invisible
+
+`harvestEnergyOuterKeeper` parks a keeper **on** the container and harvests the source next
+to it. The engine's `harvest` puts the yield into the creep's store and drops the excess
+(`engine/src/processor/intents/creeps/harvest.js`) - and when the creep is standing on a
+container that container takes it first, so the overflow only hits the ground once the
+container is **full**. Live, right now:
+
+```
+W35N55 (36,40)  container 2000/2000  ground 6261
+W35N55 ( 5,16)  container 1130/2000  ground 4758
+W35N55 (42,11)  container 2000/2000  ground  719
+W34N55 (42,15)  ground 1605   (mineral container still a site)
+```
+
+The carrier could not see any of it: the pickup branch used `this.pos.lookFor(LOOK_ENERGY)`,
+i.e. **its own tile only**, and the keeper permanently occupies the container tile, so the
+carrier is always one tile away. The drop pile grew while the lane's throughput was already
+short.
+
+- `outerCarryNearbyDrop(creep)` looks in **range 1** (the engine's `pickup` accepts
+  `|dx| <= 1 && |dy| <= 1` - verified in `engine/.../creeps/pickup.js`), picks the biggest
+  stack, and runs every tick while the carrier has free capacity. Same order as Overmind's
+  hauler (`src/overlords/situational/hauler.ts`: "Pick up drops first", then withdraw).
+- The route sweep now also runs every tick (was `ticksToLive % 4`) and its threshold went
+  from 50 to 500 (`OUTER_CARRY_DROP_PICK`): a big pile is worth a detour, a small one is
+  not. Sub-500 piles next to the container are still taken unconditionally.
+
+### 2. "1700 capacity, only 1300 delivered"
+
+Departure only required **half** a load, and a single `withdraw` can only take what the
+container holds at that instant - so "the container had 1300" became "this trip carries
+1300". The fixed cost of a trip (150+ ticks of travel plus the home-room unload) is
+identical either way; the missing 400 is pure loss, and the mine's 13.3-20 energy/tick
+keeps arriving while the carrier waits, so waiting is always the better trade.
+
+- The carrier now stays until its store is **full**. Two bounded escapes keep it from ever
+  wedging: with the mine still producing (container has energy, or a keeper is alive) the
+  wait caps at `OUTER_CARRY_FILL_WAIT` (150 - more than the ~85-128 ticks needed to fill
+  1700 from empty); with the mine genuinely dry (no keeper, empty container) it caps at the
+  existing `OUTER_CARRY_DRY_WAIT` (60).
+
+### 3. Towers did not heal creeps that came home injured from the outer mines
+
+v0.78.38 gated the injured-creep scan on "this room has seen a hostile within 400 ticks".
+That premise is wrong: **every outer fight happens in the outer room**, so the home room's
+`lastHostileTimeMap` is never armed and a keeper / defender / hauler limping home was never
+healed (the commit's "a creep that limps home after remote combat still gets healed" claim
+did not hold).
+
+- `ManagerCreeps.init` already walks every `Game.creeps` each tick; it now also records
+  `Game._injuredRoomTick[roomName] = Game.time` when one of our creeps is below full hits
+  and we can see its room. One `hits` comparison, and the signal is independent of where
+  the damage came from.
+- `StationTower.exec` scans when that mark is set for its room, in addition to the existing
+  400-tick hostile window. A peaceful room with nobody hurt still does **zero** room-wide
+  finds, so the CPU win from v0.78.38 is preserved.
+
+### 4. Two identical T3-boosted defenders for one invader squad
+
+Live: W35N55 ran `shard3_83402855_1` and `shard3_83402885_2` - the same 50-part
+`{TOUGH:2, RANGED_ATTACK:22, HEAL:6, MOVE:20}` squad body, 30 boosted parts each
+(~900 units of T3 compounds per creep). `getOuterHarDefenseBodyConfig` swaps to that T3
+body for an invader **kiting squad** (>= 2 Invader creeps), where one creep already does
+880 dps + 288 heal behind XGHO2; the second was only a second copy of the same compound
+bill. It was spawned because `outerDefenseQuota` returned the baseline 2.
+
+- `outerDefenseQuota(room)` now returns **1** when >= 2 Invader creeps are visible. It is
+  the quota (not the spawn call) that has to carry the rule: the same number feeds
+  `StrategyOuterHarvest.outerDefendersFull`, so capping only at the spawn site would leave
+  the production gate waiting for a second defender that is never sent.
+
+### 5. Why a route tile can show up with no road at all
+
+Reported as "W34N55 (34,29) has no road". At check time it *does* - a road at 4800/5000
+hits, the newest tile on the corridor (its neighbours on the same trunk sit at 2100-2600).
+Two independent defects could leave it (or any route tile) bare, and both are fixed.
+
+**5a. Outer-road maintenance was sitting behind the carrier spawn gate.** The route
+recompute, `placeOuterRoadSites`, `cleanupOuterRoadSites` and `ensureOuterEdgeLink` all
+live inside `trySpawnOuterHarCarrier`'s per-station loop - *after* two early returns
+(`outerMineStarvesSpawnRoom` and `roomCarriers.length >= outerCarrierMax`). So the moment
+the carrier count reached its cap of 8, **every** piece of outer-road maintenance stopped:
+
+    live: 10 carriers in W33N55           -> maintenance block never reached
+    route W34N55 src(32,32) recomputed at 83403755 -> (34,29) becomes a waypoint
+    ... but placeOuterRoadSites never ran again, so no site was ever placed there
+
+That is exactly the "no road on a route tile" window - the route had moved onto the tile
+and nothing was filling it in. The same stall explains the pile-up of decayed roads (min
+hits 1000-2600 across five of six routes) and the half-finished edge-link site: at
+tick 83404325 the stale site at W33N55 (2,22) was removed and (5,22) selected (its junk
+road destroyed), but the room's carrier count crossed 8 in the same stretch, so the
+follow-up `createConstructionSite(5,22)` never ran.
+
+- The maintenance loop now runs **unconditionally** (vision aside), before the starve and
+  cap gates; only the *spawn* work is gated. Maintenance is idempotent and cheap (each
+  station is throttled to one pass per 100 ticks), so this costs almost nothing and can
+  never be blocked by "we have enough haulers".
+
+**5b. `outerRoadComplete` only asked whether a road exists.** After the initial build
+nothing repaired the surface: it decayed 1 hit/tick until the tile reached zero, and only
+then did the completeness check fail, spawn WORK carriers and place a site. Rebuilding a
+tile from zero costs 5000 progress where repairing it back from 50% costs ~250 energy
+(`REPAIR_COST = 0.1`).
+
+- `outerRoadComplete` now treats a road below `OUTER_ROAD_KEEP_HITS` (50%, i.e. 2500 hits,
+  ~2500 ticks of headroom) as incomplete, so the existing keep-building loop tops it up
+  long before it can disappear.
+
+**5c. An orphaned edge-link site was pinned to a route tile.** Live, W33N55 had a link
+site at (2,22) while the recorded position was already (5,22) - the `site.remove()` and the
+re-selection were split across two ticks by the cap stall above, leaving the old site
+behind. `placeOuterRoadSites` skips any tile that already carries a site, so the road at
+(2,22) could never be built, `outerRoadComplete` stayed false forever and builders would
+have been topped up forever to work on a tile that can never be filled.
+
+- `pruneStaleEdgeLinkSites(room, keepPos)` removes link construction sites that are
+  neither in the room's blueprint (`structMap.link`) nor at the recorded edge-link
+  position. A non-blueprint link site can only have been created by
+  `ensureOuterEdgeLink`, so this cannot touch the planner's work; it no-ops entirely when
+  no position is recorded (better to miss one than to delete a good site).
+
+### Tests
+
+`test/edge-link.test.cjs` +8 carrier cases (pile on the container tile is picked at range 1;
+a 120 stack is not chased; 1300/1700 with a live mine must not leave; full leaves at once;
+dry mine leaves only after the bounded wait; keeper-alive-but-empty keeps waiting a little
+longer), a road-health case (5000 and 2500 pass, 2499 fails, no road fails), a
+maintenance-decoupling case (with 9 carriers and a starving spawn room, `ensureOuterRoadPath`
+/ `placeOuterRoadSites` / `cleanupOuterRoadSites` / `ensureOuterEdgeLink` must all still run
+while nothing is spawned) and a prune case (orphan removed, recorded site kept, blueprint
+site untouched).
+`test/recent-regressions.test.cjs` +3 tower cases: injured with the new room mark heals,
+the 400-tick hostile window still heals, and a quiet room with nobody hurt does not scan.
+`test/edge-link.test.cjs` also asserts the invader-squad quota is 1 (2 and 5 Invader creeps)
+while 1 Invader and keeper rooms keep the old numbers, and that a squad room with one
+defender already in service spawns nothing further.
+
+## v0.78.57 — The edge link is re-checked when the outer routes are recomputed
+
+Live symptom: the W33N55 edge link site sat at 0/5000 on **(4,22)** - a tile that, by the
+time anybody looked, was **on** an outer route. A link is not walkable, so that site was
+going to be a plug in the middle of the outer lane.
+
+### Root cause
+
+The placement was correct when it was chosen (v0.78.53): (4,22) was a junk road, covered all
+six routes and was not on any of them. But the route cache is rebuilt **at most every 1000
+ticks** (`OUTER_ROAD_PATH_TTL`, `ensureOuterRoadPath`), and a recomputed route may run
+anywhere - nothing was re-checking the recorded position afterwards. `sc.edgeLinkPos` was
+trusted forever.
+
+The routes did change. Live, after the recompute:
+
+    route W34N55 src(3,17)   (0,18) (1,19) (2,20) (3,21) (4,22) (5,23) ...   <- runs through (4,22)
+    route W34N55 src(32,32)  (0,25) (1,24) (2,23) (3,23) (4,23) ...          <- east along y=23
+    route W34N55 src(10,33)  (0,24) (1,23) (2,23) (3,23) ...
+    route W35N55 src(41,10)  (0,19) (1,20) (2,21) (3,22) ...
+    route W35N55 src(4,15)   (0,18) (1,19) (2,20) (3,21) ...
+    route W35N55 src(37,41)  (0,18) (1,19) (2,20) (3,21) ...
+
+and the live candidate table is now led by the tile the user asked for:
+
+    (2,22) cover=6 entry=1 ROAD(junk)     <- best: every route passes within range 1, closest to the gate
+    (5,22) cover=6 entry=4 ROAD(junk)
+    (6,22) cover=6 entry=5 free
+
+So the fix is not "write 2:22 into Memory" - the selection code was right, the *record* had
+gone stale, and the same thing would happen again ~1000 ticks later.
+
+### Fixed
+
+- **`outerRouteUnion(spawnRoom)`** (extracted from the selection loop): the union of the
+  home-room leg of every route this room is the home of, plus the earliest index per tile.
+  Cheaper than before - a raw-string room-list prefilter skips the ~30 stations of the rest
+  of the empire before any coordinate is decoded.
+- **`edgeLinkPosStale(spawnRoom, sc, x, y)`**: a recorded-but-not-yet-built position is
+  re-validated, and only under two conditions - the link is not built yet, and at least one
+  relevant route has `roadPathTick` newer than `edgeLinkPosTick`. Without those the verdict
+  is `false` and nothing is decoded, so "select once" is preserved (that rule exists so the
+  wrapper does not drift to a neighbouring tile once the junk road is gone).
+- When it *is* stale: the old site is removed (it was holding a link slot), the record is
+  cleared, and the next selection runs on the current routes. The site moves on its own.
+- The link-slot check now runs **after** the recorded-position block. A stale site counted
+  towards the cap, so on a room at the link limit the check would return early and the site
+  could never be cleared.
+- `used >= cap` / route decoding are unchanged; the stamp `edgeLinkPosTick` is written at
+  selection time.
+
+### Tests
+
+`test/edge-link.test.cjs` +3 cases (plus a tick-stamp assertion on the existing placement
+test). The negative control is the interesting pair: the same
+fixture with `edgeLinkPosTick = 99990` and `roadPathTick = 99999` must reselect, while
+`edgeLinkPosTick = 99999` (route not recomputed since) must keep the site. A third case
+checks a route whose room list does not contain the home room is skipped by the prefilter.
+
 ## v0.78.56 — Outer carriers pick up again (a partial load used to wedge them)
 
 Live: three carriers parked next to the W34N55 container with 10-20 energy in a 1600-1700

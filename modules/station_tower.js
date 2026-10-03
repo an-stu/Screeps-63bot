@@ -70,16 +70,22 @@ let pro={
             if(hostiles.length){
                 pro.lastHostileTimeMap[room.name] = Game.time;
             }
-            // 只在「本房最近出现过敌人」时才扫描受伤的己方 creep。
+            // 只在「本房有受伤的己方 creep」时才扫描。
             //
-            // 依据：房间内的结构/塔都无法跨房攻击，所以本房 creep 受伤必定意味着
-            // 本房当时有敌人。和平房里这两次带 filter 的全房 find
-            // （FIND_MY_CREEPS + FIND_MY_POWER_CREEPS，每次都要新建 options 对象和
-            // 闭包）纯粹是浪费，而它们是扫描 tick 的主要开销。
+            // 依据：房间内的结构/塔都无法跨房攻击，塔也只能奶**本房**的爬 ——
+            // 所以「本房有没有受伤的爬」才是真正的判据。
             //
-            // 保留 400 tick 的窗口：任何一次敌情出现都会重新武装一段时间的治疗，
-            // 远程战斗后带伤回城的 creep 仍能被塔奶到。
-            if(!hostiles.length && (pro.lastHostileTimeMap[room.name]||0) + PEACEFUL_HEAL_WINDOW > Game.time){
+            // 0.78.38 用的是「本房最近 400 tick 内见过敌人」，那个判据是错的：
+            // 外矿战斗全部发生在**外矿房**，主房的 lastHostileTimeMap 永远不会
+            // 被打上，于是带伤从外矿回城的 keeper / 防守爬 / 搬运爬一只都奶不到
+            //（用户 10-04 报告）。现在改用 ManagerCreeps.init 每 tick 在遍历
+            // Game.creeps 时顺手打好的 **Game._injuredRoomTick[房名]**：只有
+            // 房里真的站着受伤的爬时才做这两次带 filter 的全房 find，和平房
+            // 依旧一次都不扫（省 CPU 的初衷不变），而且对伤害来源完全免疫。
+            let injuredMark = Game._injuredRoomTick && Game._injuredRoomTick[room.name];
+            if(!hostiles.length
+                && (injuredMark == Game.time
+                    || (pro.lastHostileTimeMap[room.name]||0) + PEACEFUL_HEAL_WINDOW > Game.time)){
                 let damaged = room.find(FIND_MY_CREEPS, {filter:e=>e.hits < e.hitsMax})
                     .concat(room.find(FIND_MY_POWER_CREEPS, {filter:e=>e.hits < e.hitsMax}));
                 injured = damaged.minBy(e=>e.hits/e.hitsMax);

@@ -223,7 +223,10 @@ function edgeLinkFixture({ links = [], sites = [], roads = [], level = 8 } = {})
         find(type) { return type === CONSTANTS.FIND_MY_CONSTRUCTION_SITES ? sites : []; },
         createConstructionSite(x, y, type) {
             created.push({ x, y, type });
-            const site = { id: "site" + created.length, structureType: type, pos: { x, y, roomName: "W33N55" } };
+            const site = {
+                id: "site" + created.length, structureType: type, pos: { x, y, roomName: "W33N55" },
+                remove() { const i = sites.indexOf(this); if (i >= 0) sites.splice(i, 1); this.removed = true; },
+            };
             sites.push(site);
             return CONSTANTS.OK;
         },
@@ -247,6 +250,88 @@ function edgeLinkFixture({ links = [], sites = [], roads = [], level = 8 } = {})
     assert.ok(adjacent, "link 必须贴着共用路段（搬运爬路过时 range 1 才卸得了）");
     assert.equal(picked.x, 1, "要放在离入口最近的那一段旁边");
     assert.equal(s.spawnRoom.memory.stationCarry.edgeLinkPos, picked.x + ":" + picked.y, "位置要记进 memory");
+    assert.ok(s.spawnRoom.memory.stationCarry.edgeLinkPosTick >= 100000,
+        "选址时要盖 tick 戳，否则路线重算后没法判断记录是否过期");
+}
+
+{
+    // 路线重算后旧位置**压到了路线上** → 旧工地拆掉、位置作废、重新选。
+    // 现场取自线上 W33N55 (4,22)：选址时是废路，1000 tick 后 W34N55(3,17)
+    // 那条路线的对角线穿过它，于是这格变成路点 —— 而 link 不可行走，
+    // 立在单行道上就是把外矿通道堵死。
+    const roads = [];
+    const sites = [];
+    const s = edgeLinkFixture({ roads, sites });
+    const stale = {
+        id: "site-stale", structureType: CONSTANTS.STRUCTURE_LINK,
+        pos: { x: 2, y: 23, roomName: "W33N55" },       // 2:23 正是 TRUNK 的一段
+        remove() { const i = sites.indexOf(this); if (i >= 0) sites.splice(i, 1); this.removed = true; },
+    };
+    sites.push(stale);
+    s.spawnRoom.memory.stationCarry = {
+        edgeLinkPos: "2:23", edgeLinkSite: "site-stale", edgeLinkPosTick: 99990,
+    };
+    // 两条路线的 roadPathTick = 99999 > 99990 → 选址之后路线重算过
+    const result = s.ctx.StationSources.ensureOuterEdgeLink(s.spawnRoom);
+    assert.ok(stale.removed, "压在路线上的旧工地必须拆掉");
+    assert.ok(!sites.includes(stale), "旧工地要从房间的结构表里消失");
+    assert.notEqual(s.spawnRoom.memory.stationCarry.edgeLinkPos, "2:23", "失效的位置必须作废重选");
+    assert.ok(s.created.length >= 1, "拆掉旧工地后要在新位置立工地");
+    assert.ok(result && result.structureType === CONSTANTS.STRUCTURE_LINK, "重选后返回新工地");
+    const trunkSet = {};
+    TRUNK.forEach(([x, y]) => trunkSet[x + ":" + y] = true);
+    const picked = s.created[0];
+    assert.ok(!trunkSet[picked.x + ":" + picked.y], "重选后仍然不能压在路点上");
+    const adjacent = TRUNK.some(([x, y]) => Math.max(Math.abs(x - picked.x), Math.abs(y - picked.y)) <= 1);
+    assert.ok(adjacent, "重选后仍然要贴着路线");
+}
+
+{
+    // 负对照：路线**没有**在选址之后重算过（roadPathTick ≤ edgeLinkPosTick）
+    // → 即便那格现在在路线上（说明它一直就在，那就不该被选中），也必须继续
+    // 信任记录的位置。少了这道闸，每 tick 都会重算一次排序并漂到别的格子去。
+    const sites = [];
+    const s = edgeLinkFixture({ sites });
+    const keep = {
+        id: "site-keep", structureType: CONSTANTS.STRUCTURE_LINK,
+        pos: { x: 2, y: 23, roomName: "W33N55" },
+        remove() { const i = sites.indexOf(this); if (i >= 0) sites.splice(i, 1); this.removed = true; },
+    };
+    sites.push(keep);
+    s.spawnRoom.memory.stationCarry = {
+        edgeLinkPos: "2:23", edgeLinkSite: "site-keep", edgeLinkPosTick: 99999,
+    };
+    const result = s.ctx.StationSources.ensureOuterEdgeLink(s.spawnRoom);
+    assert.equal(result, keep, "路线没重算过就必须信任记录的位置，不许重选");
+    assert.ok(!keep.removed, "不许拆掉仍然有效的工地");
+    assert.equal(s.created.length, 0, "不许立新工地");
+    assert.equal(s.spawnRoom.memory.stationCarry.edgeLinkPos, "2:23");
+}
+
+{
+    // 预筛负对照：序列化字符串里的房间清单**不含本房**的站点，既不算
+    // 「路线重算过」，也不会被解码（全号 30+ 条路线全解码太贵）。
+    const sites = [];
+    const s = edgeLinkFixture({ sites });
+    const away = [
+        { roomName: "W36N55", x: 5, y: 5 }, { roomName: "W36N55", x: 9, y: 9 },
+    ];
+    Object.keys(s.ctx.Memory.rooms.W34N55.stationSources).forEach(k => {
+        s.ctx.Memory.rooms.W34N55.stationSources[k].roadPathStr = encodePath(away);
+    });
+    const keep = {
+        id: "site-away", structureType: CONSTANTS.STRUCTURE_LINK,
+        pos: { x: 2, y: 23, roomName: "W33N55" },
+        remove() { const i = sites.indexOf(this); if (i >= 0) sites.splice(i, 1); this.removed = true; },
+    };
+    sites.push(keep);
+    s.spawnRoom.memory.stationCarry = {
+        edgeLinkPos: "2:23", edgeLinkSite: "site-away", edgeLinkPosTick: 99990,
+    };
+    const result = s.ctx.StationSources.ensureOuterEdgeLink(s.spawnRoom);
+    assert.equal(result, keep, "不经过本房的路线不该让位置作废");
+    assert.ok(!keep.removed);
+    assert.equal(s.created.length, 0);
 }
 
 {
@@ -398,7 +483,10 @@ function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBui
     const creep = {
         room: { name: "W33N55" },
         memory: {},                                  // 新逻辑会写 this.memory.carryWait
-        store: makeStore({ energy: 1250 }, 1700),
+        // 必须**装满**才会出发：容量 1700 时 1250 只是半仓以上，新规则要等满
+        //（见 harvestEnergyOuterCarry 的「装满再走」）。本用例只验证回程任务栈，
+        // 所以直接把爬设成满仓。
+        store: makeStore({ energy: 1700 }, 1700),
         pos: { isNearTo: () => true, findInRange: () => [] },
         headTask: () => task,
         lastTask: () => task,
@@ -554,6 +642,25 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerDefenseQuota(roomWith(0)), 4, "上限 4 兜住，不允许配出 9 只");
     delete ctx.Memory.marketSettings;                 // 别把开关漏给后面的派兵用例
 
+    // invader **远程风筝小队**（≥2 只 Invader 爬）：防守爬这时会换成 T3 远程体型
+    // （squadBody），一只就是 880 dps + 288 奶 + XGHO2 减伤，对小队是碾压；
+    // 第二只只是把同一套化合物再烧一遍（30 部件 × 30 单位 ≈ 900 单位 T3）。
+    // 用户 10-04 指示：一只就够，不要随意浪费 T3。实测 W35N55 白派了
+    // shard3_83402855_1 + shard3_83402885_2 两只同体型 T3 爬。
+    const invaderRoom = n => ({
+        name: "W35N55",
+        find: () => Array.from({ length: n }, () => ({ owner: { username: "Invader" } })),
+    });
+    assert.equal(S.outerDefenseQuota(invaderRoom(2)), 1,
+        "2 只 Invader 爬 → 编制 1：T3 小队一只就够（W35N55 实测白派两只）");
+    assert.equal(S.outerDefenseQuota(invaderRoom(5)), 1, "5 只 Invader 也一样，一只 T3 碾压整个小队");
+    assert.equal(S.outerDefenseQuota(invaderRoom(1)), 2,
+        "只有 1 只 Invader 时不是风筝小队（不带 T3），仍按基线 2");
+    assert.equal(S.outerDefenseQuota({
+        name: "W34N55",
+        find: () => [1, 2, 3, 4].map(i => ({ owner: { username: i == 1 ? "Invader" : "Source Keeper" } })),
+    }), 3, "1 只 Invader + 3 只 keeper 不算 T3 小队场景，按 keeper 1:1 加编");
+
     // 派兵：编制按 keeper 加编，且**已经到岗的防守爬**必须算进数量
     //（旧实现按 spawnRoom.creeps 数，到岗的那只看不见 → 每 6 tick 白派一只）
     const spawned = [];
@@ -585,6 +692,30 @@ function defenceGateFixture(defenders) {
     ctx.StationSources.trySpawnOuterDefenser("W34N55", spawnRoom, true);
     assert.equal(spawned.length, 0,
         "编制 2 只已到齐（一只在岗、一只在途）→ 不再补员（旧实现会每 6 tick 白派一只）");
+
+    // T3 风筝小队场景：已有 1 只（T3 体型）→ 编制 1 → 绝不再派第二只烧 T3
+    spawned.length = 0;
+    ctx.StationLab = {
+        boostAble: () => true,
+        generatorBoostResTask: () => [{ taskName: "boostRes" }],
+    };
+    const invaders = [1, 2].map(() => ({
+        owner: { username: "Invader" }, hits: 1000, hitsMax: 1000,
+        possibleDamage: () => 100, possibleHealDamage: () => 0,
+    }));
+    ctx.Game.rooms.W35N55 = {
+        name: "W35N55",
+        getHostileCreeps: () => invaders,
+        find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? invaders : []),
+    };
+    ctx.Memory.rooms.W35N55 = { stationSources: { s2: { id: "s2", roomName: "W35N55", x: 41, y: 10 } } };
+    ctx.Game.creeps = {
+        a: { memory: { role: "outerHarvestDefenser", hasSendSpawn: false }, ticksToLive: 1300, headTask: () => ({ roomName: "W35N55" }) },
+    };
+    ctx.Game._outerDefAssignTick = undefined;
+    ctx.StationSources.trySpawnOuterDefenser("W35N55", spawnRoom, true);
+    assert.equal(spawned.length, 0,
+        "已经是 T3 风筝小队编制（1 只）→ 不再派第二只 T3 强化爬（W35N55 实测白派了两只）");
 }
 
 // ───────── 7) 防守体型顺序：MOVE 必须在最前（输出/续航不能拿去当肉盾） ─────────
@@ -618,9 +749,9 @@ function defenceGateFixture(defenders) {
     assert.equal(computed[0], CONSTANTS.MOVE, "按敌情算出的体型同样要把 MOVE 排在第一位");
 }
 
-// ────── 8) 搬运爬「身上有零头就不取货」的死锁 + 碎货往返 ──────
+// ────── 8) 搬运爬「身上有零头就不取货」的死锁 + 碎货往返 + 装满再走 + 捡地面掉落 ──────
 {
-    function carryScene({ storeEnergy, containerEnergy, keeperAlive, wait }) {
+    function carryScene({ storeEnergy, containerEnergy, keeperAlive, wait, drops }) {
         const ctx = makeContext();
         vm.runInNewContext(read("station_sources.js"), ctx);
         const container = {
@@ -637,13 +768,23 @@ function defenceGateFixture(defenders) {
         ctx.Game.rooms = { W33N55: { name: "W33N55", storage } };
         ctx.Game.getObjectById = id => (id === "c1" ? container : id === "k1" ? keeper
             : id === "st1" ? storage : null);
+        // 地面掉落桩：忠实实现 findInRange 的 filter 语义（模块给的是
+        // `resourceType == energy && amount > 500`）
+        const groundDrops = (drops || []).map((d, i) => ({
+            id: "d" + i, resourceType: "energy", amount: d.amount,
+            pos: { x: d.x === undefined ? 32 : d.x, y: d.y === undefined ? 31 : d.y, roomName: "W34N55" },
+        }));
         const calls = [];
         const creep = {
             room: { name: "W34N55" }, memory: { carryWait: wait },
             store: makeStore({ energy: storeEnergy }, 1700),
             ticksToLive: 1000,
             pos: { x: 32, y: 31, roomName: "W34N55", isNearTo: () => true, isEqualTo: () => false,
-                   isBorder: () => false, lookFor: () => [], findInRange: () => [],
+                   isBorder: () => false, lookFor: () => [],
+                   findInRange: (type, range, opts) => {
+                       if (type !== CONSTANTS.FIND_DROPPED_RESOURCES) return [];
+                       return opts && opts.filter ? groundDrops.filter(opts.filter) : groundDrops;
+                   },
                    getRangeTo: () => 1, inRangeTo: () => true },
             headTask: () => ({ taskName: "harvestEnergyOuterCarry", id: "sA", roomName: "W34N55", x: 32, y: 32 }),
             lastTask: () => ({ taskName: "harvestEnergyOuterCarry", id: "sA", roomName: "W34N55" }),
@@ -651,7 +792,7 @@ function defenceGateFixture(defenders) {
             mainRoom: () => ctx.Game.rooms.W33N55,
             getPartCnt: () => 0, getActiveBodyparts: () => 0,
             withdraw(t, res) { calls.push(["withdraw", res]); return CONSTANTS.OK; },
-            pickup() { calls.push(["pickup"]); return CONSTANTS.OK; },
+            pickup(t) { calls.push(["pickup", t && t.amount]); return CONSTANTS.OK; },
             transfer(t, res) { calls.push(["transfer", res]); return CONSTANTS.OK; },
             moveTo() { calls.push(["moveTo"]); return CONSTANTS.OK; },
             goTo() { calls.push(["goTo"]); return CONSTANTS.OK; },
@@ -675,6 +816,123 @@ function defenceGateFixture(defenders) {
     // ③ 干涸且已等够 60 tick：带走总比空转强
     const giveUp = carryScene({ storeEnergy: 10, containerEnergy: 0, keeperAlive: false, wait: 60 });
     assert.ok(giveUp.calls.some(c => c[0] === "addTask"), "等够上限就该回主房，不能永远等着");
+
+    // ④ **装满再走**：容量 1700、手上 1300、矿区还在出货 → 不许走（原来半仓就走，
+    //    每趟固定成本一样却少运 400，实测常态化只带 1300/1700 回主房）
+    const half = carryScene({ storeEnergy: 1300, containerEnergy: 2000, keeperAlive: true, wait: 0 });
+    assert.ok(!half.calls.some(c => c[0] === "addTask"), "矿区还在出货 → 必须等装满，不能半仓就走");
+
+    // ⑤ 装满（零空位）→ 立刻走
+    const full = carryScene({ storeEnergy: 1700, containerEnergy: 2000, keeperAlive: true, wait: 0 });
+    assert.ok(full.calls.some(c => c[0] === "addTask"), "装满就走，一秒都不多等");
+
+    // ⑥ 干涸且没 keeper、已等满干涸上限 → 带着 1300 走（有界，绝不楔死）
+    const dryHalf = carryScene({ storeEnergy: 1300, containerEnergy: 0, keeperAlive: false, wait: 60 });
+    assert.ok(dryHalf.calls.some(c => c[0] === "addTask"), "真的干涸了，等满上限就带着手上的货走");
+
+    // ⑦ keeper 还活着、容器暂时空的：等（上限 150），不要半仓就跑
+    const keeperDry = carryScene({ storeEnergy: 1300, containerEnergy: 0, keeperAlive: true, wait: 0 });
+    assert.ok(!keeperDry.calls.some(c => c[0] === "addTask"), "keeper 还在出货 → 继续等它把容器灌满");
+
+    // ⑧ **容器格上的掉落能量**（keeper 溢出）必须捡：范围 1、门槛 500。
+    //    keeper 占着容器格，搬运爬只能在旁边，原来 `this.pos.lookFor` 永远看不见。
+    const pile = carryScene({ storeEnergy: 200, containerEnergy: 0, keeperAlive: true, wait: 0,
+                              drops: [{ amount: 600 }] });
+    assert.deepEqual(pile.calls.find(c => c[0] === "pickup"), ["pickup", 600],
+        "站在容器旁边就要能捡到容器格上的 600 能量堆");
+
+    // ⑨ 500 以下的小堆不专门绕路（在容器边则无条件捡，见外矿容器分支）
+    const small = carryScene({ storeEnergy: 200, containerEnergy: 0, keeperAlive: true, wait: 0,
+                               drops: [{ amount: 120 }] });
+    assert.ok(!small.calls.some(c => c[0] === "pickup"), "120 的小堆不值得占搬运爬一趟的位置");
+}
+
+// ───────── 9) 外矿路完整性：掉血到阈值以下算「没修好」，提前派修路爬 ─────────
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const path = [{ x: 10, y: 10, roomName: "W34N55" }, { x: 11, y: 10, roomName: "W34N55" }];
+    const data = { id: "sA", roomName: "W34N55", x: 10, y: 10, roadPathStr: encodePath(path) };
+    const roadRoom = hits => ({
+        name: "W34N55",
+        lookForAt: () => [{ structureType: "road", hits: hits, hitsMax: 5000 }],
+    });
+    ctx.Game.rooms = { W34N55: roadRoom(5000) };
+    assert.equal(S.outerRoadComplete(data, true), true, "满血的路 = 完成");
+    ctx.Game.rooms.W34N55 = roadRoom(2500);
+    assert.equal(S.outerRoadComplete(data, true), true, "正好 50% 仍算完成（阈值是 <）");
+    ctx.Game.rooms.W34N55 = roadRoom(2499);
+    assert.equal(S.outerRoadComplete(data, true), false,
+        "掉到 50% 以下 → 判未完成去修回来。原判据只看「有没有路」，于是路面一路衰减到 0 "
+        + "消失，那一格才是真的「没有 road」，而且从 0 重建一格要 5000 能量（修回来只要 250）");
+    ctx.Game.rooms.W34N55 = { name: "W34N55", lookForAt: () => [] };
+    assert.equal(S.outerRoadComplete(data, true), false, "完全没有路 → 未完成");
+}
+
+// ── 10) 外矿路维护不能被「补员闸」挡住（carrier 到上限 / 出兵房缺能量） ──
+//
+// 实测 W33N55：carrier 数到上限 8 之后 placeOuterRoadSites / ensureOuterEdgeLink
+// 一次都没再跑（它们和补员写在同一个循环、被早返回挡住）。现场后果：route 2d16
+// 在 83403755 换道经过 W34N55 (34,29)，新路面永远没有工地；边缘 link 的旧工地
+// (2,22) 留在路线上、新工地 (5,22) 却一直立不起来。
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const calls = [];
+    S.ensureOuterRoadPath = () => calls.push("route");
+    S.placeOuterRoadSites = () => calls.push("sites");
+    S.cleanupOuterRoadSites = () => calls.push("cleanup");
+    S.ensureOuterEdgeLink = () => calls.push("edge");
+    S.outerMineStarvesSpawnRoom = () => true;      // 能量闸也为真：维护照样得跑
+    S.outerRoadComplete = () => true;
+    let spawned = 0;
+    ctx.StationHive.trySpawn = () => { spawned++; return "c"; };
+
+    ctx.Game.rooms.W34N55 = {
+        name: "W34N55",
+        memory: { stationSources: { s1: { id: "s1", roomName: "W34N55", x: 3, y: 17, pathTime: 90, container: "c1" } } },
+    };
+    const spawnRoom = {
+        name: "W33N55", my: true, spawnFailure: true, level: 8,
+        creeps: () => new Array(9).fill({}),       // 9 只 carrier，已经超过上限 8
+        memory: {}, getEnergyCapacityAvailable: () => 12900,
+    };
+    S.trySpawnOuterHarCarrier("W34N55", spawnRoom);
+    for (const c of ["route", "sites", "cleanup", "edge"]) {
+        assert.ok(calls.includes(c), `补员被挡住时「${c}」这类外矿路维护仍必须执行`);
+    }
+    assert.equal(spawned, 0, "超过 carrier 上限 → 一只都不补（闸门本身照旧）");
+}
+
+// ── 11) 边缘 link 的残留工地必须清掉（它钉在路线格上会让那格永远没有 road） ──
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const mkSite = (x, y) => ({
+        structureType: "link", pos: { x, y, roomName: "W33N55" }, removed: false,
+        remove() { this.removed = true; },
+    });
+    const planned = mkSite(22, 33);   // 蓝图规划的 link 工地
+    const keep = mkSite(5, 22);       // 当前位置记录上的工地
+    const orphan = mkSite(2, 22);     // 位置记录挪走后留下的残留（实测 W33N55）
+    const room = {
+        name: "W33N55",
+        memory: { structMap: { link: [{ x: 22, y: 33 }] } },
+        find: () => [planned, keep, orphan],
+    };
+    S.pruneStaleEdgeLinkSites(room, "5:22");
+    assert.equal(orphan.removed, true,
+        "蓝图外、又不在记录位置上的 link 工地是残留 —— 它占着 link 名额，还让 (2,22) 那格永远铺不了路");
+    assert.equal(keep.removed, false, "位置记录上的工地必须留着（边缘 link 就靠它）");
+    assert.equal(planned.removed, false, "蓝图规划的 link 工地不许碰（那是规划器的活）");
+    // 没有记录位置时不动手：宁可漏删，不可误删
+    const orphan2 = mkSite(3, 22);
+    room.find = () => [orphan2];
+    S.pruneStaleEdgeLinkSites(room, undefined);
+    assert.equal(orphan2.removed, false, "没有位置记录时不猜、不删");
 }
 
 console.log("edge link / hauler body / defence gate checks passed");
