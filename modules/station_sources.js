@@ -825,16 +825,24 @@ Creep.prototype.outerDefense = function () {
             });
         }
         if (hostileCreeps.length) {
-            // 直接取**最近的**活体敌人。
-            //
-            // 不要「保留已有目标以求稳定」：实测 group0 的防守爬在 (6,14) 时，
-            // 因为 memory 里还留着远处的 (42,15)，它就去走 36 格，
-            // 而**旁边 2 格**就有一只 keeper 正在杀我们的矿工。
-            // 近战爬贴着打的时候距离就是 1，天然不会来回抖，贪心选最近是安全的。
-            let nearest = this.pos.findClosestByRange(hostileCreeps);
-            if (nearest && (!target || target.id != nearest.id)) {
-                target = nearest;
-                this.memory.targetId = nearest.id;
+            // 目标取舍：**优先打已经在流血的那只**（Overmind CombatTargeting 的打分
+            // `hitsMax - hits + healPotential`），但只在接战半径
+            // （OUTER_DEFENSE_ENGAGE_SPREAD）内比较 —— 无界地追残血目标会为了几十格
+            // 外的一只 keeper 走开，把正在被咬的矿工丢在原地（这是踩过的回归）。
+            // 同分（都没掉血）退回「最近」，贴身时天然不抖。
+            let wounded = hostileCreeps.filter(h => this.pos.getRangeTo(h.pos) <= OUTER_DEFENSE_ENGAGE_SPREAD
+                && h.hits < h.hitsMax);
+            let pick;
+            if (wounded.length) {
+                wounded.sort((a, b) => (b.hitsMax - b.hits) - (a.hitsMax - a.hits)
+                    || this.pos.getRangeTo(a.pos) - this.pos.getRangeTo(b.pos));
+                pick = wounded.head();
+            } else {
+                pick = this.pos.findClosestByRange(hostileCreeps);
+            }
+            if (pick && (!target || target.id != pick.id)) {
+                target = pick;
+                this.memory.targetId = pick.id;
             }
         } else if (target) {
             // 本 tick 没有活体 → 目标作废，回岗位贴窝（见下面的巡逻分支）。
@@ -886,7 +894,14 @@ Creep.prototype.outerDefense = function () {
                     return;
                 }
                 let ret = this.attack(em);
-                if (ret != OK && ret != ERR_NO_BODYPART) {
+                if (ret == OK) {
+                    // Overmind attackAndChase：贴身命中后**同 tick 往目标方向推一格** ——
+                    // 目标这一步若往后退，我们照样保持贴身（不推就白丢一轮输出；
+                    // 目标不动时这一格移动会被引擎自然取消，没有代价）。
+                    this.move(this.pos.getDirectionTo(em.pos));
+                    return;
+                }
+                if (ret != ERR_NO_BODYPART) {
                     this.moveTo(em, { range: this.hits < this.hitsMax ? 4 : 1 });
                 }
                 return;
@@ -1321,8 +1336,6 @@ if (Game.shard.name == '6g3y-station') saveCpuLevel = 7
 
 let pro = {
     stationName: "stationSources",
-    /** 有威胁外矿房的防守编制（只数），供 StrategyOuterHarvest 的满员闸共用 */
-    outerDefenseTargetCnt: OUTER_DEFENSE_TARGET_CNT,
     /**
      * 主房能量保护：storage 可支配能量（扣除 spawn/extension 已耗）低于
      * 阈值时，外矿 keeper/carrier 缓生，优先保证主房自身 spawn、worker、
@@ -2867,6 +2880,54 @@ let pro = {
      * 取代价（各组内部距离之和）最小的一种。lair 不会移动，结果按 lair id
      * 集合缓存进 room.memory，只算一次 —— 不会每 tick 跑 PathFinder。
      */
+    /**
+     * 该房当前**在役 + 在途**的防守爬（按任务栈的目标房名全局统计）。
+     *
+     * 为什么不能用 `spawnRoom.creeps("outerHarvestDefenser")`：那只能看到「物理上
+     * 还在出兵房里的爬」——已经到岗站在外矿房里的那只看不见，于是
+     *   ① 编制判断永远差一只 → 每 6 tick 都再派一只（实测 W34N55 的接替兵
+     *      间隔只有 144 tick，一路白吃 spawn 队列和 5300 能量）；
+     *   ② 老兵的 ttl 提前量失去意义（真正该被接替的那只根本没进 front）。
+     * 防守爬的任务栈在出生时就写好了目标房名（generatorOuterHarDefenseTask），
+     * 所以按 headTask().roomName 全局数既能算在役的、也能算在途的。
+     *
+     * 每 tick 只扫一遍 Game.creeps，结果缓存在 Game 上给全房共用。
+     */
+    outerDefenseAssignments(roomName) {
+        if (Game._outerDefAssignTick != Game.time) {
+            Game._outerDefAssignTick = Game.time;
+            let all = Game._outerDefAssignAll = {};
+            for (let name in Game.creeps) {
+                let c = Game.creeps[name];
+                if (c.memory.role != "outerHarvestDefenser") continue;
+                let t = c.headTask && c.headTask();
+                if (!t || !t.roomName) continue;
+                (all[t.roomName] = all[t.roomName] || []).push(c);
+            }
+        }
+        return Game._outerDefAssignAll[roomName] || [];
+    },
+    /**
+     * 该外矿房需要几只防守爬（编制）。
+     *
+     * 基线 `OUTER_DEFENSE_TARGET_CNT`（2）：一只盯 2 个窝轮值，够覆盖出怪周期。
+     *
+     * **超过 2 只 keeper 时按 1 只防守爬对 1 只 keeper 加编**（上限 4 = lair 数，
+     * 同时存在的 keeper 不会多过窝数）。战斗账：{A22,H11,M17} 单挑 keeper 稳赢
+     * （8 tick 打完，自身还剩 ~2800/5000 血），但 1 打 2 必死（range 1 吃 800/发，
+     * 7 tick 被打空）。实测 W34N55（4 个 lair）攒了 3 只 keeper 时，2 只防守爬
+     * 连同 4 只矿工在一波里全被打掉 —— 编制按「窝数/巡逻覆盖」定，没跟上敌情。
+     *
+     * 这个数同时给「派兵」和「满员闸」用：编制不满 → 该矿只守不产，keeper
+     * 先被打掉、防守到位后才放矿工进去。没有视野时退回基线（不凭想象加派）。
+     */
+    outerDefenseQuota(room) {
+        let base = OUTER_DEFENSE_TARGET_CNT;
+        if (!room) return base;
+        let keepers = room.find(FIND_HOSTILE_CREEPS)
+            .filter(c => c.owner && c.owner.username == "Source Keeper").length;
+        return Math.max(base, Math.min(4, keepers));
+    },
     outerDefenseLairGroups(room, lairs) {
         let key = lairs.map(e => e.id).join(",");
         let mem = room.memory;
@@ -2960,10 +3021,10 @@ let pro = {
      * 打死（体型与敌情脱节 + 贴身不自愈，见 getOuterHarDefenseBodyConfig 与
      * outerDefense 的注释），就成了「生一只、死一只」的无限补员。
      *
-     * 现在的规则：
+     * 现在的规则（编制数见 outerDefenseQuota）：
      *   - 一只都没有 → 生
-     *   - 最老的快死了（ttl <= OUTER_DEFENSE_REPLACE_TTL）且还没派过接替 → 生一只接替，并打标记（**一次只派一只**）
-     *   - 数量不足常驻目标（中间九房 2 只）→ 生
+     *   - 最老的快死了（ttl <= outerDefenseReplaceLead）且还没派过接替 → 生一只接替，并打标记（**一次只派一只**）
+     *   - 在役 + 在途的数量不足编制（有威胁的房 2 只起、keeper 更多时按 1:1 加编）→ 生
      *   - 普通外矿房：只有真的看到敌人 / lair / invaderCore 才派，且已有就不派
      */
     trySpawnOuterDefenser(roomName, spawnRoom, isInvader) {
@@ -2975,12 +3036,13 @@ let pro = {
             && _.values(sourceMemory[pro.stationName]).find(e => e && e.id);
         if (!data) return;
 
-        // 已在场（含正在出生的）的防守爬。Game.creeps 按名字顺序，head() 即最老的一只。
-        let defensers = spawnRoom.creeps("outerHarvestDefenser", false).filter(e => {
-            let t = e.headTask && e.headTask();
-            return t && t.roomName == targetName;
-        });
+        // 在役 + 在途的防守爬（见 outerDefenseAssignments：必须按任务栈全局数，
+        // 只数「还站在出兵房里的」会永远差一只 → 每 6 tick 白派一只）。
+        // front = 最老的那只（ttl 最小的）；还在出生的（ttl undefined）排最后。
+        let defensers = pro.outerDefenseAssignments(targetName).slice();
+        defensers.sort((a, b) => (a.ticksToLive || 9999) - (b.ticksToLive || 9999));
         let front = defensers.head();
+        let quota = pro.outerDefenseQuota(harRoom);
 
         let needSpawn = false;
         let replacingFront = false;
@@ -2992,12 +3054,12 @@ let pro = {
                 // 但光有这个标记会把补员锁死：如果那次派出的接替**已经死了**（被打死、
                 // 或者路上损耗），标记仍在，老那只又已经低于提前量，就再也不会补 ——
                 // 防守直接断档。所以场上数量掉回目标以下时，必须无视标记继续补。
-                if (!front.memory.hasSendSpawn || defensers.length < OUTER_DEFENSE_TARGET_CNT) {
+                if (!front.memory.hasSendSpawn || defensers.length < quota) {
                     needSpawn = true;
                     replacingFront = true;
                 }
             }
-            else if (defensers.length < OUTER_DEFENSE_TARGET_CNT) needSpawn = true;
+            else if (defensers.length < quota) needSpawn = true;
         } else {
             // 普通外矿：确认有威胁才派
             if (!harRoom) return;

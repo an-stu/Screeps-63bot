@@ -53,6 +53,12 @@ function makePos(x, y, roomName) {
         inRangeTo(t, n) { return chebyshev(this, t.pos || t) <= n; },
         isNearTo(t) { return chebyshev(this, t.pos || t) <= 1; },
         lookFor() { return []; },
+        getDirectionTo(t) {
+            let o = t.pos || t;
+            let dx = Math.sign(o.x - this.x), dy = Math.sign(o.y - this.y);
+            // 1..8 = TOP, TOP_RIGHT, RIGHT, ... 与引擎同序（测试只要求是个方向值）
+            return [ [8, 1, 2], [7, 0, 3], [6, 5, 4] ][dy + 1][dx + 1];
+        },
         findClosestByRange(list) {
             return list.length ? list.reduce((a, b) =>
                 chebyshev(this, b.pos || b) < chebyshev(this, a.pos || a) ? b : a) : undefined;
@@ -176,6 +182,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         heal(t) { calls.push(["heal", t === this ? "self" : (t && t.id)]); return CONSTANTS.OK; },
         rangedHeal(t) { calls.push(["rangedHeal", t && t.id]); return CONSTANTS.OK; },
         moveTo(t) { calls.push(["moveTo", (t.pos || t) && (t.pos || t).x, (t.pos || t) && (t.pos || t).y]); return CONSTANTS.OK; },
+        move(dir) { calls.push(["move", dir]); return CONSTANTS.OK; },
         goTo() { calls.push(["goTo"]); return CONSTANTS.OK; },
         suicide() { calls.push(["suicide"]); },
     };
@@ -407,8 +414,69 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         "the staying defender must not record the target either");
 }
 
-console.log("outer defense checks passed");
+{
+    // === outerDefense：优先打**已经在流血**的那只（Overmind CombatTargeting 打分） ===
+    const ctx = loadStation();
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    ctx.StationSources.outerDefensePosts = () => [lair];
+    const healthy = { id: "kFull", body: [{ type: "attack" }], hits: 5000, hitsMax: 5000, pos: makePos(43, 15, "W34N55") };
+    const hurt = { id: "kHurt", body: [{ type: "attack" }], hits: 2120, hitsMax: 5000, pos: makePos(38, 12, "W34N55") };
+    const def = makeCreep(ctx, { x: 42, y: 14 });
+    def.memory.role = "outerHarvestDefenser";
+    const room = {
+        name: "W34N55",
+        find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [healthy, hurt]
+            : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []),
+    };
+    ctx.Game.getObjectById = id => (id === "kHurt" ? hurt : id === "kFull" ? healthy : null);
+    def.room = room;
+    def.pos.roomRef = room;
+    ctx.Creep.prototype.outerDefense.call(def);
+    assert.equal(def.memory.targetId, "kHurt",
+        "接战半径内优先打残血的（先打死一只就少挨一份伤害）");
 
+    // 同一规则**有界**：残血但在接战半径外的不追（否则会走开、把矿工丢在原地）
+    const ctx2 = loadStation();
+    ctx2.StationSources.outerDefensePosts = () => [lair];
+    const farHurt = { id: "kFar", body: [{ type: "attack" }], hits: 500, hitsMax: 5000, pos: makePos(49, 14, "W34N55") };
+    const near = { id: "kNear", body: [{ type: "attack" }], hits: 5000, hitsMax: 5000, pos: makePos(34, 15, "W34N55") };
+    const def2 = makeCreep(ctx2, { x: 33, y: 14 });
+    def2.memory.role = "outerHarvestDefenser";
+    const room2 = {
+        name: "W34N55",
+        find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [near, farHurt]
+            : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []),
+    };
+    ctx2.Game.getObjectById = id => (id === "kNear" ? near : id === "kFar" ? farHurt : null);
+    def2.room = room2;
+    def2.pos.roomRef = room2;
+    ctx2.Creep.prototype.outerDefense.call(def2);
+    assert.equal(def2.memory.targetId, "kNear", "接战半径外的残血目标不追（防走开回归）");
+}
+
+{
+    // === outerDefense：贴身命中后同 tick 往目标方向推一格（Overmind attackAndChase） ===
+    const ctx = loadStation();
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    ctx.StationSources.outerDefensePosts = () => [lair];
+    const keeper = { id: "k1", body: [{ type: "attack" }], hits: 5000, hitsMax: 5000, pos: makePos(43, 15, "W34N55") };
+    const def = makeCreep(ctx, { x: 42, y: 14 });
+    def.memory.role = "outerHarvestDefenser";
+    const room = {
+        name: "W34N55",
+        find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [keeper]
+            : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []),
+    };
+    ctx.Game.getObjectById = id => (id === "k1" ? keeper : null);
+    def.room = room;
+    def.pos.roomRef = room;
+    ctx.Creep.prototype.outerDefense.call(def);
+    assert.ok(def.calls.some(c => c[0] === "attack" && c[1] === "k1"), "贴身就打");
+    assert.ok(def.calls.some(c => c[0] === "move"),
+        "命中后同 tick 往目标方向推一格：目标这一步退开也不会丢输出");
+}
+
+console.log("outer defense checks passed");
 {
     // === 已接战别的目标的防守爬不参与新目标竞争：次近的空闲者接手 ===
     // 实测两只 keeper 同时在场：(3,16) 的分配给了正在打 (35,27) 的最近者，

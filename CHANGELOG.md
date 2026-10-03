@@ -1,3 +1,103 @@
+## v0.78.50 — Outer defence reaches the numbers the room actually needs (Overmind audit)
+
+Audited every outer-mining mechanic against Overmind's source (`SourceReaperOverlord`,
+`MiningOverlord`, `CombatZerg`, `CombatTargeting`, `Movement`, `CreepSetup`) and kept the
+findings that survive the engine's own maths (`screeps/engine`: movement.js, _recalc-body.js,
+creeps/tick.js, keepers/pretick.js).
+
+### Fixed
+
+- **Defender counting never saw the defenders that mattered.** `trySpawnOuterDefenser`
+  counted `spawnRoom.creeps("outerHarvestDefenser")`, i.e. only the creeps physically
+  still at home: a defender standing on post in the outpost was invisible, so the room
+  was judged short-staffed every 6 ticks and kept requesting replacements (live: two
+  replacements 144 ticks apart, ~5300 energy each) and the TTL lead never applied to the
+  defender that actually needed replacing. Counting now goes through
+  `StationSources.outerDefenseAssignments()`: a per-tick global scan by
+  `headTask().roomName`, so in-service and in-transit both count.
+
+### Changed
+
+- **Defence quota reacts to the room, not just the lair count.** Baseline stays
+  `OUTER_DEFENSE_TARGET_CNT` (2, one defender per two lairs for patrol coverage), but a
+  room holding more than two source keepers now asks for one defender per keeper (cap 4 =
+  lairs). Fight maths: `{A22,H11,M17}` beats a keeper 1v1 (8 ticks, ~2800/5000 HP left)
+  but loses 1v2 (800 incoming per tick at range 1). Live W34N55 (4 lairs) had piled up
+  three keepers and killed two defenders plus four miners in one wave. The same helper
+  feeds the defenders-first gate, so production waits until the quota is actually staffed.
+- **Melee defenders keep contact** (`attackAndChase` from Overmind): after a successful
+  adjacent attack the creep also steps toward the target, so a target that retreats the
+  same tick cannot buy a free round.
+- **Target choice prefers what is already bleeding** (Overmind's
+  `hitsMax - hits + healPotential` score) but only inside the engagement spread — an
+  unbounded chase after a wounded keeper is a regression we have paid for before.
+
+### Verified / kept from Overmind after checking the engine
+
+- Melee defender body order: MOVE last, boosted TOUGH first. Damage destroys parts from
+  the front (`_recalc-body.js`) and boosted damage reduction is consumed front-to-back
+  (`_applyDamage`), so MOVE-front (what Overmind's `ordered:true` grouping produces for
+  `zerglings.sourceKeeper`) trades away the ability to disengage. Overmind's own `armored`
+  pattern puts MOVE last, i.e. it is not a consistent guide.
+- Fatigue is order-independent: `(non-MOVE, non-CARRY parts + loaded CARRY) x terrain`
+  (road 1 / plain 2 / swamp 10), recovery `2 x MOVE` per tick. A hauler body is
+  road-full-speed at 2:1 (`2*MOVE >= CARRY`) and plain-full-speed at 1:1.
+- Source keepers do not chase: they walk to their remembered source every tick and shoot
+  the lowest-hits creep in range, with per-part ranged damage `[10,10,4,1]` at range 1-4.
+  That is why "stand at range 4 and self-heal" works and why the sustain-heavy melee body
+  is kept over Overmind's faster `{A20,H5,M25}`.
+- Not adopted: the `TransportRequestGroup` request pool (a logistics rewrite, no
+  measurable win at this scale), `rangedMassAttack` (only reaches range 1), and
+  invasion-specific pathing costs (the shared movement optimiser owns our pathing).
+
+## v0.78.49 — Edge link: outer haulers turn around at the home border
+
+The outer roads of both mined rooms (W34N55, W35N55 -> W33N55) converge into one shared
+corridor inside the home room, so every hauler walked the whole corridor to storage and
+back. A link next to that corridor lets it drop its load at the border.
+
+### Added
+
+- `StationSources.ensureOuterEdgeLink()` picks the free tile adjacent to the route segment
+  every outer source shares, closest to the mine entrance; never on a route tile (links
+  are not walkable — that would plug the single-lane road), never on an existing
+  structure or site, inside the RCL8 link budget. Live pick: W33N55 (6,22). The site is
+  built by the home room's ordinary build chain.
+- `StationSources.outerCarryDropOff()`: the return trip targets the edge link when it
+  exists, storage otherwise (same route, no detour).
+- `StationCarry.transformLink` drains the edge link first (it is the chain's only 800-wide
+  buffer) into the storage-side hub link, falling back to the upgrade link. Kill switch:
+  `Memory.marketSettings.edgeLink === false`.
+
+### Changed
+
+- A link holds 800 while a hauler carries 1250+, so the delivery transfer now dumps what
+  fits and then waits (bounded: only zero-progress ticks count, cap 12) for the link to
+  forward it; the stack's `fillRes(storage)` layer takes whatever is left. It cannot wedge.
+- The `ensureOuterEdgeLink` call is wrapped in `HelperError.catchError` so a bug in this
+  optional feature cannot abort the whole outer pass.
+
+## v0.78.48 — Restore the outer production chain
+
+`0d55a80` declared a defenders-first spawn gate but never defined `allDefendersFull`, so
+`StrategyOuterHarvest.exec` threw a ReferenceError on its `else` branch every 6 ticks.
+`HelperError.catchError` swallowed it, which silently killed everything after that line:
+no keepers, no haulers and no mineral chain were dispatched for any outer room (live: 0
+outer carriers, 0 keepers in W34N55/W35N55) while defenders — spawned before the throw —
+looked healthy.
+
+### Fixed
+
+- `outerDefendersFull()` implements the gate the commit intended (see v0.78.50 for the
+  counting and quota details that landed with it).
+- `getOuterHarCarrierBuildBodyConfig` emitted `[WORK,WORK] + 25x[CARRY,CARRY,MOVE]` = 77
+  parts, past the 50-part limit, so road-building haulers could never spawn
+  (`ERR_INVALID_ARGS`) and the roads had no maintainer.
+- `getOuterHarCarrierBodyConfig` was still 1:1 `[CARRY,MOVE]x25` (1250 capacity) although
+  the same commit advertised 2:1/1700. Both bodies are now `[CARRY,CARRY,MOVE]` groups —
+  hauler 34 CARRY + 16 MOVE (1700), builder 2 WORK + 32 CARRY + 16 MOVE (50 parts) — and
+  still shrink with the room's available energy.
+
 ## v0.78.47 — Ranged defenders must actually walk into range; adopt live 0.78.40
 
 Two independent stalls, both caught on 10-02 after adopting the parallel

@@ -20,18 +20,31 @@ const read = name => fs.readFileSync(path.join(root, "modules", name), "utf8");
 const ARRAY_PATCH = `
 Array.prototype.head = function () { return this.length ? this[0] : undefined; };
 Array.prototype.last = function () { return this.length ? this[this.length - 1] : undefined; };
+Array.prototype.maxBy = function (fn) {
+    let best, bestV;
+    this.forEach(x => { let v = fn(x); if (best === undefined || v > bestV) { best = x; bestV = v; } });
+    return best;
+};
+Array.prototype.sum = function () { return this.reduce((a, b) => a + b, 0); };
 `;
 
 // lodash 的 Array 扩展：宿主 realm（桩对象返回值）和 VM realm（模块自己造的数组）
 // 两边都要补，否则 `.head()` 只在一边可用
-if (!Array.prototype.head) Object.defineProperty(Array.prototype, "head", {
-    value: ARRAY_PATCH && function () { return this.length ? this[0] : undefined; },
-    enumerable: false, configurable: true, writable: true,
-});
-if (!Array.prototype.last) Object.defineProperty(Array.prototype, "last", {
-    value: function () { return this.length ? this[this.length - 1] : undefined; },
-    enumerable: false, configurable: true, writable: true,
-});
+const ARRAY_EXT = {
+    head: function () { return this.length ? this[0] : undefined; },
+    last: function () { return this.length ? this[this.length - 1] : undefined; },
+    sum: function () { return this.reduce((a, b) => a + b, 0); },
+    maxBy: function (fn) {
+        let best, bestV;
+        this.forEach(x => { let v = fn(x); if (best === undefined || v > bestV) { best = x; bestV = v; } });
+        return best;
+    },
+};
+for (const name in ARRAY_EXT) {
+    if (!Array.prototype[name]) Object.defineProperty(Array.prototype, name, {
+        value: ARRAY_EXT[name], enumerable: false, configurable: true, writable: true,
+    });
+}
 
 const ALPHA = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -77,16 +90,27 @@ function makeContext(extra = {}) {
         console,
         isSaveCpu: true,
         Memory: { rooms: {} },
-        Game: { time: 100000, shard: { name: "shard3" }, getObjectById: () => null, map: {}, creeps: {} },
+        Game: { time: 100000, shard: { name: "shard3" }, getObjectById: () => null, map: {}, creeps: {}, rooms: {} },
         Room: { Terrain: function () { this.get = () => 0; } },
         RoomPosition: function (x, y, roomName) { this.x = x; this.y = y; this.roomName = roomName; },
         StationCarry: { stationName: "stationCarry" },
         StationMineral: { stationName: "stationMineral" },
         StationUpgrade: { stationName: "stationUpgrade" },
-        // lodash 的 _.values（模块里用于遍历 object map）
-        _: { values: obj => Object.keys(obj || {}).map(k => obj[k]) },
+        // lodash 的 _.values / _.keys（模块里用于遍历 object map）
+        _: {
+            values: obj => Object.keys(obj || {}).map(k => obj[k]),
+            keys: obj => Object.keys(obj || {}),
+        },
         StationSources: undefined,
         StationHive: { trySpawn: () => undefined },
+        ManagerCreeps: {
+            calcBodyPart: spec => {
+                const parts = [];
+                (Array.isArray(spec) ? spec : Object.keys(spec).map(k => [k, spec[k]]))
+                    .forEach(([part, n]) => { for (let i = 0; i < n; i++) parts.push(part); });
+                return parts;
+            },
+        },
         ManagerFlags: { getFlagsByPrefix: () => [] },
         HelperError: { catchError: fn => fn() },
         // UtilsTask.task 的忠实桩（真实模块顶层也声明 `let pro`，同一 context 里
@@ -417,7 +441,13 @@ function linkFixture({ edgeEnergy, hubFree, upgradeFree, threshold = 200 } = {})
 function defenceGateFixture(defenders) {
     const ctx = makeContext();
     vm.runInNewContext(read("strategy_outerHarvest.js"), ctx);
-    ctx.StationSources = { outerDefenseTargetCnt: 2, stationName: "stationSources" };
+    // 闸门把「编制 / 在役数量」都委托给 StationSources（单一事实来源），这里给
+    // 忠实桩；两个函数本身在下面的 station_sources 用例里单独验。
+    ctx.StationSources = {
+        stationName: "stationSources",
+        outerDefenseQuota: () => 2,
+        outerDefenseAssignments: roomName => defenders.filter(d => d.target == roomName),
+    };
     ctx.Game.creeps = {};
     defenders.forEach((d, i) => {
         ctx.Game.creeps["d" + i] = {
@@ -449,6 +479,71 @@ function defenceGateFixture(defenders) {
     assert.equal(defenceGateFixture([
         { room: "W34N55", target: "W34N55" }, { room: "W34N55", target: "W34N55" },
     ]), true, "威胁房满编、无威胁房 0 编制 → 放行");
+}
+
+// ───────────────── 6) 防守编制的「计数口径」与「keeper 加编」 ─────────────────
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+
+    // 计数：只数防守爬、按任务栈目标房名、在役（站在外矿房）+ 在途都算
+    ctx.Game.creeps = {
+        a: { memory: { role: "outerHarvestDefenser" }, headTask: () => ({ roomName: "W34N55" }) },
+        b: { memory: { role: "outerHarvestDefenser" }, headTask: () => ({ roomName: "W34N55" }) },
+        c: { memory: { role: "outerHarvestDefenser" }, headTask: () => ({ roomName: "W35N55" }) },
+        d: { memory: { role: "harvestEnergyKeeper" }, headTask: () => ({ roomName: "W34N55" }) },
+        e: { memory: { role: "outerHarvestDefenser" }, headTask: () => undefined },
+    };
+    assert.equal(S.outerDefenseAssignments("W34N55").length, 2,
+        "在役 + 在途的防守爬都算（不看它物理上在哪个房）");
+    assert.equal(S.outerDefenseAssignments("W35N55").length, 1);
+    assert.equal(S.outerDefenseAssignments("W36N55").length, 0);
+    assert.equal(S.outerDefenseAssignments("W34N55").length, 2, "同 tick 复用缓存结果一致");
+
+    // 编制：基线 2（巡逻覆盖）；房里有 keeper → 1 只防守爬对 1 只 keeper，上限 4
+    const roomWith = n => ({
+        name: "W34N55",
+        find: () => Array.from({ length: n }, () => ({ owner: { username: "Source Keeper" } })),
+    });
+    assert.equal(S.outerDefenseQuota(roomWith(0)), 2, "没有 keeper 也要 2 只（一个盯 2 个窝）");
+    assert.equal(S.outerDefenseQuota(roomWith(1)), 2, "1 只 keeper 不需要加编");
+    assert.equal(S.outerDefenseQuota(roomWith(3)), 3,
+        "3 只 keeper → 3 只防守爬（1 打 2 必死：实测 2 只防守爬 + 4 只矿工一波全灭）");
+    assert.equal(S.outerDefenseQuota(roomWith(9)), 4, "上限 4 = lair 数");
+    assert.equal(S.outerDefenseQuota(undefined), 2, "没有视野时退回基线，不凭想象加派");
+
+    // 派兵：编制按 keeper 加编，且**已经到岗的防守爬**必须算进数量
+    //（旧实现按 spawnRoom.creeps 数，到岗的那只看不见 → 每 6 tick 白派一只）
+    const spawned = [];
+    ctx.StationHive.trySpawn = (room, name, body, role) => { spawned.push({ body, role }); return "newDef"; };
+    ctx.WarDamageCal = { possibleBreakDamage: () => 0 };
+    ctx.Game.rooms.W34N55 = {
+        name: "W34N55",
+        getHostileCreeps: () => [{ owner: { username: "Source Keeper" }, possibleDamage: () => 300, possibleHealDamage: () => 0 }],
+        find: (c) => (c == CONSTANTS.FIND_HOSTILE_CREEPS
+            ? [{ owner: { username: "Source Keeper" }, possibleDamage: () => 300, possibleHealDamage: () => 0 }]
+            : []),
+    };
+    ctx.Memory.rooms.W34N55 = { stationSources: { s1: { id: "s1", roomName: "W34N55", x: 3, y: 17 } } };
+    ctx.Game.creeps = {
+        a: { memory: { role: "outerHarvestDefenser", hasSendSpawn: false }, ticksToLive: 1200, headTask: () => ({ roomName: "W34N55" }) },
+    };
+    const spawnRoom = { name: "W33N55", my: true, spawnFailure: false, creeps: () => [] };
+    ctx.Game._outerDefAssignTick = undefined;          // 换了 creep 列表 → 让缓存重扫
+    ctx.StationSources.trySpawnOuterDefenser("W34N55", spawnRoom, true);
+    assert.equal(spawned.length, 1,
+        "在役 1 只 < 编制 2 只 → 补 1 只（主房里一只都没有也不例外）");
+
+    spawned.length = 0;
+    ctx.Game.creeps = {
+        a: { memory: { role: "outerHarvestDefenser", hasSendSpawn: false }, ticksToLive: 1400, headTask: () => ({ roomName: "W34N55" }) },
+        b: { memory: { role: "outerHarvestDefenser", hasSendSpawn: false }, ticksToLive: 1300, headTask: () => ({ roomName: "W34N55" }) },
+    };
+    ctx.Game._outerDefAssignTick = undefined;          // 强制重扫 creep 列表
+    ctx.StationSources.trySpawnOuterDefenser("W34N55", spawnRoom, true);
+    assert.equal(spawned.length, 0,
+        "编制 2 只已到齐（一只在岗、一只在途）→ 不再补员（旧实现会每 6 tick 白派一只）");
 }
 
 console.log("edge link / hauler body / defence gate checks passed");
