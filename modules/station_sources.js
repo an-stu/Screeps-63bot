@@ -775,6 +775,11 @@ Creep.prototype.outerDefense = function () {
             hostileCreeps = hostileCreeps.filter(h => {
                 let d = this.pos.getRangeTo(h.pos);
                 return mates.every(c => c === this || c.memory.role != "outerHarvestDefenser"
+                    // 已接战**别的**目标的防守爬不参与本轮竞争：否则最近的那个
+                    // 会同时"拥有"两个目标，自己忙不过来，次近的空闲者却袖手
+                    // 无敌情可打（实测 (3,16) keeper 屠杀矿工时两只满血防守爬
+                    // 在 30 格外站着，因为它们对目标都不是最近的）。
+                    || (c.memory.targetId && c.memory.targetId != h.id)
                     || c.pos.getRangeTo(h.pos) >= d);
             });
         }

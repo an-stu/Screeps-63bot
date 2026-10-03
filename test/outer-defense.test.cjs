@@ -405,3 +405,37 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
 }
 
 console.log("outer defense checks passed");
+
+{
+    // === 已接战别的目标的防守爬不参与新目标竞争：次近的空闲者接手 ===
+    // 实测两只 keeper 同时在场：(3,16) 的分配给了正在打 (35,27) 的最近者，
+    // 两只满血空闲防守爬因"不是最近"袖手，矿工被屠。
+    const ctx = loadStation();
+    const lair = { pos: makePos(41, 14, "W34N55") };
+    const lairWest = { pos: makePos(7, 17, "W34N55") };
+    ctx.StationSources.outerDefensePosts = () => [lair, lairWest];
+    const west = { id: "kw", body: [{ type: "attack" }], pos: makePos(3, 16, "W34N55") };
+    const east = { id: "ke", body: [{ type: "attack" }], pos: makePos(35, 27, "W34N55") };
+    const busy = makeCreep(ctx, { x: 35, y: 28, body: [{ type: "ranged_attack" }] });
+    busy.memory.role = "outerHarvestDefenser";
+    busy.memory.targetId = "ke";                       // 正在打东边那只
+    const idleNear = makeCreep(ctx, { x: 42, y: 13, body: [{ type: "ranged_attack" }] });
+    idleNear.memory.role = "outerHarvestDefenser";     // 次近且空闲
+    const room = {
+        name: "W34N55",
+        find(c) {
+            if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [west, east];
+            if (c == CONSTANTS.FIND_MY_CREEPS) return [busy, idleNear];
+            return [];
+        },
+    };
+    ctx.Game.getObjectById = id => (id === "kw" ? west : id === "ke" ? east : null);
+    idleNear.room = room;
+    ctx.Creep.prototype.outerDefense.call(idleNear);
+    assert.ok(idleNear.calls.some(c => c[0] === "rangedAttack" && c[1] === "kw"),
+        "an idle defender must take the unclaimed hostile even though a busy one is nearer");
+    // 忙碌者保持现有目标不被抢走
+    busy.room = room;
+    ctx.Creep.prototype.outerDefense.call(busy);
+    assert.equal(busy.memory.targetId, "ke", "an engaged defender keeps its own target");
+}
