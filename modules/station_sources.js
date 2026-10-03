@@ -2301,19 +2301,33 @@ let pro = {
         if (pro.outerEdgeLink(spawnRoom)) return undefined;              // 已经有 link
         let sc = spawnRoom.memory[StationCarry.stationName]
             || (spawnRoom.memory[StationCarry.stationName] = {});
-        // 选过一次就不再重算（路线交集的解码开销不小）：先按记录的位置确认
+        let cap = CONTROLLER_STRUCTURES[STRUCTURE_LINK][spawnRoom.level] || 0;
+        let used = spawnRoom.link.length + spawnRoom.find(FIND_MY_CONSTRUCTION_SITES)
+            .filter(s => s.structureType == STRUCTURE_LINK).length;
+        if (used >= cap) return undefined;
+        // 选过一次就不再重算（路线解码开销不小）：先按记录的位置确认
         if (sc.edgeLinkPos) {
             let xy = sc.edgeLinkPos.split(":");
             let x = parseInt(xy[0], 10), y = parseInt(xy[1], 10);
-            let link = spawnRoom.lookForAt(LOOK_STRUCTURES, x, y).find(s => s.structureType == STRUCTURE_LINK);
+            let structures = spawnRoom.lookForAt(LOOK_STRUCTURES, x, y);
+            let link = structures.find(s => s.structureType == STRUCTURE_LINK);
             if (link) { sc.edgeLink = link.id; return undefined; }
             let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).find(s => s.structureType == STRUCTURE_LINK);
             if (site) { sc.edgeLinkSite = site.id; return site; }
-            delete sc.edgeLinkPos;      // 位置被别的东西占了 / 工地没了 → 重新选
+            // 位置空着：通常是上一 tick 刚把那格冗余 road 拆掉 —— 直接在这儿立工地，
+            // **不要重选**（road 一消失，排序里的「优先回收废路」就不再成立，
+            // 会漂到旁边别的格子上去）。
+            if (!structures.length && spawnRoom.createConstructionSite(x, y, STRUCTURE_LINK) == OK) {
+                let fresh = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y)
+                    .find(s => s.structureType == STRUCTURE_LINK);
+                if (fresh) sc.edgeLinkSite = fresh.id;
+                return fresh;
+            }
+            delete sc.edgeLinkPos;      // 被别的东西占了 / 立不起来 → 重新选
             delete sc.edgeLinkSite;
         }
-        // 以本房为主房的矿点：缓存路线的**终点**落在本房
-        let paths = [];
+        // 以本房为主房的矿点：缓存路线的**终点**落在本房（一条矿点 = 一条路线）
+        let routes = [];
         for (let roomName in Memory.rooms) {
             if (roomName == spawnRoom.name) continue;                    // 主房自己的矿点没有外矿路线
             let stations = Memory.rooms[roomName][pro.stationName];
@@ -2323,59 +2337,80 @@ let pro = {
                 let path = pro.getOuterRoadPath(data);
                 if (!path || !path.length) return;
                 if (path.last().roomName != spawnRoom.name) return;
-                paths.push(path);
+                routes.push(path);
             });
         }
-        if (!paths.length) return undefined;
-        // 所有矿点共用的主房路点（求交集），并记下它在路线里的**最早序号**
-        // —— 序号越小越靠矿区入口，link 要放在最早那一段的旁边
-        let seenCnt = {};
-        let firstIdx = {};
-        paths.forEach(path => {
-            let seen = {};
+        if (!routes.length) return undefined;
+        // 每条路线在主房内的路点集合 + 每个路点的**最早序号**（越小 = 越靠矿区入口）。
+        // 用「路线并集」而不是「交集」来找候选格：交集只覆盖所有路线都重合的那一小段，
+        // 会把入口附近大把更好的位置排除掉（实测入口区路线是几条并行的斜线，
+        // 交集从 x=6 才开始，而真正合适的位置在 x=4）。
+        let routeIdx = {};                    // tile -> 最早序号
+        let routeSets = [];
+        routes.forEach(path => {
+            let set = {};
             path.forEach((p, i) => {
                 if (p.roomName != spawnRoom.name) return;
                 let key = p.x + ":" + p.y;
-                if (seen[key]) return;
-                seen[key] = true;
-                seenCnt[key] = (seenCnt[key] || 0) + 1;
-                if (firstIdx[key] == undefined || i < firstIdx[key]) firstIdx[key] = i;
+                set[key] = true;
+                if (routeIdx[key] == undefined || i < routeIdx[key]) routeIdx[key] = i;
             });
+            routeSets.push(set);
         });
-        let common = Object.keys(seenCnt).filter(k => seenCnt[k] == paths.length);
-        if (!common.length) return undefined;
+        // 蓝图里的路/容器是规划器在维护的，不能占（见 blueprintWalkableSet）
+        let planned = pro.blueprintWalkableSet(spawnRoom);
         let terrain = new Room.Terrain(spawnRoom.name);
         let cand = {};
-        common.forEach(key => {
-            let xy = key.split(":");
-            let tx = parseInt(xy[0], 10), ty = parseInt(xy[1], 10);
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    if (!dx && !dy) continue;
-                    let x = tx + dx, y = ty + dy;
-                    if (x < 1 || x > 48 || y < 1 || y > 48) continue;
-                    if (seenCnt[x + ":" + y]) continue;              // 共用路点：压上去会堵路
-                    if (terrain.get(x, y) == TERRAIN_MASK_WALL) continue;
-                    if (spawnRoom.lookForAt(LOOK_STRUCTURES, x, y).length) continue;
-                    if (spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).length) continue;
-                    let cur = cand[x + ":" + y];
-                    if (!cur || firstIdx[key] < cur.entry) cand[x + ":" + y] = { x: x, y: y, entry: firstIdx[key] };
+        routeSets.forEach((set, ri) => {
+            for (let key in set) {
+                let xy = key.split(":");
+                let tx = parseInt(xy[0], 10), ty = parseInt(xy[1], 10);
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        if (!dx && !dy) continue;
+                        let x = tx + dx, y = ty + dy;
+                        let ckey = x + ":" + y;
+                        if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                        if (routeIdx[ckey] != undefined) continue;    // 压在路点上会把外矿单行道堵死
+                        if (terrain.get(x, y) == TERRAIN_MASK_WALL) continue;
+                        let structures = spawnRoom.lookForAt(LOOK_STRUCTURES, x, y);
+                        let road = structures.find(s => s.structureType == STRUCTURE_ROAD);
+                        if (structures.length && !road) continue;      // 有别的建筑，让开
+                        if (road && planned.has(ckey)) continue;       // 规划器的路：不动
+                        if (spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).length) continue;
+                        let cur = cand[ckey];
+                        if (!cur) cur = cand[ckey] = { x: x, y: y, cover: 0, entry: routeIdx[key], road: road, seen: {} };
+                        if (routeIdx[key] < cur.entry) cur.entry = routeIdx[key];
+                        if (!cur.seen[ri]) { cur.seen[ri] = true; cur.cover++; }
+                    }
                 }
             }
         });
-        let pick = _.values(cand).sort((a, b) =>
-            a.entry - b.entry || (a.x - b.x) || (a.y - b.y)).head();
-        if (!pick) return undefined;
-        let cap = CONTROLLER_STRUCTURES[STRUCTURE_LINK][spawnRoom.level] || 0;
-        let used = spawnRoom.link.length + spawnRoom.find(FIND_MY_CONSTRUCTION_SITES)
-            .filter(s => s.structureType == STRUCTURE_LINK).length;
-        if (used >= cap) return undefined;
-        if (spawnRoom.createConstructionSite(pick.x, pick.y, STRUCTURE_LINK) != OK) return undefined;
-        sc.edgeLinkPos = pick.x + ":" + pick.y;
-        let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, pick.x, pick.y)
-            .find(s => s.structureType == STRUCTURE_LINK);
-        if (site) sc.edgeLinkSite = site.id;
-        return site;
+        // 排序：覆盖的路线数多 → 更靠矿区入口 → 优先回收冗余 road（见下）→ 坐标
+        let list = _.values(cand).sort((a, b) =>
+            b.cover - a.cover || a.entry - b.entry || (a.road ? 0 : 1) - (b.road ? 0 : 1)
+            || (a.x - b.x) || (a.y - b.y));
+        for (let pick of list) {
+            // 冗余 road（不在蓝图、也不是任何路线的路点）优先：入口区这种废路很多，
+            // 拆一格给 link 比占用一块干净空地好 —— 位置更靠入口（省的路更长），
+            // 而且这格路本来就没人在维护、迟早自己衰减掉。
+            // link 和 road 不能同格，所以先拆；destroy 与同 tick 的 createConstructionSite
+            // 有意图顺序风险，拆完就返回，下一 tick 该格已空、再立工地。
+            if (pick.road) {
+                if (pick.road.destroy() == OK) {
+                    sc.edgeLinkPos = pick.x + ":" + pick.y;
+                    return undefined;
+                }
+                continue;                    // 拆不掉（不该发生）→ 换下一个候选
+            }
+            if (spawnRoom.createConstructionSite(pick.x, pick.y, STRUCTURE_LINK) != OK) continue;
+            sc.edgeLinkPos = pick.x + ":" + pick.y;
+            let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, pick.x, pick.y)
+                .find(s => s.structureType == STRUCTURE_LINK);
+            if (site) sc.edgeLinkSite = site.id;
+            return site;
+        }
+        return undefined;
     },
     generatorOuterHarDefenseTask(data) {
         return [

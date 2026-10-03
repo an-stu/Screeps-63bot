@@ -1,3 +1,37 @@
+## v0.78.51 — Edge link sits on a redundant west-side road, not on clean land
+
+The first placement picked the westernmost *free* tile adjacent to the route every outer
+source shares (W33N55 (6,22)). That premise was wrong: the west entrance carries a lot of
+**redundant road** left over from earlier route generations, and the route intersection
+only starts at x=6, so the search threw away the better tiles closer to the border.
+
+Live candidate table (coverage = how many of the 6 outer routes pass within range 1):
+
+    (4,22) cover=6 entry=3 ROAD(junk)     <- chosen
+    (7,22) cover=6 entry=6 free
+    (6,22) cover=6 entry=6 free           <- previous pick
+    (1,21) cover=4 entry=2 ROAD(junk)
+    (2,22) cover=4 entry=3 ROAD(junk)
+
+### Changed
+
+- Candidate tiles now come from the **union** of all route tiles (not the intersection),
+  ranked by how many routes pass within range 1, then by how close to the mine entrance
+  the tile sits, then by preferring a redundant road over clean terrain.
+- A redundant road tile (a road that is neither a route waypoint nor blueprint road) is
+  recycled: the road is destroyed to make room and the link site goes up on the next tick
+  (`destroy` and `createConstructionSite` in the same tick have no guaranteed intent
+  order). Live: W33N55 (4,22) road removed, `link:4,22` site created the following tick.
+- The recorded position is now trusted once chosen: when it is empty, the site is created
+  there instead of re-running the selection (a recycled road disappears from the ranking,
+  so re-selecting would drift to a neighbouring tile).
+- The stale (6,22) site was cancelled by hand (it was 62% built but strictly worse and
+  would have consumed a link slot: RCL8 allows 6, of which 4 are already in use).
+
+`test/core-profile.test.cjs` used to reject any `road.destroy()` in station_sources to
+keep off-route roads decaying naturally; the assertion now allows exactly one — inside the
+edge-link placement — and still fails on any bulk road maintenance.
+
 ## v0.78.50 — Outer defence reaches the numbers the room actually needs (Overmind audit)
 
 Audited every outer-mining mechanic against Overmind's source (`SourceReaperOverlord`,

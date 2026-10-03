@@ -92,7 +92,14 @@ assert.ok(stationSources.includes("drawOuterRoadDebug") && main.includes("Memory
 assert.ok(stationSources.includes("nearestOuterRoadSite") && stationSources.includes("task.keepBuilding && !canBuild"), "external road builders must finish the nearest route site while legacy haulers resume delivery");
 assert.ok(stationSources.includes("!pro.outerRoadComplete(data) && isRoadBuilder"), "only WORK-capable external carriers may enter the road-only loop");
 assert.ok(stationSources.includes("moveOuterCarrierOnRoad(this, task, data, -1)") && stationSources.includes("delete task.returnPathIndex"), "external carriers must return to the source via cached roads and invalidate only unusable routes");
-assert.ok(!stationSources.includes("maintainOuterRoads") && !stationSources.includes("road.destroy()"), "external road maintenance must let off-route roads decay naturally");
+assert.ok(!stationSources.includes("maintainOuterRoads"), "external road maintenance must let off-route roads decay naturally");
+// 唯一允许拆路的地方：edge link 选址时把入口区**那格冗余 road** 让位给 link
+// （用户 10-03 指定：西侧废路多，用废路而不是占干净空地）。除此之外任何
+// 批量拆路 / 维护废路的写法都不允许 —— 这里的断言就是防它回来。
+assert.equal((stationSources.match(/road\.destroy\(\)/g) || []).length, 1,
+    "only the single edge-link tile conversion may destroy a road");
+assert.ok(stationSources.indexOf("road.destroy()") > stationSources.indexOf("ensureOuterEdgeLink"),
+    "that one road destruction must live inside the edge-link placement");
 // 原来这条断言要求用裸 `creep.move(creep.pos.getDirectionTo(point))` 逐格走。
 // 实测证明那是错的：裸 move 在目标格被别的爬占住时**返回 OK 但引擎静默取消
 // 移动**，函数对外报成功、爬却一格没动（6 只外矿 carrier 全部如此）；而且裸

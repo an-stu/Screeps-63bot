@@ -186,7 +186,7 @@ function makeStore(contents, capacity) {
 // ───────────────────────── 2) 边缘 link 选址 ─────────────────────────
 const TRUNK = [[1, 23], [2, 23], [3, 23], [4, 23], [5, 23], [6, 23], [7, 23], [8, 23], [21, 33]];
 
-function edgeLinkFixture({ links = [], sites = [], level = 8 } = {}) {
+function edgeLinkFixture({ links = [], sites = [], roads = [], level = 8 } = {}) {
     const ctx = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx);
 
@@ -206,6 +206,7 @@ function edgeLinkFixture({ links = [], sites = [], level = 8 } = {}) {
     };
 
     const created = [];
+    const destroyed = [];
     const spawnRoom = {
         name: "W33N55", my: true, level,
         controller: { level },
@@ -213,7 +214,9 @@ function edgeLinkFixture({ links = [], sites = [], level = 8 } = {}) {
         link: links,
         storage: { id: "st1", pos: { x: 21, y: 34, roomName: "W33N55" }, store: makeStore({ energy: 100 }, 1000000) },
         lookForAt(type, x, y) {
-            if (type === CONSTANTS.LOOK_STRUCTURES) return links.filter(l => l.pos.x === x && l.pos.y === y);
+            if (type === CONSTANTS.LOOK_STRUCTURES) {
+                return links.concat(roads).filter(l => l.pos.x === x && l.pos.y === y);
+            }
             if (type === CONSTANTS.LOOK_CONSTRUCTION_SITES) return sites.filter(s => s.pos.x === x && s.pos.y === y);
             return [];
         },
@@ -226,7 +229,7 @@ function edgeLinkFixture({ links = [], sites = [], level = 8 } = {}) {
         },
     };
     ctx.Game.rooms = { W33N55: spawnRoom };
-    return { ctx, spawnRoom, created, sites };
+    return { ctx, spawnRoom, created, sites, destroyed };
 }
 
 {
@@ -244,6 +247,35 @@ function edgeLinkFixture({ links = [], sites = [], level = 8 } = {}) {
     assert.ok(adjacent, "link 必须贴着共用路段（搬运爬路过时 range 1 才卸得了）");
     assert.equal(picked.x, 1, "要放在离入口最近的那一段旁边");
     assert.equal(s.spawnRoom.memory.stationCarry.edgeLinkPos, picked.x + ":" + picked.y, "位置要记进 memory");
+}
+
+{
+    // 入口区的冗余 road 优先拆掉给 link 腾位（比占干净空地更靠入口）
+    const junk = {
+        id: "jr", structureType: CONSTANTS.STRUCTURE_ROAD, pos: { x: 2, y: 22, roomName: "W33N55" },
+        destroy() { this.destroyed = true; return CONSTANTS.OK; },
+    };
+    const roads = [junk];
+    const s = edgeLinkFixture({ roads });
+    // 桩要模拟引擎：拆掉的路从房间结构表里消失（否则下一 tick 还看得见它）
+    const origDestroy = junk.destroy.bind(junk);
+    junk.destroy = () => {
+        s.destroyed.push(junk);
+        roads.splice(roads.indexOf(junk), 1);
+        return origDestroy();
+    };
+    const first = s.ctx.StationSources.ensureOuterEdgeLink(s.spawnRoom);
+    assert.equal(first, undefined, "拆路那一 tick 不立工地（destroy 与 create 的意图顺序不保证）");
+    assert.ok(junk.destroyed, "冗余 road 必须被拆掉");
+    assert.equal(s.created.length, 0, "同一 tick 不重复立工地");
+    assert.equal(s.spawnRoom.memory.stationCarry.edgeLinkPos, "2:22", "位置记下来，下一 tick 继续");
+
+    // 下一 tick：路已经没了 → 在同一个位置立 link 工地
+    s.spawnRoom.memory.stationCarry.edgeLinkPos = "2:22";
+    const second = s.ctx.StationSources.ensureOuterEdgeLink(s.spawnRoom);
+    assert.equal(s.created.length, 1, "路让位后立起 link 工地");
+    assert.equal(s.created[0].x + ":" + s.created[0].y, "2:22", "工地就落在拆掉的那格废路上");
+    assert.ok(second && second.structureType === CONSTANTS.STRUCTURE_LINK);
 }
 
 {
