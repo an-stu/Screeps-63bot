@@ -300,7 +300,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     // === 接战手段跟着体型走：远程体型没有 ATTACK 部件，attack 恒 -12，
     // 原来只判 ERR_NOT_IN_RANGE → moveTo 永远不执行，防守爬站死在门口 ===
     const ctx = loadStation();
-    const lair = { pos: makePos(41, 14, "W34N55") };
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
     const keeper = { id: "k1", body: [{ type: "attack" }], pos: makePos(40, 15, "W34N55") };
     ctx.Game.getObjectById = id => (id === "k1" ? keeper : null);
@@ -329,6 +329,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         find(c) {
             if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [keeper];
             if (c == CONSTANTS.FIND_MY_CREEPS) return [far];
+            if (c == CONSTANTS.FIND_HOSTILE_STRUCTURES) return [lair];
             return [];
         },
     };
@@ -345,7 +346,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     // 老 memory 把 targetId 钉在 core（结构）上
     const core = { id: "core1", structureType: "invaderCore", pos: makePos(11, 44, "W34N55") };
     ctx.Game.getObjectById = id => (id === "core1" ? core : null);
-    const lair = { pos: makePos(41, 14, "W34N55") };
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
     const creep = makeCreep(ctx, { x: 42, y: 14, memory: { targetId: "core1", defenseGroup: 0 } });
     creep.room = { name: "W34N55", find: () => [] };
@@ -359,7 +360,8 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     //（keeper 贴着窝出怪，真实场景里它必然落在守卫半径内）
     const keeper = { id: "k1", body: [{ type: "attack" }], pos: makePos(40, 15, "W34N55") };
     ctx.Game.getObjectById = id => (id === "core1" ? core : id === "k1" ? keeper : null);
-    creep.room.find = c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [keeper] : []);
+    creep.room.find = c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [keeper]
+        : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []);
     ctx.Creep.prototype.outerDefense.call(creep);
     assert.equal(creep.memory.targetId, "k1", "live enemies take priority every tick");
     assert.ok(creep.calls.some(c => c[0] === "attack" && c[1] === "k1"));
@@ -368,7 +370,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
 {
     // === outerDefense：友军遇袭时，距敌人最近的那只防守爬出手 ===
     const ctx = loadStation();
-    const lair = { pos: makePos(41, 14, "W34N55") };
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
 
     // invader 小队卡在运输路线上（离窝远、贴着我们的 carrier）
@@ -385,6 +387,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         find(c) {
             if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [invader];
             if (c == CONSTANTS.FIND_MY_CREEPS) return [nearDef, farDef, carrier];
+            if (c == CONSTANTS.FIND_HOSTILE_STRUCTURES) return [lair];
             return [];
         },
     };
@@ -411,8 +414,8 @@ console.log("outer defense checks passed");
     // 实测两只 keeper 同时在场：(3,16) 的分配给了正在打 (35,27) 的最近者，
     // 两只满血空闲防守爬因"不是最近"袖手，矿工被屠。
     const ctx = loadStation();
-    const lair = { pos: makePos(41, 14, "W34N55") };
-    const lairWest = { pos: makePos(7, 17, "W34N55") };
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    const lairWest = { structureType: "keeperLair", pos: makePos(7, 17, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair, lairWest];
     const west = { id: "kw", body: [{ type: "attack" }], pos: makePos(3, 16, "W34N55") };
     const east = { id: "ke", body: [{ type: "attack" }], pos: makePos(35, 27, "W34N55") };
@@ -426,6 +429,7 @@ console.log("outer defense checks passed");
         find(c) {
             if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [west, east];
             if (c == CONSTANTS.FIND_MY_CREEPS) return [busy, idleNear];
+            if (c == CONSTANTS.FIND_HOSTILE_STRUCTURES) return [lair, lairWest];
             return [];
         },
     };
@@ -438,4 +442,32 @@ console.log("outer defense checks passed");
     busy.room = room;
     ctx.Creep.prototype.outerDefense.call(busy);
     assert.equal(busy.memory.targetId, "ke", "an engaged defender keeps its own target");
+}
+
+{
+    // === 挨得近的两个敌人由同一只防守爬兼顾，不另派人（用户确认的语义） ===
+    const ctx = loadStation();
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    ctx.StationSources.outerDefensePosts = () => [lair];
+    const h1 = { id: "h1", body: [{ type: "attack" }], pos: makePos(40, 15, "W34N55") };
+    const h2 = { id: "h2", body: [{ type: "attack" }], pos: makePos(42, 16, "W34N55") };
+    const busy = makeCreep(ctx, { x: 41, y: 15, body: [{ type: "ranged_attack" }] });
+    busy.memory.role = "outerHarvestDefenser";
+    busy.memory.targetId = "h1";
+    const idle = makeCreep(ctx, { x: 43, y: 13, body: [{ type: "ranged_attack" }] });
+    idle.memory.role = "outerHarvestDefenser";
+    const room = {
+        name: "W34N55",
+        find(c) {
+            if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [h1, h2];
+            if (c == CONSTANTS.FIND_MY_CREEPS) return [busy, idle];
+            if (c == CONSTANTS.FIND_HOSTILE_STRUCTURES) return [lair];
+            return [];
+        },
+    };
+    ctx.Game.getObjectById = id => (id === "h1" ? h1 : id === "h2" ? h2 : null);
+    idle.room = room;
+    ctx.Creep.prototype.outerDefense.call(idle);
+    assert.ok(!idle.calls.some(c => c[0] === "attack" || c[0] === "rangedAttack"),
+        "a hostile pair within engage spread must be covered by the engaged defender alone");
 }

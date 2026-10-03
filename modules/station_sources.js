@@ -81,6 +81,12 @@ const OUTER_DEFENSE_GUARD_RADIUS = 8;
  */
 const OUTER_DEFENSE_HELP_RADIUS = 8;
 /**
+ * 同一只防守爬能兼顾的目标散布半径：已接战的防守爬对这一距离内的其它敌人
+ * 仍然"负责"（range 3 对射下换目标只需一两 tick），不另派第二只；超过它
+ * 才由空闲的次近者接手。
+ */
+const OUTER_DEFENSE_ENGAGE_SPREAD = 10;
+/**
  * 在两个窝之间来回跑时，每个窝待多久。
  *
  * lair 每 300 tick 出一只 keeper。让「两个窝各待 D + 两趟路上 T」≈ 300，
@@ -764,22 +770,25 @@ Creep.prototype.outerDefense = function () {
         //     防守爬在旁边 3 格也不理，矿工/搬运被逐个咬死。
         // 然后只有**距目标最近**的那只防守爬出手（本组守窝是它的特例），
         // 其余留在岗位，避免两只同时弃岗、全房失守。
-        let allies;
+        // 威胁判定**全房统一**：keeper 靠近**任一** lair（不分自己组的），或贴近
+        // 任何己方爬。原来按各自组的岗位半径算，会错位——威胁只有组 0 看得见，
+        // 最近接手者却是看不见它的组 1，两边都不动（实测 (4,15) keeper 无人接战，
+        // 西源矿工被屠）。
+        let allies = this.room.find(FIND_MY_CREEPS);
+        let allLairs = this.room.find(FIND_HOSTILE_STRUCTURES)
+            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR);
         let hostileCreeps = this.room.find(FIND_HOSTILE_CREEPS)
-            .filter(e => pro.nearDefensePosts(e.pos, posts)
-                || (allies || (allies = this.room.find(FIND_MY_CREEPS)))
-                    .some(c => c.pos.getRangeTo(e.pos) <= OUTER_DEFENSE_HELP_RADIUS));
+            .filter(e => allLairs.some(l => e.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS)
+                || allies.some(c => c.pos.getRangeTo(e.pos) <= OUTER_DEFENSE_HELP_RADIUS));
         if (hostileCreeps.length) {
-            let mates = allies
-                || this.room.find(FIND_MY_CREEPS);
             hostileCreeps = hostileCreeps.filter(h => {
                 let d = this.pos.getRangeTo(h.pos);
-                return mates.every(c => c === this || c.memory.role != "outerHarvestDefenser"
-                    // 已接战**别的**目标的防守爬不参与本轮竞争：否则最近的那个
-                    // 会同时"拥有"两个目标，自己忙不过来，次近的空闲者却袖手
-                    // 无敌情可打（实测 (3,16) keeper 屠杀矿工时两只满血防守爬
-                    // 在 30 格外站着，因为它们对目标都不是最近的）。
-                    || (c.memory.targetId && c.memory.targetId != h.id)
+                return allies.every(c => c === this || c.memory.role != "outerHarvestDefenser"
+                    // 已接战别的目标的防守爬不参与本轮竞争——但**邻近**目标例外：
+                    // 远程体型 range 3 能兼顾身边一圈的敌人，挨得近的两个由同一只
+                    // 打（用户确认的语义），不另派人。
+                    || (c.memory.targetId && c.memory.targetId != h.id
+                        && c.pos.getRangeTo(h.pos) > OUTER_DEFENSE_ENGAGE_SPREAD)
                     || c.pos.getRangeTo(h.pos) >= d);
             });
         }
