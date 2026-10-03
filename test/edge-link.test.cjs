@@ -397,6 +397,7 @@ function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBui
     const task = { taskName: "harvestEnergyOuterCarry", id: "sA", roomName: "W34N55", x: 3, y: 17 };
     const creep = {
         room: { name: "W33N55" },
+        memory: {},                                  // 新逻辑会写 this.memory.carryWait
         store: makeStore({ energy: 1250 }, 1700),
         pos: { isNearTo: () => true, findInRange: () => [] },
         headTask: () => task,
@@ -615,6 +616,65 @@ function defenceGateFixture(defenders) {
     ctx.WarDamageCal = { possibleBreakDamage: () => 0 };
     const computed = ctx.StationSources.getOuterHarDefenseBodyConfig(false, room2).body;
     assert.equal(computed[0], CONSTANTS.MOVE, "按敌情算出的体型同样要把 MOVE 排在第一位");
+}
+
+// ────── 8) 搬运爬「身上有零头就不取货」的死锁 + 碎货往返 ──────
+{
+    function carryScene({ storeEnergy, containerEnergy, keeperAlive, wait }) {
+        const ctx = makeContext();
+        vm.runInNewContext(read("station_sources.js"), ctx);
+        const container = {
+            id: "c1", structureType: "container",
+            store: makeStore({ energy: containerEnergy }, 2000),
+            pos: { x: 32, y: 31, roomName: "W34N55", isEqualTo: () => false },
+        };
+        const storage = { id: "st1", pos: { x: 21, y: 34, roomName: "W33N55" } };
+        const keeper = { id: "k1" };
+        ctx.Memory.rooms = {
+            W34N55: { stationSources: { sA: { id: "sA", roomName: "W34N55", x: 32, y: 32, container: "c1",
+                                              creeps: keeperAlive ? ["k1"] : [] } } },
+        };
+        ctx.Game.rooms = { W33N55: { name: "W33N55", storage } };
+        ctx.Game.getObjectById = id => (id === "c1" ? container : id === "k1" ? keeper
+            : id === "st1" ? storage : null);
+        const calls = [];
+        const creep = {
+            room: { name: "W34N55" }, memory: { carryWait: wait },
+            store: makeStore({ energy: storeEnergy }, 1700),
+            ticksToLive: 1000,
+            pos: { x: 32, y: 31, roomName: "W34N55", isNearTo: () => true, isEqualTo: () => false,
+                   isBorder: () => false, lookFor: () => [], findInRange: () => [],
+                   getRangeTo: () => 1, inRangeTo: () => true },
+            headTask: () => ({ taskName: "harvestEnergyOuterCarry", id: "sA", roomName: "W34N55", x: 32, y: 32 }),
+            lastTask: () => ({ taskName: "harvestEnergyOuterCarry", id: "sA", roomName: "W34N55" }),
+            lastTaskObj: () => undefined,
+            mainRoom: () => ctx.Game.rooms.W33N55,
+            getPartCnt: () => 0, getActiveBodyparts: () => 0,
+            withdraw(t, res) { calls.push(["withdraw", res]); return CONSTANTS.OK; },
+            pickup() { calls.push(["pickup"]); return CONSTANTS.OK; },
+            transfer(t, res) { calls.push(["transfer", res]); return CONSTANTS.OK; },
+            moveTo() { calls.push(["moveTo"]); return CONSTANTS.OK; },
+            goTo() { calls.push(["goTo"]); return CONSTANTS.OK; },
+            addTask() { calls.push(["addTask"]); return this; },
+            execLastTask() { return this; },
+            popTask() { return this; },
+        };
+        ctx.Creep.prototype.harvestEnergyOuterCarry.call(creep);
+        return { calls, creep };
+    }
+
+    // ① 身上有 20 能量零头（路上捡墓碑留下的）→ 必须能补货（旧代码 storeEmpty() 挡住，永远补不上）
+    const top = carryScene({ storeEnergy: 20, containerEnergy: 500, keeperAlive: true, wait: 0 });
+    assert.ok(top.calls.some(c => c[0] === "withdraw" && c[1] === "energy"),
+        "身上有零头也要能从容器补货（这就是 3 只 carrier 卡在容器边的根因）");
+
+    // ② 容器干涸 + 没 keeper + 刚等：不搬碎货，继续等
+    const dry = carryScene({ storeEnergy: 10, containerEnergy: 0, keeperAlive: false, wait: 0 });
+    assert.ok(!dry.calls.some(c => c[0] === "addTask"), "容器干涸但才刚开始等 → 别搬 10 能量的碎货");
+
+    // ③ 干涸且已等够 60 tick：带走总比空转强
+    const giveUp = carryScene({ storeEnergy: 10, containerEnergy: 0, keeperAlive: false, wait: 60 });
+    assert.ok(giveUp.calls.some(c => c[0] === "addTask"), "等够上限就该回主房，不能永远等着");
 }
 
 console.log("edge link / hauler body / defence gate checks passed");

@@ -164,6 +164,14 @@ const OUTER_ROAD_FAIL_TOLERANCE = 100;
  * （hub 满 / 被拆 / 关掉了站）时，等满这个数就照旧走 storage。
  */
 const OUTER_EDGE_LINK_WAIT = 12;
+/**
+ * 矿区干涸时，搬运爬最多在容器边等多少个 tick 再带着「不满半仓」的货回主房。
+ *
+ * 外矿 keeper 死后（或矿点没在采）容器里可能只剩几十能量，如果「取到就走」，
+ * carrier 会在主房和矿区之间来回搬碎货（实测一只一直往返挂机，store 10/1700）。
+ * 等够这个数就说明真的没得等了，带走总比空转强。
+ */
+const OUTER_CARRY_DRY_WAIT = 60;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -1273,17 +1281,26 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                     if (!pro.moveOuterCarrierOnRoad(this, task, data, -1)) this.goTo(container);
                     return;
                 }
-                // 从 source 旁边的 container / 地上掉落取能量：只要相邻且自身空手
-                // 就直接取，不依赖 keeper 是否就位、不限最低能量
-                if (this.storeEmpty()) {
-                    // 优先捡地上的掉落（keeper 掉落的能量堆），不够再拿 container 里的
+                // 从 source 旁边的 container / 地上掉落取能量：**只要有空位就补**
+                //（原来写的是 `if (this.storeEmpty())`，于是"身上已经有几十一百能量"
+                // 的 carrier 永远补不上货：取货分支进不去，而下面的「等攒满再回」
+                // 又要求半仓 —— 它就在容器边干等到老死。实测 3 只 carrier 卡在
+                // W34N55 容器边 store 10~20/1700，一只还一直往返挂机搬碎货）。
+                // 身上的能量可能来自路上捡的墓碑/掉落，属于正常状态，不能当"空手"判。
+                if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                    // 优先捡地上的掉落（keeper 掉落的能量堆），再拿 container 里的
                     let drop = this.pos.lookFor(LOOK_ENERGY).head();
-                    if (drop && this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) this.pickup(drop);
-                    if (this.storeEmpty() && container.store[RESOURCE_ENERGY] > 0) {
+                    if (drop) this.pickup(drop);
+                    if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && container.store[RESOURCE_ENERGY] > 0) {
                         let code = this.withdraw(container, RESOURCE_ENERGY)
                         if (code == ERR_NOT_IN_RANGE)
                             this.moveTo(container)
                     }
+                    // 注意：**不要**在这里重置 carryWait —— 同一 tick 里引擎还没把
+                    // withdraw 的结果写进 this.store，"有没有进展"判断不出来；而
+                    // 「身上有零星能量」是常态（路上捡的墓碑），顺手重置会让
+                    // 「干涸等待」永远累积不到上限、又变回死等。计数器只在
+                    // 真正出发（回程）时清零，见下面。
                 }
                 else if (container.store[RESOURCE_ENERGY] != container.store.getUsedCapacity()) { // add by an_w
                     let ResType = Object.keys(container.store).filter(e => e != RESOURCE_ENERGY).head()
@@ -1331,9 +1348,21 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         // keeper 在时攒满再回，减少碎片往返。
         let sm = rm && rm[pro.stationName] && rm[pro.stationName][task.id];
         let keeperAlive = sm && sm["creeps"] && Game.getObjectById(sm["creeps"][0]);
-        if (keeperAlive && this.store[RESOURCE_ENERGY] * 2 <= this.store.getCapacity(RESOURCE_ENERGY)) {
-            return; // keeper 正常时等攒满
+        // 攒批再回（别搬碎货）：
+        //   · 有 keeper：等半仓（它会把容器灌满）。
+        //   · **没有 keeper**：原来写成「取到就回」，于是容器只剩几十能量时
+        //     carrier 会在主房与矿区之间来回搬 10 能量的碎货（实测一只
+        //     shard3_83402075_3 一直往返挂机）。改成同样等半仓，但矿区确实
+        //     干涸（容器里没能量）且已经等够 OUTER_CARRY_DRY_WAIT tick 才走，
+        //     避免它永远等着。
+        let halfLoad = this.store.getCapacity(RESOURCE_ENERGY) / 2;
+        if (this.store[RESOURCE_ENERGY] < halfLoad) {
+            let cont = sm && Game.getObjectById(sm[STRUCTURE_CONTAINER]);
+            let dry = !cont || !(cont.store[RESOURCE_ENERGY] > 0);
+            this.memory.carryWait = (this.memory.carryWait || 0) + 1;
+            if (keeperAlive || !dry || this.memory.carryWait < OUTER_CARRY_DRY_WAIT) return;
         }
+        this.memory.carryWait = 0;
         let data = task.roomName && task.id
             ? (Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
                 && Memory.rooms[task.roomName][pro.stationName][task.id]) : undefined;

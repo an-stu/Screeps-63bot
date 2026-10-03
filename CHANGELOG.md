@@ -1,3 +1,25 @@
+## v0.78.56 — Outer carriers pick up again (a partial load used to wedge them)
+
+Live: three carriers parked next to the W34N55 container with 10-20 energy in a 1600-1700
+store, and one of them (shard3_83402075_3) shuttling back and forth indefinitely.
+
+### Fixed
+
+- **The pickup branch required an *empty* store.** `if (this.storeEmpty())` meant a carrier
+  that already held a little energy - normal, road tombstones get looted - could never top
+  up from the container, while the departure rule below required a half load. It sat at the
+  container until it died. The gate is now `store.getFreeCapacity(energy) > 0`.
+- **Without a keeper the carrier left with whatever it had.** The old comment said "when the
+  keeper is away the container rarely fills, so take it and go", which with a dry container
+  became a 10-energy shuttle between the mine and storage (the wandering carrier above).
+  Both cases now wait for a half load, with one escape hatch: if the container is dry and
+  the wait has lasted OUTER_CARRY_DRY_WAIT (60) ticks, the carrier leaves with what it has.
+
+Note the wait counter is only cleared on departure: inside the same tick the engine has not
+yet written a withdrawal into `this.store`, so "did I make progress" cannot be observed
+there - resetting on "store is non-empty" (the first version of this fix) meant the dry-out
+counter never reached its limit and the wedge came straight back.
+
 ## v0.78.55 — Outer defence strength is now a Memory knob
 
 `StationSources.outerDefenseQuota()` honours `Memory.marketSettings.outerDefenseBase`
