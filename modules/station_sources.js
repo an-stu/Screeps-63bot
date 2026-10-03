@@ -1330,7 +1330,10 @@ let pro = {
         // T3 强化（boostRes 由 trySpawnOuterDefenser 按 boostAble 决定是否附加）
         // 后 880 dps + 288 奶 + tough 减伤，对小队是碾压。
         const bigBody = () => ({
-            body: ManagerCreeps.calcBodyPart({[MOVE]: 20, [RANGED_ATTACK]: 22, [HEAL]: 6, [TOUGH]: 2}),
+            // TOUGH 必须是数组**第一个**部件：伤害按 body 顺序从前往后结算，
+            // 强化 TOUGH（XGHO2 ×0.3）放前面才能把 666 点伤害挡在真部件之前；
+            // 放在末尾永远轮不到，纯摆设。
+            body: ManagerCreeps.calcBodyPart({[TOUGH]: 2, [RANGED_ATTACK]: 22, [HEAL]: 6, [MOVE]: 20}),
             boostRes: {
                 // BOOST_RES 的键是**动作名**（tough 的动作是 "damage"，这正是
                 // FIGHT_BOOST_RES_MAP[TOUGH]="damage" 的原因），索引 0/1/2 =
@@ -2755,8 +2758,16 @@ let pro = {
         // 体型按房间实际敌情算（没有视野时退回固定体型），需要 boost 时先确认 lab 有货
         let cfg = pro.getOuterHarDefenseBodyConfig(isInvader, harRoom);
         let tasks = pro.generatorOuterHarDefenseTask(data);
-        if (cfg.boostRes && _.keys(cfg.boostRes).length && StationLab.boostAble(spawnRoom, cfg.boostRes)) {
-            tasks.push(StationLab.generatorBoostResTask(cfg.boostRes).head());
+        if (cfg.boostRes && _.keys(cfg.boostRes).length) {
+            if (StationLab.boostAble(spawnRoom, cfg.boostRes)) {
+                tasks.push(StationLab.generatorBoostResTask(cfg.boostRes).head());
+            } else {
+                // lab 拿不出化合物：不强化 TOUGH 只是 100 血的普通部件（还排在
+                // 吸伤位之外就是双重死重），去掉并把 2 个部件位还给远程输出。
+                cfg.body = cfg.body.filter(e => e != TOUGH);
+                cfg.body.unshift(RANGED_ATTACK, RANGED_ATTACK);
+                cfg.boostRes = {};
+            }
         }
         let name = StationHive.trySpawn(spawnRoom, spawnRoom.name, cfg.body, "outerHarvestDefenser", tasks);
         // 只有「为了接替最老那只而生的」才打标记，避免标记落到别的爬身上
