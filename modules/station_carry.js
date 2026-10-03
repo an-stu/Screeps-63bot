@@ -3,6 +3,16 @@ global.STORE_IN = 0;
 global.STORE_CACHE = 1;
 global.STORE_OUT = 2;//只存储能量
 
+/**
+ * 主房边缘 link（外矿卸货口，见 StationSources.ensureOuterEdgeLink）攒到多少能量
+ * 才发给主房 link 网。
+ *
+ * 取值要小：link 容量 800，而外矿搬运爬一趟 1250+ —— 一次只塞得进 800，剩下的
+ * 要靠 link 把货发走才卸得下（见 harvestEnergyOuterCarryRoadBuilder 的有界等待）。
+ * 阈值太大，尾量会长期滞留在 link 里，搬运爬每次都得多等一轮甚至回退 storage。
+ */
+const OUTER_EDGE_LINK_SEND = 200;
+
 
 Creep.prototype.registerStationCarryDrop = function () {
     let room = Game.rooms[this.memory["roomName"]]
@@ -100,6 +110,27 @@ let pro = {
         if (!room.memory[StationUpgrade.stationName] || !room.memory[pro.stationName]) return;
         let upgradeLink = Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_LINK])
         let centerLink = Game.getObjectById(room.memory[pro.stationName][STRUCTURE_LINK])
+
+        // 外矿卸货口 link（主房边缘，见 StationSources.ensureOuterEdgeLink）：
+        // 它是个**中转站**，容量只有 800 而外矿搬运爬一趟 1250+，所以要**最先**
+        // 把它清空 —— 它空着，下一只搬运爬到了才能卸干净、立刻掉头回去。优先级
+        // 排在矿点 link 之前就是这个道理（矿点 link 背后还有容器做缓冲）。
+        // 目的地：storage 旁的 hub link（-> 由搬运爬送进 storage），hub 满了退
+        // 到升级 link（那也是本房正在消耗的能量）。都满就留在 link 里等下一轮。
+        let edgeLink = Game.getObjectById(room.memory[pro.stationName].edgeLink);
+        if (edgeLink && edgeLink.structureType == STRUCTURE_LINK) {
+            let edgeSendAble = edgeLink.store[RESOURCE_ENERGY] >= OUTER_EDGE_LINK_SEND;
+            if (edgeSendAble) {
+                let dest;
+                if (centerLink && centerLink.store.getFreeCapacity(RESOURCE_ENERGY) > 100) dest = centerLink;
+                else if (upgradeLink && upgradeLink.store.getFreeCapacity(RESOURCE_ENERGY) > 100) dest = upgradeLink;
+                if (dest) {
+                    edgeLink.transferEnergy(dest);
+                    if (dest == centerLink) centerLink = null;
+                    else upgradeLink = null;
+                }
+            }
+        }
 
         _.values(room.memory[StationSources.stationName]).forEach(e => {
             let link = Game.getObjectById(e["link"]);

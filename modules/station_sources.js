@@ -147,6 +147,23 @@ const OUTER_ROAD_STUCK_INVALIDATE = 25;
  * 现在单次失败只回退到原生 moveTo（照样走得动），连续失败超过这个 tick 数才作废。
  */
 const OUTER_ROAD_FAIL_TOLERANCE = 100;
+/**
+ * 主房边缘 link（外矿卸货口）：外矿搬运爬把能量倒在**主房内那段共用路线旁边**的
+ * link 上就掉头，由 link 送进主房 link 网（link 之间任意距离互传），砍掉它在
+ * 主房内的最后一段路。一个 link 服务以该房为主房的所有矿点（路线在主房内共用）。
+ * 发送端（攒够多少能量才发给 hub/升级 link）在 StationCarry.transformLink。
+ */
+/**
+ * 搬运爬在边缘 link 边**最多等**多少个 tick（只在「link 满、这一 tick 一克都
+ * 塞不进」时计数）。
+ *
+ * 为什么需要等：link 只有 800 容量，而一趟货 1250+，塞不完的部分本来只能走
+ * storage —— 那等于白省（还是得跑完主房那段路）。link 的发送轮询
+ * （StationCarry.transformLink）约每 7~10 tick 跑一次，所以在这里等几 tick
+ * 比带着货再走二十格划算得多。上限的意义是**绝不楔死**：link 没人收
+ * （hub 满 / 被拆 / 关掉了站）时，等满这个数就照旧走 storage。
+ */
+const OUTER_EDGE_LINK_WAIT = 12;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -994,9 +1011,13 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // cached road (the builder task moves along it even without WORK parts).
     if (task.keepBuilding && !canBuild && this.store[RESOURCE_ENERGY] > 0) {
         this.popTask();
+        // 卸货点同样走 outerCarryDropOff（主房边缘 link 在位就卸它）
+        let dropHome = this.mainRoom();
+        let dropOff = (dropHome && pro.outerCarryDropOff(dropHome)) || (dropHome && dropHome.storage);
+        if (!dropOff) return this.execLastTask();
         this.addTask([
-            UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
-            UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+            UtilsTask.task(dropHome.storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
+            UtilsTask.task(dropOff, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                 mineRoom: task.mineRoom, stationId: task.stationId, roadDir: 1,
             }),
         ]);
@@ -1007,9 +1028,12 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // the source container, still walking the cached road.
     if (task.keepBuilding && complete && this.store[RESOURCE_ENERGY] > 0) {
         this.popTask();
+        let doneHome = this.mainRoom();
+        let doneDropOff = (doneHome && pro.outerCarryDropOff(doneHome)) || (doneHome && doneHome.storage);
+        if (!doneDropOff) return this.execLastTask();
         this.addTask([
-            UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
-            UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+            UtilsTask.task(doneHome.storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
+            UtilsTask.task(doneDropOff, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                 mineRoom: task.mineRoom, stationId: task.stationId, roadDir: 1,
             }),
         ]);
@@ -1027,14 +1051,37 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     let noRoute = !data;
     if (this.pos.isNearTo(target) || (this.store[RESOURCE_ENERGY] == 0 && noRoute)) {
         if (target && target.store && this.store[RESOURCE_ENERGY] > 0) {
-            this.transfer(target, RESOURCE_ENERGY);
+            // 卸货点是**边缘 link** 时：link 只有 800 容量，而这一趟有 1250+。
+            // 先把塞得进的塞进去，剩下的**有界地等** link 把能量发给主房
+            // （link 轮询约每 7~10 tick 一次）—— 在 link 边等几 tick，比带着
+            // 几百能量再走完主房那二十格划算得多。等满
+            // OUTER_EDGE_LINK_WAIT 个「link 满、一克都塞不进」的 tick 就收手，
+            // 剩下的交给栈里的 fillRes(storage) 兜底（**绝不楔死**）。
+            let energy = this.store[RESOURCE_ENERGY];
+            if (target.structureType == STRUCTURE_LINK) {
+                let free = target.store.getFreeCapacity(RESOURCE_ENERGY);
+                let amount = Math.min(energy, free);
+                let wait = task.edgeLinkWait || 0;
+                if (free <= 0) wait++;                       // 这一 tick 一克都塞不进
+                if (amount < energy && wait < OUTER_EDGE_LINK_WAIT) {
+                    if (amount > 0) this.transfer(target, RESOURCE_ENERGY, amount);
+                    task.edgeLinkWait = wait;
+                    return;                                   // 留在 link 边等它发走
+                }
+                if (amount > 0) this.transfer(target, RESOURCE_ENERGY, amount);
+            } else {
+                this.transfer(target, RESOURCE_ENERGY);
+            }
         }
         this.popTask();
         if (task.keepBuilding && this.store[RESOURCE_ENERGY] > 0 && data) {
             // 确定完成后再退出：端点强制刷新完成度检查
             complete = pro.outerRoadComplete(data, true);
             if (!complete) {
-                let nextTarget = task.roadDir == 1 ? pro.getOuterMineTarget(data) : this.mainRoom().storage;
+                // 掉头：回程那一趟的卸货点同样走 outerCarryDropOff（边缘 link 在位就卸它）
+                let backHome = this.mainRoom();
+                let nextTarget = task.roadDir == 1 ? pro.getOuterMineTarget(data)
+                    : ((backHome && pro.outerCarryDropOff(backHome)) || (backHome && backHome.storage));
                 if (nextTarget) this.addTask(UtilsTask.task(nextTarget, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                     mineRoom: task.mineRoom,
                     stationId: task.stationId,
@@ -1220,17 +1267,26 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 && Memory.rooms[task.roomName][pro.stationName][task.id]) : undefined;
         let home = this.mainRoom();
         if (!home || !home.storage) return;   // 主房/storage 拿不到：本 tick 跳过（此前这里抛 TypeError 刷 lastError）
+        // 卸货点：主房边缘 link 在位就卸它（回程同路、先经过它），否则 storage。
+        // 到场时 link 满/消失由卸货函数自己回退，见 outerCarryDropOff。
+        let dropOff = pro.outerCarryDropOff(home) || home.storage;
         let isRoadBuilder = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
         if (data && !pro.outerRoadComplete(data) && isRoadBuilder) {
             // 道路未修好时只让带 WORK 的专职 carrier 修路。普通搬运爬
             // 仍然沿缓存路线把能量送入 Storage，不能让修路任务饿死主房。
-            this.addTask(UtilsTask.task(home.storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+            this.addTask(UtilsTask.task(dropOff, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                 mineRoom: task.roomName, stationId: task.id, keepBuilding: true, roadDir: 1,
             }));
         } else {
             let roadTask = [
+                // 栈底：最终兜底把能量送进 storage（边缘 link 满/被拆时接住剩下的货）
                 UtilsTask.task(home.storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
-                UtilsTask.task(home.storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                // 边缘 link 在位时插一层：先往 link 卸，卸不下的往下漏给 storage
+                dropOff != home.storage
+                    ? UtilsTask.task(dropOff, "fillRes", undefined, { resType: RESOURCE_ENERGY })
+                    : undefined,
+                // 栈顶：沿缓存路线走回主房，到场（link 或 storage）卸货
+                UtilsTask.task(dropOff, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                     mineRoom: task.roomName, stationId: task.id, roadDir: 1,
                 }) // 想致富先修路：source -> storage
             ]
@@ -2175,6 +2231,139 @@ let pro = {
         }
         return room._plannedBlockedSet.has(pos.x + ":" + pos.y);
     },
+    /**
+     * 主房边缘 link（外矿卸货口）：外矿搬运爬把能量倒在**主房内那段共用路线
+     * 旁边**的 link 上就掉头，由 link 送进主房 link 网（link 之间任意距离互传），
+     * 省掉它在主房内的最后一段路 —— 每趟省十几格往返，还顺带减少 storage 周边拥堵。
+     *
+     * 记录写在 `room.memory.stationCarry.edgeLink`（与 hub link 同一个 station，
+     * 因为 link 的发送轮询在 StationCarry.transformLink）。link 被拆、被换成别的
+     * 建筑时立刻清记录，调用方一律回退旧行为（storage）。
+     * `Memory.marketSettings.edgeLink === false` 可一键关掉。
+     */
+    outerEdgeLink(home) {
+        if (!home || !home.my) return undefined;
+        if (Memory.marketSettings && Memory.marketSettings.edgeLink === false) return undefined;
+        let sc = home.memory && home.memory[StationCarry.stationName];
+        if (!sc || !sc.edgeLink) return undefined;
+        let link = Game.getObjectById(sc.edgeLink);
+        if (!link || link.structureType != STRUCTURE_LINK) {
+            delete sc.edgeLink;
+            return undefined;
+        }
+        return link;
+    },
+    /**
+     * 外矿搬运爬回程的卸货点：边缘 link 在位就用它，否则回退 storage。
+     *
+     * 回程路线与 storage 同路且**先经过** link，所以「先去 link 再看」不会多走路。
+     * link 满不满不在这里判 —— 那要在**到场那一刻**判（有界等待 + 回退，见
+     * harvestEnergyOuterCarryRoadBuilder），否则出发时满、到场时已经空了的 link
+     * 会被整趟跳过。
+     */
+    outerCarryDropOff(home) {
+        if (!home) return undefined;
+        return pro.outerEdgeLink(home) || home.storage;
+    },
+    /**
+     * 边缘 link 的选址与工地（幂等；只在外矿生产 pass 里调用）。
+     *
+     * 选址规则（全部满足，取「离矿区入口最近」的一个）：
+     *   1. 在主房内（外矿路线在主房的那一段）
+     *   2. 与**所有**矿点共用的那段路相邻（切比雪夫 ≤1）—— 一个 link 服务以本房
+     *      为主房的全部矿点；只贴某一条路线会漏掉其它矿点的搬运爬
+     *   3. 空地、无建筑、无工地
+     *   4. **不能压在路点上**：link 不像 road/container 那样能踩上去（见
+     *      outerRoadStructureWalkable），压上去等于把外矿单行道堵死；贴在旁边时
+     *      搬运爬在路上经过就是 range 1，transfer 照常成立
+     *
+     * 建好之前返回工地对象。建工地的活不需要专门派爬：工地一出现在主房，
+     * strategy_highLevel 就会补 worker，idle 的 worker 走
+     * StationWork.generatorBuildTask（挑最近的工地），主房里通常就这一个工地。
+     */
+    ensureOuterEdgeLink(spawnRoom) {
+        if (!spawnRoom || !spawnRoom.my || !spawnRoom.controller) return undefined;
+        if (Memory.marketSettings && Memory.marketSettings.edgeLink === false) return undefined;
+        if (spawnRoom.level < 5) return undefined;                       // link 要 RCL5
+        if (pro.outerEdgeLink(spawnRoom)) return undefined;              // 已经有 link
+        let sc = spawnRoom.memory[StationCarry.stationName]
+            || (spawnRoom.memory[StationCarry.stationName] = {});
+        // 选过一次就不再重算（路线交集的解码开销不小）：先按记录的位置确认
+        if (sc.edgeLinkPos) {
+            let xy = sc.edgeLinkPos.split(":");
+            let x = parseInt(xy[0], 10), y = parseInt(xy[1], 10);
+            let link = spawnRoom.lookForAt(LOOK_STRUCTURES, x, y).find(s => s.structureType == STRUCTURE_LINK);
+            if (link) { sc.edgeLink = link.id; return undefined; }
+            let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).find(s => s.structureType == STRUCTURE_LINK);
+            if (site) { sc.edgeLinkSite = site.id; return site; }
+            delete sc.edgeLinkPos;      // 位置被别的东西占了 / 工地没了 → 重新选
+            delete sc.edgeLinkSite;
+        }
+        // 以本房为主房的矿点：缓存路线的**终点**落在本房
+        let paths = [];
+        for (let roomName in Memory.rooms) {
+            if (roomName == spawnRoom.name) continue;                    // 主房自己的矿点没有外矿路线
+            let stations = Memory.rooms[roomName][pro.stationName];
+            if (!stations) continue;
+            _.values(stations).forEach(data => {
+                if (!data || !data.id || !data.roadPathStr) return;
+                let path = pro.getOuterRoadPath(data);
+                if (!path || !path.length) return;
+                if (path.last().roomName != spawnRoom.name) return;
+                paths.push(path);
+            });
+        }
+        if (!paths.length) return undefined;
+        // 所有矿点共用的主房路点（求交集），并记下它在路线里的**最早序号**
+        // —— 序号越小越靠矿区入口，link 要放在最早那一段的旁边
+        let seenCnt = {};
+        let firstIdx = {};
+        paths.forEach(path => {
+            let seen = {};
+            path.forEach((p, i) => {
+                if (p.roomName != spawnRoom.name) return;
+                let key = p.x + ":" + p.y;
+                if (seen[key]) return;
+                seen[key] = true;
+                seenCnt[key] = (seenCnt[key] || 0) + 1;
+                if (firstIdx[key] == undefined || i < firstIdx[key]) firstIdx[key] = i;
+            });
+        });
+        let common = Object.keys(seenCnt).filter(k => seenCnt[k] == paths.length);
+        if (!common.length) return undefined;
+        let terrain = new Room.Terrain(spawnRoom.name);
+        let cand = {};
+        common.forEach(key => {
+            let xy = key.split(":");
+            let tx = parseInt(xy[0], 10), ty = parseInt(xy[1], 10);
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (!dx && !dy) continue;
+                    let x = tx + dx, y = ty + dy;
+                    if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                    if (seenCnt[x + ":" + y]) continue;              // 共用路点：压上去会堵路
+                    if (terrain.get(x, y) == TERRAIN_MASK_WALL) continue;
+                    if (spawnRoom.lookForAt(LOOK_STRUCTURES, x, y).length) continue;
+                    if (spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).length) continue;
+                    let cur = cand[x + ":" + y];
+                    if (!cur || firstIdx[key] < cur.entry) cand[x + ":" + y] = { x: x, y: y, entry: firstIdx[key] };
+                }
+            }
+        });
+        let pick = _.values(cand).sort((a, b) =>
+            a.entry - b.entry || (a.x - b.x) || (a.y - b.y)).head();
+        if (!pick) return undefined;
+        let cap = CONTROLLER_STRUCTURES[STRUCTURE_LINK][spawnRoom.level] || 0;
+        let used = spawnRoom.link.length + spawnRoom.find(FIND_MY_CONSTRUCTION_SITES)
+            .filter(s => s.structureType == STRUCTURE_LINK).length;
+        if (used >= cap) return undefined;
+        if (spawnRoom.createConstructionSite(pick.x, pick.y, STRUCTURE_LINK) != OK) return undefined;
+        sc.edgeLinkPos = pick.x + ":" + pick.y;
+        let site = spawnRoom.lookForAt(LOOK_CONSTRUCTION_SITES, pick.x, pick.y)
+            .find(s => s.structureType == STRUCTURE_LINK);
+        if (site) sc.edgeLinkSite = site.id;
+        return site;
+    },
     generatorOuterHarDefenseTask(data) {
         return [
             UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "outerDefense", "registerStationSourcesDefenseOutRoom")
@@ -2499,6 +2688,11 @@ let pro = {
                 pro.ensureOuterRoadPath(data, spawnRoom);
                 pro.placeOuterRoadSites(data, spawnRoom);
                 pro.cleanupOuterRoadSites(data, spawnRoom);
+                // 主房边缘 link（外矿卸货口）：只与主房有关，重复调用是幂等的。
+                // 用 HelperError.catchError 包住：这个函数一旦抛异常，整个外矿
+                // pass 会在中途断掉 —— 外矿生产全停（allDefendersFull 那次的
+                // 教训），而它只是个可选优化，绝不能拖垮采运。
+                HelperError.catchError(() => pro.ensureOuterEdgeLink(spawnRoom), "outerEdgeLink:" + spawnRoom.name);
                 // 安全网：任务栈被扒空的 carrier 没有任何地方会补任务，会永久闲置
                 // 在原地（见 harvestEnergyOuterCarryRoadBuilder 里 store==0 分支的
                 // 注释）。这里发现就立刻把搬运任务派回去，比事后在控制台里一只只
