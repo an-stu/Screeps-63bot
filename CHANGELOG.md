@@ -1,3 +1,26 @@
+## v0.78.55 — Outer defence strength is now a Memory knob
+
+`StationSources.outerDefenseQuota()` honours `Memory.marketSettings.outerDefenseBase`
+(default 2, clamped 1-4) before the keeper-count scaling. Setting it to 1 runs a single
+defender for the whole room, which the measured Patrol budget says is feasible:
+
+    single defender, closed loop over four lairs   168 tick / 300   (44% slack)
+
+That figure already includes the live terrain, the 93 existing road tiles, the
+post-fight slowdown (a 1424-damage fight deletes 14 of 17 MOVE parts outright, dropping
+the creep to 0.18 tiles/tick until it heals on the march) and healing-while-walking.
+
+What a single defender costs, none of which show up in that tick budget:
+1. every source is keeper-occupied for roughly twice as long, and our miners stop
+   working while a keeper camps next to them - this is throughput, not safety;
+2. it is a single point of failure: the replacement needs 150+ ticks, and keepers farm
+   the miners meanwhile;
+3. when an invader squad walks in, one defender leaving to fight it leaves all four
+   lairs unattended (with two, one can fight while the other holds).
+
+The knob takes effect on the next spawn decision; existing defenders simply retire at
+the end of their life, so it can be A/B tested without another deploy.
+
 ## v0.78.54 — Defence groups own their own lairs; the patrol budget is measured, not guessed
 
 ### Added

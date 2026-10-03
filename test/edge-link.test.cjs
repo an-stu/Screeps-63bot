@@ -545,6 +545,14 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerDefenseQuota(roomWith(9)), 4, "上限 4 = lair 数");
     assert.equal(S.outerDefenseQuota(undefined), 2, "没有视野时退回基线，不凭想象加派");
 
+    // 基线可调：设 1 = 只留一只防守爬兜整个房间（用户想试单只时用，不用改代码）
+    ctx.Memory.marketSettings = { outerDefenseBase: 1 };
+    assert.equal(S.outerDefenseQuota(roomWith(0)), 1, "outerDefenseBase=1 → 无 keeper 时也要 1 只");
+    assert.equal(S.outerDefenseQuota(roomWith(3)), 3, "有 3 只 keeper 时仍按 1:1 加编到 3");
+    ctx.Memory.marketSettings = { outerDefenseBase: 9 };
+    assert.equal(S.outerDefenseQuota(roomWith(0)), 4, "上限 4 兜住，不允许配出 9 只");
+    delete ctx.Memory.marketSettings;                 // 别把开关漏给后面的派兵用例
+
     // 派兵：编制按 keeper 加编，且**已经到岗的防守爬**必须算进数量
     //（旧实现按 spawnRoom.creeps 数，到岗的那只看不见 → 每 6 tick 白派一只）
     const spawned = [];

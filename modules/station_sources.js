@@ -3028,7 +3028,15 @@ let pro = {
      * 先被打掉、防守到位后才放矿工进去。没有视野时退回基线（不凭想象加派）。
      */
     outerDefenseQuota(room) {
-        let base = OUTER_DEFENSE_TARGET_CNT;
+        // 基线可用 Memory.marketSettings.outerDefenseBase 覆盖（缺省 2）：
+        // 设成 1 = 只留一只防守爬兜整个房间。逐 tick 模拟（含地形/现有道路/受伤降速）
+        // 显示单只走完 4 个窝的闭环只要 168 tick / 300（44% 余量）——**来得及**，
+        // 但代价在别处：① 每个矿点被 keeper 占着的时长翻倍 → 矿工停工时间变长；
+        // ② 单点故障：唯一那只死了要 150+ tick 才补上，期间 keeper 屠矿工；
+        // ③ invader 小队来时它去接战 = 4 个窝全空（两只可以一只接战一只守窝）。
+        let base = Number(Memory.marketSettings && Memory.marketSettings.outerDefenseBase)
+            || OUTER_DEFENSE_TARGET_CNT;
+        base = Math.max(1, Math.min(4, base));
         if (!room) return base;
         let keepers = room.find(FIND_HOSTILE_CREEPS)
             .filter(c => c.owner && c.owner.username == "Source Keeper").length;
