@@ -2393,6 +2393,14 @@ let pro = {
         // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
         // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）
         if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) return null;
+        // 外矿搬运爬**全局硬上限**（跨所有矿点统计，Memory.marketSettings.outerCarrierMax
+        // 可调，缺省 6）：每只 50 部件 = 1650 容量，往返 ~150 tick ≈ 11 能量/tick，
+        // 一个 20/tick 的源 2 只就够，三个矿点 6 只封顶。需求公式里 pathTime 一旦
+        // 被拥堵抬高就会正反馈多派（10-03 实测涨到 16 只），CPU 与 bucket 双输，
+        // 这里一刀切住。短缺靠 50 部件的单体运力兜，不再靠数量。
+        let roomCarriers = spawnRoom.creeps("outerHarvestEnergyCarrier", false);
+        let carrierMax = Number(Memory.marketSettings && Memory.marketSettings.outerCarrierMax) || 6;
+        if (roomCarriers.length >= carrierMax) return null;
         // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
         // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
         // 主房 spawn 常年是忙的（spawnFailure 常真），把路线维护挡在后面等于
