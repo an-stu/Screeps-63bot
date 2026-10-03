@@ -6,6 +6,17 @@ const vm = require("node:vm");
 const root = path.resolve(__dirname, "..");
 const missionSource = fs.readFileSync(path.join(root, "modules/manager_missions.js"), "utf8");
 
+// lodash/项目给 Array 挂的扩展：宿主 realm 与 VM realm 都要有（两边的数组会混用）
+for (const [name, fn] of [
+    ["head", function () { return this.length ? this[0] : undefined; }],
+    ["sum", function () { return this.reduce((a, b) => a + b, 0); }],
+    ["toMap", function () { return this.reduce((m, e) => { m[e[0]] = e[1]; return m; }, {}); }],
+]) {
+    if (!Array.prototype[name]) Object.defineProperty(Array.prototype, name, {
+        value: fn, enumerable: false, configurable: true, writable: true,
+    });
+}
+
 function loadMissionHandler(store, costRate = 0.2) {
     const sent = [];
     const terminal = {
@@ -147,6 +158,63 @@ function loadMineralKeeper({ withContainer = true, harvestCode = 0 } = {}) {
     assert.ok(calls.some(c => c[0] === "harvest"), "mineral keeper must still harvest when its container is gone");
     assert.ok(!calls.some(c => c[0] === "transfer" || c[0] === "repair"),
         "a missing container must be skipped, not passed to transfer/repair");
+}
+
+// buildConst 的叶子任务一旦指向「已经不存在的工地」，必须**先弹任务**再干别的：
+// 拿 null 去调 this.build() 万一抛异常，异常被外层 runEach 吞掉，叶子任务永远弹不掉，
+// 爬就顶着一条死任务原地不动（实测一只 worker 在 storage 边站了十几分钟）。
+{
+    const creepSource = fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8");
+    const ctx = {
+        console,
+        OK: 0, ERR_NOT_IN_RANGE: -9, ERR_INVALID_TARGET: -7,
+        WORK: "work", BUILD_POWER: 5, STRUCTURE_RAMPART: "rampart",
+        Creep: function () {}, Memory: { creeps: {} }, Game: { time: 100, getObjectById: () => null },
+        UtilsTask: { task: (t, name) => ({ taskName: name, id: t && t.id }), taskOutView: () => ({ taskName: "x" }) },
+        StationUpgrade: { trySignController: () => false },
+        PathFinder: { CostMatrix: function () { this.set = () => {}; this.get = () => 0; } },
+        Room: function () {}, RoomPosition: function () {},
+        FIND_CREEPS: 1, FIND_MY_CREEPS: 2, FIND_HOSTILE_CREEPS: 4, FIND_STRUCTURES: 3,
+        FIND_CONSTRUCTION_SITES: 8, FIND_MY_CONSTRUCTION_SITES: 8, FIND_SOURCES: 9,
+        RESOURCE_ENERGY: "energy", STRUCTURE_CONTAINER: "container", STRUCTURE_ROAD: "road",
+        STRUCTURE_TOWER: "tower", STRUCTURE_LINK: "link", LOOK_STRUCTURES: "structures",
+        LOOK_CONSTRUCTION_SITES: "constructionSite", CARRY: "carry", MOVE: "move",
+        ATTACK: "attack", HEAL: "heal", RANGED_ATTACK: "ranged_attack", TOUGH: "tough",
+        ERR_FULL: -8, ERR_NOT_ENOUGH_RESOURCES: -6, ERR_BUSY: -4, ERR_NOT_OWNER: -1,
+        ERR_INVALID_ARGS: -10, ERR_NO_BODYPART: -12, ERR_NO_PATH: -2, ERR_TIRED: -11,
+        DISMANTLE_POWER: 50, RANGED_ATTACK_POWER: 10, ATTACK_POWER: 30, HEAL_POWER: 12,
+        RANGED_HEAL_POWER: 4, REPAIR_POWER: 100, HARVEST_POWER: 2, CARRY_CAPACITY: 50,
+        RESOURCE_POWER: "power", PWR_OPERATE_STORAGE: 1, PWR_GENERATE_OPS: 2,
+        BOOSTS: {},
+        _: { values: o => Object.values(o || {}), keys: o => Object.keys(o || {}),
+             head: a => (a && a.length ? a[0] : undefined), sum: a => (a || []).reduce((x, y) => x + y, 0) },
+    };
+    ctx.global = ctx;
+    // 项目在游戏里由 utils.js 给 Array 挂了一堆 lodash 扩展，VM 里要补上
+    vm.runInNewContext(`
+Array.prototype.head = function () { return this.length ? this[0] : undefined; };
+Array.prototype.toMap = function () { return this.reduce((m, e) => { m[e[0]] = e[1]; return m; }, {}); };
+Array.prototype.sum = function () { return this.reduce((a, b) => a + b, 0); };
+Array.prototype.head = function () { return this.length ? this[0] : undefined; };
+`, ctx);
+    vm.runInNewContext(creepSource, ctx, { filename: "prototype_creep.js" });
+
+    const calls = [];
+    const creep = {
+        memory: { tasks: [{ taskName: "buildConst", id: "dead" }] },
+        storeEmpty: () => false,
+        getActiveBodyparts: () => 10,
+        lastTaskObj: () => null,                       // ← 工地已被撤/被建好
+        build: t => { calls.push(["build", t]); return ctx.ERR_INVALID_TARGET; },
+        moveTo: () => 0,
+        popTask() { calls.push(["pop"]); this.memory.tasks.pop(); return this; },
+        execLastTask() { calls.push(["exec"]); return this; },
+        addTask() { return this; },
+    };
+    ctx.Creep.prototype.buildConst.call(creep);
+    assert.ok(calls.some(c => c[0] === "pop"), "missing target must pop the leaf task");
+    assert.ok(!calls.some(c => c[0] === "build"), "must not call build() with a null target");
+    assert.equal(creep.memory.tasks.length, 0, "the dead task must really be gone");
 }
 
 console.log("recent regression checks passed");

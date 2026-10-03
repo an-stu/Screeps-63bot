@@ -636,7 +636,14 @@ Creep.prototype.fillRes = function () {
 
 Creep.prototype.buildConst = function () {
     let obj = this.lastTaskObj();
-    let completesRampart = obj && obj.structureType == STRUCTURE_RAMPART
+    // 目标消失（工地被别人建好 / 被撤销）→ **先弹任务再谈别的**，不要拿 null 去调
+    // this.build()：万一那条路径抛异常，异常会被外层 runEach 吞掉，而这个叶子任务
+    // 永远弹不掉 —— 爬就顶着一条死任务站在原地不动了（实测：一只 worker 的
+    // buildConst 指向已撤销的工地，在 storage 边站了十几分钟，车间工地进度 0/5000）。
+    // 同类事故在 concatStationSources 上也出过一次（矿物爬被钉在容器上）。
+    // 通用规则：**叶子任务里凡是"目标可能已不存在"的，第一句就是判空退出。**
+    if (!obj) return this.popTask().execLastTask();
+    let completesRampart = obj.structureType == STRUCTURE_RAMPART
         && obj.progress + this.getActiveBodyparts(WORK) * BUILD_POWER >= obj.progressTotal;
     let code = this.build(obj);
     if (code == ERR_NOT_IN_RANGE) {
@@ -653,7 +660,7 @@ Creep.prototype.buildConst = function () {
             "repairFreshRampart", undefined, { expire: Game.time + 3 }));
         return this.execLastTask();
     }
-    if (!obj || this.storeEmpty()) {
+    if (this.storeEmpty()) {
         this.popTask()
         this.execLastTask()
     }

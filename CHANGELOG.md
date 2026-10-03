@@ -1,3 +1,38 @@
+## v0.78.54 — Defence groups own their own lairs; the patrol budget is measured, not guessed
+
+### Added
+
+- **Group discipline** (user direction): a keeper belonging to another group's lair may
+  only be engaged by that group's defender, unless the challenger is at least 20 tiles
+  closer (and when the owning group has nobody alive, anyone may take it). Without this
+  both defenders drift to whichever half of the room is louder - observed live: an
+  invader squad pulled group 0 to (15,5) while its own lair (41,14) was counting down.
+- `StationSources.hostileDefenseGroup()` maps a hostile to the group whose lair it is
+  standing next to, reusing the cached path-distance pairing.
+
+### Measured (W34N55, live terrain + the 93 existing road tiles, per-tick simulation)
+
+The walk cost uses the engine's fatigue rules: weight 33 (A22+H11, constant - it counts
+body length, not surviving parts), recovery 2 x surviving MOVE, so a tile costs
+33xterrain/(2xMOVE) ticks: 1.0 on road, 1.94 on plain, 9.7 in swamp.
+
+    single defender, full loop over all four lairs       168 tick / 300  (44% slack)
+    two defenders (current quota), 2 lairs each         ~90-125 tick / 300 (60%+ slack)
+    lair-to-lair legs at full health: 25 / 32 / 48 / 98 tick
+
+Damage matters: `_recalc-body` hands out hits from the tail backwards, so a fight that
+costs 1424 hit points **destroys the first 14 parts outright** - with MOVE leading that
+is 14 of 17 MOVE gone, and the creep drops to 0.18 tiles/tick until healed. Healing runs
+while walking (heal and move are independent intents), so it recovers about 11 ticks into
+each march. That recovery is included in the 168 tick figure; earlier hand estimates that
+added a separate "heal timer" (and used lair-to-lair legs only) were pessimistic.
+
+Road option, if a wider margin is ever wanted: paving the 12 plain tiles of the
+(41,14)<->(36,29) leg (the path already runs through (43,20)/(42,21)/(41,22)) makes that
+leg 16 instead of 25 ticks; paving the 13 plain tiles of the west leg saves ~12. ~25 tiles
+total. Note that nobody repairs roads that are neither blueprint nor on an outer route
+(they decay), so any such road must be attached to a maintenance path first.
+
 ## v0.78.53 — Melee duels are decided by arithmetic, and the retreat actually retreats
 
 Three defects in the melee defender, all found by reading the engine and confirmed by

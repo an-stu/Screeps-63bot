@@ -813,6 +813,28 @@ Creep.prototype.outerDefense = function () {
             .filter(e => allLairs.some(l => e.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS)
                 || allies.some(c => c.pos.getRangeTo(e.pos) <= OUTER_DEFENSE_HELP_RADIUS));
         if (hostileCreeps.length) {
+            // 分组纪律（用户 10-03 定稿）：**窝区威胁归它所在组的防守爬**；
+            // 别组的爬只有「比本组最近的防守爬还近 ≥20 格」才许接手 —— 否则两组
+            // 会互相跑去对方那半边，各自的窝反而没人守（实测：北边一队 invader
+            // 把组0 勾到 (15,5)，而它该守的 (41,14) 正在倒计时）。
+            // 本组没人（防守爬死了/还没出生）时直接放行，别让窝空着。
+            let myGroup = this.memory.defenseGroup;
+            hostileCreeps = hostileCreeps.filter(h => {
+                if (myGroup === undefined) return true;
+                let hg = pro.hostileDefenseGroup(this.room, allLairs, h);
+                if (hg === undefined || hg == myGroup) return true;
+                let ownerNear = Infinity;
+                allies.forEach(c => {
+                    if (c === this || c.memory.role != "outerHarvestDefenser") return;
+                    if (c.memory.defenseGroup != hg) return;
+                    let r = c.pos.getRangeTo(h.pos);
+                    if (r < ownerNear) ownerNear = r;
+                });
+                if (ownerNear === Infinity) return true;                 // 本组无人 → 我来
+                return this.pos.getRangeTo(h.pos) + 20 <= ownerNear;      // 必须近 ≥20 格
+            });
+        }
+        if (hostileCreeps.length) {
             hostileCreeps = hostileCreeps.filter(h => {
                 let d = this.pos.getRangeTo(h.pos);
                 return allies.every(c => c === this || c.memory.role != "outerHarvestDefenser"
@@ -3011,6 +3033,20 @@ let pro = {
         let keepers = room.find(FIND_HOSTILE_CREEPS)
             .filter(c => c.owner && c.owner.username == "Source Keeper").length;
         return Math.max(base, Math.min(4, keepers));
+    },
+    /**
+     * 该敌人贴在**哪个防守组的窝**边上（返回组号；不在任何窝的守卫半径内 → undefined）。
+     *
+     * 分组表由 outerDefenseLairGroups 按真实寻路距离算出并缓存进 room.memory，
+     * 与 outerDefensePosts 用的是同一份 —— 两边不会打架。
+     */
+    hostileDefenseGroup(room, lairs, hostile) {
+        if (!room || !room.memory || !lairs || !lairs.length) return undefined;
+        let groups = pro.outerDefenseLairGroups(room, lairs);
+        for (let gi = 0; gi < groups.length; gi++) {
+            if (pro.nearDefensePosts(hostile.pos, groups[gi])) return gi;
+        }
+        return undefined;
     },
     outerDefenseLairGroups(room, lairs) {
         let key = lairs.map(e => e.id).join(",");

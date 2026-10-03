@@ -543,6 +543,64 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         "目标残血到一两 tick 能收掉时，即使被夹击也照打");
 }
 
+{
+    // === 分组纪律：只许本组接自己的窝；跨组必须近 ≥20 格 ===
+    const lairA = { id: "lA", structureType: "keeperLair", pos: makePos(7, 17, "W34N55") };
+    const lairB = { id: "lB", structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    const lairC = { id: "lC", structureType: "keeperLair", pos: makePos(7, 38, "W34N55") };
+    const lairD = { id: "lD", structureType: "keeperLair", pos: makePos(36, 29, "W34N55") };
+    const allLairs = [lairA, lairB, lairC, lairD];
+    function scene2(myGroup, myPos, mates, keeperPos) {
+        const ctx = loadStation();
+        ctx.StationSources.outerDefensePosts = () => [lairA, lairB];
+        const keeper = {
+            id: "k1", owner: { username: "Source Keeper" }, hits: 5000, hitsMax: 5000,
+            body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 10 : (t === "ranged_attack" ? 10 : 0)),
+            pos: makePos(keeperPos[0], keeperPos[1], "W34N55"),
+        };
+        // 真实体型：22 ATTACK + 11 HEAL（空体型会被「对拼账」判成打不过 → 不出手）
+        const realBody = [];
+        for (let i = 0; i < 22; i++) realBody.push({ type: CONSTANTS.ATTACK });
+        for (let i = 0; i < 11; i++) realBody.push({ type: CONSTANTS.HEAL });
+        const me = makeCreep(ctx, { x: myPos[0], y: myPos[1], body: realBody });
+        me.memory.role = "outerHarvestDefenser";
+        me.memory.defenseGroup = myGroup;
+        const all = [me].concat(mates);
+        const room = {
+            name: "W34N55",
+            memory: { defenseLairGroups: [["lA", "lB"], ["lC", "lD"]],
+                      defenseLairGroupsKey: allLairs.map(e => e.id).join(",") },
+            find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [keeper]
+                : c == CONSTANTS.FIND_MY_CREEPS ? all
+                    : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? allLairs : []),
+        };
+        ctx.Game.getObjectById = id => (id === "k1" ? keeper : null);
+        me.room = room;
+        me.pos.roomRef = room;
+        ctx.Creep.prototype.outerDefense.call(me);
+        return me;
+    }
+    const mate = (group, x, y) => {
+        const c = { memory: { role: "outerHarvestDefenser", defenseGroup: group }, pos: makePos(x, y, "W34N55") };
+        return c;
+    };
+    // ① 敌人贴着我这组的窝（7,17）→ 我可以打
+    const mine = scene2(0, [10, 16], [mate(1, 40, 40)], [7, 16]);
+    assert.ok(mine.calls.some(c => c[0] === "attack"), "本组窝旁的敌人照打");
+
+    // ② 敌人在别组窝旁（7,38 = 组1），而组1 的爬就在旁边（距离 1）→ 我不许抢
+    const other = scene2(0, [10, 16], [mate(1, 8, 37)], [7, 38]);
+    assert.ok(!other.calls.some(c => c[0] === "attack"), "别组窝旁的敌人不许抢（本组爬就在旁边）");
+
+    // ③ 同一情况但组1 的爬远在天边（≥20 格差）→ 允许我接手，别让窝空着
+    const far = scene2(0, [10, 37], [mate(1, 45, 5)], [7, 38]);
+    assert.ok(far.calls.some(c => c[0] === "attack"), "别组的爬远 ≥20 格 → 允许接手");
+
+    // ④ 本组没人了（另一只在路上还没出生）→ 直接接手
+    const solo = scene2(0, [10, 37], [], [7, 38]);
+    assert.ok(solo.calls.some(c => c[0] === "attack"), "本组无人时照打，不能把窝晾着");
+}
+
 console.log("outer defense checks passed");
 {
     // === 已接战别的目标的防守爬不参与新目标竞争：次近的空闲者接手 ===
