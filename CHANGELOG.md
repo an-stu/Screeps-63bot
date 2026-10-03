@@ -1,3 +1,42 @@
+## v0.78.60 — The outer hauler cap is sized from the number of mines, not a fixed 8
+
+While verifying v0.78.58 the W35N55 piles kept growing even though the pickup fix was live.
+The reason was upstream of the pickup code: **two of its three stations had no hauler at
+all**.
+
+    W34N55 3,17  pathTime  85  live 3   dead 0
+    W34N55 32,32 pathTime  45  live 2   dead 0
+    W34N55 10,33 pathTime  78  live 1   dead 0
+    W35N55 41,10 pathTime 104  live 1   dead 0     <- replacement still spawning
+    W35N55 4,15  pathTime 149  live 0   dead 1     <- container full, ground 6261
+    W35N55 37,41 pathTime 124  live 0   dead 1     <- container full, ground 4758
+
+`trySpawnOuterHarCarrier` returned early when `roomCarriers.length >= carrierMax`, with the
+default `carrierMax` a hard-coded 8 (the comment sizes it as "3 mines x 2"). The count is
+**per spawn room**, and W33N55 is the home of six mines (three in W34N55, three in
+W35N55) - the demand formula asks for ~9.5 carriers (2.34/1.63/1.96 for W35N55 alone,
+because its round trips are 250-300 ticks). At a fleet of 7-8 the two W35N55 stations that
+lost their haulers could never be backfilled: first-come-first-served, and the first six
+never die at the same time. That is why those two containers stayed full and their ground
+piles reached 6000+.
+
+### Fixed
+
+- **`outerCarrierFleetCap(spawnRoom)`**: `Memory.marketSettings.outerCarrierMax` still wins
+  when set; otherwise the cap is `max(4, mines * 2)`, where a "mine" is a station whose
+  cached route lists this room (same prefilter as `outerRouteUnion`, counted once per tick
+  on the room object). Six mines -> 12. The demand formula remains the real bound; this is
+  only the safety net that stops the congestion feedback loop the old constant existed for.
+- The spawn gate now uses it, so a station with zero live haulers can be refilled while the
+  fleet is still under the sized cap.
+
+### Tests
+
+`test/edge-link.test.cjs` +5 cases: no routes -> floor of 4; six mines -> 12; a route whose
+home is another room does not count; the Memory knob still overrides the formula; and a
+functional case where the fleet is at 8 (the old cap, so the old code returned early) with a
+station whose `carryCreeps` are all dead must spawn a replacement.
+
 ## v0.78.59 — The T3 invader-squad defender is recycled once the squad is dead
 
 The squad body (`{TOUGH:2, RANGED_ATTACK:22, HEAL:6, MOVE:20}`) costs 7010 energy plus

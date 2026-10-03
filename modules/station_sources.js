@@ -3016,6 +3016,41 @@ let pro = {
             "buildOuterMineralContainer", undefined, { homeRoom: spawnRoom.name })];
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, role, tasks);
     },
+    /**
+     * 外矿搬运爬的全局上限。
+     *
+     * `Memory.marketSettings.outerCarrierMax` 显式给了正数就听它的；否则按
+     * **本房供几个矿点**算：每点 2 只（一只在路上、一只在装/卸），下限 4。
+     * W33N55 供 6 个矿点 → 12；这正是需求公式（`effPathTime × 2 × 产出 / 50`）
+     * 算出来的量级。
+     *
+     * 为什么不能拍死一个小常数：这个上限是**按出兵房统计的全局量**，而一个出兵房
+     * 常常同时供多个外矿房。缺省 8 是按「三矿点 × 2」定的，于是 6 个矿点时
+     * 先到先得 —— 实测 W35N55 两个矿点的 carryCreeps 全死光、容器堆满、地面堆到
+     * 6000+，总数却卡在 7~8，补员被早返回挡住，永远没人去清。
+     * 矿点数按「以本房为主房的外矿路线」数（与 outerRouteUnion 同一判据）。
+     */
+    outerCarrierFleetCap(spawnRoom) {
+        let knob = Number(Memory.marketSettings && Memory.marketSettings.outerCarrierMax);
+        if (knob > 0) return knob;
+        if (spawnRoom._outerCarrierFleetCap !== undefined) return spawnRoom._outerCarrierFleetCap;
+        let stations = 0;
+        for (let roomName in Memory.rooms) {
+            if (roomName == spawnRoom.name) continue;
+            let stationsMem = Memory.rooms[roomName][pro.stationName];
+            if (!stationsMem) continue;
+            _.values(stationsMem).forEach(data => {
+                if (!data || !data.id || !data.roadPathStr) return;
+                let sep = data.roadPathStr.indexOf(";");
+                if (sep < 0) return;
+                if (data.roadPathStr.slice(0, sep).split(",").indexOf(spawnRoom.name) < 0) return;
+                stations++;
+            });
+        }
+        let cap = Math.max(4, stations * 2);
+        spawnRoom._outerCarrierFleetCap = cap;      // room 对象每 tick 重建，不需要清
+        return cap;
+    },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
         let targetName = roomName.name || roomName;
         let harRoom = Game.rooms[targetName];
@@ -3060,14 +3095,16 @@ let pro = {
         // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
         // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）
         if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) return null;
-        // 外矿搬运爬**全局硬上限**（跨所有矿点统计，Memory.marketSettings.outerCarrierMax
-        // 可调，缺省 8）：每只 50 部件 = 1650 容量，往返 ~150 tick ≈ 11 能量/tick，
-        // 一个 20/tick 的源 2 只就够，三个矿点 6 只封顶。需求公式里 pathTime 一旦
-        // 被拥堵抬高就会正反馈多派（10-03 实测涨到 16 只），CPU 与 bucket 双输，
-        // 这里一刀切住。短缺靠 50 部件的单体运力兜，不再靠数量。
+        // 外矿搬运爬**全局上限**，缺省**按矿点数**算（见 outerCarrierFleetCap），
+        // Memory.marketSettings.outerCarrierMax 可显式覆盖。
+        //
+        // 原来缺省是拍死的 8（注释按「三个矿点、每点 2 只」估的），但一个出兵房
+        // 常常同时供多个外矿房：W33N55 同时是 W34N55(3 点) + W35N55(3 点) 的主房，
+        // 需求公式算出来 ≈ 9~10 只。8 这个数于是把整条链卡成「谁先占满谁活着」：
+        // 实测 W35N55 的 (4,15)/(37,41) 两点 carryCreeps 全是死 id、容器堆满、
+        // 地面堆到 6000+，而总数停在 7~8 → 补员被这里的早返回挡住，永远没人去清。
         let roomCarriers = spawnRoom.creeps("outerHarvestEnergyCarrier", false);
-        // 容量 1700/只（2:1 间隔排列），上限同步放宽到 8
-        let carrierMax = Number(Memory.marketSettings && Memory.marketSettings.outerCarrierMax) || 8;
+        let carrierMax = pro.outerCarrierFleetCap(spawnRoom);
         if (roomCarriers.length >= carrierMax) return null;
         // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
         // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。

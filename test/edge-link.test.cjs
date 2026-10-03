@@ -994,4 +994,65 @@ function defenceGateFixture(defenders) {
     assert.equal(c2.memory.tasks[0].taskName, "outerDefense", "条件不满足 → 照常走防守逻辑");
 }
 
+// ── 13) 搬运爬上限按**矿点数**算，不能拍死一个常数把某些矿点饿死 ──
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const route = encodePath([{ x: 10, y: 10, roomName: "W34N55" }, { x: 11, y: 10, roomName: "W33N55" }]);
+
+    ctx.Memory.rooms = {};
+    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 4, "没有外矿路线时退回下限 4");
+
+    ctx.Memory.rooms = { W34N55: { stationSources: {} }, W35N55: { stationSources: {} } };
+    for (let i = 0; i < 3; i++) ctx.Memory.rooms.W34N55.stationSources["a" + i] = { id: "a" + i, roadPathStr: route };
+    for (let i = 0; i < 3; i++) ctx.Memory.rooms.W35N55.stationSources["b" + i] = { id: "b" + i, roadPathStr: route };
+    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 12,
+        "6 个矿点 × 2 = 12（缺省 8 是按三矿点估的，会把后两个矿点的补员永久挡住）");
+    // 别的房为主房的路线不算
+    ctx.Memory.rooms.W34N55.stationSources.c = {
+        id: "c", roadPathStr: encodePath([{ x: 1, y: 1, roomName: "W40N40" }, { x: 2, y: 1, roomName: "W39N40" }]),
+    };
+    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 12, "别房为主房的路线不计入本房上限");
+    // 显式开关仍然优先（保留硬压回去的能力）
+    ctx.Memory.marketSettings = { outerCarrierMax: 8 };
+    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 8, "Memory 开关优先于缺省公式");
+    delete ctx.Memory.marketSettings;
+
+    // 功能验证：总数 8（旧上限就是 8）时，给「一只 live carrier 都没有」的矿点补员
+    const ctx2 = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx2);
+    const S2 = ctx2.StationSources;
+    const container = { id: "c1", pos: { x: 32, y: 31, roomName: "W35N55" } };
+    const source = { id: "s1", energyCapacity: 4000, ticksToRegeneration: 300 };
+    const stations = {};
+    for (let i = 1; i <= 6; i++) {
+        stations["s" + i] = { id: "s" + i, roomName: "W35N55", x: 32, y: 32, roadPathStr: route };
+    }
+    stations.s1.pathTime = 100;
+    stations.s1.container = "c1";
+    stations.s1.carryCreeps = ["dead1"];           // 死 id：这个矿点实际一只都没有
+    ctx2.Memory.rooms = { W35N55: { stationSources: stations } };
+    ctx2.Game.rooms.W35N55 = { name: "W35N55", memory: ctx2.Memory.rooms.W35N55 };
+    ctx2.Game.getObjectById = id => (id === "c1" ? container : id === "s1" ? source : null);
+    S2.ensureOuterRoadPath = () => {};
+    S2.placeOuterRoadSites = () => {};
+    S2.cleanupOuterRoadSites = () => {};
+    S2.ensureOuterEdgeLink = () => {};
+    S2.outerRoadComplete = () => true;
+    S2.outerMineStarvesSpawnRoom = () => false;
+    S2.getOuterRoadPath = () => new Array(100).fill(0);
+    S2.getHarvesterBodyConfig = () => new Array(10).fill("work");
+    const spawned = [];
+    ctx2.StationHive.trySpawn = (room, name, body, role) => { spawned.push(role); return "c"; };
+    const spawnRoom = {
+        name: "W33N55", my: true, spawnFailure: false, level: 8,
+        creeps: () => new Array(8).fill({}),       // 已经 8 只：旧上限下必然被早返回挡住
+        memory: {}, getEnergyCapacityAvailable: () => 12900,
+    };
+    S2.trySpawnOuterHarCarrier("W35N55", spawnRoom);
+    assert.equal(spawned.length, 1,
+        "总数 8、但该矿点 0 只 live carrier → 上限按矿点数算（12），必须补员（实测 W35N55 两点 carryCreeps 全死）");
+}
+
 console.log("edge link / hauler body / defence gate checks passed");
