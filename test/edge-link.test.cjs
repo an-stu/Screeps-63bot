@@ -1007,13 +1007,14 @@ function defenceGateFixture(defenders) {
     ctx.Memory.rooms = { W34N55: { stationSources: {} }, W35N55: { stationSources: {} } };
     for (let i = 0; i < 3; i++) ctx.Memory.rooms.W34N55.stationSources["a" + i] = { id: "a" + i, roadPathStr: route };
     for (let i = 0; i < 3; i++) ctx.Memory.rooms.W35N55.stationSources["b" + i] = { id: "b" + i, roadPathStr: route };
-    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 12,
-        "6 个矿点 × 2 = 12（缺省 8 是按三矿点估的，会把后两个矿点的补员永久挡住）");
+    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 18,
+        "6 个矿点 × 3 = 18（缺省 8 是按三矿点估的，会把后两个矿点的补员永久挡住；"
+        + "需求公式实测稳态 ≈16 只，18 只挡跑飞不挡稳态）");
     // 别的房为主房的路线不算
     ctx.Memory.rooms.W34N55.stationSources.c = {
         id: "c", roadPathStr: encodePath([{ x: 1, y: 1, roomName: "W40N40" }, { x: 2, y: 1, roomName: "W39N40" }]),
     };
-    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 12, "别房为主房的路线不计入本房上限");
+    assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 18, "别房为主房的路线不计入本房上限");
     // 显式开关仍然优先（保留硬压回去的能力）
     ctx.Memory.marketSettings = { outerCarrierMax: 8 };
     assert.equal(S.outerCarrierFleetCap({ name: "W33N55" }), 8, "Memory 开关优先于缺省公式");

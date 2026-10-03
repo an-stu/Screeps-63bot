@@ -1,3 +1,51 @@
+## v0.78.61 — The hauler cap is a runaway guard at 3 per mine, not the demand itself
+
+v0.78.60 sized the cap as `mines * 2` (= 12 for W33N55) from an estimate. Live numbers say
+the estimate was low, so the cap was truncating the fleet and leaving one station at 44%.
+
+Measured demand, per station (`effPathTime * 2 * energyPerTick / 50`, replicated in the
+console), all six stations at once:
+
+    W34N55  3,17  path  85  len  76  ept 20.0  need 68 CARRY   have 66  (2 haulers)
+    W34N55 32,32  path  52  len  45  ept 20.0  need 42 CARRY   have 64  (2)
+    W34N55 10,33  path  74  len  68  ept 20.0  need 60 CARRY   have 66  (2)
+    W35N55 41,10  path 106  len  88  ept 20.0  need 85 CARRY   have 98  (3)
+    W35N55  4,15  path 149  len 125  ept 13.5  need 81 CARRY   have 64  (2)
+    W35N55 37,41  path 124  len 104  ept 14.3  need 72 CARRY   have 32  (1)  <- short
+
+Total 408 CARRY parts = ~12-13 haulers of real need, but the formula rounds *up* to a whole
+carrier whenever any residual remains, so its steady state is 16 (each station keeps one
+extra for a residual of a few parts). A cap of 12 was therefore below the formula and the
+fleet sat exactly on it with (37,41) starved - and (37,41) is the station whose pile kept
+growing.
+
+### Fixed
+
+- Default cap is now `max(4, mines * 3)` = 18 for six mines. It no longer binds the
+  formula's ~16, it only stops the congestion feedback (whose demand side is already
+  clamped by the path-length x1.2 factor). `Memory.marketSettings.outerCarrierMax` still
+  overrides.
+
+### Measured cost (runtime instrumentation, 47-tick window, 13-14 haulers)
+
+    keeper (harvestEnergyKeeper x32)      3.28 CPU/tick   24.0 calls/tick
+    roadBuilder (outer, WORK)             1.97 CPU/tick    7.6 calls/tick
+    outerCarry (outer, plain)             1.69 CPU/tick    5.9 calls/tick
+    defense                               0.50 CPU/tick    3.0 calls/tick
+    outerRoadComplete                     0.05 CPU/tick    7.6 calls/tick
+    nearestOuterRoadSite                  0.15 CPU/tick    4.8 calls/tick
+    outerCarryNearbyDrop (v0.78.58)       0.01 CPU/tick    1.5 calls/tick
+
+So the whole outer hauler chain is ~3.9 CPU/tick, of which the v0.78.58 drop pickup is
+noise (0.013) - the fleet size is what costs. Settled `Memory.codeHealth.averageCpu` with
+12 haulers was 17.9, so the formula's ~16 should land near 19. If the bucket ever drains,
+`Memory.marketSettings.outerCarrierMax` is the one-line throttle.
+
+### Tests
+
+The fleet-cap cases now expect 18 for six mines (floor 4 unchanged, the Memory knob still
+overrides, and the functional backfill case is unaffected).
+
 ## v0.78.60 — The outer hauler cap is sized from the number of mines, not a fixed 8
 
 While verifying v0.78.58 the W35N55 piles kept growing even though the pickup fix was live.
