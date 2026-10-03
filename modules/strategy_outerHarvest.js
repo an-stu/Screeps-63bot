@@ -170,6 +170,12 @@ let pro = {
         if ((Game.time + room.hashCode()) % 6 != 0) return;
         let flags = ManagerFlags.getFlagsByPrefix("har");
         if (!flags.length) return;
+        // 生产优先级按**离主房的线性距离**排（用户 10-03 指示）：主房最高（由
+        // 策略执行顺序 + starves 闸保证），外矿近的先于远的。配合防守满员闸：
+        // 防守编制不满时全部暂停，满了之后近矿先恢复生产。
+        if (flags.length > 1) flags.sort((a, b) =>
+            Game.map.getRoomLinearDistance(room.name, a.pos.roomName)
+            - Game.map.getRoomLinearDistance(room.name, b.pos.roomName));
         for (let flag of flags) {
             let targetRoomName = flag.pos.roomName;
             // 矿区放 stopRemote 旗则暂停该矿
