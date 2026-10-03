@@ -142,6 +142,30 @@ let pro = {
         }
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "coreBuster", tasks);
     },
+
+    /**
+     * 外矿房里的 **invader 塔**（lv2 core 部署后留下，3000 血、射程内 600/tick）：
+     * 派一只小近战专职拆掉。体力账：[A15,H10,M15] 450 dps → 塔 ~7 tick 倒；
+     * 塔伤 600 - 自奶 120 = 净 -480/tick，4000 血能站 ~8 tick，够拆完。
+     * 复用 coreBuster 处理器（taskName 相同，含跨房 -7 / 无部件 -12 的修正），
+     * 拆完自回收。
+     */
+    spawnTowerBuster(targetRoomName, spawnRoom) {
+        if (spawnRoom.spawnFailure) return;
+        let harRoom = Game.rooms[targetRoomName];
+        if (!harRoom) return;
+        let tower = harRoom.find(FIND_HOSTILE_STRUCTURES)
+            .filter(e => e.structureType == STRUCTURE_TOWER).head();
+        if (!tower) return;
+        let busting = spawnRoom.creeps("towerBuster", false).filter(e => {
+            let t = e.headTask && e.headTask();
+            return t && t.roomName == targetRoomName;
+        });
+        if (busting.length) return;
+        let body = ManagerCreeps.calcBodyPart({ [ATTACK]: 15, [HEAL]: 10, [MOVE]: 15 });
+        let tasks = [UtilsTask.task(tower, "coreBuster")];
+        StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "towerBuster", tasks);
+    },
     exec(room) {
         if ((Game.time + room.hashCode()) % 6 != 0) return;
         let flags = ManagerFlags.getFlagsByPrefix("har");
@@ -190,6 +214,8 @@ let pro = {
                 StationSources.trySpawnOuterDefenser(targetRoomName, spawnRoom, isInvader);
                 // core 专队：房里有 invaderCore 就派一队去拆（规模按 core 等级）。
                 pro.spawnCoreBuster(targetRoomName, spawnRoom);
+                // invader 塔（lv2 core 部署后留下）：派小近战专职拆掉。
+                pro.spawnTowerBuster(targetRoomName, spawnRoom);
             }
             // Scout 只负责首次建立 source Memory。已有坐标、container ID 与路径
             // 后，keeper 本身可以直接走入不可见的矿区；为重新拿视野而多派 scout

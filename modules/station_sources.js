@@ -1329,32 +1329,36 @@ let pro = {
         // 无强化兜底也有 220 dps（近战版在风筝战术下实际 dps ≈ 0）；
         // T3 强化（boostRes 由 trySpawnOuterDefenser 按 boostAble 决定是否附加）
         // 后 880 dps + 288 奶 + tough 减伤，对小队是碾压。
-        const bigBody = () => ({
-            // TOUGH 必须是数组**第一个**部件：伤害按 body 顺序从前往后结算，
-            // 强化 TOUGH（XGHO2 ×0.3）放前面才能把 666 点伤害挡在真部件之前；
-            // 放在末尾永远轮不到，纯摆设。
+        // 默认**近战** {A22,H11,M17}：打 lair 生成的 keeper 实测稳赢（660 dps
+        // + 132 自奶），不用强化（用户 10-03 指示）。
+        const meleeBody = () => ({
+            body: ManagerCreeps.calcBodyPart({[ATTACK]: 22, [HEAL]: 11, [MOVE]: 17}), boostRes: {}});
+        const smallBody = () => ({body: ManagerCreeps.calcBodyPart({[ATTACK]: 9, [MOVE]: 10, [HEAL]: 1}), boostRes: {}});
+        if (!harRoom) return isInvader ? meleeBody() : smallBody();
+
+        // invader **远程风筝小队**（≥2 只 Invader 爬）：纯近战摸不到边退边打的
+        // 小队（实测被磨死），才换强化远程（TOUGH 前置先结算减伤）。资源够时
+        // boostAble 通过即挂 T3；拿不出化合物则由 trySpawnOuterDefenser 剥 TOUGH。
+        const squadBody = () => ({
             body: ManagerCreeps.calcBodyPart({[TOUGH]: 2, [RANGED_ATTACK]: 22, [HEAL]: 6, [MOVE]: 20}),
             boostRes: {
-                // BOOST_RES 的键是**动作名**（tough 的动作是 "damage"，这正是
-                // FIGHT_BOOST_RES_MAP[TOUGH]="damage" 的原因），索引 0/1/2 =
-                // T1/T2/T3（见 boostAbleLevel 的 maxLevel=2）。
                 [BOOST_RES["damage"][2]]: 2 * 30,
                 [BOOST_RES["heal"][2]]: 6 * 30,
                 [BOOST_RES["rangedAttack"][2]]: 22 * 30,
             },
         });
-        const smallBody = () => ({body: ManagerCreeps.calcBodyPart({[ATTACK]: 9, [MOVE]: 10, [HEAL]: 1}), boostRes: {}});
-        if (!harRoom) return isInvader ? bigBody() : smallBody();
-
         let hostiles = harRoom.getHostileCreeps();
         if (!hostiles.length) {
             // 没有活体敌人：只有 lair / invaderCore 时用能拆掉它的配置即可
             let hasNest = harRoom.find(FIND_HOSTILE_STRUCTURES)
                 .some(e => e.structureType == STRUCTURE_KEEPER_LAIR || e.structureType == STRUCTURE_INVADER_CORE);
             if (!hasNest) return {body: ManagerCreeps.calcBodyPart({[ATTACK]: 5, [MOVE]: 6, [HEAL]: 1}), boostRes: {}};
-            return isInvader ? bigBody() : smallBody();
+            return isInvader ? meleeBody() : smallBody();
         }
 
+        if (isInvader && hostiles.filter(e => e.owner.username == "Invader").length >= 2) {
+            return squadBody();
+        }
         let sumDamage = hostiles.map(e => e.possibleDamage(false, 2)).sum();      // 距离 2 时的全部伤害
         let sumHeal = hostiles.map(e => e.possibleHealDamage(1, false)).sum();    // 对面全部奶量
         // 注意：这里原来是 e.possibleToughBeHitsDamage(sumHeal)，那个方法
@@ -1388,7 +1392,7 @@ let pro = {
         // 16 ATTACK + 5 HEAL，而满血打赢 keeper 的是 22 ATTACK + 11 HEAL。
         // 所以入侵房（isInvader）一律不低于手工调好的 bigBody。
         if (isInvader) {
-            let big = bigBody().body;
+            let big = meleeBody().body;
             if (body.length < big.length) return { body: big, boostRes: {} };
         }
         return {body: body, boostRes: boostRes};
