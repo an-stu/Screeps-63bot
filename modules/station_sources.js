@@ -1174,17 +1174,19 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         let data = task.roomName && task.id
             ? (Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
                 && Memory.rooms[task.roomName][pro.stationName][task.id]) : undefined;
+        let home = this.mainRoom();
+        if (!home || !home.storage) return;   // 主房/storage 拿不到：本 tick 跳过（此前这里抛 TypeError 刷 lastError）
         let isRoadBuilder = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
         if (data && !pro.outerRoadComplete(data) && isRoadBuilder) {
             // 道路未修好时只让带 WORK 的专职 carrier 修路。普通搬运爬
             // 仍然沿缓存路线把能量送入 Storage，不能让修路任务饿死主房。
-            this.addTask(UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+            this.addTask(UtilsTask.task(home.storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                 mineRoom: task.roomName, stationId: task.id, keepBuilding: true, roadDir: 1,
             }));
         } else {
             let roadTask = [
-                UtilsTask.task(this.mainRoom().storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
-                UtilsTask.task(this.mainRoom().storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                UtilsTask.task(home.storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
+                UtilsTask.task(home.storage, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                     mineRoom: task.roomName, stationId: task.id, roadDir: 1,
                 }) // 想致富先修路：source -> storage
             ]
@@ -2253,7 +2255,8 @@ let pro = {
                 let energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(spawnRoom.energyAvailable, 550));
                 let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
-                StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)
+                // keeper 是能量源头：force 绕过同 tick 的 spawnFailure 毒化
+                StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks, { force: true })
             }
         });
     },

@@ -24,8 +24,16 @@ Creep.prototype.registerStationHiveCarryInRoom = function () {
 
 Creep.prototype.fillHive = function () {
     if (this.store[RESOURCE_ENERGY] == 0) {
-        this.popTask()
-        return;
+        // 空载不能直接弹任务走人：fillHive 是 extension/spawn 补给链的**分发环节**，
+        // 装货环节（carryRes）一旦先弹掉，这里一 pop 整条链就断头 —— carrier 空转
+        // 在 storage 边上，extension 56/60 空、3 个 spawn 0 能量，storage 里 29 万
+        // 能量出不了门，全服的 spawn 请求（防守接替、矿物链）跟着饿死。
+        // 有 storage 就先装货再回来继续分发；storage 真没能量才放弃。
+        if (!this.room.storage || this.room.storage.store[RESOURCE_ENERGY] == 0) {
+            return this.popTask();
+        }
+        this.addTask(UtilsTask.task(this.room.storage, "carryRes", undefined, { resType: RESOURCE_ENERGY }));
+        return this.execLastTask();
     }
     //这里只在自己的房间
     let room = Game.rooms[this.memory["roomName"]]
@@ -158,6 +166,7 @@ let pro = {
             name = LOCAL_SHARD_NAME + "_" + Game.time + "_" + Game._name_hash;// shard+Game.time+第几个生的
         let opts = { memory: { role: role, roomName: targetRoomName, tasks: tasks } };
         if (ops) for (let t in ops) opts[t] = ops[t];
+        delete opts.force;
         let spend = Utils.getBodyEnergyNeed(body);
         if (room.currentEnergyAvailable < spend) {
             room.spawnFailure = true; return undefined;
