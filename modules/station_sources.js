@@ -859,6 +859,12 @@ Creep.prototype.outerDefense = function () {
             // （实测两只钉死在 (0,17)/(49,17) 门格对上，接替兵进来也接着站）。
             // attack/rangedAttack 没真正生效（含跨房边界的 -7）就继续接近目标。
             let ranged = this.getActiveBodyparts(RANGED_ATTACK) > 0;
+            // Overmind reaper 语义：重伤（<50%）的近战停止进攻、拉开距离只奶
+            // （治疗分支在上面已经执行），奶满再上——避免贴脸换血到死
+            if (!ranged && this.hits < this.hitsMax / 2) {
+                if (!this.pos.inRangeTo(em, 4)) this.moveTo(em, { range: 4 });
+                return;
+            }
             let ret = ranged ? this.rangedAttack(em) : this.attack(em);
             if (ret != OK && ret != ERR_NO_BODYPART) this.moveTo(em, { range: ranged ? 3 : 1 });
             // 自愈/救人都已在上面做过；这里只在还在掉血且没在救别人时补一次自愈。
