@@ -1265,6 +1265,8 @@ if (Game.shard.name == '6g3y-station') saveCpuLevel = 7
 
 let pro = {
     stationName: "stationSources",
+    /** 有威胁外矿房的防守编制（只数），供 StrategyOuterHarvest 的满员闸共用 */
+    outerDefenseTargetCnt: OUTER_DEFENSE_TARGET_CNT,
     /**
      * 主房能量保护：storage 可支配能量（扣除 spawn/extension 已耗）低于
      * 阈值时，外矿 keeper/carrier 缓生，优先保证主房自身 spawn、worker、
@@ -1325,25 +1327,39 @@ let pro = {
         }
         return ManagerCreeps.calcBodyPart({ [MOVE]: num, [CLAIM]: num });
     },
+    /**
+     * 外矿搬运爬体型：**2:1 的 CARRY:MOVE**，`[CARRY,CARRY,MOVE]` 循环排列
+     * （用户 10-03 指示），满编 34 CARRY + 16 MOVE = 50 部件 / **1700 容量**。
+     *
+     * 为什么是 2:1：路上每格的疲劳 ≈ 部件数 / 2，而 MOVE 提供的额度是 2×MOVE
+     * —— 2 CARRY : 1 MOVE 正好在铺好的路上跑满 1 格/tick，同部件数下比 1:1 多装
+     * 36% 的货（1700 vs 1250）。循环排列让伤害（从 body 前端往后扣）每扣一组都
+     * 保持 2:1，被伏击掉一半部件后在路上依然满速，不会越打越慢。
+     * 尾部两个 CARRY 把部件数补到 50。
+     *
+     * 能量不足时按能量收缩组数（每组 150 能量），否则低等级房会 spawnFailure。
+     */
     getOuterHarCarrierBodyConfig(energy, maxPart) {
-        // **CARRY/MOVE 严格间隔排列**（用户 10-03 指示）：伤害从 body 前端往后
-        // 扣部件，交替排列让 CARRY:MOVE ≈ 1:1 在任何损伤程度下都成立——
-        // 满血被伏击掉一半血，road 上依然 1 格/tick，不会越打越爬。
-        // 原来是 [CARRY×33, MOVE×17] 分组排列。容量 25×50 = 1250。
-        let pairs = Math.min(Math.floor(maxPart / 2), 25);
-        while (pairs > 1 && (BODYPART_COST[CARRY] + BODYPART_COST[MOVE]) * pairs
-            + BODYPART_COST[WORK] + BODYPART_COST[MOVE] > energy) pairs--;
+        let triples = Math.min(Math.floor(maxPart / 3), 16);
+        while (triples > 1 && triples * (BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE]) > energy) triples--;
         let body = [];
-        for (let i = 0; i < pairs; i++) body.push(CARRY, MOVE);
+        for (let i = 0; i < triples; i++) body.push(CARRY, CARRY, MOVE);
+        if (triples == 16) body.push(CARRY, CARRY);   // 50 部件 / 34 CARRY = 1700
         return body;
     },
+    /**
+     * 修路爬（前缀 2 个 WORK + 同样的 2:1 组）。
+     *
+     * **部件数必须 ≤ 50**：上一版写的是 `floor(maxPart / 2)` 组 → 2 + 25×3 = 77
+     * 部件，spawnCreep 直接 ERR_INVALID_ARGS，修路爬一只也生不出来（路坏了没人修）。
+     * 现在最多 16 组 = 2 + 48 = 50 部件（32 CARRY + 16 MOVE + 2 WORK，容量 1600）。
+     */
     getOuterHarCarrierBuildBodyConfig(energy, maxPart) {
-        // 同上：间隔排列，前缀 2 个 WORK 专职修路（修路吞吐由多只并行决定）
-        let pairs = Math.min(Math.floor(maxPart / 2), 25);
-        while (pairs > 1 && (BODYPART_COST[CARRY] + BODYPART_COST[MOVE]) * pairs
-            + BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE] > energy) pairs--;
+        let triples = Math.min(Math.floor((maxPart - 2) / 3), 16);
+        while (triples > 1 && triples * (BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE])
+            + BODYPART_COST[WORK] * 2 > energy) triples--;
         let body = [WORK, WORK];
-        for (let i = 0; i < pairs; i++) body.push(CARRY, CARRY, MOVE);
+        for (let i = 0; i < triples; i++) body.push(CARRY, CARRY, MOVE);
         return body;
     },
     /**

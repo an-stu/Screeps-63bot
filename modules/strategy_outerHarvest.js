@@ -166,6 +166,58 @@ let pro = {
         let tasks = [UtilsTask.task(tower, "coreBuster")];
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "towerBuster", tasks);
     },
+    /**
+     * 每 tick 一次的「防守爬 → 目标任务房」计数，给各房的满员闸共用。
+     *
+     * 计数口径是**在役 + 在途**：防守爬的任务栈在出生那一刻就写好了目标房名
+     * （见 generatorOuterHarDefenseTask），所以「按 headTask().roomName 全局数」
+     * 能把还在路上的接替兵算进来。若按「站在外矿房里的爬」数，接替兵行军的一
+     * 两百 tick 里闸门一直判「不满员」，外矿生产会被反复锁死 —— 那正是这个闸
+     * 最危险的失效方向（生产停顿，而它本来是为了保命）。
+     */
+    outerDefenderAssignment() {
+        if (Game._outerDefenderAssignTick == Game.time) return Game._outerDefenderAssign;
+        Game._outerDefenderAssignTick = Game.time;
+        let out = Game._outerDefenderAssign = {};
+        for (let name in Game.creeps) {
+            let c = Game.creeps[name];
+            if (c.memory.role != "outerHarvestDefenser") continue;
+            let t = c.headTask && c.headTask();
+            if (t && t.roomName) out[t.roomName] = (out[t.roomName] || 0) + 1;
+        }
+        return out;
+    },
+    /**
+     * 防守满员闸（用户 10-03 定稿的优先级：主房 → 防守满员 → 外矿按距离）：
+     * spawnRoom 负责的**每个**外矿房防守编制都到位才返回 true，否则该矿本轮
+     * 只守不产 —— 先把保命的防守爬配齐，再让 keeper / carrier / 矿物链进去。
+     *
+     * 编制 = 有威胁的房 `StationSources.outerDefenseTargetCnt`（2）只、
+     * 无威胁的房 0 只，判据复用 roomNeedsDefense（活体敌人 / lair / invaderCore /
+     * 失去视野后 OUTER_HOSTILE_MEMORY_TICKS 内的威胁记忆）—— 与
+     * StationSources.trySpawnOuterDefenser 派兵用的是同一份判据，两边不会打架。
+     *
+     * 注意这只是**派发闸**，不是派兵闸：trySpawnOuterDefenser 在它之前无条件
+     * 执行，所以满员闸挡住生产时，防守爬照补，补满即自动放行。
+     *
+     * 历史：0d55a80 引入这个闸时漏了定义（`allDefendersFull` 从未赋值），exec
+     * 每 6 tick 在 else 分支抛一次 ReferenceError，被 HelperError.catchError 吞掉
+     * 后**外矿生产整段失效**——keeper / carrier / 矿物链一只都不派，现场表现是
+     * 「外矿房一个矿工都没有、主房门口一只搬运爬都没有」，而防守爬（异常之前
+     * 派发）看起来还正常。
+     */
+    outerDefendersFull(spawnRoom, flags) {
+        let assigned = pro.outerDefenderAssignment();
+        for (let flag of flags) {
+            let roomName = flag.pos.roomName;
+            // 该旗子由别的房间负责派发时不计在本房头上
+            if (flag.memory.spawnRoom && flag.memory.spawnRoom != spawnRoom.name) continue;
+            let need = pro.roomNeedsDefense(Game.rooms[roomName], flag)
+                ? StationSources.outerDefenseTargetCnt : 0;
+            if ((assigned[roomName] || 0) < need) return false;
+        }
+        return true;
+    },
     exec(room) {
         if ((Game.time + room.hashCode()) % 6 != 0) return;
         let flags = ManagerFlags.getFlagsByPrefix("har");
@@ -239,7 +291,9 @@ let pro = {
                 }
             }
             else {
-                if (!allDefendersFull) continue;   // 防守没满员：本矿本轮只守不产
+                // 防守满员闸：本房负责的外矿房防守编制没满就只守不产（见
+                // outerDefendersFull 的说明；这里原来是未定义的 allDefendersFull）
+                if (!pro.outerDefendersFull(spawnRoom, flags)) continue;
                 let harRoom = Game.rooms[targetRoomName];
                 if ((Game.time + spawnRoom.hashCode()) % 30 == 0 && harRoom) {
                     StationSources.update(harRoom)
