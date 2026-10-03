@@ -74,6 +74,16 @@ const OUTER_DEFENSE_LAIRS_PER_CREEP = 2;
  */
 const OUTER_DEFENSE_GUARD_RADIUS = 8;
 /**
+ * T3 强化的「invader 小队」防守爬在目标房**连续多少 tick** 没见过 Invader 爬之后
+ * 回主房回收（见 squadDefenderShouldRecycle 与 Creep.prototype.outerDefense 的触发点）。
+ *
+ * 150 的理由：invader 小队是 3~5 只一起游荡的，清完一波不会再零散刷；而 invaderCore
+ * 会持续刷（每 6/3/2/1 tick 一只），那种房里的 `invaders.length` 会一直刷新计数器，
+ * 永远不会触发回收 —— 这是想要的行为（core 在场就不该撤）。150 tick 也短于一只防守爬
+ * 的接替提前量，所以撤了以后补员来得及。
+ */
+const OUTER_DEFENSE_RECYCLE_QUIET = 150;
+/**
  * 「友军遇袭」接战半径：敌人在任意己方爬这一距离内，就算威胁到我们的作业，
  * 由**距它最近**的那只防守爬出手（见 outerDefense 的选敌注释）。
  *
@@ -817,6 +827,11 @@ Creep.prototype.coreBuster = function () {
 
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
+    // T3 强化的小队防守爬：目标房的 invader 清干净一段时间 → 回主房贴 spawn 回收。
+    // 放在最前面：回收期间不再接战、不再巡逻，直接走人（见 squadDefenderShouldRecycle）。
+    if (pro.squadDefenderShouldRecycle(this, task)) {
+        return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
     if (task.roomName != this.room.name) {
         // 行军只负责「进房间」，目标取房间中心 —— 和 coreBuster 同一修法。
         //
@@ -3254,6 +3269,46 @@ let pro = {
             }
         }
         return Game._outerDefAssignAll[roomName] || [];
+    },
+    /**
+     * T3 强化的「invader 小队」防守爬该不该回主房回收。
+     *
+     * 背景：invader **远程风筝小队**（≥2 只 Invader 爬）会把我们的防守爬临时换成
+     * T3 远程体型（squadBody：TOUGH2 / RA22 / HEAL6 / MOVE20 = 30 个强化部件，
+     * ≈900 单位化合物 + 7010 能量）。小队清完之后这只爬没有别的活，如果不管它，
+     * 它就只在窝区巡逻到老死 —— 那 900 单位化合物白烧（用户 10-04 指示：打完回
+     * 主房回收，可以 unboost，也可以直接在 spawn 旁边回收）。
+     *
+     * 选 **spawn.recycleCreep**（`recycleCreep` 任务自己会走回主房、贴到 spawn 旁边
+     * 再回收）而不是 lab.unboostCreep，账是这样的：
+     *   · 引擎 `_die(creep, 1.0)` 的返还是按**剩余寿命比例** dropRate=ttl/1500 算的
+     *     （`src/processor/intents/creeps/_die.js`）：每个强化部件返还
+     *     `LAB_BOOST_MINERAL(30) × ttl/1500` 单位化合物 + 部件能量。
+     *     刚打完的爬 ttl ≈ 1300~1400 → 每部件拿回 26~28 单位。
+     *   · unboost 只返还 `LAB_UNBOOST_MINERAL = 15`（固定，与 ttl 无关），而且要把
+     *     那座 lab 冷却 ≈ Σ 部件数 × 反应时间 × 15/5 tick（T3 反应时间 60~150）
+     *     —— 30 个部件 ≈ 4000~6000 tick，等于把强化产线停半天。
+     *   所以「直接回收」在 ttl > 750 时**回收的化合物更多、还顺带拿回部件能量、
+     *   且不动 lab**。只有爬已经老了（ttl < 700，见 prototype_creep.recycleCreep）
+     *   才先走 lab unboost —— 那时 15 > 30×ttl/1500，化合物比 lab 冷却值钱。
+     *
+     * 触发条件：T3 强化过 + **已在目标房内** + 连续 OUTER_DEFENSE_RECYCLE_QUIET tick
+     * 没见过 Invader 爬。用 `memory.invaderLastSeen` 记「最后一次见到 Invader 的时刻」：
+     * 见到就刷新；到场时没见到（例如另一只防守爬先清完了）就从到场那 tick 起算。
+     * 只在目标房内起算，行军途中不会误触发。
+     */
+    squadDefenderShouldRecycle(creep, task) {
+        if (!creep || !task || !task.roomName) return false;
+        if (!creep.room || creep.room.name != task.roomName) return false;   // 到场再判
+        if (!creep.body || !creep.body.some(p => p.boost)) return false;     // 只有 T3 小队体型
+        let invaders = creep.room.find(FIND_HOSTILE_CREEPS)
+            .filter(c => c.owner && c.owner.username == "Invader");
+        if (invaders.length) {
+            creep.memory.invaderLastSeen = Game.time;
+            return false;
+        }
+        if (!creep.memory.invaderLastSeen) creep.memory.invaderLastSeen = Game.time;
+        return Game.time - creep.memory.invaderLastSeen > OUTER_DEFENSE_RECYCLE_QUIET;
     },
     /**
      * 该外矿房需要几只防守爬（编制）。

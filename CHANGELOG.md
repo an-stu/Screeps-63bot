@@ -1,3 +1,49 @@
+## v0.78.59 — The T3 invader-squad defender is recycled once the squad is dead
+
+The squad body (`{TOUGH:2, RANGED_ATTACK:22, HEAL:6, MOVE:20}`) costs 7010 energy plus
+~900 units of T3 compounds, and it is only ever spawned because >= 2 Invader creeps were
+seen. Once they are dead the creep has nothing left to do: it patrolled the lairs until it
+expired at 1500 ticks, taking the compounds with it (the pair from v0.78.58's report,
+`shard3_83402855_1` / `shard3_83402885_2`, both died of old age). User 10-04: bring it home
+and either unboost it or recycle it next to the spawn.
+
+### Fixed
+
+- **`squadDefenderShouldRecycle(creep, task)`** is consulted as the first line of
+  `Creep.prototype.outerDefense`. It fires when the creep has boosted parts, is **inside its
+  target room**, and has seen no `Invader` creep for `OUTER_DEFENSE_RECYCLE_QUIET` (150)
+  ticks. `creep.memory.invaderLastSeen` is refreshed on every sighting and seeded on
+  arrival, so a room cleared by the *other* defender also starts the clock, and a room with
+  a spawning invaderCore never triggers (the counter keeps being refreshed). While the
+  creep is still marching there is no verdict at all - no mid-route U-turns.
+- The trigger swaps the task stack to `recycleCreep` (the existing handler walks back to
+  the main room, and, if `ticksToLive < 700`, unboosts at a lab first). No new movement or
+  recycle code.
+
+### Why recycle beats unboost here
+
+The engine refunds on a **lifetime-scaled** basis (`_die(creep, 1.0)`,
+`dropRate = ticksToLive / 1500`, `src/processor/intents/creeps/_die.js`): each boosted part
+returns `LAB_BOOST_MINERAL (30) * ttl/1500` compounds **plus** the body part energy. A
+defender that just won a fight has ttl ~1300-1400, i.e. 26-28 compounds per part, and
+recycling also returns the 7010-energy body.
+
+`StructureLab.unboostCreep` returns a flat `LAB_UNBOOST_MINERAL = 15` per part (verified
+in game) and drops it on the ground for a hauler to collect, and it puts that lab on
+cooldown for `sum(parts * REACTION_TIME * 15/5)` ticks - ~4000-6000 ticks for 30 parts of
+T3 (REACTION_TIME 60-150). So for a young creep, recycling recovers about twice the
+compounds, recovers the body, and leaves the labs alone. The unboost path still exists for
+old creeps (ttl < 700, where 15 > 30 * ttl/1500), which is exactly what
+`Creep.prototype.recycleCreep` already does.
+
+### Tests
+
+`test/edge-link.test.cjs` +8 cases: an unboosted defender never recycles, invaders present
+block it and refresh the timer, the 150-tick quiet window is respected, arrival with no
+record starts the clock, a long-quiet T3 defender returns true, marching (not in the target
+room) is never judged, and the `outerDefense` wiring replaces the stack with `recycleCreep`
+and executes it immediately - while the stack is left alone when the condition is not met.
+
 ## v0.78.58 — Outer haulers collect the container-tile pile, fill up, and the road never goes bare
 
 Four live reports from W33N55 / W34N55 / W35N55, plus the T3 spend on an invader squad.

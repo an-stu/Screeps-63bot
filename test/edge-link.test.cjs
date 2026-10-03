@@ -935,4 +935,63 @@ function defenceGateFixture(defenders) {
     assert.equal(orphan2.removed, false, "没有位置记录时不猜、不删");
 }
 
+// ── 12) T3 小队防守爬：invader 清完 → 回主房贴 spawn 回收（不白烧 T3） ──
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const mkCreep = ({ boosted = true, room = "W35N55", invaders = 0, lastSeen } = {}) => {
+        const body = [];
+        for (let i = 0; i < 50; i++) body.push({ type: "move", boost: boosted && i < 30 ? "XKHO2" : null });
+        const hostile = Array.from({ length: invaders }, () => ({ owner: { username: "Invader" } }));
+        return {
+            name: "d1",
+            memory: { role: "outerHarvestDefenser", invaderLastSeen: lastSeen,
+                      tasks: [{ taskName: "outerDefense", id: "s1", roomName: "W35N55", x: 41, y: 10 }] },
+            body, ticksToLive: 1300,
+            room: { name: room, find: c => (c === CONSTANTS.FIND_HOSTILE_CREEPS ? hostile : []) },
+            pos: { x: 41, y: 10, roomName: room },
+            mainRoom: () => ({ name: "W33N55", storage: null, controller: null, spawn: { head: () => null } }),
+            say() {}, moveTo() { return 0; }, goTo() { return this; },
+            popTask() { this.memory.tasks.pop(); return this; },
+            addTask(t) { (Array.isArray(t) ? t : [t]).forEach(x => x && this.memory.tasks.push(x)); return this; },
+            execLastTask() { this.execCount = (this.execCount || 0) + 1; return this; },
+            headTask() { return this.memory.tasks.head(); },
+        };
+    };
+    const task = { taskName: "outerDefense", id: "s1", roomName: "W35N55" };
+
+    // ① 没强化过的普通防守爬永远不回收
+    assert.equal(S.squadDefenderShouldRecycle(mkCreep({ boosted: false }), task), false,
+        "普通近战防守爬不回收（它们要长期守窝）");
+    // ② 房里还有 Invader 爬 → 不许撤，并刷新计时
+    const fighting = mkCreep({ invaders: 3, lastSeen: ctx.Game.time - 500 });
+    assert.equal(S.squadDefenderShouldRecycle(fighting, task), false, "invader 还在就不许撤");
+    assert.equal(fighting.memory.invaderLastSeen, ctx.Game.time, "见到 Invader 要刷新计时");
+    // ③ 刚清完、还在静默窗口内 → 不回收
+    assert.equal(S.squadDefenderShouldRecycle(mkCreep({ lastSeen: ctx.Game.time - 10 }), task), false,
+        "刚清完别急着走（等 150 tick 确认不是漏网/下一波）");
+    // ④ 到场时就没有 Invader（另一只先清完了）→ 从到场起算
+    const fresh = mkCreep({ lastSeen: undefined });
+    assert.equal(S.squadDefenderShouldRecycle(fresh, task), false, "没有记录 → 先打点，本 tick 不撤");
+    assert.equal(fresh.memory.invaderLastSeen, ctx.Game.time);
+    // ⑤ 静默够久 → 回收
+    assert.equal(S.squadDefenderShouldRecycle(mkCreep({ lastSeen: ctx.Game.time - 200 }), task), true,
+        "Invader 清完 150 tick → 回主房回收（recycle 按 ttl 比例返还 T3，比 unboost 的固定 15/部件多）");
+    // ⑥ 还在行军（人不在目标房）→ 不判，避免半路调头
+    assert.equal(S.squadDefenderShouldRecycle(mkCreep({ room: "W34N55", lastSeen: ctx.Game.time - 500 }), task),
+        false, "行军途中不回收");
+
+    // ⑦ 接线：outerDefense 的第一句就把任务栈换成 recycleCreep 并立刻执行
+    const c = mkCreep({ lastSeen: ctx.Game.time - 200 });
+    ctx.Creep.prototype.outerDefense.call(c);
+    assert.deepEqual(c.memory.tasks.map(t => t.taskName), ["recycleCreep"],
+        "触发后任务栈 = [recycleCreep]（它会自己走回主房、贴到 spawn 旁边回收）");
+    assert.equal(c.execCount, 1, "必须当场执行回收任务，不能这一 tick 白站");
+    // ⑧ 不满足条件时任务栈不许被动
+    const c2 = mkCreep({ room: "W34N55", lastSeen: ctx.Game.time - 500 });
+    ctx.Creep.prototype.outerDefense.call(c2);
+    assert.equal(c2.memory.tasks[0].taskName, "outerDefense", "条件不满足 → 照常走防守逻辑");
+}
+
 console.log("edge link / hauler body / defence gate checks passed");
