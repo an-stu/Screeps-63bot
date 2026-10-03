@@ -172,6 +172,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         memory,
         fatigue: 0,
         getActiveBodyparts(type) { return body.filter(e => e.type == type).length; },
+        getPartCnt(type) { return body.filter(e => e.type == type).length; },
         headTask: () => ({ roomName: "W34N55", id: "core1", x: 11, y: 44 }),
         headTaskObj: () => undefined,
         popTask() { calls.push(["pop"]); return this; },
@@ -309,7 +310,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     const ctx = loadStation();
     const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
-    const keeper = { id: "k1", body: [{ type: "attack" }], pos: makePos(40, 15, "W34N55") };
+    const keeper = { id: "k1", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(40, 15, "W34N55") };
     ctx.Game.getObjectById = id => (id === "k1" ? keeper : null);
 
     // 远程体型、目标在射程内：rangedAttack 直接输出，不移动
@@ -365,7 +366,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
 
     // 活体敌人每 tick 重查：即便 core id 还挂着，也会换成活体
     //（keeper 贴着窝出怪，真实场景里它必然落在守卫半径内）
-    const keeper = { id: "k1", body: [{ type: "attack" }], pos: makePos(40, 15, "W34N55") };
+    const keeper = { id: "k1", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(40, 15, "W34N55") };
     ctx.Game.getObjectById = id => (id === "core1" ? core : id === "k1" ? keeper : null);
     creep.room.find = c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [keeper]
         : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []);
@@ -381,7 +382,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     ctx.StationSources.outerDefensePosts = () => [lair];
 
     // invader 小队卡在运输路线上（离窝远、贴着我们的 carrier）
-    const invader = { id: "inv1", body: [{ type: "attack" }], pos: makePos(12, 3, "W34N55") };
+    const invader = { id: "inv1", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(12, 3, "W34N55") };
     const carrier = { id: "cv1", memory: { role: "outerHarvestEnergyCarrier" }, pos: makePos(13, 7, "W34N55") };
     // 近处防守爬 (14,6) 与远处防守爬 (42,14)
     const nearDef = makeCreep(ctx, { x: 14, y: 6 });
@@ -419,8 +420,8 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     const ctx = loadStation();
     const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
-    const healthy = { id: "kFull", body: [{ type: "attack" }], hits: 5000, hitsMax: 5000, pos: makePos(43, 15, "W34N55") };
-    const hurt = { id: "kHurt", body: [{ type: "attack" }], hits: 2120, hitsMax: 5000, pos: makePos(38, 12, "W34N55") };
+    const healthy = { id: "kFull", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), hits: 5000, hitsMax: 5000, pos: makePos(43, 15, "W34N55") };
+    const hurt = { id: "kHurt", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), hits: 2120, hitsMax: 5000, pos: makePos(38, 12, "W34N55") };
     const def = makeCreep(ctx, { x: 42, y: 14 });
     def.memory.role = "outerHarvestDefenser";
     const room = {
@@ -438,8 +439,8 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     // 同一规则**有界**：残血但在接战半径外的不追（否则会走开、把矿工丢在原地）
     const ctx2 = loadStation();
     ctx2.StationSources.outerDefensePosts = () => [lair];
-    const farHurt = { id: "kFar", body: [{ type: "attack" }], hits: 500, hitsMax: 5000, pos: makePos(49, 14, "W34N55") };
-    const near = { id: "kNear", body: [{ type: "attack" }], hits: 5000, hitsMax: 5000, pos: makePos(34, 15, "W34N55") };
+    const farHurt = { id: "kFar", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), hits: 500, hitsMax: 5000, pos: makePos(49, 14, "W34N55") };
+    const near = { id: "kNear", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), hits: 5000, hitsMax: 5000, pos: makePos(34, 15, "W34N55") };
     const def2 = makeCreep(ctx2, { x: 33, y: 14 });
     def2.memory.role = "outerHarvestDefenser";
     const room2 = {
@@ -459,7 +460,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     const ctx = loadStation();
     const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
-    const keeper = { id: "k1", body: [{ type: "attack" }], hits: 5000, hitsMax: 5000, pos: makePos(43, 15, "W34N55") };
+    const keeper = { id: "k1", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), hits: 5000, hitsMax: 5000, pos: makePos(43, 15, "W34N55") };
     const def = makeCreep(ctx, { x: 42, y: 14 });
     def.memory.role = "outerHarvestDefenser";
     const room = {
@@ -476,6 +477,72 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         "命中后同 tick 往目标方向推一格：目标这一步退开也不会丢输出");
 }
 
+{
+    // === 交战决策：**算得赢才贴脸**（不是无脑贴）===
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    const mkKeeper = (id, x, y, extra = {}) => Object.assign({
+        id, owner: { username: "Source Keeper" }, hits: 5000, hitsMax: 5000,
+        body: [{ type: CONSTANTS.ATTACK }, { type: CONSTANTS.RANGED_ATTACK }],
+        getActiveBodyparts: t => (t === CONSTANTS.ATTACK ? 10 : (t === CONSTANTS.RANGED_ATTACK ? 10 : 0)),
+        pos: makePos(x, y, "W34N55"),
+    }, extra);
+    const mkInvader = (id, x, y) => ({
+        id, owner: { username: "Invader" }, hits: 1000, hitsMax: 1000,
+        body: [{ type: CONSTANTS.ATTACK }],
+        getActiveBodyparts: t => (t === CONSTANTS.ATTACK ? 5 : 0),
+        pos: makePos(x, y, "W34N55"),
+    });
+    // 真实体型：22 ATTACK + 11 HEAL（= 输出 660 + 自愈 132 → 对拼阈值 792）
+    const meleeBody = [];
+    for (let i = 0; i < 22; i++) meleeBody.push({ type: CONSTANTS.ATTACK });
+    for (let i = 0; i < 11; i++) meleeBody.push({ type: CONSTANTS.HEAL });
+    function scene(hostiles, creepOpts = {}) {
+        const ctx = loadStation();
+        ctx.StationSources.outerDefensePosts = () => [lair];
+        const def = makeCreep(ctx, Object.assign({ x: 42, y: 14, body: meleeBody, hits: 5000, hitsMax: 5000 }, creepOpts));
+        def.memory.role = "outerHarvestDefenser";
+        const room = {
+            name: "W34N55",
+            find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? hostiles
+                : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []),
+        };
+        const byId = {};
+        hostiles.forEach(h => byId[h.id] = h);
+        ctx.Game.getObjectById = id => byId[id] || null;
+        def.room = room;
+        def.pos.roomRef = room;
+        ctx.Creep.prototype.outerDefense.call(def);
+        return def;
+    }
+    // 单只 keeper：账算得赢（400 < 我们的输出+自愈）→ 贴脸打
+    const solo = scene([mkKeeper("k1", 43, 15)]);
+    assert.ok(solo.calls.some(c => c[0] === "attack" && c[1] === "k1"), "单只 keeper 能赢 → 贴身对拼");
+
+    // 两只 keeper 夹着（800 > 792）：健康也不贴，退到 range 4 等队友
+    const pair = scene([mkKeeper("k1", 43, 15), mkKeeper("k2", 41, 15)]);
+    assert.ok(!pair.calls.some(c => c[0] === "attack"), "两把近战夹击算下来赢不了 → 不贴脸");
+    assert.ok(pair.calls.some(c => c[0] === "moveTo"),
+        "退开（keeper 不追人，range 4 只吃 10/发而自愈 132/发，退开就是免费医院）");
+    const pairHurt = scene([mkKeeper("k1", 43, 15), mkKeeper("k2", 41, 15)], { hits: 4000 });
+    assert.ok(pairHurt.calls.some(c => c[0] === "heal" && c[1] === "self"),
+        "退开的同时自愈（掉血才会 heal，满血不需要）");
+
+    // 重伤（<50%）单 keeper：退到 range 4 自愈
+    const hurt = scene([mkKeeper("k1", 43, 15)], { hits: 2000 });
+    assert.ok(!hurt.calls.some(c => c[0] === "attack"), "重伤时先退开自愈");
+    assert.ok(hurt.calls.some(c => c[0] === "moveTo"));
+
+    // 会追人的敌人（invader）受伤也不退：退了它照样贴上来
+    const inv = scene([mkInvader("i1", 43, 15)], { hits: 2000 });
+    assert.ok(inv.calls.some(c => c[0] === "attack" && c[1] === "i1"),
+        "会追人的敌人不能靠退，照样打");
+
+    // 收尾例外：目标只剩一 tick 的量，夹击也要打死
+    const fin = scene([mkKeeper("k1", 43, 15, { hits: 300 }), mkKeeper("k2", 41, 15)]);
+    assert.ok(fin.calls.some(c => c[0] === "attack" && c[1] === "k1"),
+        "目标残血到一两 tick 能收掉时，即使被夹击也照打");
+}
+
 console.log("outer defense checks passed");
 {
     // === 已接战别的目标的防守爬不参与新目标竞争：次近的空闲者接手 ===
@@ -485,8 +552,8 @@ console.log("outer defense checks passed");
     const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     const lairWest = { structureType: "keeperLair", pos: makePos(7, 17, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair, lairWest];
-    const west = { id: "kw", body: [{ type: "attack" }], pos: makePos(3, 16, "W34N55") };
-    const east = { id: "ke", body: [{ type: "attack" }], pos: makePos(35, 27, "W34N55") };
+    const west = { id: "kw", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(3, 16, "W34N55") };
+    const east = { id: "ke", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(35, 27, "W34N55") };
     const busy = makeCreep(ctx, { x: 35, y: 28, body: [{ type: "ranged_attack" }] });
     busy.memory.role = "outerHarvestDefenser";
     busy.memory.targetId = "ke";                       // 正在打东边那只
@@ -517,8 +584,8 @@ console.log("outer defense checks passed");
     const ctx = loadStation();
     const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
-    const h1 = { id: "h1", body: [{ type: "attack" }], pos: makePos(40, 15, "W34N55") };
-    const h2 = { id: "h2", body: [{ type: "attack" }], pos: makePos(42, 16, "W34N55") };
+    const h1 = { id: "h1", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(40, 15, "W34N55") };
+    const h2 = { id: "h2", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(42, 16, "W34N55") };
     const busy = makeCreep(ctx, { x: 41, y: 15, body: [{ type: "ranged_attack" }] });
     busy.memory.role = "outerHarvestDefenser";
     busy.memory.targetId = "h1";

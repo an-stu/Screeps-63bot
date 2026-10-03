@@ -884,15 +884,50 @@ Creep.prototype.outerDefense = function () {
             // （实测两只钉死在 (0,17)/(49,17) 门格对上，接替兵进来也接着站）。
             // attack/rangedAttack 没真正生效（含跨房边界的 -7）就继续接近目标。
             let ranged = this.getActiveBodyparts(RANGED_ATTACK) > 0;
-            // Overmind reaper 运动语义完全参照：
-            //   满血            → approachRange 1（贴脸输出）
-            //   掉血但 >50%     → 已在 3 格内就边打边奶，否则停在 4 格外边走边奶
-            //   重伤（≤50%）    → 不打，保持 4 格只奶（heal 在上面治疗分支已做）
             if (!ranged) {
-                if (this.hits < this.hitsMax / 2) {
-                    if (!this.pos.inRangeTo(em, 4)) this.moveTo(em, { range: 4 });
+                // ===== 近战对拼规则：**能不能赢算了再打**，不是无脑贴脸 =====
+                //
+                // 引擎事实（screeps/engine 源码）：
+                //   · source keeper **不追人**（creeps/keepers/pretick.js：每 tick 走向
+                //     自己记住的 source，只打 range 1 内的目标）→ 打不过可以退，退开它
+                //     就回矿点，range 4 只吃 10/发而自愈 132/发 → 4 格是免费医院。
+                //   · invader / 玩家爬**会追**（invaders/findAttack.js：findClosestByPath
+                //     直追最近的敌人）→ 退了它照样贴上来，白丢一轮输出，还不如站着对拼。
+                //   · keeper 伤害：贴身 10 ATTACK×30 + 10 RA×10 = 400/发；range 2 = 100、
+                //     range 3 = 40、range 4 = 10、≥5 = 0（远程按距离 [10,10,4,1]/部件）。
+                //
+                // 对拼账（用**自己的实际部件**算，不写死）：
+                //   我们每 tick 输出 30×ATTACK 数、自愈 12×HEAL 数；
+                //   对方贴身总伤害 = Σ(30×其 ATTACK + 10×其 RA)。
+                //   总伤害 ≥ 输出+自愈 时这场对拼**赢不了**（两只 keeper 贴身 = 800 >
+                //   660+132 = 792，实测就是这个数才输的）→ 那就别贴，退到 4 格自愈等队友。
+                let keeper = !!(em.owner && em.owner.username == "Source Keeper");
+                let ours = 30 * this.getPartCnt(ATTACK) + 12 * this.getPartCnt(HEAL);
+                let incoming = 0;
+                this.room.find(FIND_HOSTILE_CREEPS).forEach(c => {
+                    // 半径 5：这一场里「很快能加入」的敌人都算进来（keeper 平地 0.35 格/tick，
+                    // 5 格外 15 tick 内就到场）。只看 3 格会导致「贴上去才发现打不过 →
+                    // 退开 → 敌人不在 3 格内又判定能打 → 再贴」的来回抖。
+                    if (this.pos.getRangeTo(c.pos) > 5) return;
+                    incoming += 30 * c.getActiveBodyparts(ATTACK)
+                        + 10 * c.getActiveBodyparts(RANGED_ATTACK);
+                });
+                let winnable = incoming < ours;
+                let hurt = this.hits < this.hitsMax / 2;
+                // 收尾例外：目标再两 tick 就能打死（≤2×我们的输出）→ 照打。
+                // 否则会出现「两只 keeper 一起守着 → 两只防守爬都退到 4 格干等」
+                // 的死局（前面打残的那只没人去收）。
+                let finishing = em.hits <= 30 * this.getPartCnt(ATTACK) * 2;
+                if (keeper && !finishing && (hurt || !winnable)) {
+                    // 不追人的对手 + 这场账算下来赢不了 → 退到 range 4 只自愈
+                    //（治疗已在上面治疗分支做过；这里连 attack 都不调）
+                    // 注意判据是 getRangeTo < 4：`inRangeTo(em, 4)` 在**贴身时也为真**
+                    //（range 1 ≤ 4），原来那句等于「永远不后退」—— 重伤的防守爬其实一直
+                    // 站在原地挨 400/发、自愈 132/发，净 -268/tick，只是看起来在「退守」。
+                    if (this.pos.getRangeTo(em.pos) < 4) this.moveTo(em, { range: 4 });
                     return;
                 }
+                // 账算得赢（或对手会追人退不掉）→ 贴脸对拼，输出最大化
                 let ret = this.attack(em);
                 if (ret == OK) {
                     // Overmind attackAndChase：贴身命中后**同 tick 往目标方向推一格** ——
@@ -902,7 +937,7 @@ Creep.prototype.outerDefense = function () {
                     return;
                 }
                 if (ret != ERR_NO_BODYPART) {
-                    this.moveTo(em, { range: this.hits < this.hitsMax ? 4 : 1 });
+                    this.moveTo(em, { range: 1 });
                 }
                 return;
             }
@@ -1457,11 +1492,24 @@ let pro = {
         // 无强化兜底也有 220 dps（近战版在风筝战术下实际 dps ≈ 0）；
         // T3 强化（boostRes 由 trySpawnOuterDefenser 按 boostAble 决定是否附加）
         // 后 880 dps + 288 奶 + tough 减伤，对小队是碾压。
-        // 默认**近战** {A22,H11,M17}：打 lair 生成的 keeper 实测稳赢（660 dps
-        // + 132 自奶），不用强化（用户 10-03 指示）。
+        // 默认**近战** {A22,H11,M17}：打 lair 生成的 keeper 稳赢（660 dps + 132 自奶），
+        // 不用强化（用户 10-03 指示），但**部件顺序必须 MOVE → ATTACK → HEAL**。
+        //
+        // 伤害从 body 前端往后扣（engine: creeps/_recalc-body.js）——**谁放在最前面，
+        // 谁就是肉盾**。放在前面用 ATTACK 挡伤害是致命的：打掉前 22 个部件后我们的
+        // dps 归零，而 keeper 的两个输出部件藏在 3000 血（17 TOUGH + 13 MOVE）后面，
+        // 全程满输出。逐 tick 模拟（`.workbuddy/tmp/edge/keeper_fight_sim.py`，
+        // 用引擎规则：部件 100 血、30/ATTACK、远程按距离 [10,10,4,1]、12/HEAL）：
+        //   [A22,H11,M17] 贴身对拼 → **输**：17 tick 我们死，keeper 还剩 1850
+        //   [M17,A22,H11] 贴身对拼 → **赢**：8 tick 打完，我们还剩 3444
+        //   [A22,H11,M17] 靠「掉血退 4 格自愈」的循环 → 赢，但要 38 tick（多挨 4 倍）
+        // 把 MOVE 放前排的代价很小：MOVE 每部件 50 能量、只在**行军**时必需
+        // （打起来只需贴身，我们的 attack 成功后还会往目标方向推一格），
+        // 而 8 tick 的战斗里 MOVE 部件只是掉血、没被销毁（hits>0 就仍然有效）。
+        // 保持用户定稿的 {A22,H11,M17} 部件数，只把顺序改对。
         const meleeBody = () => ({
-            body: ManagerCreeps.calcBodyPart({[ATTACK]: 22, [HEAL]: 11, [MOVE]: 17}), boostRes: {}});
-        const smallBody = () => ({body: ManagerCreeps.calcBodyPart({[ATTACK]: 9, [MOVE]: 10, [HEAL]: 1}), boostRes: {}});
+            body: ManagerCreeps.calcBodyPart({[MOVE]: 17, [ATTACK]: 22, [HEAL]: 11}), boostRes: {}});
+        const smallBody = () => ({body: ManagerCreeps.calcBodyPart({[MOVE]: 10, [ATTACK]: 9, [HEAL]: 1}), boostRes: {}});
         if (!harRoom) return isInvader ? meleeBody() : smallBody();
 
         // invader **远程风筝小队**（≥2 只 Invader 爬）：纯近战摸不到边退边打的
@@ -1480,7 +1528,7 @@ let pro = {
             // 没有活体敌人：只有 lair / invaderCore 时用能拆掉它的配置即可
             let hasNest = harRoom.find(FIND_HOSTILE_STRUCTURES)
                 .some(e => e.structureType == STRUCTURE_KEEPER_LAIR || e.structureType == STRUCTURE_INVADER_CORE);
-            if (!hasNest) return {body: ManagerCreeps.calcBodyPart({[ATTACK]: 5, [MOVE]: 6, [HEAL]: 1}), boostRes: {}};
+            if (!hasNest) return {body: ManagerCreeps.calcBodyPart({[MOVE]: 6, [ATTACK]: 5, [HEAL]: 1}), boostRes: {}};
             return isInvader ? meleeBody() : smallBody();
         }
 
@@ -1513,7 +1561,8 @@ let pro = {
             moveCnt = Math.max(1, Math.ceil((attackCnt + healCnt) / 2));
             if (attackCnt + healCnt + moveCnt > 50) attackCnt = Math.max(1, 50 - healCnt - moveCnt);
         }
-        let body = ManagerCreeps.calcBodyPart([[ATTACK, attackCnt], [HEAL, healCnt], [MOVE, moveCnt]]);
+        // 同上：MOVE 放最前当肉盾，ATTACK/HEAL 放后面保住输出与续航
+        let body = ManagerCreeps.calcBodyPart([[MOVE, moveCnt], [ATTACK, attackCnt], [HEAL, healCnt]]);
         // 中间九房的 source keeper 是满配 50 部件（约 5000 血，贴身时近战+远程
         // 合计约 400/发）。上面是按「当前看得见的那几只、且按 dis=2 只算远程」
         // 估的体型，实战一贴身就会奶量不足被反杀 —— 实测算出来只有

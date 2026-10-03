@@ -578,4 +578,35 @@ function defenceGateFixture(defenders) {
         "编制 2 只已到齐（一只在岗、一只在途）→ 不再补员（旧实现会每 6 tick 白派一只）");
 }
 
+// ───────── 7) 防守体型顺序：MOVE 必须在最前（输出/续航不能拿去当肉盾） ─────────
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const lair = { structureType: CONSTANTS.STRUCTURE_KEEPER_LAIR };
+    const room = {
+        name: "W34N55",
+        getHostileCreeps: () => [],
+        find: c => (c === CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []),
+    };
+    const melee = ctx.StationSources.getOuterHarDefenseBodyConfig(true, room).body;
+    assert.equal(melee.join("+"),
+        Array(17).fill(CONSTANTS.MOVE).concat(Array(22).fill(CONSTANTS.ATTACK), Array(11).fill(CONSTANTS.HEAL)).join("+"),
+        "近战防守爬必须是 MOVE(17) → ATTACK(22) → HEAL(11)：伤害从前端扣，"
+        + "ATTACK 放前面等于拿输出当肉盾（逐 tick 模拟：那样贴身对拼会输给 keeper）");
+
+    // 按敌情算出来的体型也必须把 MOVE 放最前
+    const keeper = {
+        owner: { username: "Source Keeper" }, hits: 5000, hitsMax: 5000,
+        possibleDamage: () => 300, possibleHealDamage: () => 0,
+    };
+    const room2 = {
+        name: "W34N55",
+        getHostileCreeps: () => [keeper],
+        find: c => (c === CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []),
+    };
+    ctx.WarDamageCal = { possibleBreakDamage: () => 0 };
+    const computed = ctx.StationSources.getOuterHarDefenseBodyConfig(false, room2).body;
+    assert.equal(computed[0], CONSTANTS.MOVE, "按敌情算出的体型同样要把 MOVE 排在第一位");
+}
+
 console.log("edge link / hauler body / defence gate checks passed");

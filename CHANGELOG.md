@@ -1,3 +1,71 @@
+## v0.78.53 — Melee duels are decided by arithmetic, and the retreat actually retreats
+
+Three defects in the melee defender, all found by reading the engine and confirmed by
+the tick-by-tick simulator:
+
+### Fixed
+
+- **The "retreat to range 4 and heal" never ran.** The guard was
+  `if (!this.pos.inRangeTo(em, 4))`, which is *true even when adjacent* (range 1 <= 4),
+  so a hurt defender simply kept standing next to the keeper taking 400/tick against
+  132/tick of self-healing (net -268/tick). It is now `getRangeTo(em.pos) < 4`.
+  Overmind's own reaper has the same structure but works because it compares
+  `range <= 3` against the *intended* approach range.
+- **"Hug always" is not always right.** Engines facts that decide the duel:
+  keepers never chase (`creeps/keepers/pretick.js` walks to its remembered source), while
+  invaders do (`invaders/findAttack.js` paths to the closest enemy), and a keeper deals
+  400/tick adjacent (10 ATTACK + 10 RANGED_ATTACK) but only 100/40/10 at ranges 2/3/4.
+  The defender now computes the exchange from its own parts - output = 30 x ATTACK,
+  sustain = 12 x HEAL, incoming = sum over hostiles within 5 of (30 x their ATTACK +
+  10 x their RANGED_ATTACK) - and only hugs when `incoming < output + sustain` (792 for
+  the standard body). Two keepers adjacent are 800 > 792, so it steps out instead of
+  losing the race; one wounded keeper that is two ticks from dying is finished anyway
+  (finisher exception, so two parked defenders cannot stalemate a room).
+- The 5-tile radius for counting incoming damage (not 3) is deliberate: with 3 the creep
+  steps out, sees nobody in range, steps back in, and oscillates.
+
+### Body order (v0.78.52 follow-up)
+
+Melee and ranged squad bodies both lead with the cheapest part so the win condition
+survives: melee `[MOVE, ATTACK, HEAL]` (matches Overmind's `zerglings.sourceKeeper`,
+whose `ordered: true` grouping produces `[MOVE x20, ATTACK x20, HEAL x5, MOVE x5]`),
+ranged squad `[TOUGH, RANGED_ATTACK, HEAL, MOVE]` because boosted TOUGH reduction is
+consumed front-to-back and a kiter cannot lose MOVE before its own damage.
+
+Simulator: `.workbuddy/tmp/edge/keeper_fight_sim.py` (engine rules: 100 HP/part,
+front-to-back destruction, 30/ATTACK, 12/HEAL, keeper ranged `[10,10,4,1]`, no boosts).
+Numbers: `[A22,H11,M17]` loses a straight brawl (17 ticks, keeper survives on 1850);
+`[M17,A22,H11]` wins it in 8 ticks with 3444 left.
+
+## v0.78.52 — Melee defenders stop using their damage as the damage sponge
+
+The body order of the melee outer defender was `[ATTACK x22, HEAL x11, MOVE x17]`.
+Damage destroys body parts front to back (`engine/creeps/_recalc-body.js`), so the first
+2200 points of incoming damage deleted the entire damage output while the keeper's own
+attack parts sit behind 3000 HP of TOUGH + MOVE and keep firing at full rate.
+
+Tick-by-tick simulation with the engine's rules (100 HP/part, 30/ATTACK, keeper ranged
+damage `[10,10,4,1]` per distance, 12/HEAL, no boosts on either side):
+
+    [A22,H11,M17]  straight brawl      LOSE  t=17, defender dead, keeper at 1850
+    [M17,A22,H11]  straight brawl      WIN   t=8,  keeper dead, defender at 3444
+    [A22,H11,M17]  retreat-and-heal    WIN   t=38, but takes ~4x as long
+
+### Changed
+
+- Melee defender body order is now MOVE -> ATTACK -> HEAL (part counts unchanged: the
+  user's {A22,H11,M17}). MOVE is the cheapest part (50 energy) and is only needed to
+  march and close in - after a successful attack the creep also steps toward its target -
+  while ATTACK and HEAL are the win condition. In an 8-tick fight the MOVE parts are only
+  damaged, not destroyed (a part with hits > 0 still functions), so nothing is lost.
+- Same reorder for the small melee body, the nest-only body, and the enemy-scaled body.
+- The ranged squad body keeps `[TOUGH, RANGED_ATTACK, HEAL, MOVE]`: boosted TOUGH damage
+  reduction is consumed front-to-back so TOUGH must lead, and a kiter cannot afford to
+  lose MOVE before its own damage.
+
+Regression test locks the order (and the negative control - restoring the old order - fails
+it). Simulation script: `.workbuddy/tmp/edge/keeper_fight_sim.py`.
+
 ## v0.78.51 — Edge link sits on a redundant west-side road, not on clean land
 
 The first placement picked the westernmost *free* tile adjacent to the route every outer
