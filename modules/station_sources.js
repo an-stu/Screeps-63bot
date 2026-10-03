@@ -1282,28 +1282,25 @@ let pro = {
         return ManagerCreeps.calcBodyPart({ [MOVE]: num, [CLAIM]: num });
     },
     getOuterHarCarrierBodyConfig(energy, maxPart) {
-        let current = 0;
-        let cost = BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE];
-        let baseCost = BODYPART_COST[WORK] + BODYPART_COST[MOVE];
-        let num = 0;
-        while (current + cost <= energy - baseCost) {// 超过 10个 work 加一个 carry
-            num += 1;
-            current += cost
-            if (num >= 17 || maxPart / 2 < num) break;
-        }
-        return ManagerCreeps.calcBodyPart({ [CARRY]: num < 17 ? num * 2 : num * 2 - 1, [MOVE]: num });
+        // **CARRY/MOVE 严格间隔排列**（用户 10-03 指示）：伤害从 body 前端往后
+        // 扣部件，交替排列让 CARRY:MOVE ≈ 1:1 在任何损伤程度下都成立——
+        // 满血被伏击掉一半血，road 上依然 1 格/tick，不会越打越爬。
+        // 原来是 [CARRY×33, MOVE×17] 分组排列。容量 25×50 = 1250。
+        let pairs = Math.min(Math.floor(maxPart / 2), 25);
+        while (pairs > 1 && (BODYPART_COST[CARRY] + BODYPART_COST[MOVE]) * pairs
+            + BODYPART_COST[WORK] + BODYPART_COST[MOVE] > energy) pairs--;
+        let body = [];
+        for (let i = 0; i < pairs; i++) body.push(CARRY, MOVE);
+        return body;
     },
     getOuterHarCarrierBuildBodyConfig(energy, maxPart) {
-        let current = 0;
-        let cost = BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE];
-        let baseCost = BODYPART_COST[WORK] + BODYPART_COST[MOVE];
-        let num = 0;
-        while (current + cost <= energy - baseCost) {// 超过 10个 work 加一个 carry
-            num += 1;
-            current += cost
-            if (num >= 17 || maxPart / 2 < num) break;
-        }
-        return ManagerCreeps.calcBodyPart({ [WORK]: 2, [CARRY]: (num < 17 ? num * 2 : num * 2 - 1) - 2, [MOVE]: num });
+        // 同上：间隔排列，前缀 2 个 WORK 专职修路（修路吞吐由多只并行决定）
+        let pairs = Math.min(Math.floor(maxPart / 2), 25);
+        while (pairs > 1 && (BODYPART_COST[CARRY] + BODYPART_COST[MOVE]) * pairs
+            + BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE] > energy) pairs--;
+        let body = [WORK, WORK];
+        for (let i = 0; i < pairs; i++) body.push(CARRY, CARRY, MOVE);
+        return body;
     },
     /**
      * 外矿防守爬的体型与 boost 需求。
@@ -2422,7 +2419,8 @@ let pro = {
         // 被拥堵抬高就会正反馈多派（10-03 实测涨到 16 只），CPU 与 bucket 双输，
         // 这里一刀切住。短缺靠 50 部件的单体运力兜，不再靠数量。
         let roomCarriers = spawnRoom.creeps("outerHarvestEnergyCarrier", false);
-        let carrierMax = Number(Memory.marketSettings && Memory.marketSettings.outerCarrierMax) || 6;
+        // 容量 1700/只（2:1 间隔排列），上限同步放宽到 8
+        let carrierMax = Number(Memory.marketSettings && Memory.marketSettings.outerCarrierMax) || 8;
         if (roomCarriers.length >= carrierMax) return null;
         // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
         // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。

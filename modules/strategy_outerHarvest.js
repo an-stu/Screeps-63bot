@@ -233,6 +233,7 @@ let pro = {
                 }
             }
             else {
+                if (!allDefendersFull) continue;   // 防守没满员：本矿本轮只守不产
                 let harRoom = Game.rooms[targetRoomName];
                 if ((Game.time + spawnRoom.hashCode()) % 30 == 0 && harRoom) {
                     StationSources.update(harRoom)
