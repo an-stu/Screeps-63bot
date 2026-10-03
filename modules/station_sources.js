@@ -29,6 +29,8 @@ const OUTER_DEFENSE_REPLACE_MARGIN = 10;
 const OUTER_DEFENSE_REPLACE_OVERLAP = 100;
 /** 拿不到路线缓存时的行军时间保守估计（tick） */
 const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
+/** keeper 撤离触发距离：敌对爬进入该半径且无防守爬接战就撤（Overmind flee 语义） */
+const OUTER_KEEPER_FLEE_RANGE = 6;
 /**
  * 「我方矿工工作位」的寻路代价：矿点及其相邻一圈。
  *
@@ -236,6 +238,19 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
             && Memory.rooms[task.roomName][pro.stationName][task["id"]];
         if (!pro.moveOuterCarrierOnRoad(this, task, data, -1)) this.goTo(task);
     } else {
+        // Overmind 式撤离（miner.flee + dropEnergy 的等价实现）：keeper 的命比
+        // 一包能量值钱。敌对爬逼近 OUTER_KEEPER_FLEE_RANGE 且本房防守爬不在其
+        // OUTER_DEFENSE_GUARD_RADIUS 接战范围内 → 朝主房方向撤，丢掉身上能量减
+        // 重。原来站着挖到被杀，两轮巡检的 (3,16)/(4,15) 墓碑都是这么来的。
+        let hunter = this.pos.findInRange(FIND_HOSTILE_CREEPS, OUTER_KEEPER_FLEE_RANGE)[0];
+        if (hunter && !this.room.find(FIND_MY_CREEPS).some(c =>
+            c.memory.role == "outerHarvestDefenser" && c.pos.getRangeTo(hunter.pos) <= OUTER_DEFENSE_GUARD_RADIUS)) {
+            let flee = PathFinder.search(this.pos, { pos: hunter.pos, range: OUTER_KEEPER_FLEE_RANGE + 4 },
+                { flee: true, maxRooms: 1 }).path[0];
+            if (this.store[RESOURCE_ENERGY] > 0 && flee) this.drop(RESOURCE_ENERGY);
+            if (flee) this.moveTo(flee);
+            return;
+        }
         let source = Game.getObjectById(task["id"]);
         let station = Memory.rooms[this.headTask().roomName][pro.stationName][task["id"]];
         let container = Game.getObjectById(station["container"]);
