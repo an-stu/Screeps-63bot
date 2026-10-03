@@ -166,7 +166,6 @@ let pro = {
             name = LOCAL_SHARD_NAME + "_" + Game.time + "_" + Game._name_hash;// shard+Game.time+第几个生的
         let opts = { memory: { role: role, roomName: targetRoomName, tasks: tasks } };
         if (ops) for (let t in ops) opts[t] = ops[t];
-        delete opts.force;
         let spend = Utils.getBodyEnergyNeed(body);
         if (room.currentEnergyAvailable < spend) {
             room.spawnFailure = true; return undefined;

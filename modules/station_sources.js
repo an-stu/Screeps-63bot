@@ -2255,8 +2255,7 @@ let pro = {
                 let energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(spawnRoom.energyAvailable, 550));
                 let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
-                // keeper 是能量源头：force 绕过同 tick 的 spawnFailure 毒化
-                StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks, { force: true })
+                StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)
             }
         });
     },
