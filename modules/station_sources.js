@@ -876,6 +876,20 @@ Creep.prototype.outerDefense = function () {
             }
             let ret = this.rangedAttack(em);
             if (ret != OK && ret != ERR_NO_BODYPART) this.moveTo(em, { range: 3 });
+            // Overmind hydralisk 语义：血 <90% 就风筝后撤一格（保持 3~4 格对射）；
+            // 单 keeper 时贴近近战 reaper 当奶妈（rangedHeal 接战中的队友）
+            if (this.hits < this.hitsMax * 0.9) {
+                let flee = PathFinder.search(this.pos, { pos: em.pos, range: 5 }, { flee: true, maxRooms: 1 }).path[0];
+                if (flee) this.moveTo(flee);
+            } else if (this.room.find(FIND_HOSTILE_CREEPS).length == 1) {
+                let reaper = this.room.find(FIND_MY_CREEPS).filter(c =>
+                    c.memory.role == "outerHarvestDefenser" && c != this && c.memory.targetId)[0];
+                if (reaper && reaper.hits < reaper.hitsMax && this.pos.getRangeTo(reaper) <= 3) {
+                    this.rangedHeal(reaper);
+                } else if (reaper && this.pos.getRangeTo(reaper) > 3) {
+                    this.moveTo(reaper, { range: 3 });
+                }
+            }
             // 自愈/救人都已在上面做过；这里只在还在掉血且没在救别人时补一次自愈。
             if (!healingAlly && this.hits < this.hitsMax) this.heal(this);
             return;
