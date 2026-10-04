@@ -1,3 +1,57 @@
+## v0.78.62 — A defender is now born with its post written down, and the successor inherits it
+
+User 10-04: "接替的爬没有储存目标信息，分工不够明确" - the replacement creep stores no target,
+so the division of labour is not clear. That was literal: `trySpawnOuterDefenser` gave every
+defender the memory `{role, roomName, tasks}` and nothing about **which lairs it owns**.
+
+### What was actually wrong (all three)
+
+1. **The successor did not take over the post.** `outerDefensePosts` derived
+   `creep.memory.defenseGroup` at runtime with "count defenders per group, move to the
+   emptiest". A replacement cut loose from the creep it replaced could join the *other*
+   group - so when the old defender died, the group it had been covering could be empty
+   while the successor stood on the wrong lairs.
+2. **Posts could swap.** Because the rule re-evaluated every tick, a defender whose group
+   became the more crowded one simply moved over. Two defenders can trade posts that way.
+3. **The record of who guards what was wrong.** Every defender's task pointed at the room's
+   **first** station (`_.values(...).find(e => e && e.id)`), so in a room with three
+   defenders over two groups, `registerStationSourcesDefenseOutRoom` filed all of them under
+   the same station in `stationSources[*].defenseCreeps`.
+
+### Fixed
+
+- **`defenseGroupKey(lairs)`** - the post is identified by its **lair ids** (sorted, joined
+  with `|`), not by the group index: when lairs are destroyed/rebuilt the grouping is
+  recomputed and indices change meaning, ids do not.
+- **`outerDefenseAssignmentForSpawn(harRoom, front, replacingFront)`** - decides the post
+  *before* the creep exists: a replacement **inherits** the post of the creep it replaces
+  (by key, falling back to the group index for pre-deploy creeps), a top-up takes the
+  least-populated group. Empty when there is no vision or no lairs, in which case runtime
+  assignment fills it in as before.
+- **`defenseGroupStation(room, groupLairs)`** + `generatorOuterHarDefenseTask(data, ops)` -
+  the task now carries `defenseGroup` / `defenseLairIds`, and its target station is the one
+  **nearest that group of lairs** rather than the room's first station. So the task is the
+  creep's actual orders: "guard these two lairs, and you belong to this mine's record".
+- The assignment is written to `creep.memory` on the spawn tick (a just-spawned creep is
+  already in `Game.creeps`), and `outerDefensePosts` now **trusts the stored post**: a creep
+  whose `defenseLairIds` still exists keeps that group and never chases the emptiest one.
+  Only creeps with no stored post at all (pre-deploy memory) get a single balancing pass,
+  and a post whose lairs are gone falls back to the group index and rewrites the key.
+
+Result: when the old defender expires, its successor is already standing on the same pair
+of lairs, the other group stays covered, and posts stop trading places.
+
+### Tests
+
+`test/edge-link.test.cjs` +9 cases: the post key is order-independent; the station is the
+one nearest the group; a replacement inherits the post by key (and by group index for old
+memory); a top-up takes the emptiest group; no vision / no lairs leaves it empty; an
+assigned creep does **not** move to an emptier group; an unassigned creep is balanced once
+and has the post written down; a stale key falls back and is rewritten; and end-to-end
+`trySpawnOuterDefenser` fills the task target with the group's own station (`sEast`, while
+`data` was `sWest`), carries the post in the task, and writes it into the new creep's memory
+while still setting `hasSendSpawn` on the old one.
+
 ## v0.78.61 — The hauler cap is a runaway guard at 3 per mine, not the demand itself
 
 v0.78.60 sized the cap as `mines * 2` (= 12 for W33N55) from an estimate. Live numbers say

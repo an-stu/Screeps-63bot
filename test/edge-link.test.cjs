@@ -1056,4 +1056,101 @@ function defenceGateFixture(defenders) {
         "总数 8、但该矿点 0 只 live carrier → 上限按矿点数算（12），必须补员（实测 W35N55 两点 carryCreeps 全死）");
 }
 
+// ── 14) 防守爬的「岗位」要记下来，接替兵继承 —— 分工明确（用户 10-04 指出） ──
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const mkLair = (id, x, y) => ({ id, structureType: "keeperLair", pos: { x, y, roomName: "W34N55" } });
+    const lW1 = mkLair("l1", 5, 5), lW2 = mkLair("l3", 5, 20), lE1 = mkLair("l2", 40, 5), lE2 = mkLair("l4", 40, 20);
+    const lairs = [lW1, lW2, lE1, lE2];              // 与 outerDefensePosts 的按坐标排序一致
+    // 分组表走缓存（否则会跑 PathFinder）：西组 [l1,l3]、东组 [l2,l4]
+    const mkRoom = creeps => ({
+        name: "W34N55",
+        memory: {
+            defenseLairGroupsKey: "l1,l3,l2,l4",
+            defenseLairGroups: [["l1", "l3"], ["l2", "l4"]],
+            stationSources: {
+                sWest: { id: "sWest", roomName: "W34N55", x: 6, y: 6, pathTime: 85 },
+                sEast: { id: "sEast", roomName: "W34N55", x: 41, y: 6, pathTime: 85 },
+            },
+        },
+        find: type => (type === CONSTANTS.FIND_HOSTILE_STRUCTURES ? lairs
+            : type === CONSTANTS.FIND_MY_CREEPS ? creeps : []),
+    });
+    const def = (group, key) => ({ memory: { role: "outerHarvestDefenser", defenseGroup: group, defenseLairIds: key } });
+
+    // 岗位 key：按 id 排序，与传入顺序无关 → 窝重建后组号会变、key 不变
+    assert.equal(S.defenseGroupKey([lE1, lE2]), "l2|l4");
+    assert.equal(S.defenseGroupKey([lE2, lE1]), "l2|l4", "岗位 key 与传入顺序无关");
+    // 这组窝挂在哪个矿点：西组 → 西矿点，东组 → 东矿点
+    assert.equal(S.defenseGroupStation(mkRoom([]), [lW1, lW2]).id, "sWest");
+    assert.equal(S.defenseGroupStation(mkRoom([]), [lE1, lE2]).id, "sEast");
+    assert.equal(S.defenseGroupStation({ memory: {} }, [lE1]), undefined, "找不到矿点就返回 undefined");
+
+    // 接替兵：继承被接替者的岗位（key 优先）
+    const front = def(1, "l2|l4");
+    const inherit = S.outerDefenseAssignmentForSpawn(mkRoom([front]), front, true);
+    assert.equal(inherit.group, 1, "接替兵继承岗位（不是运行时看谁少去哪）");
+    assert.equal(inherit.lairIds, "l2|l4", "守的就是老兵那一组窝");
+    assert.equal(inherit.station.id, "sEast", "任务挂在离这组窝最近的矿点下");
+    // 老 memory 只有组号（本改动前出生的爬）→ 按组号继承
+    const oldFront = { memory: { role: "outerHarvestDefenser", defenseGroup: 0 } };
+    assert.equal(S.outerDefenseAssignmentForSpawn(mkRoom([oldFront]), oldFront, true).group, 0);
+    // 补员兵：挑当时人最少的那组（西组 2 人、东组 0 人 → 东组）
+    const w1 = def(0, "l1|l3"), w2 = def(0, "l1|l3");
+    const fill = S.outerDefenseAssignmentForSpawn(mkRoom([w1, w2]), undefined, false);
+    assert.equal(fill.group, 1, "补员兵补最空的那组");
+    assert.equal(fill.lairIds, "l2|l4");
+    // 没视野 / 没有窝 → 空（运行时 outerDefensePosts 再补）
+    assert.equal(Object.keys(S.outerDefenseAssignmentForSpawn(undefined, front, true)).length, 0,
+        "没有视野 → 岗位留空（运行时 outerDefensePosts 再补）");
+    assert.equal(Object.keys(S.outerDefenseAssignmentForSpawn({ find: () => [], memory: {} }, front, true)).length, 0,
+        "房里没有窝 → 岗位留空");
+
+    // 运行时不换岗：岗位是记下来的，别组更空也不动（避免两只爬来回对调）
+    const sticky = def(1, "l2|l4");
+    sticky.room = mkRoom([sticky, w1, w2]);
+    assert.equal(S.outerDefensePosts(sticky).map(l => l.id).join(","), "l2,l4", "守记下来的那组");
+    assert.equal(sticky.memory.defenseGroup, 1, "别组更空也不换岗（分工稳定）");
+    // 从没定过岗 → 挑人最少，并把岗位写下来
+    const fresh = { memory: { role: "outerHarvestDefenser" }, room: null };
+    fresh.room = mkRoom([fresh, w1, w2]);
+    S.outerDefensePosts(fresh);
+    assert.equal(fresh.memory.defenseGroup, 1, "没定过岗才做一次均衡");
+    assert.equal(fresh.memory.defenseLairIds, "l2|l4", "岗位必须落到 memory 里");
+    // 岗位记的窝已经没了（分组表重算）→ 用组号兜，并把新 key 写回
+    const stale = def(0, "lX|lY");
+    stale.room = mkRoom([stale]);
+    S.outerDefensePosts(stale);
+    assert.equal(stale.memory.defenseLairIds, "l1|l3", "旧岗位失效 → 按组号兜并改写 key");
+
+    // 端到端：trySpawnOuterDefenser 出生即定岗（任务里带岗位 + 最近的矿点 + memory）
+    const ctx2 = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx2);
+    const S2 = ctx2.StationSources;
+    const room2 = mkRoom([]);
+    room2.getHostileCreeps = () => [];
+    ctx2.Game.rooms.W34N55 = room2;
+    ctx2.Memory.rooms.W34N55 = room2.memory;
+    const frontCreep = {
+        memory: { role: "outerHarvestDefenser", defenseGroup: 1, defenseLairIds: "l2|l4" },
+        ticksToLive: 100, headTask: () => ({ roomName: "W34N55" }),
+    };
+    const freshCreep = { memory: {} };
+    ctx2.Game.creeps = { old1: frontCreep, newDef: freshCreep };
+    ctx2.Game._outerDefAssignTick = undefined;
+    let spawnedTasks = null;
+    ctx2.StationHive.trySpawn = (room, name, body, role, tasks) => { spawnedTasks = tasks; return "newDef"; };
+    S2.trySpawnOuterDefenser("W34N55", { name: "W33N55", my: true, spawnFailure: false, memory: {} }, true);
+    assert.ok(spawnedTasks, "老兵到了提前量 → 必须派接替兵");
+    assert.equal(spawnedTasks[0].id, "sEast",
+        "任务目标 = 它真正要守的那组窝所属的矿点（原来一律挂在房里第一个矿点，分工记录是错的）");
+    assert.equal(spawnedTasks[0].defenseLairIds, "l2|l4", "岗位随任务一起下达");
+    assert.equal(spawnedTasks[0].defenseGroup, 1);
+    assert.equal(freshCreep.memory.defenseLairIds, "l2|l4", "新爬 memory 里存着岗位");
+    assert.equal(freshCreep.memory.defenseGroup, 1);
+    assert.equal(frontCreep.memory.hasSendSpawn, true, "老兵只派一次接替（原有语义不变）");
+}
+
 console.log("edge link / hauler body / defence gate checks passed");

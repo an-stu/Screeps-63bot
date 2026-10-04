@@ -2722,9 +2722,17 @@ let pro = {
         }
         return undefined;
     },
-    generatorOuterHarDefenseTask(data) {
+    /**
+     * 防守爬的出生任务。
+     *
+     * `ops` 会把**岗位**一起写进任务里（`defenseGroup` / `defenseLairIds`），
+     * 也就是「这只爬负责哪几个窝」——出生时就随任务下达，而不是等运行时
+     * `outerDefensePosts` 现场猜。任务里的矿点也换成**离它那组窝最近的矿点**
+     * （见 defenseGroupStation），不再一律挂在房里第一个矿点下。
+     */
+    generatorOuterHarDefenseTask(data, ops) {
         return [
-            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "outerDefense", "registerStationSourcesDefenseOutRoom")
+            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "outerDefense", "registerStationSourcesDefenseOutRoom", ops)
         ]
     },
     /**
@@ -3243,6 +3251,79 @@ let pro = {
         return OUTER_DEFENSE_SPAWN_TICKS + travel + Math.max(queueWait, 150)
             + OUTER_DEFENSE_REPLACE_MARGIN + OUTER_DEFENSE_REPLACE_OVERLAP;
     },
+    /**
+     * 一组窝的**稳定标识**：把 lair id 排序后用 `|` 连起来。
+     *
+     * 岗位用这个 key 存进 `creep.memory.defenseLairIds`，而不是组号 ——
+     * 窝被打掉/重建后 `outerDefenseLairGroups` 会整张重算，组号会换含义，
+     * id 集合不会。于是「这只爬守哪几个窝」是**记下来的**，不是每 tick 现猜的。
+     */
+    defenseGroupKey(lairs) {
+        return (lairs || []).map(e => e && e.id).filter(e => e).sort().join("|");
+    },
+    /**
+     * 这一组窝应该挂在哪个矿点下（防守爬的任务目标）。
+     *
+     * 取**离该组最近的矿点**（按组内各窝到矿点的切比雪夫距离之和）。
+     * 原来防守爬的任务一律指向 `.find(e => e && e.id)` 找到的**第一个**矿点：
+     * 一个房 3 只防守爬守着 2 组窝，却在记录里全登记在同一个矿点下 ——
+     * 分工在 Memory 里是错的（用户 10-04 指出）。
+     * 找不到矿点时返回 undefined（保留原行为）。
+     */
+    defenseGroupStation(room, groupLairs) {
+        let stations = room && room.memory && room.memory[pro.stationName];
+        if (!stations || !groupLairs || !groupLairs.length) return undefined;
+        let best, bestD = Infinity;
+        _.values(stations).forEach(d => {
+            if (!d || !d.id) return;
+            let dist = 0;
+            groupLairs.forEach(l => { dist += Math.max(Math.abs(l.pos.x - d.x), Math.abs(l.pos.y - d.y)); });
+            if (dist < bestD) { bestD = dist; best = d; }
+        });
+        return best;
+    },
+    /**
+     * 给**即将出生的**防守爬定岗：它要守哪一组窝、这组属于哪个矿点。
+     *
+     * - 接替兵（`replacingFront`）：**继承**被接替者的岗位。它就是来接这个岗的，
+     *   所以继承之后「谁守哪组」是连续的 —— 老兵死掉那一刻，新人已经在原来的
+     *   岗位上，不会出现「两组里空了一组」。
+     * - 补员兵：挑当时**人最少**的那组，出生即定岗。
+     *
+     * 判据优先用岗位 key（`defenseLairIds`）；只有老 memory 还没这个字段时，
+     * 才退回被接替者的组号。房间不可见 / 没有窝时返回 `{}`（memory 留空，
+     * 运行时的 `outerDefensePosts` 会补上）。
+     */
+    outerDefenseAssignmentForSpawn(harRoom, front, replacingFront) {
+        if (!harRoom) return {};
+        let lairs = harRoom.find(FIND_HOSTILE_STRUCTURES)
+            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
+            .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
+        if (!lairs.length) return {};
+        let groups = pro.outerDefenseLairGroups(harRoom, lairs);
+        if (!groups || !groups.length) return {};
+        let keys = groups.map(g => pro.defenseGroupKey(g));
+        let pick = g => ({ station: pro.defenseGroupStation(harRoom, groups[g]), group: g, lairIds: keys[g] });
+        if (replacingFront && front && front.memory) {
+            let gi = keys.indexOf(front.memory.defenseLairIds);
+            // 岗位 key 还没有（本次部署前出生的老爬）→ 用它当前记的组号兜
+            if (gi < 0) {
+                let fg = front.memory.defenseGroup;
+                if (fg !== undefined && fg >= 0 && fg < groups.length) gi = fg;
+            }
+            if (gi >= 0) return pick(gi);
+        }
+        // 补员：挑人最少的那组（统计时不含还没出生的自己）
+        let cnt = [];
+        for (let i = 0; i < groups.length; i++) cnt.push(0);
+        harRoom.find(FIND_MY_CREEPS).forEach(c => {
+            if (!c.memory || c.memory.role != "outerHarvestDefenser") return;
+            let g = c.memory.defenseGroup;
+            if (g >= 0 && g < groups.length) cnt[g]++;
+        });
+        let least = Math.min.apply(null, cnt);
+        return pick(cnt.indexOf(least));
+    },
     outerDefensePosts(creep) {
         let room = creep.room;
         let lairs = room.find(FIND_HOSTILE_STRUCTURES)
@@ -3250,6 +3331,7 @@ let pro = {
             .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
         if (!lairs.length) return [];
         let groups = pro.outerDefenseLairGroups(room, lairs);
+        let keys = groups.map(g => pro.defenseGroupKey(g));
         // 分组号：默认/越界/或者自己这组已经比别组挤，就重新挑人最少的那组。
         // 统计时排除自己，否则两只爬会互相把对方挤走、来回抖。
         let cnt = [];
@@ -3260,11 +3342,22 @@ let pro = {
                 && c.memory.defenseGroup < groups.length) cnt[c.memory.defenseGroup]++;
         });
         let least = Math.min.apply(null, cnt);
-        let g = creep.memory.defenseGroup;
-        if (g === undefined || g < 0 || g >= groups.length || cnt[g] > least) {
-            g = cnt.indexOf(least);
-            creep.memory.defenseGroup = g;
+        // 优先认**记下来的岗位**（出生时就写好，接替兵继承自被接替者）：
+        // 目标那组窝还在 → 就守这一组，不再「看谁少往谁那儿跑」。
+        // 这样分工是记忆里的、稳定的：老兵死那一刻新人已经在原来的岗位上，
+        // 不会出现「两组里空掉一组」；也不会两只爬互相对调岗位来回抖。
+        // （用户 10-04：接替的爬没有储存目标信息，分工不够明确。）
+        let g = keys.indexOf(creep.memory.defenseLairIds);
+        if (g < 0) {
+            // 岗位还在（窝没变）但 key 缺失（本次部署前出生的老爬）→ 用组号兜；
+            // 组号越界（分组表重算过）→ 挑人最少的那组。
+            g = creep.memory.defenseGroup;
+            if (g === undefined || g < 0 || g >= groups.length) g = cnt.indexOf(least);
         }
+        // 从来没定过岗（老 memory）才做一次均衡，避免一上来两组不均
+        if (creep.memory.defenseLairIds === undefined && cnt[g] > least) g = cnt.indexOf(least);
+        creep.memory.defenseGroup = g;
+        creep.memory.defenseLairIds = keys[g];
         return groups[g] || [];
     },
     /**
@@ -3556,7 +3649,13 @@ let pro = {
 
         // 体型按房间实际敌情算（没有视野时退回固定体型），需要 boost 时先确认 lab 有货
         let cfg = pro.getOuterHarDefenseBodyConfig(isInvader, harRoom);
-        let tasks = pro.generatorOuterHarDefenseTask(data);
+        // 出生即定岗：接替兵**继承**被接替者的岗位（它接的就是这个岗），补员兵挑
+        // 当时人最少的那组。岗位连同「离这组窝最近的矿点」一起写进任务，见
+        // outerDefenseAssignmentForSpawn / generatorOuterHarDefenseTask。
+        let assign = pro.outerDefenseAssignmentForSpawn(harRoom, front, replacingFront);
+        let assignOps = assign.group === undefined
+            ? undefined : { defenseGroup: assign.group, defenseLairIds: assign.lairIds };
+        let tasks = pro.generatorOuterHarDefenseTask(assign.station || data, assignOps);
         if (cfg.boostRes && _.keys(cfg.boostRes).length) {
             if (StationLab.boostAble(spawnRoom, cfg.boostRes)) {
                 tasks.push(StationLab.generatorBoostResTask(cfg.boostRes).head());
@@ -3569,6 +3668,15 @@ let pro = {
             }
         }
         let name = StationHive.trySpawn(spawnRoom, spawnRoom.name, cfg.body, "outerHarvestDefenser", tasks);
+        // 任务里的岗位同时落到 creep.memory（outerDefensePosts 优先认它）。
+        // 新爬出生后**当 tick 就能**在 Game.creeps 里取到（spawning=true）。
+        if (name && assign.group !== undefined) {
+            let fresh = Game.creeps[name];
+            if (fresh) {
+                fresh.memory.defenseGroup = assign.group;
+                fresh.memory.defenseLairIds = assign.lairIds;
+            }
+        }
         // 只有「为了接替最老那只而生的」才打标记，避免标记落到别的爬身上
         if (replacingFront && name) {
             front.memory.hasSendSpawn = true;
