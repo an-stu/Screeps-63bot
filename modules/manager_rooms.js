@@ -10,7 +10,19 @@ global.SPECIAL_ROOM = new Set([
 const ROOM_MEMORY_TTL = 20000;
 const ROOM_TTL_SWEEP_INTERVAL = 10;
 const ROOM_REFRESH_INTERVAL = 61;
-const MOVEMENT_CACHE_REFRESH_INTERVAL = 301;
+/**
+ * 强制清空某房移动缓存的周期。
+ *
+ * `BetterMove.deletePathInRoom()` 会删掉这个房的 costMatrix **以及所有穿过它的
+ * 缓存路径**，也就是房里的爬下一 tick 全部重新寻路 —— 一次就是十几只 × 1~2 CPU
+ * 的尖峰（遥测里 unitTasks 平均 11、单 tick 最高 34.7，超限 tick 里很大一部分
+ * 就是它）。而移动模块自己就有过期机制：`pathClearDelay = 3000`（3000 tick 没用
+ * 到的路径自动删）+ costMatrix 定时清理，所以 301 这个周期比模块自身策略激进 10 倍。
+ *
+ * 拉到 1201：结构变化最多晚 1201 tick 反映到寻路成本上（走错时 move 失败会当场
+ * 重新评估，不会真的卡住），尖峰频率降 4 倍。
+ */
+const MOVEMENT_CACHE_REFRESH_INTERVAL = 1201;
 
 const managerRooms = {
     bootstrapRefreshPending: true,

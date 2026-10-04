@@ -163,6 +163,16 @@ assert.ok(main.includes("room.controller.ticksToDowngrade < 20000"), "upgrader t
 assert.ok(main.includes("Game.cpu.bucket < 9950) return 2"), "near-full buckets must ramp upgrader CPU smoothly");
 assert.ok(main.includes("Game.cpu.bucket >= 6000") && !main.includes("plannerAverage <"), "auto planner must stay enabled above the bucket safety floor");
 assert.ok(main.includes("health.autoPlanner"), "auto planner CPU must be measured online");
+assert.ok(main.includes("POWER_CREEP_TICK_INTERVAL = 2") && main.includes("function shouldRunPowerCreeps()"),
+    "power creeps must be throttled to every other tick: 12 of them measured 1.04 CPU/tick while their tasks only wait on skill cooldowns, and the bucket<=40 emergency path used to run them unthrottled");
+{
+    const powerExec = (main.match(/HelperError\.runEach(?:Profiled)?\(objects\.powerCreeps/g) || []).length;
+    const guarded = (main.match(/shouldRunPowerCreeps\(\)\) HelperError\.runEach(?:Profiled)?\(objects\.powerCreeps/g) || []).length;
+    assert.ok(powerExec > 0, "power creeps must still be executed somewhere");
+    assert.equal(powerExec, guarded, "every power creep execution site must go through shouldRunPowerCreeps()");
+}
+assert.ok(/MOVEMENT_CACHE_REFRESH_INTERVAL = 1201/.test(managerRooms),
+    "the movement cache must not be force-cleared every 301 ticks: deletePathInRoom() deletes every cached path crossing the room, so all its creeps re-path at once (unitTasks spikes), while the movement module already expires unused paths after 3000 ticks");
 assert.ok(stationUpgrade.includes("getUpgradePosition(creep, controller") && stationUpgrade.includes("upgradePosition"), "upgraders must reserve independent controller positions");
 assert.ok(stationUpgrade.includes("CONTROLLER_SIGNS") && stationUpgrade.includes("trySignController(creep)"), "owned controllers must receive the curated sign set");
 const signArraySource = stationUpgrade.match(/let CONTROLLER_SIGNS = (\[[\s\S]*?\n\]);/)[1];

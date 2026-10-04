@@ -1,3 +1,38 @@
+## v0.78.65 — Power creeps run every other tick, and the movement cache is not force-cleared every 301 ticks
+
+Follow-up to v0.78.64 ("reduce the load, get the average under 20"). The bot's own CPU
+telemetry (`Memory.cpuTelemetry` / `cpuModuleTelemetry`, readable for free over the REST API)
+showed exactly where the remaining CPU goes and why the bucket stays empty:
+
+    recent 100-tick windows   average 18.1-18.9 CPU - already under 20 -
+                              but 20-55 of every 100 ticks are OVER the limit
+    phases                    unitTasks 11.08 (max 34.72), rooms 5.77 (max 155.68 =
+                              the post-deploy bootstrap refresh), init 0.69, registration 0.37
+
+The bucket gains +1 per tick and loses the overage of every over-limit tick, so an 18.6
+average with ~20 ticks at ~25 CPU is exactly break-even. Two concrete spike sources:
+
+- **`power:OPF` = 1.04 CPU/tick for 12 power creeps.** `StrategyFactoryPowerCreep.exec()`
+  already throttles itself to every 3rd tick, but the creeps' own task handlers ran *every*
+  tick - including straight through the `bucket <= 40` emergency path, which deliberately
+  skips normal creeps. Their tasks spend nearly all their time waiting on skill cooldowns
+  (`PWR_OPERATE_FACTORY` is 800 ticks), so they now execute and register every other tick
+  (`POWER_CREEP_TICK_INTERVAL = 2` + `shouldRunPowerCreeps()`), saving ~0.5 CPU/tick. A
+  structural test asserts that **every** power creep execution site goes through the guard.
+- **`MOVEMENT_CACHE_REFRESH_INTERVAL` 301 -> 1201.** `BetterMove.deletePathInRoom()` deletes
+  the room's cost matrix *and every cached path crossing that room*, i.e. every creep in the
+  room re-paths on the next tick (10-30 CPU at once), and with 14 rooms one room fired it
+  every ~21 ticks. The movement module already expires unused paths after 3000 ticks and
+  cleans its cost matrices on a timer, so 301 was 10x more aggressive than the underlying
+  policy. 1201 cuts the spike frequency 4x; a move into a newly-blocked tile still fails and
+  re-evaluates on the spot.
+
+### Tests
+
+`test/core-profile.test.cjs` +3: the power creep interval constant and guard function exist,
+no unguarded `runEach(objects.powerCreeps...)` site remains, and the movement cache interval
+is 1201.
+
 ## v0.78.64 — Home mining pauses while the energy is already piling up (CPU relief)
 
 User 10-04: reduce the load, get the average CPU back under 20. Before this change:
