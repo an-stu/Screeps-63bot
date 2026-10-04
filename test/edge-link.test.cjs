@@ -1168,38 +1168,51 @@ function defenceGateFixture(defenders) {
     assert.equal(frontCreep.memory.hasSendSpawn, true, "老兵只派一次接替（原有语义不变）");
 }
 
-// ── 15) 主房挖掘节流：storage 充裕 + hive 满 + 无工地 → 暂停本房矿点补员 ──
+// ── 15) 主房挖掘节流：storage 充裕就暂停本房矿点补员（带滞回） ──
 {
     const ctx = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx);
     const S = ctx.StationSources;
-    let hiveNeed = false;
-    ctx.StationHive.HiveNeedToFill = () => hiveNeed;
-    const mkRoom = (energy, sites) => ({
-        name: "W33N55",
-        storage: { store: { energy: energy } },
-        find: type => (type === CONSTANTS.FIND_MY_CONSTRUCTION_SITES ? new Array(sites).fill({}) : []),
-    });
-    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), true,
-        "storage 充裕 + hive 满 + 无工地 → 暂停本房矿点补员（实测 26 只 keeper ≈3.6 CPU/tick）");
-    assert.equal(S.homeMiningPaused(mkRoom(199999, 0)), false, "storage 低于阈值 → 照常挖");
-    assert.equal(S.homeMiningPaused(mkRoom(500000, 1)), false, "有工地 → 照常挖（施工要能量）");
-    hiveNeed = true;
-    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), false, "hive 缺能 → 照常挖（先保 spawn/extension）");
-    hiveNeed = false;
+    const mkRoom = (energy, opts) => {
+        opts = opts || {};
+        return {
+            name: "W33N55",
+            memory: {},
+            storage: { store: { energy: energy } },
+            find: type => (type === CONSTANTS.FIND_MY_CONSTRUCTION_SITES ? new Array(opts.sites || 0).fill({}) : []),
+            creeps: () => (opts.noCarrier ? [] : [{}]),
+        };
+    };
+    assert.equal(S.homeMiningPaused(mkRoom(500000)), true,
+        "storage 充裕 → 暂停本房矿点补员（实测 26 只 keeper ≈3.6 CPU/tick）");
+    assert.equal(S.homeMiningPaused(mkRoom(199999)), false, "storage 低于阈值 → 照常挖");
+    assert.equal(S.homeMiningPaused(mkRoom(500000, { sites: 3 })), true,
+        "有工地也照样暂停：storage 里 20 万+，工地用料由 carrier 从 storage 搬过去");
+    assert.equal(S.homeMiningPaused(mkRoom(500000, { noCarrier: true })), false,
+        "没有 carrier 的死房不暂停（hive 只能靠本房 keeper 挖的矿救）");
+    // 滞回：暂停后要掉到阈值 75% 以下才恢复。第一版拿 HiveNeedToFill 当条件，
+    // 它每次 spawn 一忙就翻真 → 翻一次就把 20 个矿点的 keeper 同时塞进 spawn 队列
+    // （每只 150 tick = 3000 tick 的 spawn 时间），外矿 carrier 补员全被挡死。
+    const h = mkRoom(500000);
+    assert.equal(S.homeMiningPaused(h), true);
+    assert.equal(h.memory.miningPaused, 1, "暂停状态记在 room.memory 里，瞬时条件不能再翻转它");
+    h.storage.store.energy = 160000;                  // 仍高于 0.75 * 200000
+    assert.equal(S.homeMiningPaused(h), true, "滞回：略低于阈值仍保持暂停");
+    h.storage.store.energy = 140000;                  // 低于 150000
+    assert.equal(S.homeMiningPaused(h), false, "掉到滞回下限以下 → 恢复补员");
+    assert.equal(h.memory.miningPaused, undefined, "恢复时清掉标记");
+    // 开关与阈值
     ctx.Memory.marketSettings = { homeMiningPauseEnergy: 0 };
-    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), false, "开关设 0 → 整个节流关闭");
+    assert.equal(S.homeMiningPaused(mkRoom(500000)), false, "开关设 0 → 整个节流关闭");
     ctx.Memory.marketSettings = { homeMiningPauseEnergy: 1000 };
-    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), true, "阈值可用 Memory 调");
+    assert.equal(S.homeMiningPaused(mkRoom(500000)), true, "阈值可用 Memory 调");
     delete ctx.Memory.marketSettings;
     assert.equal(S.homeMiningPaused({ name: "x", find: () => [] }), false, "没有 storage → 不暂停");
 
-    // 接线：暂停时不给本房矿点补 keeper；storage 掉下去立刻恢复
+    // 接线：暂停时不给本房矿点补 keeper；storage 掉到滞回下限以下立刻恢复
     const ctx2 = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx2);
     const S2 = ctx2.StationSources;
-    let need2 = false;
-    ctx2.StationHive.HiveNeedToFill = () => need2;
     S2.getHarvesterBodyConfig = () => ["move"];
     const spawned = [];
     ctx2.StationHive.trySpawn = (room, name, body, role) => { spawned.push(role); return "k"; };
@@ -1208,9 +1221,10 @@ function defenceGateFixture(defenders) {
     };
     const home = {
         name: "W33N55",
+        memory: {},
         storage: { store: { energy: 500000 } },
         find: () => [],
-        creeps: () => [],
+        creeps: () => [{}],
         spawnFailure: false,
         energyAvailable: 12900,
         getEnergyCapacityAvailable: () => 12900,
@@ -1221,7 +1235,7 @@ function defenceGateFixture(defenders) {
     assert.equal(spawned.length, 0, "满足节流条件 → 本房矿点一只 keeper 都不补");
     home.storage.store.energy = 1000;
     S2.trySpawnOuterHarKeeper("W33N55", home);
-    assert.equal(spawned.length, 1, "storage 掉回阈值以下 → 下一次评估立刻恢复补员");
+    assert.equal(spawned.length, 1, "storage 掉到滞回下限以下 → 下一次评估立刻恢复补员");
 }
 
 console.log("edge link / hauler body / defence gate checks passed");

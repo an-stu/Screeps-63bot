@@ -1,3 +1,32 @@
+## v0.78.66 — The home-mining throttle leaked through a transient condition (and queued 3000 ticks of spawns)
+
+v0.78.64's throttle used `HiveNeedToFill(room)` as one of its conditions. That condition is
+**transient** - it goes true whenever the spawn/extensions are short - so a single flip let
+all 20 throttled stations hand a keeper to the spawn **at the same time** (each body is ~150
+ticks of spawn time, i.e. a **3000-tick spawn queue**). The live check caught it: keepers went
+9 -> 27 while the outer carrier fleet starved down to 9 against a demand of 12-13, because the
+spawns were busy building keepers nobody needed.
+
+Neither transient condition is a reason to mine:
+
+- the hive's shortfall is filled by carriers **from the storage**, and the emergency
+  `HiveNeedToFill` branches in `trySpawnCarrier` still spawn those carriers;
+- construction sites likewise draw from the storage, which by definition holds 200k+.
+
+The throttle is now one hard condition (storage above the threshold) plus:
+
+- **hysteresis** (`room.memory.miningPaused`): once paused, mining resumes only below 75% of
+  the threshold, so a room sitting near the line cannot flap - and every flap used to cost a
+  fresh 1350-energy keeper;
+- **a safety valve**: a room with no carriers at all is never paused (its hive can only be
+  rescued by its own mining).
+
+### Tests
+
+edge-link section 15 rewritten: a construction site no longer un-pauses the room, a
+carrierless room is never paused, the pause sticks through a dip to 160k and releases at
+140k, and the spawn-suppression + resume wiring still holds.
+
 ## v0.78.65 — Power creeps run every other tick, and the movement cache is not force-cleared every 301 ticks
 
 Follow-up to v0.78.64 ("reduce the load, get the average under 20"). The bot's own CPU

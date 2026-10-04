@@ -2844,9 +2844,20 @@ let pro = {
     /**
      * 主房**自己的**矿点该不该暂停补员（见 HOME_MINING_PAUSE_ENERGY）。
      *
-     * 三个条件同时成立才暂停：storage 能量高于阈值、hive 不需要补能、没有工地。
-     * 任一不成立（storage 掉下去 / spawn 缺电 / 有活要干）就照常补员 —— 所以它
-     * 只是把「能量已经堆到用不完时的挖掘」停掉，不会把任何一个房饿死。
+     * 判据只有一条硬条件：storage 能量高于阈值（默认 20 万）。为什么不需要
+     * 「hive 缺能」和「有工地」这两个条件 —— 它们都是**瞬时**的，而且不构成
+     * 理由：storage 里有 20 万+ 时，spawn/extension 的缺口和工地用料都由
+     * carrier 从 storage 搬过去（`HiveNeedToFill` 的紧急补员分支照常补 carrier），
+     * 挖掘出来的能量本来也是进 storage，帮不上这两件事的忙。
+     *
+     * 教训（实测踩到）：v0.78.64 第一版把 `HiveNeedToFill` 当条件，结果它
+     * 每次 spawn 一忙就翻真 → 只要翻一次，20 个矿点就**同时**把 keeper 塞进
+     * spawn 队列（每只 150 tick，等于 3000 tick 的 spawn 时间），外矿 carrier
+     * 补员全被挡住（实测外矿 fleet 掉到 9、需求是 12~13）。所以：
+     *   · 去掉瞬时条件，只留 storage 阈值；
+     *   · 加**滞回**（`room.memory.miningPaused`）：一旦暂停，要掉到阈值 75%
+     *     以下才恢复，避免在阈值附近一开一关，每开一次就要重养一只 1350 能量的爬；
+     *   · 没有 carrier 的死房不暂停（hive 只能靠本房 keeper 挖的矿救）。
      * 外矿 keeper 不经过这里（它们是收入来源）。
      */
     homeMiningPaused(room) {
@@ -2854,9 +2865,18 @@ let pro = {
         if (threshold === 0) return false;                        // 显式 0 = 关闭节流
         if (!(threshold > 0)) threshold = HOME_MINING_PAUSE_ENERGY;
         if (!room || !room.storage) return false;
-        if ((room.storage.store[RESOURCE_ENERGY] || 0) < threshold) return false;
-        if (!global.StationHive || !StationHive.HiveNeedToFill || StationHive.HiveNeedToFill(room)) return false;
-        if (room.find(FIND_MY_CONSTRUCTION_SITES).length) return false;
+        let energy = room.storage.store[RESOURCE_ENERGY] || 0;
+        let paused = room.memory && room.memory.miningPaused;
+        if (paused) {
+            if (energy < threshold * 0.75) {                      // 滞回下限
+                delete room.memory.miningPaused;
+                return false;
+            }
+            return true;
+        }
+        if (energy < threshold) return false;
+        if (room.creeps("carrier", false).length == 0) return false; // 死房靠挖掘自救
+        if (room.memory) room.memory.miningPaused = 1;            // 只在下一次评估时写
         return true;
     },
     trySpawnOuterHarKeeper(roomName, spawnRoom) {
