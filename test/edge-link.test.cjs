@@ -1168,4 +1168,60 @@ function defenceGateFixture(defenders) {
     assert.equal(frontCreep.memory.hasSendSpawn, true, "老兵只派一次接替（原有语义不变）");
 }
 
+// ── 15) 主房挖掘节流：storage 充裕 + hive 满 + 无工地 → 暂停本房矿点补员 ──
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    let hiveNeed = false;
+    ctx.StationHive.HiveNeedToFill = () => hiveNeed;
+    const mkRoom = (energy, sites) => ({
+        name: "W33N55",
+        storage: { store: { energy: energy } },
+        find: type => (type === CONSTANTS.FIND_MY_CONSTRUCTION_SITES ? new Array(sites).fill({}) : []),
+    });
+    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), true,
+        "storage 充裕 + hive 满 + 无工地 → 暂停本房矿点补员（实测 26 只 keeper ≈3.6 CPU/tick）");
+    assert.equal(S.homeMiningPaused(mkRoom(199999, 0)), false, "storage 低于阈值 → 照常挖");
+    assert.equal(S.homeMiningPaused(mkRoom(500000, 1)), false, "有工地 → 照常挖（施工要能量）");
+    hiveNeed = true;
+    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), false, "hive 缺能 → 照常挖（先保 spawn/extension）");
+    hiveNeed = false;
+    ctx.Memory.marketSettings = { homeMiningPauseEnergy: 0 };
+    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), false, "开关设 0 → 整个节流关闭");
+    ctx.Memory.marketSettings = { homeMiningPauseEnergy: 1000 };
+    assert.equal(S.homeMiningPaused(mkRoom(500000, 0)), true, "阈值可用 Memory 调");
+    delete ctx.Memory.marketSettings;
+    assert.equal(S.homeMiningPaused({ name: "x", find: () => [] }), false, "没有 storage → 不暂停");
+
+    // 接线：暂停时不给本房矿点补 keeper；storage 掉下去立刻恢复
+    const ctx2 = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx2);
+    const S2 = ctx2.StationSources;
+    let need2 = false;
+    ctx2.StationHive.HiveNeedToFill = () => need2;
+    S2.getHarvesterBodyConfig = () => ["move"];
+    const spawned = [];
+    ctx2.StationHive.trySpawn = (room, name, body, role) => { spawned.push(role); return "k"; };
+    ctx2.Memory.rooms.W33N55 = {
+        stationSources: { s1: { id: "s1", roomName: "W33N55", x: 10, y: 10, spawnTime: 0, creeps: [] } },
+    };
+    const home = {
+        name: "W33N55",
+        storage: { store: { energy: 500000 } },
+        find: () => [],
+        creeps: () => [],
+        spawnFailure: false,
+        energyAvailable: 12900,
+        getEnergyCapacityAvailable: () => 12900,
+        level: 8,
+    };
+    ctx2.Game.rooms.W33N55 = home;
+    S2.trySpawnOuterHarKeeper("W33N55", home);
+    assert.equal(spawned.length, 0, "满足节流条件 → 本房矿点一只 keeper 都不补");
+    home.storage.store.energy = 1000;
+    S2.trySpawnOuterHarKeeper("W33N55", home);
+    assert.equal(spawned.length, 1, "storage 掉回阈值以下 → 下一次评估立刻恢复补员");
+}
+
 console.log("edge link / hauler body / defence gate checks passed");

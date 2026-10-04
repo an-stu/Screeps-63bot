@@ -1,3 +1,48 @@
+## v0.78.64 — Home mining pauses while the energy is already piling up (CPU relief)
+
+User 10-04: reduce the load, get the average CPU back under 20. Before this change:
+`averageCpu` 20.7-24.1, bucket 47-207, and on a profiled tick the **creep phase alone**
+(`unitTasks`) measured **26 CPU** against a 20 CPU limit, so ticks were being truncated.
+`MIN_CPU` was therefore on (workers/upgraders frozen), which is why the W33N55 edge-link
+site had sat at 0/5000 for 20k ticks and construction/upgrading were dead.
+
+Where the CPU actually went (runtime instrumentation earlier this session): keeper
+0.137 CPU/call x31, outer carriers ~0.28 x17, home carriers ~0.1 x36, defenders 0.17 x3.
+Two whole fleets were doing nothing:
+
+    home carriers  36 spawns, **23 of them with no task at all**, every room `hive0`
+    home keepers   26 (2/room), while the empire held 8.8M energy in storage
+                   (288k-1501k per room) and every room was `hive0`
+
+### Changed
+
+- **`HOME_MINING_PAUSE_ENERGY` (200000) + `StationSources.homeMiningPaused(room)`**: a *home*
+  room's own sources stop being refilled while (a) storage holds more than the threshold,
+  (b) the hive does not need filling, and (c) the room has no construction site. Existing
+  keepers retire naturally (each one is 0.137 CPU/tick); mining resumes automatically on the
+  next pass once the storage drops, the hive is short, or a site appears. Outer keepers are
+  never touched - they are the income. `Memory.marketSettings.homeMiningPauseEnergy = 0`
+  disables the throttle, any positive value retunes the threshold.
+- **RCL8 `carrierTarget` 4-5 -> 2** (+1 when the room has fewer than 4 links, +2 while the
+  hive needs filling, so the emergency top-up branches still work). The fleet declines by
+  attrition; nothing is recycled or killed.
+- `Memory.marketSettings.outerCarrierMax = 13` set live (measured aggregate demand 408
+  CARRY parts = 12-13 haulers): the outer fleet declines 17 -> 13 by attrition.
+
+### Expected relief
+
+-24 home keepers (~3.3 CPU) -10 home carriers (~1.2) -4 outer carriers (~1.1) = **~5.6 CPU**,
+so the average should land around 15-17 even after `MIN_CPU` lifts and workers/upgraders
+resume - which is what unblocks the edge link.
+
+### Tests
+
+`test/edge-link.test.cjs` +8: the throttle triggers only with storage above the threshold, a
+full hive and no sites; it stays off below the threshold, with a site, or when the hive needs
+filling; the Memory knob disables it and can retune the threshold; no storage means no pause;
+and end-to-end `trySpawnOuterHarKeeper` spawns nothing for a home room while throttled, then
+resumes on the next pass once the storage drops.
+
 ## v0.78.63 — A stored post is stable, but an *empty* lair group still gets covered
 
 v0.78.62 made the post sticky and was deployed; the live room immediately showed the hole in

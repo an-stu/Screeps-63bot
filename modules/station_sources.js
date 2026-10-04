@@ -99,6 +99,20 @@ const OUTER_DEFENSE_HELP_RADIUS = 8;
  */
 const OUTER_DEFENSE_ENGAGE_SPREAD = 10;
 /**
+ * 主房**自己的**矿点在 storage 高于这个能量时暂停补员（外矿链永不停）。
+ *
+ * 实测（10-04，13 个 L8 房）：storage 合计 8.8M（单房 288k~1501k），13 个房
+ * **全部 hive0**（spawn/extension 满），升级爬在 MIN_CPU 下被冻结 —— 挖出来的
+ * 能量只是往 storage 里堆；而 26 只主房 keeper 实测 0.137 CPU/次 ≈ **3.6 CPU/tick**，
+ * 是整个 bot 里单角色第三贵的开销（13 房 carrier 39 只里 23 只空转是另一笔）。
+ *
+ * 三个条件**同时**成立才暂停：storage 高于阈值、hive 不缺能、**没有工地**。
+ * storage 掉回阈值以下 / hive 缺能 / 出现工地 → 下一次评估立刻恢复补员。
+ * 只影响本房自己的矿点，外矿 keeper 是收入来源不受影响。
+ * `Memory.marketSettings.homeMiningPauseEnergy = 0` 可整个关掉这个节流。
+ */
+const HOME_MINING_PAUSE_ENERGY = 200000;
+/**
  * 在两个窝之间来回跑时，每个窝待多久。
  *
  * lair 每 300 tick 出一只 keeper。让「两个窝各待 D + 两趟路上 T」≈ 300，
@@ -2827,6 +2841,24 @@ let pro = {
         if (room.spawnFailure) return null;
         pro.trySpawnOuterHarKeeper(room.name, room);
     },
+    /**
+     * 主房**自己的**矿点该不该暂停补员（见 HOME_MINING_PAUSE_ENERGY）。
+     *
+     * 三个条件同时成立才暂停：storage 能量高于阈值、hive 不需要补能、没有工地。
+     * 任一不成立（storage 掉下去 / spawn 缺电 / 有活要干）就照常补员 —— 所以它
+     * 只是把「能量已经堆到用不完时的挖掘」停掉，不会把任何一个房饿死。
+     * 外矿 keeper 不经过这里（它们是收入来源）。
+     */
+    homeMiningPaused(room) {
+        let threshold = Number(Memory.marketSettings && Memory.marketSettings.homeMiningPauseEnergy);
+        if (threshold === 0) return false;                        // 显式 0 = 关闭节流
+        if (!(threshold > 0)) threshold = HOME_MINING_PAUSE_ENERGY;
+        if (!room || !room.storage) return false;
+        if ((room.storage.store[RESOURCE_ENERGY] || 0) < threshold) return false;
+        if (!global.StationHive || !StationHive.HiveNeedToFill || StationHive.HiveNeedToFill(room)) return false;
+        if (room.find(FIND_MY_CONSTRUCTION_SITES).length) return false;
+        return true;
+    },
     trySpawnOuterHarKeeper(roomName, spawnRoom) {
         // 主房能量优先：storage + spawn/extension 可支配能量低于阈值时，
         // 外矿 keeper 缓一缓——否则外矿爬先吃光能量、主房 spawn/worker/
@@ -2847,6 +2879,11 @@ let pro = {
         for (let k in Memory.rooms[roomName][StationSources.stationName])
             if (!Memory.rooms[roomName][StationSources.stationName][k]) delete Memory.rooms[roomName][StationSources.stationName][k]
 
+        // 主房节流（见 HOME_MINING_PAUSE_ENERGY）：storage 已经堆到用不完、hive 满、
+        // 没有工地时，**本房自己的**矿点暂停补员 —— 在役 keeper 自然老死退役，
+        // 一只退役省 0.137 CPU/tick。外矿（roomName != spawnRoom.name）不受影响。
+        // 整个循环里所有 data 都属于本房，所以这里直接 return。
+        if (roomName == spawnRoom.name && pro.homeMiningPaused(spawnRoom)) return;
         // 排除非 source 数据（认领表 _carryClaim 等辅助字段），避免被当
         // 成挖矿点遍历、污染 spawnTime
         _.values(Memory.rooms[roomName][StationSources.stationName]).forEach(data => {

@@ -347,9 +347,16 @@ let pro = {
         }
         else {
             // RCL8 大多通过 link 转运，固定 7 只只会让空闲 carrier 占着 spawn、
-            // 吃掉本应留给 upgrader/keeper 的补员能量。按 link 数动态下调：
-            // 6 link 房 4 只，4-5 link 房 5 只。
-            carrierTarget = room.link.length >= 6 ? 4 : 5;
+            // 吃掉本应留给 upgrader/keeper 的补员能量。
+            //
+            // 实测（10-04，13 个 L8 房）：**36 只 carrier 里 23 只没有任何任务**、
+            // 全部 hive0（spawn/extension 满）—— 也就是 2 只就够，4~5 只纯属占着
+            // CPU（每只 ~0.1 CPU/tick，而这正是 tick 超 20 的主因之一）。
+            // 压到 2 只；link 少于 4 的房多留一只；hive 真的缺能时 +2
+            //（下面几条紧急补员分支都按 carrierTarget 判，所以不会饿死主房）。
+            carrierTarget = 2;
+            if (room.link.length < 4) carrierTarget += 1;
+            if (StationHive.HiveNeedToFill(room)) carrierTarget += 2;
         }
         // 死房自救：没有 carrier、hive 缺能、可用能量 ≤750 时每个 economy
         // pass 立即评估，不再受 %10 与 %7 对齐的偶发限制。
