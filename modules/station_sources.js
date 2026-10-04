@@ -3345,17 +3345,27 @@ let pro = {
         // 优先认**记下来的岗位**（出生时就写好，接替兵继承自被接替者）：
         // 目标那组窝还在 → 就守这一组，不再「看谁少往谁那儿跑」。
         // 这样分工是记忆里的、稳定的：老兵死那一刻新人已经在原来的岗位上，
-        // 不会出现「两组里空掉一组」；也不会两只爬互相对调岗位来回抖。
-        // （用户 10-04：接替的爬没有储存目标信息，分工不够明确。）
+        // 不会两只爬互相对调岗位来回抖（用户 10-04：接替的爬没有储存目标信息）。
         let g = keys.indexOf(creep.memory.defenseLairIds);
         if (g < 0) {
-            // 岗位还在（窝没变）但 key 缺失（本次部署前出生的老爬）→ 用组号兜；
-            // 组号越界（分组表重算过）→ 挑人最少的那组。
+            // 岗位的窝没了（分组表重算过）→ 用记下来的组号兜；组号也越界 → 挑人最少的组
             g = creep.memory.defenseGroup;
             if (g === undefined || g < 0 || g >= groups.length) g = cnt.indexOf(least);
         }
-        // 从来没定过岗（老 memory）才做一次均衡，避免一上来两组不均
+        // 从来没定过岗（本次部署前出生的老爬）才做一次均衡，避免一上来两组不均
         if (creep.memory.defenseLairIds === undefined && cnt[g] > least) g = cnt.indexOf(least);
+        // 覆盖兜底：**别组一个人都没有**时，才允许离开自己记下来的岗位去补位。
+        //
+        // 为什么需要它：工位稳定之后就没人「看谁少去哪」了，而岗位的交接总有
+        // 对不上的时候 —— 实测 W34N55 的接替兵是在部署前出生的、按老规则落到了
+        // g0，原 g1 那只一死，g1 就整组没人（两个窝的 keeper 没人管）。
+        // 判据刻意很窄：只补**空组**，不拣「人少的组」——
+        //   · 2/1 的分工不会来回对调（两组都有人 → 都不动）；
+        //   · 自己那组还有别人（cnt[g] > 0）才准走，所以不会把本组走空。
+        if (cnt[g] > 0) {
+            let empty = cnt.indexOf(0);
+            if (empty >= 0 && empty != g) g = empty;
+        }
         creep.memory.defenseGroup = g;
         creep.memory.defenseLairIds = keys[g];
         return groups[g] || [];

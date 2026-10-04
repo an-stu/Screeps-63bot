@@ -1,3 +1,27 @@
+## v0.78.63 — A stored post is stable, but an *empty* lair group still gets covered
+
+v0.78.62 made the post sticky and was deployed; the live room immediately showed the hole in
+it. W34N55 had two defenders left, both recorded on group 0, and group 1's defender had just
+died - under the old "move to the emptiest" rule one of them would have walked over at once,
+but with posts now sticky **group 1 (two lairs) stayed uncovered**.
+
+The two goals are not in conflict, they just need different thresholds:
+
+- **stable**: nobody chases the "least loaded" group any more, so a 2/1 split never trades
+  places (that was the churn v0.78.62 removed);
+- **covered**: a defender may leave its post only when (a) its own group still has someone
+  else in it (`cnt[g] > 0`, so leaving cannot empty it) **and** (b) some other group has
+  **zero** defenders. Then it fills that empty group and the new post is written back.
+
+Deliberately narrow: it fills *empty* groups, never "less crowded" ones.
+
+### Tests
+
+`test/edge-link.test.cjs` +3 cases: a 2/1 split with both groups manned leaves everyone where
+they are; with both defenders recorded on group 0 and group 1 empty, exactly one moves (and
+its `defenseLairIds` is rewritten), while the second stays because its group would otherwise
+be empty.
+
 ## v0.78.62 — A defender is now born with its post written down, and the successor inherits it
 
 User 10-04: "接替的爬没有储存目标信息，分工不够明确" - the replacement creep stores no target,

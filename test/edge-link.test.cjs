@@ -1113,6 +1113,21 @@ function defenceGateFixture(defenders) {
     sticky.room = mkRoom([sticky, w1, w2]);
     assert.equal(S.outerDefensePosts(sticky).map(l => l.id).join(","), "l2,l4", "守记下来的那组");
     assert.equal(sticky.memory.defenseGroup, 1, "别组更空也不换岗（分工稳定）");
+    // 覆盖兜底：**只补空组**。两组都有人（2/1）→ 谁也不动（分工稳，不对调）
+    const s1 = def(0, "l1|l3"), s2 = def(0, "l1|l3"), s3 = def(1, "l2|l4");
+    s1.room = mkRoom([s1, s2, s3]);
+    S.outerDefensePosts(s1);
+    assert.equal(s1.memory.defenseGroup, 0, "两组都有人 → 不拣人少的组、不动岗（不会来回对调）");
+    assert.equal(s1.memory.defenseLairIds, "l1|l3");
+    // 一组**空了**才去补：两个爬都记着 g0、g1 没人 → 恰好一只补过去
+    const e1 = def(0, "l1|l3"), e2 = def(0, "l1|l3");
+    e1.room = mkRoom([e1, e2]);
+    S.outerDefensePosts(e1);
+    assert.equal(e1.memory.defenseGroup, 1, "别组一个人都没有 → 去补空组");
+    assert.equal(e1.memory.defenseLairIds, "l2|l4", "补位后岗位跟着改写");
+    e2.room = e1.room;                       // 同一间房（此时 e1 已改记为 g1）
+    S.outerDefensePosts(e2);
+    assert.equal(e2.memory.defenseGroup, 0, "补位只走一只：本组不能走空（剩这只守住 g0）");
     // 从没定过岗 → 挑人最少，并把岗位写下来
     const fresh = { memory: { role: "outerHarvestDefenser" }, room: null };
     fresh.room = mkRoom([fresh, w1, w2]);
