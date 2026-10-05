@@ -1,3 +1,38 @@
+## v0.78.69 — No vision is not evidence that the road is gone (and the blind turn-around threw every tick)
+
+Follow-up to the W33N55 outage. Once the outer chain died, the hub lost vision of its outer
+mines — which exposed two blind-vision bugs in the road-builder path:
+
+1. `outerRoadComplete` treated `Game.rooms[p.roomName] === undefined` as `roadComplete = false`.
+   With no vision every route therefore looked unfinished, so the bot kept spawning WORK-type
+   road builders and kept them in the `keepBuilding` turn-around loop — burning exactly the
+   spawn capacity the fleet needed to recover.
+2. `getOuterMineTarget` falls back to a `RoomPosition` when the source container is not visible,
+   and `UtilsTask.task()` requires `.pos` — which a `RoomPosition` does not have:
+
+       TypeError: UtilsTask.task: invalid target for harvestEnergyOuterCarryRoadBuilder
+           at Creep.harvestEnergyOuterCarryRoadBuilder (station_sources:1242)
+
+   the live error on `shard3_83436569_2` (errorCount 6), thrown every tick so that builder was
+   frozen.
+
+### Fixed
+
+- `outerRoadComplete` keeps the previous verdict while blind (`undefined` -> complete): only
+  *seeing* a missing or decayed road is evidence. The 10-tick cache still bounds the cost.
+- the turn-around builds its task through `taskOutView(containerId, roomName, x, y, ...)` when
+  the target is a bare position, so the creep keeps walking the cached road and re-resolves the
+  real object as soon as it has vision again.
+- `if (!target || this.pos.isNearTo(target) ...)` — `lastTaskObj()` returns `undefined` when the
+  destination room is not visible, and `isNearTo(undefined)` throws.
+
+### Tests
+
+- edge-link +4: no vision with no prior verdict counts as complete, the previous verdict is kept
+  both ways, and a visible missing road is still incomplete. Verified to fail against the
+  un-fixed module.
+- core-profile +2 structural assertions covering the two crash guards.
+
 ## v0.78.68 — The energy gate must count the terminal, or it locks itself out
 
 Immediately after v0.78.67 removed the crash, the outer chain stayed dead for a second, purely

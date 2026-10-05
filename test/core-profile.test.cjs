@@ -91,6 +91,10 @@ assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < s
 assert.ok(stationSources.includes("maxRooms: 8") && stationSources.includes("maxOps: 20000"), "cached external-route planning must have enough room and op budget to reach storage across several rooms");
 assert.ok(stationSources.includes("if (!ret || ret.incomplete)") && stationSources.includes("fallback search threw"), "an unreachable blueprint route must retry using the native obstacle matrix");
 assert.ok(stationSources.includes("drawOuterRoadDebug") && main.includes("Memory.visualOuterRoad"), "external road visuals must be opt-in and temporary");
+assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
+    "the road builder turn-around must use taskOutView when getOuterMineTarget falls back to a RoomPosition: UtilsTask.task requires .pos and a RoomPosition has none, so the no-vision case threw every tick");
+assert.ok(/if \(!target \|\| this\.pos\.isNearTo\(target\)/.test(stationSources),
+    "the road builder must not call isNearTo() on an unresolved target (no vision makes lastTaskObj() return undefined)");
 assert.ok(stationSources.includes("nearestOuterRoadSite") && stationSources.includes("task.keepBuilding && !canBuild"), "external road builders must finish the nearest route site while legacy haulers resume delivery");
 assert.ok(stationSources.includes("!pro.outerRoadComplete(data) && isRoadBuilder"), "only WORK-capable external carriers may enter the road-only loop");
 assert.ok(stationSources.includes("moveOuterCarrierOnRoad(this, task, data, -1)") && stationSources.includes("delete task.returnPathIndex"), "external carriers must return to the source via cached roads and invalidate only unusable routes");

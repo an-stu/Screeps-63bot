@@ -621,6 +621,25 @@ function linkFixture({ edgeEnergy, hubFree, upgradeFree, threshold = 200 } = {})
     assert.equal(S.outerMineStarvesSpawnRoom({ my: false }, true), true, "不是自己的房 → 视为缺能");
 }
 
+// ── 5c) 没视野不等于「路没修完」 ──
+// 原来无视野一律 data.roadComplete=false → 外矿一失视野就持续补 WORK 型修路爬，
+// 修路爬反复 keepBuilding 掉头；掉头目标在无视野时是 RoomPosition（没有 .pos），
+// 于是 UtilsTask.task 每 tick 抛一次（实测 shard3_83436569_2）。
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const path = [{ x: 25, y: 25, roomName: "W34N55" }, { x: 26, y: 25, roomName: "W34N55" }];
+    S.getOuterRoadPath = () => path;
+    ctx.Game.rooms = {};                                   // 完全没有视野
+    assert.equal(S.outerRoadComplete({ roadPathStr: "x" }), true,
+        "没视野且从未判定过 → 视为完成（否则会一直补修路爬、掉头时抛异常）");
+    assert.equal(S.outerRoadComplete({ roadPathStr: "x", roadComplete: true }), true, "没视野 → 沿用上次「完成」");
+    assert.equal(S.outerRoadComplete({ roadPathStr: "x", roadComplete: false }), false, "没视野 → 沿用上次「未完成」");
+    ctx.Game.rooms.W34N55 = { lookForAt: () => [] };       // 有视野且真的缺路
+    assert.equal(S.outerRoadComplete({ roadPathStr: "x", roadComplete: true }), false, "看得见且缺路 → 仍然是未完成");
+}
+
 // ───────────────────────── 5) 防守满员闸 ─────────────────────────
 /**
  * 计数口径必须是「在役 + 在途」，所以 fixture 显式区分**物理所在房**（room）

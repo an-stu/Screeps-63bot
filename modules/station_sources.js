@@ -1206,7 +1206,11 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // 占着格子、照常吃 CPU，从外面看就是「堵车」。
     // 只有拿不到矿区信息（data 为空、无处可去）时才允许把任务清掉。
     let noRoute = !data;
-    if (this.pos.isNearTo(target) || (this.store[RESOURCE_ENERGY] == 0 && noRoute)) {
+    // `target` 可能解析不出来（目的地房间没有视野时 lastTaskObj() 返回 undefined），
+    // 那时 `this.pos.isNearTo(undefined)` 会直接抛 TypeError —— 同一条链上
+    // shard3_83436569_2 已经因为无视野抛过一次。解析不出来就按「已到端点」处理：
+    // 下面的卸货有 `target && target.store` 守卫，随后照常掉头/返回。
+    if (!target || this.pos.isNearTo(target) || (this.store[RESOURCE_ENERGY] == 0 && noRoute)) {
         if (target && target.store && this.store[RESOURCE_ENERGY] > 0) {
             // 卸货点是**边缘 link** 时：link 只有 800 容量，而这一趟有 1250+。
             // 先把塞得进的塞进去，剩下的**有界地等** link 把能量发给主房
@@ -1239,12 +1243,25 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
                 let backHome = this.mainRoom();
                 let nextTarget = task.roadDir == 1 ? pro.getOuterMineTarget(data)
                     : ((backHome && pro.outerCarryDropOff(backHome)) || (backHome && backHome.storage));
-                if (nextTarget) this.addTask(UtilsTask.task(nextTarget, "harvestEnergyOuterCarryRoadBuilder", undefined, {
+                let ops = {
                     mineRoom: task.mineRoom,
                     stationId: task.stationId,
                     keepBuilding: true,
                     roadDir: task.roadDir == 1 ? -1 : 1,
-                }));
+                };
+                if (nextTarget && nextTarget.pos) {
+                    this.addTask(UtilsTask.task(nextTarget, "harvestEnergyOuterCarryRoadBuilder", undefined, ops));
+                } else if (nextTarget) {
+                    // getOuterMineTarget 在**看不到容器**时返回的是 RoomPosition
+                    // （有 x/y/roomName，**没有 .pos**），直接喂 UtilsTask.task 会抛
+                    // `UtilsTask.task: invalid target for harvestEnergyOuterCarryRoadBuilder`
+                    // —— 实测 shard3_83436569_2 在外矿失视野期间每 tick 抛一次，
+                    // 这只修路爬就此卡死（HelperError 也把它记成一条线上错误）。
+                    // 用 taskOutView 显式写坐标 + 容器 id：走到有视野的地方
+                    // lastTaskObj() 会重新解析成真对象。
+                    this.addTask(UtilsTask.taskOutView(data && data.container, nextTarget.roomName,
+                        nextTarget.x, nextTarget.y, "harvestEnergyOuterCarryRoadBuilder", undefined, ops));
+                }
             }
         }
         this.execLastTask();
@@ -2421,7 +2438,16 @@ let pro = {
             // —— 把运力白白换成了修不了的"缺口"。
             if (p.x == 0 || p.x == 49 || p.y == 0 || p.y == 49) continue;
             let room = Game.rooms[p.roomName];
-            if (!room) { data.roadComplete = false; return false; }
+            if (!room) {
+                // **没视野 ≠ 路没了**。原来一律判「未完成」，于是外矿一失视野
+                // （搬运爬死光/防守爬还在路上时很常见）系统就持续补 WORK 型修路爬，
+                // 修路爬反复 keepBuilding 掉头，而掉头目标在无视野时是
+                // RoomPosition，还会连带抛 `UtilsTask.task: invalid target`
+                // （实测 shard3_83436569_2 每 tick 抛一次）。盲飞期间沿用上一次的
+                // 判定：只有**亲眼看到**缺路/烂路才算未完成。10 tick 的缓存
+                // （函数开头已写 roadCompleteTick）保证不会每 tick 重扫。
+                return data.roadComplete === undefined ? true : data.roadComplete;
+            }
             let structures = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
             let road = structures.find(s => s.structureType == STRUCTURE_ROAD);
             // 有路也要看血量：崩到 OUTER_ROAD_KEEP_HITS 以下就算未完成，让修路爬
