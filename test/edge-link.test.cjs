@@ -640,6 +640,42 @@ function linkFixture({ edgeEnergy, hubFree, upgradeFree, threshold = 200 } = {})
     assert.equal(S.outerRoadComplete({ roadPathStr: "x", roadComplete: true }), false, "看得见且缺路 → 仍然是未完成");
 }
 
+// ── 5d) 防守爬跨房行军必须沿外矿路线（跨房 moveTo 的 range 判据是坏的） ──
+// 引擎判跨房目标只用**房内格差**：W33N55(8,37) 到 (25,25,W34N55) 返回 17，
+// 于是 `moveTo(..., {range:20})` 认为已到达 → 防守爬一出生就站死在出兵房。
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    S.squadDefenderShouldRecycle = () => false;
+    ctx.Memory.rooms.W34N55 = { stationSources: { s1: { id: "s1", roomName: "W34N55", x: 3, y: 17 } } };
+    const calls = [];
+    S.moveOuterCarrierOnRoad = (creep, task, data, dir) => { calls.push([data.id, dir]); return true; };
+    let moved = 0;
+    const creep = {
+        memory: { role: "outerHarvestDefenser", defenseGroup: 0 },
+        room: { name: "W33N55" },
+        pos: { x: 8, y: 37, roomName: "W33N55", isNearTo: () => false },
+        headTask: () => ({ taskName: "outerDefense", id: "s1", roomName: "W34N55", x: 3, y: 17 }),
+        moveTo: () => { moved++; },
+        goTo: () => { moved += 100; },
+    };
+    ctx.Creep.prototype.outerDefense.call(creep);
+    assert.equal(JSON.stringify(calls), JSON.stringify([["s1", -1]]),
+        "跨房行军要沿外矿路线走，方向 -1（路线 index 0 = 矿区、末点 = 主房）");
+    assert.equal(moved, 0, "有路线时不许再退回跨房 moveTo/goTo");
+    // 没有路线数据时的退路：朝目标房中心走、**不带 range**，而且绝不退回
+    // goTo(源点坐标) —— 那正是 outer-defense.test.cjs 断言禁止的旧写法。
+    delete ctx.Memory.rooms.W34N55.stationSources.s1;
+    const mv = [];
+    creep.moveTo = (pos, opts) => { mv.push([pos.x, pos.y, opts && opts.range]); };
+    creep.goTo = () => { mv.push(["goTo"]); };
+    ctx.Creep.prototype.outerDefense.call(creep);
+    assert.equal(mv.length, 1, "没有路线时也要动起来（不能站着不动）");
+    assert.equal(mv[0][0] === 25 && mv[0][1] === 25, true, "退路朝目标房中心");
+    assert.equal(mv[0][2] === undefined, true, "退路不带 range（跨房 range 会在出兵房里误判到达）");
+}
+
 // ───────────────────────── 5) 防守满员闸 ─────────────────────────
 /**
  * 计数口径必须是「在役 + 在途」，所以 fixture 显式区分**物理所在房**（room）

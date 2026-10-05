@@ -1,3 +1,49 @@
+## v0.78.71 — Defender march fallback: centre target, no range, never goTo
+
+v0.78.70 shipped the road-path march, but its no-route fallback called `goTo(task)` - the very
+source-tile march that `outer-defense.test.cjs` forbids, because it is what wedged defenders on
+the W33N55(0,18) border tile until their ttl ran out. That assertion caught it (the suite failed
+on the deploy), which is exactly what it is for.
+
+The fallback is now a centre-target `moveTo` **without a `range`**: cross-room distances are
+measured with the in-room tile delta, so any positive range declares most of the spawn room
+"already arrived" (the bug being fixed), while `range: 0` can only misfire on the single centre
+tile.
+
+### Tests
+- `outer-defense.test.cjs` (pre-existing) and `edge-link.test.cjs` +1 both green: the march uses
+  the road path with direction -1, and the no-route fallback moves toward the room centre without
+  a range and never calls `goTo`.
+
+## v0.78.70 — The defender march never left the spawn room (cross-room moveTo range is a trap)
+
+The W33N55 outer chain stayed dead after the crash and gate fixes, and the reason turned out to
+be the defence gate itself: `outerDefendersFull` blocks the **entire** outer production
+(keepers, carriers, minerals) while any threatened room's defender quota is unmet — and the
+defenders could never get there:
+
+    this.moveTo(new RoomPosition(25, 25, task.roomName), { range: 20 });
+
+The engine measures the distance to a **cross-room** target using the **in-room tile delta
+only**: live, `W33N55(8,37).getRangeTo(new RoomPosition(25,25,'W34N55'))` returns **17**. So
+`range: 20` declared most of the spawn room "already arrived" and the defenders never moved —
+three of them sat in W33N55 for 287 / 1319 / 1469 ticks with a 0% travel record. No defender
+arrives -> the quota stays unmet -> no keeper/carrier dispatch -> no vision of the outer rooms
+-> exactly the same state next tick. A self-closing loop that also explains the exploding
+ground piles (36k across the six mines).
+
+They now march along the **outer road path**, exactly like the haulers do
+(`moveOuterCarrierOnRoad(creep, task, data, -1)`), with a centre-target march as the fallback when no
+route is cached (see v0.78.71 for why that fallback may not use `goTo`). The direction is taken from live data rather than guessed: for all six
+stations the path's **last** point is the home end (`W33N55 21,33`) while index 0 sits beside
+the mine container, so travelling to the mine is index-decreasing = direction **-1** — the same
+direction `harvestEnergyOuterCarry` uses when it is outside the mine room.
+
+### Tests
+
+edge-link +1: the march must call the road-path helper with direction -1 and must not fall back
+to a cross-room `moveTo`; without cached route data it falls back to `goTo`.
+
 ## v0.78.69 — No vision is not evidence that the road is gone (and the blind turn-around threw every tick)
 
 Follow-up to the W33N55 outage. Once the outer chain died, the hub lost vision of its outer

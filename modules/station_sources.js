@@ -852,14 +852,35 @@ Creep.prototype.outerDefense = function () {
         return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
     }
     if (task.roomName != this.room.name) {
-        // 行军只负责「进房间」，目标取房间中心 —— 和 coreBuster 同一修法。
+        // 行军：沿**外矿路线**一格一格走到矿区（和搬运爬出行同一套已验证的跨房
+        // 行军），不能把「目标房里的坐标」直接交给 moveTo。
         //
-        // 原来 goTo(task) 直奔任务里的源点坐标，而房间内攻击/贴窝的 moveTo 目标
-        // （keeper 就站在源旁）经常就是同一个格子：跨房长路径缓存被房间内的
-        // 同目标 moveTo 复用，跨界后 idx 错位，爬钉死在边境门格上被过路爬对穿
-        // 搬来搬去 —— 实测 W33N55(0,18) 这一个格 20 分钟里先后困住两只防守爬，
-        // 其中一只 ttl 剩 27 老死在门口，replacement 永远进不了场。
-        this.moveTo(new RoomPosition(25, 25, task.roomName), { range: 20 });
+        // 原因：引擎判定跨房目标的距离**只用房内格差**。实测 W33N55(8,37) 到
+        // (25,25,W34N55) 的 getRangeTo 返回 **17**，于是
+        // `moveTo(new RoomPosition(25,25,task.roomName), {range:20})`
+        // 让出兵房里大半张图都算「已到达」→ 防守爬一出生就原地站死
+        // （实测 3 只分别卡 287 / 1319 / 1469 tick，出行率 0）。而
+        // `StrategyOuterHarvest.outerDefendersFull` 只要有一个威胁房编制不满，
+        // 就把**整条外矿生产**挡住（keeper / carrier / 矿物链全不派）——
+        // 没人进矿区 → 永远拿不回视野 → 自我锁死几千 tick（这就是 W33N55
+        // 那次外矿全灭的第二层原因）。
+        //
+        // 路线点集方向（实测 6 个矿点）：index 0 = 矿区容器旁，**最后一点** =
+        // 主房 W33N55(21,33)。所以「去矿区」= index 递减 = direction **-1**，
+        // 与搬运爬 `harvestEnergyOuterCarry` 出行时的方向完全一致。
+        // 拿不到路线时退回原来的 goTo（有总比站着不动好）。
+        let defenseData = Memory.rooms[task.roomName]
+            && Memory.rooms[task.roomName][pro.stationName]
+            && Memory.rooms[task.roomName][pro.stationName][task.id];
+        if (!defenseData || !pro.moveOuterCarrierOnRoad(this, task, defenseData, -1)) {
+            // 没有路线缓存时退回「朝目标房中心走」，**且不带 range**：
+            // 跨房距离只按房内格差算（见上），range>0 会让出兵房大半张图都算
+            // 「已到达」；range 0 只在恰好踩到 (25,25) 那一格时才可能误判。
+            // **绝不能退回 goTo(task)** —— 直奔源点坐标正是历史上把防守爬
+            // 钉死在边境门格（W33N55 0,18）、ttl 耗尽在门口的做法
+            // （outer-defense.test.cjs 明确断言过这一点）。
+            this.moveTo(new RoomPosition(25, 25, task.roomName));
+        }
     } else {
         let posts = pro.outerDefensePosts(this);
         // 防守爬只打**活体敌人**，不再去啃 invaderCore —— 拆 core 是 coreBuster
