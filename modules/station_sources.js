@@ -239,6 +239,11 @@ const OUTER_CARRY_FILL_WAIT = 150;
  * 站在容器旁边就能捡容器格上的掉落）。
  */
 const OUTER_CARRY_DROP_PICK = 500;
+/**
+ * terminal 里留给市场的能量储备（`carryEnergyAuto` 的 terminalReserve 同值）：
+ * 低于这个数的 terminal 能量不算「可支配」，不能被外矿补员当成资本。
+ */
+const OUTER_TERMINAL_RESERVE = 50000;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -1522,12 +1527,23 @@ let pro = {
     outerMineStarvesSpawnRoom(spawnRoom, isCarrier) {
         if (!spawnRoom || !spawnRoom.my) return true;
         if (!spawnRoom.storage) return false; // 无 storage 的低级房不做限制
-        let storageEnergy = spawnRoom.storage.store[RESOURCE_ENERGY] || 0;
-        // 主房可支配能量：storage 能量减去 spawn/extension 的缺口
+        // 可支配能量 = storage + **terminal 里超出市场储备的部分**。
+        //
+        // 只看 storage 会把「能量暂存在 terminal」变成永久死锁（2026-10-04 实测）：
+        // W33N55 的 storage 被抽到 0，而 terminal 里躺着 9.8 万（别的房送来的
+        // 救济），可是 carrier 只在 **hive 缺能** 时才去 terminal 取
+        // （strategy_highLevel.carrierManager 的 `if (HiveNeedToFill)` 分支），
+        // hive 满时这笔钱一动不动。于是 `0 - deficit < 30000` 恒真 →
+        // 外矿 carrier 永远不补 → 没有外矿收入 → storage 永远回不来，
+        // 整条链把自己锁死（实测锁了几千 tick，6 个矿点 0 只外矿搬运爬）。
+        let terminalEnergy = spawnRoom.terminal ? (spawnRoom.terminal.store[RESOURCE_ENERGY] || 0) : 0;
+        let disposableEnergy = (spawnRoom.storage.store[RESOURCE_ENERGY] || 0)
+            + Math.max(0, terminalEnergy - OUTER_TERMINAL_RESERVE);
+        // 主房可支配能量：再减去 spawn/extension 的缺口
         let capacity = (spawnRoom.energyCapacityAvailable || 0);
         let available = spawnRoom.getEnergyAvailable();
         let deficit = Math.max(0, capacity - available);
-        let disposable = storageEnergy - deficit;
+        let disposable = disposableEnergy - deficit;
         // keeper 是能量输入（低阈值 2 万），carrier 是外矿搬运链必要环节
         // （没它 keeper 挖的能量滞留外矿），阈值也放低到 3 万
         return disposable < (isCarrier ? 30000 : 20000);

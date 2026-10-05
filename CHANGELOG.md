@@ -1,3 +1,33 @@
+## v0.78.68 — The energy gate must count the terminal, or it locks itself out
+
+Immediately after v0.78.67 removed the crash, the outer chain stayed dead for a second, purely
+structural reason: W33N55's **storage was 0 while its terminal held 98k** (energy other rooms
+had sent as a rescue), and
+
+    outerMineStarvesSpawnRoom:  disposable = storageEnergy - deficit  <  30000
+
+so the gate that is supposed to protect the spawn room's last energy instead blocked every
+outer carrier forever: no haulers -> no outer income -> the storage never comes back. Nothing
+was moving the terminal energy down, either, because carriers only withdraw from the terminal
+in the `HiveNeedToFill(room)` branch of `carrierManager` - and W33N55's hive was full
+(12900/12900), so the 98k just sat there.
+
+`disposableEnergy` is now `storage + max(0, terminal - OUTER_TERMINAL_RESERVE)`, where the
+50k reserve is the same market reserve `carryEnergyAuto` already honours. The gate still
+protects a genuinely poor room (storage 0 + terminal 49k still counts as starving), but a room
+whose energy merely happens to be parked in the terminal can feed the outer chain again.
+
+Live: the room was also given a manual nudge (one free carrier tasked with
+`fillAllMainRoomStorage` + `carryEnergyAuto {allowStorage:true}`) so the storage starts
+climbing while the fix is deployed.
+
+### Tests
+
+edge-link +6: storage 0 with a 98k terminal is not starving; storage 0 with a 49k terminal is;
+10k storage + 20k spendable terminal just clears the 30k bar; no terminal falls back to
+storage-only; the keeper threshold (20k) counts the terminal too; a room that is not ours is
+starving.
+
 ## v0.78.67 — The congestion breaker crashed on its first trip and silently killed a spawn room's whole outer strategy
 
 Live symptom (2026-10-04, W33N55): `outerHarvestEnergyCarrier: 0` (it had been 8), three spawns

@@ -597,6 +597,30 @@ function linkFixture({ edgeEnergy, hubFree, upgradeFree, threshold = 200 } = {})
         "熔断要真的把该外矿房停掉（写回成功）");
 }
 
+// ── 5b) 能量闸必须认 terminal：只看 storage 会把自己锁死 ──
+// W33N55 实测：storage 被抽到 0、terminal 里躺着 9.8 万（别房救济），而 carrier
+// 只在 hive 缺能时才去 terminal 取 → storage 永远回不来 → 外矿 carrier 永远不补。
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    const mk = (storage, terminal) => ({
+        my: true, energyCapacityAvailable: 12900,
+        getEnergyAvailable: () => 12900,
+        storage: { store: { energy: storage } },
+        terminal: terminal === undefined ? undefined : { store: { energy: terminal } },
+    });
+    assert.equal(S.outerMineStarvesSpawnRoom(mk(0, 98053), true), false,
+        "storage 空但 terminal 有 9.8 万 → 不算缺能（实测这里把整条外矿锁死几千 tick）");
+    assert.equal(S.outerMineStarvesSpawnRoom(mk(0, 49000), true), true,
+        "terminal 只有 4.9 万（未超过 5 万市场储备）→ 仍算缺能");
+    assert.equal(S.outerMineStarvesSpawnRoom(mk(10000, 70000), true), false,
+        "1 万 storage + terminal 超储备的 2 万 = 3 万 → 够（阈值是 < 3 万）");
+    assert.equal(S.outerMineStarvesSpawnRoom(mk(0), true), true, "没有 terminal 时退回只看 storage");
+    assert.equal(S.outerMineStarvesSpawnRoom(mk(0, 98053), false), false, "keeper 阈值 2 万，同样认 terminal");
+    assert.equal(S.outerMineStarvesSpawnRoom({ my: false }, true), true, "不是自己的房 → 视为缺能");
+}
+
 // ───────────────────────── 5) 防守满员闸 ─────────────────────────
 /**
  * 计数口径必须是「在役 + 在途」，所以 fixture 显式区分**物理所在房**（room）
