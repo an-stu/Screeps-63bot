@@ -110,6 +110,8 @@ assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     assert.ok(ss.includes("defenseHostiles(room)") && ss.includes("getHostileCreeps"),
         "hostile scans in the defender handler must use the room's cached accessors");
 }
+assert.ok(stationSources.includes("let bodyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(),"),
+    "outer carrier bodies must be sized from the energy actually available, not the hive's full capacity: a 2500-energy 50-part body queued against a hive holding 2000-5000 energy simply fails to spawn, the spawn idles, and the fleet collapses from 15 to 1-2 for thousands of ticks (the keeper spawner already scales its body this way)");
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
     "the road builder turn-around must use taskOutView when getOuterMineTarget falls back to a RoomPosition: UtilsTask.task requires .pos and a RoomPosition has none, so the no-vision case threw every tick");
 assert.ok(/if \(!target \|\| this\.pos\.isNearTo\(target\)/.test(stationSources),

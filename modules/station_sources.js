@@ -3293,11 +3293,22 @@ let pro = {
                 // 大爬少 = 同运力下 creep 数最少。生产时间变长由 PC 的
                 // operate spawn（needOpSpawn 对全忙 spawn 生效）兜底提速。
                 let maxPart = 50
+                // 出兵预算按**当前可用能量**算，而不是 hive 满容量。
+                //
+                // 原写法传 getEnergyCapacityAvailable()（满容量 12,900）→ 永远按
+                // 50 部件满配体型去试，而 hive 在连续出兵时长期只有 2,000~5,000 能量
+                // ⇒ **体型付不起就直接不出兵，spawn 空转**。实测外矿 fleet 反复从
+                // 15 只整批老死到 1~2 只、几千 tick 补不回来（keeper 早就是按可用
+                // 能量收缩体型的写法，见 trySpawnOuterHarKeeper 的 energyBudget，这里漏了）。
+                let spawnAvail = spawnRoom.getEnergyAvailable
+                    ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
+                let bodyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(),
+                    Math.max(spawnAvail, 550));
                 let isNearToAny = carrierCreeps.filter(e => e.pos.isNearTo(container)).head()
                 if (CarryPartCnt > 0 && !isNearToAny) {
                     let carrierBody = carrierBuildCreep ?
-                        pro.getOuterHarCarrierBodyConfig(spawnRoom.getEnergyCapacityAvailable(), maxPart)
-                        : pro.getOuterHarCarrierBuildBodyConfig(spawnRoom.getEnergyCapacityAvailable(), maxPart) // 如果没修路的造一个
+                        pro.getOuterHarCarrierBodyConfig(bodyBudget, maxPart)
+                        : pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart) // 如果没修路的造一个
                     let tasks = pro.generatorOuterHarCarryTask(data)
                     StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestEnergyCarrier", tasks)
                 }
@@ -3312,7 +3323,7 @@ let pro = {
                 if (!pro.outerRoadComplete(data)) {
                     let builderCnt = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).length;
                     if (builderCnt < OUTER_ROAD_BUILDER_CNT && !spawnRoom.spawnFailure) {
-                        let body = pro.getOuterHarCarrierBuildBodyConfig(spawnRoom.getEnergyCapacityAvailable(), maxPart)
+                        let body = pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart)
                         let tasks = pro.generatorOuterHarCarryTask(data)
                         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "outerHarvestEnergyCarrier", tasks)
                     }

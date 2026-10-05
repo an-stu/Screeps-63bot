@@ -1,3 +1,26 @@
+## v0.78.75 — Outer carrier bodies were sized against the hive's full capacity, so spawns idled
+
+The oscillation behind the round-2/3/7 findings finally has a concrete mechanism. The outer
+carrier spawner asked for the body like this:
+
+    pro.getOuterHarCarrierBodyConfig(spawnRoom.getEnergyCapacityAvailable(), maxPart)
+
+`getEnergyCapacityAvailable()` is the hive's **full** capacity (12,900), so every request was
+for the maximum 50-part / ~2,500-energy body - while the hive, being drained by continuous
+spawning, actually sits around 2,000-5,000. A body the hive cannot pay for is simply not
+spawned, the spawn sits idle, and the fleet collapses from 15 to 1-2 and cannot climb back for
+thousands of ticks. `trySpawnOuterHarKeeper` has scaled its body to the energy actually
+available for a long time (`energyBudget`); the carrier path never did.
+
+The carrier (and road-builder) body budget is now
+`min(hiveCapacity, max(energyAvailable, 550))`, so a half-filled hive spawns a proportionally
+smaller hauler instead of nothing. The floor keeps the body from degenerating (and v0.78.73
+still refuses zero-CARRY bodies).
+
+### Tests
+core-profile +1 structural assertion; the full suite is green (the offline fixture uses the
+`energyAvailable` property, so the code prefers the getter and falls back to the property).
+
 ## v0.78.74 — The defender engagement was the CPU sink (10.7 CPU/tick)
 
 Round-5 telemetry, with no deploy in the window to confuse it, was unambiguous:
