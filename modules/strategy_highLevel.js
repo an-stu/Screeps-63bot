@@ -324,11 +324,23 @@ let pro = {
         let deficit = Math.max(0, capacity - available);
         let storageEnergy = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
         let starved = storageEnergy > deficit && storageEnergy > 50000 && deficit > capacity * 0.3;
-        let carrierList = room.creeps("carrier", false);
+        // 只把**真有搬运能力**的爬算进编制。hive 被抽干时 calcBodyPart 可能按
+        // 剩余能量生成退化体型（连 CARRY 部件都没有），而它们照样带 role "carrier"
+        // —— 实测 W33N55 三只 0 CARRY 容量的 "carrier" 把编制占满（目标 2 只/房），
+        // 真搬运爬不再补员，hive 因此永远填不上（avail 1156 → 406 / 12900），
+        // 于是 2600 能量的防守爬与 2500 能量的外矿搬运**永远付不起出兵能量**，
+        // 整个外矿链被卡死。带着这种爬的编制数是假的，必须按部件过滤。
+        let carrierList = room.creeps("carrier", false)
+            .filter(e => !e.body || e.body.some(p => p.type == CARRY));
         let carrierCnt = carrierList.length;
         // keeper 先跑时，昂贵体型失败会把 spawnFailure 锁住整个 tick；
         // carrier 分支按当前真实可用能量重算，避免便宜的 bootstrap carrier 被挡住。
         let spawnCarrierNow = function (body) {
+            // 退化体型保护：要造的是**搬运**爬，body 里连一个 CARRY 都没有时
+            // 造出来只会占编制（见上面 carrierList 的注释：W33N55 三只 0 CARRY 的
+            // "carrier" 把 hive 补给线彻底卡死）。宁可这一轮不补，等能量够了
+            // 由后面按满配体型的几条分支来造。
+            if (!body || !body.some(p => p === CARRY)) return;
             room.spawnFailure = false;
             room.currentEnergyAvailable = undefined;
             StationHive.trySpawn(room, room.name, body, "carrier", []);

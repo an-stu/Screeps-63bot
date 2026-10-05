@@ -91,6 +91,13 @@ assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < s
 assert.ok(stationSources.includes("maxRooms: 8") && stationSources.includes("maxOps: 20000"), "cached external-route planning must have enough room and op budget to reach storage across several rooms");
 assert.ok(stationSources.includes("if (!ret || ret.incomplete)") && stationSources.includes("fallback search threw"), "an unreachable blueprint route must retry using the native obstacle matrix");
 assert.ok(stationSources.includes("drawOuterRoadDebug") && main.includes("Memory.visualOuterRoad"), "external road visuals must be opt-in and temporary");
+{
+    const hl = fs.readFileSync(path.join(root, "modules/strategy_highLevel.js"), "utf8");
+    assert.ok(hl.includes("e.body.some(p => p.type == CARRY)"),
+        "the home carrier headcount must ignore creeps with no CARRY part: degenerate bootstrap bodies (calcBodyPart on a drained hive) otherwise fill the quota, no real hauler is spawned, the hive never refills and 2600-energy defenders / 2500-energy outer haulers can never be paid for");
+    assert.ok(hl.includes("if (!body || !body.some(p => p === CARRY)) return;"),
+        "spawnCarrierNow must refuse to spawn a carrier body without a CARRY part");
+}
 assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     .includes("if (this.store.getCapacity(RESOURCE_ENERGY) == 0) return this.popTask();"),
     "fillHive must not hand a carry task to a zero-capacity creep: storeFull() is trivially true there, so the two handlers bounce execLastTask() until the stack overflows");

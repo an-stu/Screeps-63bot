@@ -1,3 +1,31 @@
+## v0.78.73 — Degenerate zero-CARRY "carriers" filled the quota and deadlocked the hive
+
+Live (W33N55, t=83446140): three creeps with role `carrier`, a completely empty task stack,
+0 energy, and **no CARRY part at all**. The hive was at 406-1156 of 12,900 while the storage
+held 45k, so the 2600-energy defender body and the 2500-energy outer hauler body could never be
+paid for - `trySpawnOuterDefenser` called by hand produced nothing, the outer fleet sat at 2,
+and `outerDefendersFull` kept the whole outer production blocked.
+
+Why those bodies exist: when the hive is drained, `ManagerCreeps.calcBodyPart` scales the
+requested ratio down to whatever energy is left, which can drop the CARRY parts entirely. The
+resulting creep still carries role `carrier`, so `trySpawnCarrier` counted it:
+
+    let carrierList = room.creeps("carrier", false);
+    let carrierCnt = carrierList.length;
+
+The room therefore believed it had enough haulers (target 2/room) and never spawned a real one,
+the hive never refilled, and every expensive body stayed unaffordable - a self-closing loop
+around the whole outer chain.
+
+### Fixed
+- the headcount now ignores creeps with no CARRY part, so a degenerate body cannot masquerade
+  as a hauler and block replenishment;
+- `spawnCarrierNow` refuses to spawn a carrier body without a CARRY part (better to skip a tick
+  than to plant another quota ghost).
+
+### Tests
+core-profile +2 structural assertions for both guards.
+
 ## v0.78.72 — The task chain could recurse until the call stack blew (carryRes <-> fillHive)
 
 Live, right after v0.78.71: `RangeError: Maximum call stack size exceeded`, 37 hits,
