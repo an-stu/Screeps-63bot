@@ -101,6 +101,15 @@ assert.ok(stationSources.includes("drawOuterRoadDebug") && main.includes("Memory
 assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     .includes("if (this.store.getCapacity(RESOURCE_ENERGY) == 0) return this.popTask();"),
     "fillHive must not hand a carry task to a zero-capacity creep: storeFull() is trivially true there, so the two handlers bounce execLastTask() until the stack overflows");
+{
+    const ss = stationSources;
+    assert.ok(ss.includes("defenseStep(creep, target, range)") && ss.includes("if (Game.time % 2 != 0) return;"),
+        "defender approach movement must re-path only every other tick: a 50-part / ~17-MOVE body needs 2 ticks per tile anyway, and BetterMove's cache key includes the moving target's coordinates, so per-tick moveTo is a full path search every tick (measured outerHarvestDefenser 10.7 CPU/tick while engaged)");
+    assert.ok(ss.includes("defenseAllies(room)") && ss.includes("_defAllyCache"),
+        "the defender handler must share one FIND_MY_CREEPS scan per room per tick instead of re-scanning per creep");
+    assert.ok(ss.includes("defenseHostiles(room)") && ss.includes("getHostileCreeps"),
+        "hostile scans in the defender handler must use the room's cached accessors");
+}
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
     "the road builder turn-around must use taskOutView when getOuterMineTarget falls back to a RoomPosition: UtilsTask.task requires .pos and a RoomPosition has none, so the no-vision case threw every tick");
 assert.ok(/if \(!target \|\| this\.pos\.isNearTo\(target\)/.test(stationSources),

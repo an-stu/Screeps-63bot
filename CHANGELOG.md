@@ -1,3 +1,36 @@
+## v0.78.74 — The defender engagement was the CPU sink (10.7 CPU/tick)
+
+Round-5 telemetry, with no deploy in the window to confuse it, was unambiguous:
+
+    834478 a15.3 o4   834479 a16.7 o15   <- clean steady state
+    834480 a21.7 o52  834481 a27.2 o99  834482 a27.3 o50
+    roles last: outerHarvestDefenser 10.72    bucket 1093 -> 291, lastError empty
+
+So the steady state really is 15-17 CPU, and what pushes it over 20 is the **defender
+engagement** - the same 9.17 figure seen earlier. While engaged, every defender ran up to six
+raw `room.find()` scans per tick (allies, lairs, hostiles x3, allies again) and called
+`moveTo(enemy, {range})` every tick against a **moving** target, which defeats BetterMove's path
+cache (its key contains the target's coordinates) and forces a full path search per tick.
+
+### Fixed
+
+- one shared `FIND_MY_CREEPS` scan per room per tick (`defenseAllies`, cached on the per-tick
+  room object) instead of two or three per creep;
+- hostile scans go through the room's cached accessors (`getHostileCreeps` /
+  `getHostileStructures`), with a `find` fallback so offline fixtures keep working;
+- approach movement re-paths only every other tick (`defenseStep`). A 50-part / 17-20 MOVE body
+  accrues about 2 fatigue per tile - it can only advance one tile every two ticks anyway - so
+  this costs nothing in speed while halving the path searches. Flee and reaper moves use the
+  same helper.
+
+Functionality is untouched: combat decisions, healing priority and target selection still run
+every tick; only redundant work was removed.
+
+### Tests
+
+core-profile +3 structural assertions; outer-defense.test.cjs (the pre-existing handler suite)
+stays green.
+
 ## v0.78.73 — Degenerate zero-CARRY "carriers" filled the quota and deadlocked the hive
 
 Live (W33N55, t=83446140): three creeps with role `carrier`, a completely empty task stack,

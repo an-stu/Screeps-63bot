@@ -33,7 +33,7 @@ global.isCpuFeatureEnabled = name => {
 // the online cross-shard feature gate is temporarily disabled.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.78.73",
+    version: "0.78.74",
     uploadedModules: 70,
     restoredSnapshotModules: 68,
     intentionallyExcluded: []

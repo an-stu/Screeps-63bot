@@ -345,7 +345,7 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
             let flee = PathFinder.search(this.pos, { pos: hunter.pos, range: OUTER_KEEPER_FLEE_RANGE + 4 },
                 { flee: true, maxRooms: 1 }).path[0];
             if (this.store[RESOURCE_ENERGY] > 0 && flee) this.drop(RESOURCE_ENERGY);
-            if (flee) this.moveTo(flee);
+            if (flee) pro.defenseStep(this, flee, 0);
             return;
         }
         let source = Game.getObjectById(task["id"]);
@@ -912,10 +912,10 @@ Creep.prototype.outerDefense = function () {
         // 任何己方爬。原来按各自组的岗位半径算，会错位——威胁只有组 0 看得见，
         // 最近接手者却是看不见它的组 1，两边都不动（实测 (4,15) keeper 无人接战，
         // 西源矿工被屠）。
-        let allies = this.room.find(FIND_MY_CREEPS);
-        let allLairs = this.room.find(FIND_HOSTILE_STRUCTURES)
+        let allies = pro.defenseAllies(this.room);
+        let allLairs = pro.defenseHostileStructures(this.room)
             .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR);
-        let hostileCreeps = this.room.find(FIND_HOSTILE_CREEPS)
+        let hostileCreeps = pro.defenseHostiles(this.room)
             .filter(e => allLairs.some(l => e.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS)
                 || allies.some(c => c.pos.getRangeTo(e.pos) <= OUTER_DEFENSE_HELP_RADIUS));
         if (hostileCreeps.length) {
@@ -994,7 +994,7 @@ Creep.prototype.outerDefense = function () {
             hurt.sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax);
             let ally = hurt[0];
             let code = this.pos.getRangeTo(ally) <= 1 ? this.heal(ally) : this.rangedHeal(ally);
-            if (code == ERR_NOT_IN_RANGE) this.moveTo(ally, { range: 1 });
+            if (code == ERR_NOT_IN_RANGE) pro.defenseStep(this, ally, 1);
             healingAlly = true;
         } else if (this.hits < this.hitsMax) {
             this.heal(this);
@@ -1032,7 +1032,7 @@ Creep.prototype.outerDefense = function () {
                 let keeper = !!(em.owner && em.owner.username == "Source Keeper");
                 let ours = 30 * this.getPartCnt(ATTACK) + 12 * this.getPartCnt(HEAL);
                 let incoming = 0;
-                this.room.find(FIND_HOSTILE_CREEPS).forEach(c => {
+                pro.defenseHostiles(this.room).forEach(c => {
                     // 半径 5：这一场里「很快能加入」的敌人都算进来（keeper 平地 0.35 格/tick，
                     // 5 格外 15 tick 内就到场）。只看 3 格会导致「贴上去才发现打不过 →
                     // 退开 → 敌人不在 3 格内又判定能打 → 再贴」的来回抖。
@@ -1052,7 +1052,7 @@ Creep.prototype.outerDefense = function () {
                     // 注意判据是 getRangeTo < 4：`inRangeTo(em, 4)` 在**贴身时也为真**
                     //（range 1 ≤ 4），原来那句等于「永远不后退」—— 重伤的防守爬其实一直
                     // 站在原地挨 400/发、自愈 132/发，净 -268/tick，只是看起来在「退守」。
-                    if (this.pos.getRangeTo(em.pos) < 4) this.moveTo(em, { range: 4 });
+                    if (this.pos.getRangeTo(em.pos) < 4) pro.defenseStep(this, em, 4);
                     return;
                 }
                 // 账算得赢（或对手会追人退不掉）→ 贴脸对拼，输出最大化
@@ -1065,24 +1065,24 @@ Creep.prototype.outerDefense = function () {
                     return;
                 }
                 if (ret != ERR_NO_BODYPART) {
-                    this.moveTo(em, { range: 1 });
+                    pro.defenseStep(this, em, 1);
                 }
                 return;
             }
             let ret = this.rangedAttack(em);
-            if (ret != OK && ret != ERR_NO_BODYPART) this.moveTo(em, { range: 3 });
+            if (ret != OK && ret != ERR_NO_BODYPART) pro.defenseStep(this, em, 3);
             // Overmind hydralisk 语义：血 <90% 就风筝后撤一格（保持 3~4 格对射）；
             // 单 keeper 时贴近近战 reaper 当奶妈（rangedHeal 接战中的队友）
             if (this.hits < this.hitsMax * 0.9) {
                 let flee = PathFinder.search(this.pos, { pos: em.pos, range: 5 }, { flee: true, maxRooms: 1 }).path[0];
                 if (flee) this.moveTo(flee);
-            } else if (this.room.find(FIND_HOSTILE_CREEPS).length == 1) {
-                let reaper = this.room.find(FIND_MY_CREEPS).filter(c =>
+            } else if (pro.defenseHostiles(this.room).length == 1) {
+                let reaper = pro.defenseAllies(this.room).filter(c =>
                     c.memory.role == "outerHarvestDefenser" && c != this && c.memory.targetId)[0];
                 if (reaper && reaper.hits < reaper.hitsMax && this.pos.getRangeTo(reaper) <= 3) {
                     this.rangedHeal(reaper);
                 } else if (reaper && this.pos.getRangeTo(reaper) > 3) {
-                    this.moveTo(reaper, { range: 3 });
+                    pro.defenseStep(this, reaper, 3);
                 }
             }
             // 自愈/救人都已在上面做过；这里只在还在掉血且没在救别人时补一次自愈。
@@ -3443,6 +3443,38 @@ let pro = {
         });
         let least = Math.min.apply(null, cnt);
         return pick(cnt.indexOf(least));
+    },
+    /**
+     * 防守爬共用的「我方爬列表」缓存：同 tick 同房只扫一次。
+     *
+     * 交战的 `outerDefense` 每只爬每 tick 会用到它 2~3 次（找伤员、找被咬的友军、
+     * 找 reaper），原来是每处一次裸 `room.find(FIND_MY_CREEPS)` —— 实测交战期
+     * `outerHarvestDefenser` 单项吃 10+ CPU/tick。room 对象每 tick 重建，所以这个
+     * 缓存天然每 tick 失效，不会读到过期数据。
+     */
+    defenseAllies(room) {
+        if (!room._defAllyCache) room._defAllyCache = room.find(FIND_MY_CREEPS);
+        return room._defAllyCache;
+    },
+    /** 敌对爬：优先房间缓存访问器（免掉每只防守爬每 tick 的裸全房扫描） */
+    defenseHostiles(room) {
+        return room.getHostileCreeps ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
+    },
+    /** 敌建（keeper lair / invaderCore）：同上走缓存 */
+    defenseHostileStructures(room) {
+        return room.getHostileStructures ? room.getHostileStructures() : room.find(FIND_HOSTILE_STRUCTURES);
+    },
+    /**
+     * 防守爬的逼近移动：**隔 tick 才重新寻路**。
+     *
+     * 理由：它们是 50 部件 / 17~20 MOVE 的近战体型，每格约 2 疲劳 —— 本来就要
+     * 2 tick 才能走一格，每 tick 都调 moveTo 是纯浪费。而且 BetterMove 的路径缓存
+     * 键包含**目标坐标**，追移动中的敌人时每 tick 都是全量寻路（这也是交战期
+     * CPU 飙升的主因之一）。隔 tick 寻路对实际推进速度**零影响**。
+     */
+    defenseStep(creep, target, range) {
+        if (Game.time % 2 != 0) return;
+        creep.moveTo(target, { range: range });
     },
     outerDefensePosts(creep) {
         let room = creep.room;
