@@ -231,23 +231,52 @@ Creep.prototype.addTaskAndExec = function (task) {
     return this;
 };
 
+/**
+ * 一条任务链在一个 tick 内最多展开多少层。
+ *
+ * 任务处理器之间会互相「弹掉自己、执行下一条」（`popTask(); execLastTask();`），
+ * 而另一条链会反过来「加一条任务、立刻执行」（`addTask(x); return this.execLastTask();`）。
+ * 两者撞在一起就是**互相递归**：实测 `carryRes` ↔ `fillHive` 死循环
+ * （`RangeError: Maximum call stack size exceeded`，线上 37 次、CPU 均值 32.96、
+ * 桶从 3280 掉到 73）。
+ * 触发条件：某个**零 CARRY 容量**的爬拿到 `fillHive` —— 它在 `carryRes` 里
+ * `storeFull()` 恒真（`getFreeCapacity() <= 0` 对 0 容量成立），于是弹回
+ * `fillHive`，`fillHive` 看 storage 有能量又加一条 `carryRes`……无限。
+ *
+ * 正常任务链一次 tick 最多展开两三层，10 层足够宽裕；真的撞上限就停下并记一条
+ * 错误（`HelperError` 会把它写进 codeHealth），避免整个 tick 崩在栈溢出上。
+ */
+const TASK_EXEC_MAX_DEPTH = 10;
+
 Creep.prototype.execLastTask = function () {
-    // One nearby creep re-signs each owned controller after a sign-set update.
-    // StationUpgrade caches the selected signer per room, so the other creeps
-    // only pay for a couple of property checks after the room is signed.
-    if (global.StationUpgrade && this.room.my && this.room.controller
-        && StationUpgrade.trySignController(this)) return this;
-    // this.memory.tasks = this.memory.tasks.flat()
-    if (this.memory.tasks.length) {
-        // if(!this.memory.tasks.last().taskName)
-        //     log(this.memory.tasks)
-        let taskName = this.memory.tasks.last().taskName;
-        // A bootstrap deployment can deliberately omit optional task modules.
-        // Leave such a task intact for a later module restore, but never turn it
-        // into an exception on every tick.
-        if (typeof this[taskName] == "function") this[taskName]();
-    } else {
-        this.memory.dontPullMe = false;
+    let depth = (this._taskExecDepth || 0) + 1;
+    if (depth > TASK_EXEC_MAX_DEPTH) {
+        this._taskExecDepth = 0;
+        if (global.log) log("task chain too deep", this.name, this.memory.role,
+            (this.memory.tasks || []).map(t => t.taskName).join(">"));
+        return this;
+    }
+    this._taskExecDepth = depth;
+    try {
+        // One nearby creep re-signs each owned controller after a sign-set update.
+        // StationUpgrade caches the selected signer per room, so the other creeps
+        // only pay for a couple of property checks after the room is signed.
+        if (global.StationUpgrade && this.room.my && this.room.controller
+            && StationUpgrade.trySignController(this)) return this;
+        // this.memory.tasks = this.memory.tasks.flat()
+        if (this.memory.tasks.length) {
+            // if(!this.memory.tasks.last().taskName)
+            //     log(this.memory.tasks)
+            let taskName = this.memory.tasks.last().taskName;
+            // A bootstrap deployment can deliberately omit optional task modules.
+            // Leave such a task intact for a later module restore, but never turn it
+            // into an exception on every tick.
+            if (typeof this[taskName] == "function") this[taskName]();
+        } else {
+            this.memory.dontPullMe = false;
+        }
+    } finally {
+        this._taskExecDepth = depth - 1;
     }
     return this;
 };

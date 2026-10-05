@@ -9,6 +9,9 @@ const missionSource = fs.readFileSync(path.join(root, "modules/manager_missions.
 // lodash/项目给 Array 挂的扩展：宿主 realm 与 VM realm 都要有（两边的数组会混用）
 for (const [name, fn] of [
     ["head", function () { return this.length ? this[0] : undefined; }],
+    // 游戏里 utils.js 给 Array 挂了 .last（任务栈取最后一条），宿主 realm 也要有：
+    // 否则用宿主数组造 fixture 时 execLastTask 会报 "tasks.last is not a function"。
+    ["last", function () { return this[this.length - 1]; }],
     ["sum", function () { return this.reduce((a, b) => a + b, 0); }],
     ["minBy", function (f) {
         let best, bestV;
@@ -25,6 +28,63 @@ for (const [name, fn] of [
     if (!Array.prototype[name]) Object.defineProperty(Array.prototype, name, {
         value: fn, enumerable: false, configurable: true, writable: true,
     });
+}
+
+// ── execLastTask 深度闸：任务处理器互相 execLastTask 不能把调用栈打爆 ──
+// 实测 carryRes ↔ fillHive 死循环：RangeError: Maximum call stack size exceeded，
+// 线上 37 次、CPU 均值 32.96、桶从 3280 掉到 73。触发条件是某个**零 CARRY 容量**
+// 的爬拿到 fillHive：它在 carryRes 里 storeFull() 恒真（0 容量），于是弹回
+// fillHive，fillHive 看 storage 有能量又加一条 carryRes……无限。
+{
+    const creepSource = fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8");
+    const ctx = {
+        console,
+        OK: 0, ERR_NOT_IN_RANGE: -9, ERR_INVALID_TARGET: -7,
+        WORK: "work", BUILD_POWER: 5, STRUCTURE_RAMPART: "rampart",
+        Creep: function () {}, Memory: { creeps: {} }, Game: { time: 100, getObjectById: () => null },
+        UtilsTask: { task: (t, name) => ({ taskName: name, id: t && t.id }), taskOutView: () => ({ taskName: "x" }) },
+        StationUpgrade: { trySignController: () => false },
+        PathFinder: { CostMatrix: function () { this.set = () => {}; this.get = () => 0; } },
+        Room: function () {}, RoomPosition: function () {},
+        FIND_CREEPS: 1, FIND_MY_CREEPS: 2, FIND_HOSTILE_CREEPS: 4, FIND_STRUCTURES: 3,
+        FIND_CONSTRUCTION_SITES: 8, FIND_MY_CONSTRUCTION_SITES: 8, FIND_SOURCES: 9,
+        RESOURCE_ENERGY: "energy", STRUCTURE_CONTAINER: "container", STRUCTURE_ROAD: "road",
+        STRUCTURE_TOWER: "tower", STRUCTURE_LINK: "link", LOOK_STRUCTURES: "structures",
+        LOOK_CONSTRUCTION_SITES: "constructionSite", CARRY: "carry", MOVE: "move",
+        ATTACK: "attack", HEAL: "heal", RANGED_ATTACK: "ranged_attack", TOUGH: "tough",
+        ERR_FULL: -8, ERR_NOT_ENOUGH_RESOURCES: -6, ERR_BUSY: -4, ERR_NOT_OWNER: -1,
+        ERR_INVALID_ARGS: -10, ERR_NO_BODYPART: -12, ERR_NO_PATH: -2, ERR_TIRED: -11,
+        DISMANTLE_POWER: 50, RANGED_ATTACK_POWER: 10, ATTACK_POWER: 30, HEAL_POWER: 12,
+        RANGED_HEAL_POWER: 4, REPAIR_POWER: 100, HARVEST_POWER: 2, CARRY_CAPACITY: 50,
+        RESOURCE_POWER: "power", PWR_OPERATE_STORAGE: 1, PWR_GENERATE_OPS: 2,
+        BOOSTS: {},
+        _: { values: o => Object.values(o || {}), keys: o => Object.keys(o || {}),
+             head: a => (a && a.length ? a[0] : undefined), sum: a => (a || []).reduce((x, y) => x + y, 0) },
+    };
+    ctx.global = ctx;
+    vm.runInNewContext(`
+Array.prototype.last = function () { return this[this.length - 1]; };
+Array.prototype.head = function () { return this.length ? this[0] : undefined; };
+Array.prototype.toMap = function () { return this.reduce((m, e) => { m[e[0]] = e[1]; return m; }, {}); };
+Array.prototype.sum = function () { return this.reduce((a, b) => a + b, 0); };
+`, ctx);
+    vm.runInNewContext(creepSource, ctx, { filename: "prototype_creep.js" });
+
+    let calls = 0;
+    ctx.Creep.prototype.loopTask = function () { calls++; return this.execLastTask(); };
+    const creep = Object.create(ctx.Creep.prototype);
+    creep.memory = { tasks: [{ taskName: "loopTask" }] };
+    creep.room = { my: false };
+    assert.doesNotThrow(() => ctx.Creep.prototype.execLastTask.call(creep),
+        "自递归任务处理器必须被深度闸截断，不能抛 RangeError");
+    assert.ok(calls > 0 && calls <= 12, "深度闸要生效且不能太浅（实际展开 " + calls + " 层）");
+
+    calls = 0;
+    ctx.Creep.prototype.one = function () { calls++; this.memory.tasks.pop(); return this.execLastTask(); };
+    ctx.Creep.prototype.two = function () { calls++; this.memory.tasks.pop(); return this.execLastTask(); };
+    creep.memory.tasks = [{ taskName: "two" }, { taskName: "one" }];
+    ctx.Creep.prototype.execLastTask.call(creep);
+    assert.equal(calls, 2, "两层正常任务链必须都执行到");
 }
 
 function loadMissionHandler(store, costRate = 0.2) {

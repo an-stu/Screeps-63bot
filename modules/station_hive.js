@@ -32,6 +32,11 @@ Creep.prototype.fillHive = function () {
         if (!this.room.storage || this.room.storage.store[RESOURCE_ENERGY] == 0) {
             return this.popTask();
         }
+        // 零 CARRY 容量的爬（纯 MOVE 侦察爬 / 纯 WORK 爬）搬不了能量：给它加
+        // carryRes 会在那边被 `storeFull()`（0 容量恒真）立刻弹回来，两边互相
+        // execLastTask 直到 `RangeError: Maximum call stack size exceeded`
+        // （实测线上 37 次、CPU 均 32.96、桶从 3280 掉到 73）。直接放弃这条链。
+        if (this.store.getCapacity(RESOURCE_ENERGY) == 0) return this.popTask();
         this.addTask(UtilsTask.task(this.room.storage, "carryRes", undefined, { resType: RESOURCE_ENERGY }));
         return this.execLastTask();
     }

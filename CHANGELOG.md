@@ -1,3 +1,40 @@
+## v0.78.72 — The task chain could recurse until the call stack blew (carryRes <-> fillHive)
+
+Live, right after v0.78.71: `RangeError: Maximum call stack size exceeded`, 37 hits,
+`averageCpu` 32.96 and the bucket fell from 3280 to **73**.
+
+    at trySwap (超级移动优化:583)
+    at Creep.moveTo (超级移动优化:1653)
+    at Creep.carryRes (prototype_creep:461)
+    at Creep.execLastTask (prototype_creep:248)
+    at Creep.fillHive (station_hive:36)
+    at Creep.execLastTask (prototype_creep:248)
+    at Creep.carryRes (prototype_creep:465)
+    ... repeating
+
+`carryRes` and `fillHive` bounce tasks off each other: `fillHive` (empty store, storage has
+energy) adds a storage `carryRes` and immediately executes it; `carryRes` then sees
+`storeFull()` - which for a creep with **zero CARRY capacity** is trivially true
+(`getFreeCapacity() <= 0`) - pops itself and executes the chain again, forever. It surfaced now
+only because the storage finally had energy to hand out (the v0.78.68 gate fix); the recursion
+itself was latent.
+
+Two fixes, one general and one specific:
+
+- `execLastTask` bounds a single tick's task-chain expansion (`TASK_EXEC_MAX_DEPTH = 10`) and
+  logs when it trips. Normal chains are 2-3 deep, so this is slack; it protects every handler
+  pair from the same class of mutual recursion. The counter lives on the creep object, so it
+  resets every tick by construction.
+- `fillHive` no longer hands a carry task to a zero-capacity creep (`getCapacity(ENERGY) == 0`
+  -> pop), an assignment that could only ever bounce.
+
+### Tests
+
+- recent-regressions +1 behavioural: a self-recursing task handler must not overflow the stack
+  (verified: without the guard it dies with `Maximum call stack size exceeded`), while a normal
+  two-deep pop-and-continue chain still runs both handlers.
+- core-profile +1 structural assertion for the `fillHive` capacity guard.
+
 ## v0.78.71 — Defender march fallback: centre target, no range, never goTo
 
 v0.78.70 shipped the road-path march, but its no-route fallback called `goTo(task)` - the very

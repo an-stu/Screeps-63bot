@@ -91,6 +91,9 @@ assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < s
 assert.ok(stationSources.includes("maxRooms: 8") && stationSources.includes("maxOps: 20000"), "cached external-route planning must have enough room and op budget to reach storage across several rooms");
 assert.ok(stationSources.includes("if (!ret || ret.incomplete)") && stationSources.includes("fallback search threw"), "an unreachable blueprint route must retry using the native obstacle matrix");
 assert.ok(stationSources.includes("drawOuterRoadDebug") && main.includes("Memory.visualOuterRoad"), "external road visuals must be opt-in and temporary");
+assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
+    .includes("if (this.store.getCapacity(RESOURCE_ENERGY) == 0) return this.popTask();"),
+    "fillHive must not hand a carry task to a zero-capacity creep: storeFull() is trivially true there, so the two handlers bounce execLastTask() until the stack overflows");
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
     "the road builder turn-around must use taskOutView when getOuterMineTarget falls back to a RoomPosition: UtilsTask.task requires .pos and a RoomPosition has none, so the no-vision case threw every tick");
 assert.ok(/if \(!target \|\| this\.pos\.isNearTo\(target\)/.test(stationSources),
