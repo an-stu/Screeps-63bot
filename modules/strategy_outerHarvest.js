@@ -247,6 +247,17 @@ let pro = {
             });
             if (Memory.outerPaused && Memory.outerPaused[targetRoomName] > Game.time) continue;
             if (stuckCnt >= OUTER_CONGESTION_PAUSE_CNT) {
+                // **必须先建好 map 再写**：读取侧原来有 `Memory.outerPaused &&` 守卫，
+                // 写入侧却是裸下标赋值。`Memory.outerPaused` 不存在时（第一次触发
+                // 熔断就是这种情况）这一行抛
+                // `TypeError: Cannot set properties of undefined (setting 'W34N55')`，
+                // 被 HelperError.catchError 吞掉不会崩 tick，**但 exec 已经中断** ——
+                // 该出兵房的外矿策略从此每 6 tick 死一次，keeper / carrier /
+                // 防守爬一只都不派。实测 W33N55（2026-10-04）：4 只防守爬在出兵房
+                // 堵死后熔断触发 → 崩 → 外矿搬运爬团灭没人补 → 主房 storage 被抽到
+                // **0** → `outerMineStarvesSpawnRoom` 反过来把外矿彻底锁死，
+                // 整条链死了几千 tick 直到发现这行。
+                if (!Memory.outerPaused) Memory.outerPaused = {};
                 Memory.outerPaused[targetRoomName] = Game.time + OUTER_CONGESTION_PAUSE_TICKS;
                 continue;
             }

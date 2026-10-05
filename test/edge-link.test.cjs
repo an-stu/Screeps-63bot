@@ -553,6 +553,50 @@ function linkFixture({ edgeEnergy, hubFree, upgradeFree, threshold = 200 } = {})
         "低于阈值不发（不做碎片传输）");
 }
 
+// ── 5a) 拥堵熔断写回：Memory.outerPaused 不存在时也不能崩 ──
+// 读取侧原来有 `Memory.outerPaused &&` 守卫、写入侧是裸下标赋值。首次触发熔断
+// 时这个 map 根本不存在 → TypeError → 被 catchError 吞掉但 exec 已中断 →
+// 该出兵房的外矿策略从此每 6 tick 死一次，keeper/carrier 一只都不派
+// （实测 W33N55：外矿搬运爬团灭、主房 storage 被抽到 0）。
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("strategy_outerHarvest.js"), ctx);
+    const S = ctx.StrategyOuterHarvest;
+    delete ctx.Memory.outerPaused;
+    ctx.Memory.rooms = { W34N55: { stationSources: { s1: { id: "s1" } } } };
+    const killed = [];
+    ctx.Game.creeps = {};
+    for (let i = 0; i < 4; i++) {
+        ctx.Game.creeps["c" + i] = {
+            memory: { role: "outerHarvestEnergyCarrier", outerStuck: { x: 25, y: 25, t: 99000 } },
+            pos: { x: 25, y: 25 },
+            headTask: () => ({ roomName: "W34N55" }),
+            suicide: () => killed.push("c" + i),
+        };
+    }
+    const target = { name: "W34N55", flags: () => [] };
+    const room = {
+        name: "W33N55", my: true, hashCode: () => 2,      // (Game.time + 2) % 6 == 0
+        storage: {},                                      // 没有 storage 的出兵房会被提前跳过
+        find: () => Object.values(ctx.Game.creeps),
+        flags: () => [],
+    };
+    ctx.Game.rooms = { W33N55: room, W34N55: target };
+    ctx.ManagerFlags = {
+        getFlagsByPrefix: () => [{
+            name: "har_W33N55_invader_W34N55", pos: { roomName: "W34N55" },
+            memory: { spawnRoom: "W33N55" }, getRoomName: () => "W33N55",
+        }],
+    };
+    ctx.StationHive = { getClosestSpawnRoom: () => undefined, trySpawn: () => undefined };
+    ctx.Game.time = 100000;
+    assert.doesNotThrow(() => S.exec(room),
+        "熔断首次触发不能抛异常：写入前必须先把 Memory.outerPaused 建出来");
+    assert.equal(killed.length, 4, "熔断要先处决堵路的爬");
+    assert.ok(ctx.Memory.outerPaused && ctx.Memory.outerPaused.W34N55 > 100000,
+        "熔断要真的把该外矿房停掉（写回成功）");
+}
+
 // ───────────────────────── 5) 防守满员闸 ─────────────────────────
 /**
  * 计数口径必须是「在役 + 在途」，所以 fixture 显式区分**物理所在房**（room）

@@ -63,6 +63,8 @@ assert.ok(mainMount.includes("global.LOCAL_SHARD_NAME = Game.shard.name"), "core
 assert.ok(manifest.includes("strategy_factoryPowerCreep"), "core mode must keep Power Creeps alive and operating storage");
 assert.ok(manifest.includes("strategy_resourceBalance"), "core mode must prevent full storage from blocking the economy");
 assert.ok(manifest.includes("strategy_outerHarvest"), "remote harvesting must be independently restorable");
+assert.ok(strategyOuterHarvest.includes("if (!Memory.outerPaused) Memory.outerPaused = {};"),
+    "the congestion breaker must create Memory.outerPaused before writing it: the read side was guarded but the write was not, so the first-ever trip threw a TypeError and silently killed the whole outer strategy for that room");
 assert.ok(strategyOuterHarvest.includes("!Memory.rooms[targetRoomName]"), "only unknown remotes must require a scoped scout; remembered sources launch directly");
 assert.ok(managerRooms.indexOf("StrategyOuterHarvest.exec(room)") < managerRooms.indexOf("StrategyHighLevel.exec(room)"), "remote economy must request Spawn capacity before background high-level workers");
 assert.ok(stationSources.includes("let roadDir = task.roadDir == -1 ? -1 : 1"), "legacy road-builder tasks must default to a valid route direction");

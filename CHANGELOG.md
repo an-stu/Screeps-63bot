@@ -1,3 +1,38 @@
+## v0.78.67 — The congestion breaker crashed on its first trip and silently killed a spawn room's whole outer strategy
+
+Live symptom (2026-10-04, W33N55): `outerHarvestEnergyCarrier: 0` (it had been 8), three spawns
+idle, W33N55's storage drained to **0**, and `Memory.codeHealth.lastError` =
+`TypeError: Cannot set properties of undefined (setting 'W34N55')` at
+`strategy_outerHarvest.exec`.
+
+Root cause, one line:
+
+    if (Memory.outerPaused && Memory.outerPaused[targetRoomName] > Game.time) continue;
+    if (stuckCnt >= OUTER_CONGESTION_PAUSE_CNT) {
+        Memory.outerPaused[targetRoomName] = Game.time + OUTER_CONGESTION_PAUSE_TICKS;   // <- crash
+
+The read was guarded, the write was not - and `Memory.outerPaused` is only ever created by that
+very write, so the breaker could never fire even once. `HelperError.catchError` swallowed the
+exception (no failed tick), but `exec` had already aborted: from then on that spawn room's outer
+strategy threw every 6 ticks, so keepers, carriers and defenders were never dispatched again.
+
+What triggered it: four defenders jammed in the spawn room (each burning ~2.3 CPU re-pathing
+around the others, i.e. 9.17 CPU/tick for the role). The breach then killed the haulers, so no
+outer energy arrived, so the storage emptied, and `outerMineStarvesSpawnRoom` (storage - deficit
+< 30000) locked the outer chain out - a loop that closes itself and stays closed.
+
+Fixed by creating the map before writing. Live recovery: `Memory.outerPaused` initialised, the
+four jammed creeps executed, and at the same moment the bucket crossed 2000 so `MIN_CPU` lifted
+(workers/upgraders resume, and the W33N55 edge link had already been built by them).
+
+### Tests
+
+- edge-link +1 behavioural case reproducing the production error: with `Memory.outerPaused`
+  deleted and four stuck creeps, `exec` must not throw, must execute the jammed creeps and must
+  really write the pause. Verified against the un-fixed module - it fails with the exact live
+  message `Cannot set properties of undefined (setting 'W34N55')`.
+- core-profile +1 structural assertion that the write is preceded by the map's creation.
+
 ## v0.78.66 — The home-mining throttle leaked through a transient condition (and queued 3000 ticks of spawns)
 
 v0.78.64's throttle used `HiveNeedToFill(room)` as one of its conditions. That condition is
