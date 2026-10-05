@@ -1,3 +1,23 @@
+## v0.78.76 — Smooth the economy passes: schedule them by room ordinal, not by random hash
+
+The remaining bucket problem is not the average but the **variance**. Live windows read
+`avg 18.5` with **37-52 of every 100 ticks over the limit** - a bimodal shape (troughs around
+15, spikes around 24) that drains the bucket even though the mean is under 20. The bucket sat at
+1999, flipping `MIN_CPU` on and off.
+
+The biggest per-tick variable cost is the room economy pass (`StrategyHighLevel.exec`: spawn
+planning plus task dispatch, roughly 1-3 CPU per room). It was scheduled with
+
+    if ((Game.time + room.hashCode()) % economyInterval != 0) return;
+
+and thirteen random hashes into a 7- or 10-tick interval cluster - some ticks run three or four
+passes at once, others none. The pass is now scheduled by the room's **ordinal** in the owned
+room list (`pro.economySlot`), so a tick runs at most `rooms / interval` (~2) passes and the
+load spreads evenly. Special rooms and offline fixtures fall back to the old hashCode rule.
+
+### Tests
+core-profile +2 structural assertions; full suite green.
+
 ## v0.78.75 — Outer carrier bodies were sized against the hive's full capacity, so spawns idled
 
 The oscillation behind the round-2/3/7 findings finally has a concrete mechanism. The outer

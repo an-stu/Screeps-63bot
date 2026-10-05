@@ -110,6 +110,13 @@ assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     assert.ok(ss.includes("defenseHostiles(room)") && ss.includes("getHostileCreeps"),
         "hostile scans in the defender handler must use the room's cached accessors");
 }
+{
+    const hlText = fs.readFileSync(path.join(root, "modules/strategy_highLevel.js"), "utf8");
+    assert.ok(hlText.includes("Game.time % economyInterval != pro.economySlot(room, economyInterval)"),
+        "the economy pass must be scheduled by room ordinal, not by random hashCode: 13 rooms hashing into a 7/10-tick interval cluster 3-4 passes onto the same tick, which is the per-tick cost that produced the measured bimodal CPU (avg 18.5 with 37-52% of ticks over the limit)");
+    assert.ok(hlText.includes("economySlot(room, interval)"),
+        "the ordinal-based slot helper must exist with a hashCode fallback for special/offline rooms");
+}
 assert.ok(stationSources.includes("let bodyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(),"),
     "outer carrier bodies must be sized from the energy actually available, not the hive's full capacity: a 2500-energy 50-part body queued against a hive holding 2000-5000 energy simply fails to spawn, the spawn idles, and the fleet collapses from 15 to 1-2 for thousands of ticks (the keeper spawner already scales its body this way)");
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),

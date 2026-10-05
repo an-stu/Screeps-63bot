@@ -443,13 +443,35 @@ let pro = {
             }
         }
     },
+    /**
+     * 本房在这个 interval 内独占的槽位（0..interval-1）。
+     *
+     * 用己方房间列表的**序号取模**，让同一 tick 上跑经济 pass 的房间数稳定在
+     * 房间总数/interval（13/7 ≈ 2），而不是随机 hashCode 撞车后一次跑 3~4 个。
+     * 拿不到列表（特殊房、离线）时退回 hashCode，行为与改动前一致。
+     */
+    economySlot(room, interval) {
+        let rooms = (global.ManagerRooms && ManagerRooms.getNormalRoom)
+            ? ManagerRooms.getNormalRoom() : null;
+        let idx = rooms ? rooms.indexOf(room) : -1;
+        return idx >= 0 ? idx % interval : room.hashCode() % interval;
+    },
     exec(room) {
         if (!MIN_CPU) pro.processPowerSpawn(room)// 每tick都要处理
         // Task assignment and spawn planning tolerate a short delay. Spreading
         // this expensive economy pass across rooms keeps ordinary ticks below
         // the shard's 20 CPU allowance without delaying tower defense.
         let economyInterval = MIN_CPU ? 10 : 7;
-        if ((Game.time + room.hashCode()) % economyInterval != 0) return;
+        // 经济 pass 按**房间序号**错峰，而不是按随机 hashCode。
+        //
+        // 原来 `(Game.time + room.hashCode()) % 7/10`：13 个房的随机哈希会互相撞车
+        // （泊松聚集），某些 tick 上同时跑 3~4 个房的经济 pass。而经济 pass 是每 tick
+        // 最大的单个可变成本（生爬规划 + 任务下发，1~3 CPU/房）—— 实测窗口均值 18.5
+        // 却有 **37~52% 的 tick 超限**（双峰分布：低谷 ~15、尖峰 ~24），
+        // 桶因此在 2000 附近反复被抽干。
+        // 改成按「本房在己方房间列表里的序号」取槽位后，同一 tick 最多
+        // 房间总数/interval（13/7 ≈ 2）个房跑 pass，方差显著变小。
+        if (Game.time % economyInterval != pro.economySlot(room, economyInterval)) return;
         if (global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")) ManagerAutoPlanner.tryAutoBuildHighLevel(room);
 
 
