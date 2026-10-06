@@ -1,3 +1,28 @@
+## v0.78.78 — The flee search was the 13.7 CPU/tick hotspot (never compute PathFinder every tick)
+
+Round-16 telemetry still showed the bucket pinned near zero with `roles last` naming the
+defenders again - this time **13.72 CPU/tick**. The hotspot is a single line:
+
+    let flee = PathFinder.search(this.pos, { pos: em.pos, range: 5 }, { flee: true, maxRooms: 1 }).path[0];
+
+Every defender below 90% health ran a **flee search every tick**, and the identical pattern
+existed for the keepers' evacuation (`harvestEnergyOuterKeeper`:
+
+    PathFinder.search(this.pos, { pos: hunter.pos, range: OUTER_KEEPER_FLEE_RANGE + 4 }, ...)
+
+With 5 defenders and a dozen-plus keepers that is a worst case of twenty-plus path searches per
+tick - far more than a 20 CPU budget can pay for, even with `maxRooms: 1`.
+
+Both sites now cache the computed step in `creep.memory.fleeStep` and only recompute it every
+4 ticks (or when the creep has reached the cached step / the cached entry is gone). That is
+sound because these bodies are 50 parts with 17-20 MOVE - about 2 fatigue per tile, so they can
+only advance one tile every two ticks - and the enemy (a keeper) moves at roughly 0.35 tiles per
+tick. The keeper evacuation also now uses the shared ally scan instead of its own
+`room.find(FIND_MY_CREEPS)`.
+
+### Tests
+core-profile +1 assertion that both flee sites cache; full suite green.
+
 ## v0.78.77 — Freeze the optional resource ops under MIN_CPU too (emergency CPU relief)
 
 Live: the bucket was pinned at **47** (cached window 834567) with windows running 18.4-23.9 CPU

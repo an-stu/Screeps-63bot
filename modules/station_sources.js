@@ -340,12 +340,25 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
         // OUTER_DEFENSE_GUARD_RADIUS 接战范围内 → 朝主房方向撤，丢掉身上能量减
         // 重。原来站着挖到被杀，两轮巡检的 (3,16)/(4,15) 墓碑都是这么来的。
         let hunter = this.pos.findInRange(FIND_HOSTILE_CREEPS, OUTER_KEEPER_FLEE_RANGE)[0];
-        if (hunter && !this.room.find(FIND_MY_CREEPS).some(c =>
+        if (hunter && !pro.defenseAllies(this.room).some(c =>
             c.memory.role == "outerHarvestDefenser" && c.pos.getRangeTo(hunter.pos) <= OUTER_DEFENSE_GUARD_RADIUS)) {
-            let flee = PathFinder.search(this.pos, { pos: hunter.pos, range: OUTER_KEEPER_FLEE_RANGE + 4 },
-                { flee: true, maxRooms: 1 }).path[0];
-            if (this.store[RESOURCE_ENERGY] > 0 && flee) this.drop(RESOURCE_ENERGY);
-            if (flee) pro.defenseStep(this, flee, 0);
+            // 撤离方向同样**不能每 tick 算 PathFinder**（防守爬那边刚修过同一个坑：
+            // 实测交战期单项 13.72 CPU/tick，热点就是 per-tick 的 flee 搜索）。
+            // keeper 一共十几只，被猎时同时开算会直接把 tick 打爆。
+            // 方向 4 tick 复用一次：矿工本来也在容器上站桩，敌人移动很慢。
+            let fs = this.memory.fleeStep;
+            if (!fs || Game.time - fs.t >= 4 || (this.pos.x == fs.x && this.pos.y == fs.y)) {
+                let step = PathFinder.search(this.pos, { pos: hunter.pos, range: OUTER_KEEPER_FLEE_RANGE + 4 },
+                    { flee: true, maxRooms: 1 }).path[0];
+                if (step) {
+                    fs = this.memory.fleeStep = { x: step.x, y: step.y, t: Game.time };
+                } else {
+                    delete this.memory.fleeStep;
+                    fs = null;
+                }
+            }
+            if (this.store[RESOURCE_ENERGY] > 0 && fs) this.drop(RESOURCE_ENERGY);
+            if (fs) pro.defenseStep(this, new RoomPosition(fs.x, fs.y, this.room.name), 0);
             return;
         }
         let source = Game.getObjectById(task["id"]);
@@ -1074,8 +1087,26 @@ Creep.prototype.outerDefense = function () {
             // Overmind hydralisk 语义：血 <90% 就风筝后撤一格（保持 3~4 格对射）；
             // 单 keeper 时贴近近战 reaper 当奶妈（rangedHeal 接战中的队友）
             if (this.hits < this.hitsMax * 0.9) {
-                let flee = PathFinder.search(this.pos, { pos: em.pos, range: 5 }, { flee: true, maxRooms: 1 }).path[0];
-                if (flee) this.moveTo(flee);
+                // 风筝后撤：**PathFinder 绝不能每 tick 跑**。
+                //
+                // 实测（10-04 第 16 轮）防守爬交战期单项 **13.72 CPU/tick**，热点就是
+                // 这一行：每只低于 90% 血的防守爬、每 tick 都做一次 flee 搜索
+                // （即使 maxRooms:1 也要建代价矩阵 + 搜索）。而它们是 50 部件 /
+                // 17~20 MOVE —— 每格约 2 疲劳，**本来 2 tick 才走一格**，敌人
+                // （keeper 0.35 格/tick）也几乎不动 ⇒ 后撤方向 4 tick 重算一次完全够。
+                // 缓存写在 creep.memory 里（creep 对象每 tick 重建，不能挂在对象上）。
+                let fs = this.memory.fleeStep;
+                if (!fs || Game.time - fs.t >= 4 || (this.pos.x == fs.x && this.pos.y == fs.y)) {
+                    let step = PathFinder.search(this.pos, { pos: em.pos, range: 5 },
+                        { flee: true, maxRooms: 1 }).path[0];
+                    if (step) {
+                        fs = this.memory.fleeStep = { x: step.x, y: step.y, t: Game.time };
+                    } else {
+                        delete this.memory.fleeStep;
+                        fs = null;
+                    }
+                }
+                if (fs) this.moveTo(new RoomPosition(fs.x, fs.y, this.room.name));
             } else if (pro.defenseHostiles(this.room).length == 1) {
                 let reaper = pro.defenseAllies(this.room).filter(c =>
                     c.memory.role == "outerHarvestDefenser" && c != this && c.memory.targetId)[0];

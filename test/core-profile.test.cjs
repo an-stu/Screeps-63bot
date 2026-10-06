@@ -394,3 +394,5 @@ assert.equal(context.HelperCpuUsed.series(context.HelperCpuUsed.cpu)[0], 6, "rin
 assert.equal(context.HelperCpuUsed.average(context.HelperCpuUsed.cpu, 20), 595.5, "sampler must average only recent values");
 
 console.log("core profile checks passed");
+assert.ok((stationSources.match(/memory\.fleeStep/g) || []).length >= 4,
+    "both flee sites (defender kiting and keeper evacuation) must cache the PathFinder direction in creep.memory and recompute at most every 4 ticks: the per-tick flee search was the measured 13.72 CPU/tick hotspot, and a 50-part/17-MOVE body only advances one tile every two ticks anyway");
