@@ -1,3 +1,27 @@
+## v0.78.77 — Freeze the optional resource ops under MIN_CPU too (emergency CPU relief)
+
+Live: the bucket was pinned at **47** (cached window 834567) with windows running 18.4-23.9 CPU
+and 23-68 of every 100 ticks over the limit. `MIN_CPU` was on, yet the tick was still over
+budget - because the roles it freezes are only `worker`/`upgrader` plus the optional strategy
+modules, while the **power bank** (`PBer` 50, `PBCarrier` 10) and the **deposit mining**
+(`harDeposits` 9, `carrierDeposits` 9) carry *positive* priorities and therefore keep running
+at full tilt in the emergency. Measured together they are ~3-4 CPU/tick of work that produces
+resources but no energy - a net loss precisely when the carrier/keeper energy loop is being
+truncated mid-tick.
+
+- `PBer` / `PBCarrier` / `harDeposits` / `carrierDeposits` are now priority `-1`, so
+  `ROLE_PRIORITY_ALLOWED` freezes them whenever the bucket is under the MIN_CPU line. They
+  resume by themselves as soon as the bucket recovers - no manual step.
+- the power creeps (`power:OPF`, ~1-2 CPU/tick on their own) are gated on `!MIN_CPU` at all
+  three execution sites as well.
+
+Defence was deliberately left alone: `defenser`, the combat teams and the outer defenders
+(`outerHarvestDefenser` is not in the table and therefore always allowed) keep running even in
+the emergency.
+
+### Tests
+Full suite green (the change is a priority table plus three call-site guards).
+
 ## v0.78.76 — Smooth the economy passes: schedule them by room ordinal, not by random hash
 
 The remaining bucket problem is not the average but the **variance**. Live windows read

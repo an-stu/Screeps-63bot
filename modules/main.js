@@ -40,7 +40,9 @@ let pro = {
         let cpuProfile = Game._coreCpuProfile;
         let phaseStart = cpuProfile ? Game.cpu.getUsed() : 0;
         HelperError.runEach(objects.creeps, e => e.execRegFun());
-        if (shouldRunPowerCreeps()) HelperError.runEach(objects.powerCreeps, e => e.ticksToLive && e.execRegFun());
+        // power creep 的 task 也只有在非低桶时跑：它们等的是技能冷却（分钟级），
+        // 而实测 `power:OPF` 单项 ~1~2 CPU/tick —— 桶到 MIN_CPU 线以下时先冻掉。
+        if (!MIN_CPU && shouldRunPowerCreeps()) HelperError.runEach(objects.powerCreeps, e => e.ticksToLive && e.execRegFun());
         if (cpuProfile) {
             cpuProfile.registration = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();
@@ -111,10 +113,10 @@ let pro = {
         });
         if (cpuProfile) {
             cpuProfile.unitRoles = {};
-            if (shouldRunPowerCreeps()) HelperError.runEachProfiled(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()), e => "power:" + (e.memory.role || "unknown"), cpuProfile.unitRoles);
+            if (!MIN_CPU && shouldRunPowerCreeps()) HelperError.runEachProfiled(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()), e => "power:" + (e.memory.role || "unknown"), cpuProfile.unitRoles);
             HelperError.runEachProfiled(activeCreeps, e => e.spawning || e.execLastTask(), e => e.memory.role || "unknown", cpuProfile.unitRoles);
         } else {
-            if (shouldRunPowerCreeps()) HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
+            if (!MIN_CPU && shouldRunPowerCreeps()) HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
             HelperError.runEach(activeCreeps, e => e.spawning || e.execLastTask());
         }
         if (cpuProfile) {
@@ -306,7 +308,7 @@ let main = function () {
     if (Game.cpu.bucket > 40 || !isSaveCpu) pro.exec();
     else {
         let objects = getTickObjects();
-        if (shouldRunPowerCreeps()) HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
+        if (!MIN_CPU && shouldRunPowerCreeps()) HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
         HelperError.runEach(objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0), e => e.spawning || e.execLastTask());
     }
     let afterWorkStart = Game._coreCpuProfile ? Game.cpu.getUsed() : 0;

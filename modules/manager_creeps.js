@@ -3,11 +3,18 @@ global.ROLE_PRIORITY= {
     "raL1":50,
     "atk2":50,
     "heal2":50,
-    "PBer":50,
-    "PBCarrier":10,
+    // ⚠️ 负值 = bucket 低于 MIN_CPU 阈值时**也冻掉**（见 ROLE_PRIORITY_ALLOWED）。
+    //
+    // power bank（PBer/PBCarrier）与存款矿（harDeposits/carrierDeposits）原来分别
+    // 是 50/10/9/9（>0 ⇒ 低桶时照样运行），实测它们合计 ~3~4 CPU/tick —— 当桶已经
+    // 掉到 MIN_CPU 线以下、连 carrier/keeper 这条能量命脉都在被 tick 截断时，
+    // 继续跑这些**产资源但不产能量**的可选作业是净亏：桶被打到 0 就再也回不来。
+    // 现在低桶时一并冻结，桶回血到 2000 以上自动恢复（不需要人工干预）。
+    "PBer":-1,
+    "PBCarrier":-1,
     "defenser":10,
-    "harDeposits":9,
-    "carrierDeposits":9,
+    "harDeposits":-1,
+    "carrierDeposits":-1,
     "carrier":1,
     "harvestEnergyKeeper":1,
     "worker":-5,
