@@ -208,6 +208,20 @@ let pro={
                 pro.ObserveRoomQueue[room.observer.id].push(rn)
             }
         }
+        // 情报常亮（Overmind 式 intel）：有 stationSources 记忆但**失联**的外矿房
+        // 周期性重新排队优先观测。没有这一步，"袭击→keeper 全灭→失明→威胁记忆
+        // 过期→房间被遗忘"会进入死循环，keeper 一只只派进去喂怪（W35N55 实测
+        // 18k tick 没有任何爬活着到达）。观测刷新 lastHostileSeen / 矿点状态，
+        // 让 roomNeedsDefense 的盲区分支持续拿到真实威胁情报。
+        for(let rn in Memory.rooms){
+            let rm = Memory.rooms[rn];
+            if(!rm.stationSources || Game.rooms[rn])continue;   // 只看失联的矿房
+            if(Game.map.getRoomLinearDistance(room.name, rn) > 10)continue;
+            let w = pro.watchRoom(rn);
+            if(Game.time - (w.sw||0) < 600)continue;            // 每房 600 tick 一次
+            w.sw = Game.time;
+            if(StationObserver.requestRoom(rn, room.name)) break; // 每个观测者每轮排一个
+        }
         pro.pruneWatch(checkTimeDelay);
     },
 };
