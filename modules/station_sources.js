@@ -244,6 +244,14 @@ const OUTER_CARRY_DROP_PICK = 500;
  * 低于这个数的 terminal 能量不算「可支配」，不能被外矿补员当成资本。
  */
 const OUTER_TERMINAL_RESERVE = 50000;
+/**
+ * 一只满编外矿搬运爬的 spawn 成本：34 CARRY × 50 + 16 MOVE × 50 = 2500。
+ *
+ * 用途见 outerCarrierBacklogQuota —— 外矿堆着的货「够喂饱几只搬运爬」是按这个
+ * 数折算的：一只一趟能运 1700，所以存货超过 2500 就意味着出这一只立刻回本。
+ * 体型见 getOuterHarCarrierBodyConfig，两者必须一起改。
+ */
+const OUTER_CARRIER_COST = 2500;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -1605,17 +1613,24 @@ let pro = {
         // hive 满时这笔钱一动不动。于是 `0 - deficit < 30000` 恒真 →
         // 外矿 carrier 永远不补 → 没有外矿收入 → storage 永远回不来，
         // 整条链把自己锁死（实测锁了几千 tick，6 个矿点 0 只外矿搬运爬）。
+        // keeper 是能量输入（低阈值 2 万），carrier 是外矿搬运链必要环节
+        // （没它 keeper 挖的能量滞留外矿），阈值也放低到 3 万
+        let threshold = isCarrier ? 30000 : 20000;
         let terminalEnergy = spawnRoom.terminal ? (spawnRoom.terminal.store[RESOURCE_ENERGY] || 0) : 0;
+        // 市场储备**不能比闸门阈值本身还大**：`reserve = 50000 > threshold = 30000`
+        // 意味着 terminal 要超过 5 万才有贡献，而只有超过 8 万才可能过闸 —— 于是
+        // terminal 里躺着 48350 也会被判成「只剩 storage 那点」。这是纯口径错误，
+        // 和「terminal 的货能不能动」无关：夹一刀到 threshold，语义就回到
+        // 「terminal 至少给市场留住 threshold，超出的那部分算可支配」。
+        let reserve = Math.min(OUTER_TERMINAL_RESERVE, threshold);
         let disposableEnergy = (spawnRoom.storage.store[RESOURCE_ENERGY] || 0)
-            + Math.max(0, terminalEnergy - OUTER_TERMINAL_RESERVE);
+            + Math.max(0, terminalEnergy - reserve);
         // 主房可支配能量：再减去 spawn/extension 的缺口
         let capacity = (spawnRoom.energyCapacityAvailable || 0);
         let available = spawnRoom.getEnergyAvailable();
         let deficit = Math.max(0, capacity - available);
         let disposable = disposableEnergy - deficit;
-        // keeper 是能量输入（低阈值 2 万），carrier 是外矿搬运链必要环节
-        // （没它 keeper 挖的能量滞留外矿），阈值也放低到 3 万
-        return disposable < (isCarrier ? 30000 : 20000);
+        return disposable < threshold;
     },
     getHarvesterBodyConfig(energy, isOutRoom, level, data) {
         let regPerTick = 10; // 每tick+10的能量
@@ -2565,19 +2580,23 @@ let pro = {
         return pro.outerEdgeLink(home) || home.storage;
     },
     /**
-     * 搬运爬**身边**值得捡的地面掉落能量堆（只挑能量，且量够大）。
+     * 搬运爬**身边**值得捡的地面掉落能量堆（只挑能量）。
      *
      * 用途见 harvestEnergyOuterCarry：keeper 站在容器上、容器满时溢出的能量全部
      * 掉在容器那一格，而那一格被 keeper 占着，搬运爬只能停在旁边。引擎的 pickup
      * 判定是切比雪夫 ≤1（engine/src/processor/intents/creeps/pickup.js：
      * `Math.abs(target.x - object.x) > 1 || ...`），所以站在旁边就能捡。
      *
-     * 取**最大**的一堆：范围 1 内通常只有一堆（容器格），但被挤开时可能有两堆。
+     * **范围 1 内不设数量门槛**：它就在身边、不用绕路，捡多少都是净赚；带 500
+     * 门槛会让容器边上那些「一点一点溢出来」的小堆永远没人收（容器已满、
+     * 别处也收不走）。500 的门槛只对**行进途中绕路去捡**有意义，见
+     * harvestEnergyOuterCarry 里那个 8 格扫描（OUTER_CARRY_DROP_PICK）。
+     * 取**最大**的一堆：范围 1 内通常只有一堆（容器格），被挤开时可能有两堆。
      */
     outerCarryNearbyDrop(creep) {
         if (!creep || !creep.pos) return undefined;
         return creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
-            filter: e => e.resourceType == RESOURCE_ENERGY && e.amount > OUTER_CARRY_DROP_PICK
+            filter: e => e.resourceType == RESOURCE_ENERGY && e.amount > 0
         }).maxBy(e => e.amount);
     },
     /**
@@ -3213,6 +3232,71 @@ let pro = {
         spawnRoom._outerCarrierFleetCap = cap;      // room 对象每 tick 重建，不需要清
         return cap;
     },
+    /**
+     * 外矿房里**堆着等运**的能量总量（每个矿点容器的存量；容器的存量不够说明
+     * 问题时再补扫地面掉落）。
+     *
+     * 「以本房为主房」的判据与 outerRouteUnion / outerCarrierFleetCap 完全一致
+     * （roadPathStr 的房间清单含本房），这样三处不会各自漂移。
+     * 容器读的是 `stationSources[*].container` 记的对象 —— 有视野才读得到 store，
+     * 没视野自然算 0（保守：退回原来的闸门行为，不会误放行）。
+     *
+     * 地面掉落只在**容器存量已经不足以说明问题**时才扫：容器满时溢出的那部分全
+     * 掉在容器那一格，正常情况下容器存量本身就已经远超判据，不必再多做两次
+     * `room.find(FIND_DROPPED_RESOURCES)`（带 filter 的全房扫描不便宜）。
+     */
+    outerMineEnergyWaiting(spawnRoom) {
+        if (spawnRoom._outerMineWaiting !== undefined) return spawnRoom._outerMineWaiting;
+        let total = 0;
+        let outerRooms = {};
+        for (let roomName in Memory.rooms) {
+            if (roomName == spawnRoom.name) continue;
+            let stations = Memory.rooms[roomName][pro.stationName];
+            if (!stations) continue;
+            _.values(stations).forEach(data => {
+                if (!data || !data.id || !data.roadPathStr) return;
+                let sep = data.roadPathStr.indexOf(";");
+                if (sep < 0) return;
+                if (data.roadPathStr.slice(0, sep).split(",").indexOf(spawnRoom.name) < 0) return;
+                outerRooms[roomName] = true;
+                let container = data[STRUCTURE_CONTAINER] && Game.getObjectById(data[STRUCTURE_CONTAINER]);
+                if (container && container.store) total += container.store[RESOURCE_ENERGY] || 0;
+            });
+        }
+        if (total < OUTER_CARRIER_COST) {
+            for (let roomName in outerRooms) {
+                let room = Game.rooms[roomName];
+                if (!room) continue;
+                room.find(FIND_DROPPED_RESOURCES, { filter: e => e.resourceType == RESOURCE_ENERGY })
+                    .forEach(e => { total += e.amount || 0; });
+            }
+        }
+        spawnRoom._outerMineWaiting = total;        // room 对象每 tick 重建，不需要清
+        return total;
+    },
+    /**
+     * 外矿有货等着运时，**按存货**该有几只搬运爬 —— 不看主房穷不穷。
+     *
+     * 这道判据专门用来破 `outerMineStarvesSpawnRoom` 的自锁：那个闸门的输入
+     * （主房能量）恰好是外矿搬运爬的产出，车一没就成环 ——
+     * 车没了 → 货回不来 → 主房穷 → 闸门恒真 → 永远不出车。
+     *   2026-10-04：W33N55 storage 被抽到 0，而 terminal 躺着 9.8 万（别的房送来
+     *   的救济），闸门只看 storage → 锁了几千 tick、6 个矿点 0 只搬运爬。
+     *   2026-10-07：W33N55 storage 4242 / terminal 48350，但 reserve(50000) 比
+     *   carrier 阈值(30000) 还大 → terminal 一分都不算；同一时刻 W34N55 三个容器
+     *   2000/2000 全满 + 地面堆 5714、W35N55 三个容器全满且一只爬都没有，
+     *   两侧约 1.8 万能量滞留、外矿整条链停摆。
+     *
+     * 返回值 = 存货能喂饱几只（每只成本 OUTER_CARRIER_COST、一趟运 1700），
+     * 天然收敛：货清完就归零，**不会把闸门永久架空**。所以只在闸门判真时拿它
+     * 当豁免，不用它取代闸门。
+     */
+    outerCarrierBacklogQuota(spawnRoom) {
+        if (spawnRoom._outerCarrierBacklogQuota !== undefined) return spawnRoom._outerCarrierBacklogQuota;
+        let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom) / OUTER_CARRIER_COST);
+        spawnRoom._outerCarrierBacklogQuota = quota;
+        return quota;
+    },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
         let targetName = roomName.name || roomName;
         let harRoom = Game.rooms[targetName];
@@ -3254,9 +3338,6 @@ let pro = {
             });
         }
         // ─────────────── 以下才是补员，可以被能量 / 上限 / spawn 挡住 ───────────────
-        // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
-        // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）
-        if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) return null;
         // 外矿搬运爬**全局上限**，缺省**按矿点数**算（见 outerCarrierFleetCap），
         // Memory.marketSettings.outerCarrierMax 可显式覆盖。
         //
@@ -3267,6 +3348,16 @@ let pro = {
         // 地面堆到 6000+，而总数停在 7~8 → 补员被这里的早返回挡住，永远没人去清。
         let roomCarriers = spawnRoom.creeps("outerHarvestEnergyCarrier", false);
         let carrierMax = pro.outerCarrierFleetCap(spawnRoom);
+        // 主房 carrier（roomName == spawnRoom.name）负责填 hive/搬 link，
+        // 是主房能量循环的一部分，不能挡；只挡外矿 carrier（纯消耗，8 万阈值）。
+        //
+        // **但闸门不能自锁**：它的输入（主房能量）恰好是外矿搬运爬的产出，
+        // 车一没就是环 —— 车没了 → 货回不来 → 主房穷 → 闸门恒真 → 永远不出车。
+        // 实测两次（2026-10-04 / 2026-10-07，见 outerCarrierBacklogQuota 注释）。
+        // 豁免按**外矿存货**折算出该有几只（每只成本 2500、一趟运 1700），
+        // 存货清完自动失效，所以不会把闸门永久架空；车队已经到配额就不再多出。
+        if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)
+            && roomCarriers.length >= pro.outerCarrierBacklogQuota(spawnRoom)) return null;
         if (roomCarriers.length >= carrierMax) return null;
         // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
         // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
@@ -3520,7 +3611,9 @@ let pro = {
     },
     outerDefensePosts(creep) {
         let room = creep.room;
-        let lairs = room.find(FIND_HOSTILE_STRUCTURES)
+        // 走房间缓存访问器（内部优先 room.getHostileStructures），否则每只防守爬
+        // 每 tick 一次裸 room.find(FIND_HOSTILE_STRUCTURES)。
+        let lairs = pro.defenseHostileStructures(room)
             .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
             .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
         if (!lairs.length) return [];
@@ -3530,7 +3623,7 @@ let pro = {
         // 统计时排除自己，否则两只爬会互相把对方挤走、来回抖。
         let cnt = [];
         for (let i = 0; i < groups.length; i++) cnt.push(0);
-        room.find(FIND_MY_CREEPS).forEach(c => {
+        pro.defenseAllies(room).forEach(c => {
             if (c === creep) return;
             if (c.memory.role == "outerHarvestDefenser" && c.memory.defenseGroup >= 0
                 && c.memory.defenseGroup < groups.length) cnt[c.memory.defenseGroup]++;

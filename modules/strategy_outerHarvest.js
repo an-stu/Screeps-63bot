@@ -238,11 +238,14 @@ let pro = {
                 let t = c.headTask && c.headTask();
                 if (!t || t.roomName != targetRoomName) return;
                 let m = c.memory.outerStuck;
-                if (m && m.x == c.pos.x && m.y == c.pos.y && Game.time - m.t >= OUTER_CONGESTION_TICKS) {
+                if (m && m.room == c.pos.roomName && m.x == c.pos.x && m.y == c.pos.y
+                    && Game.time - m.t >= OUTER_CONGESTION_TICKS) {
                     stuckCnt++;
                     c.suicide();
-                } else if (!m || m.x != c.pos.x || m.y != c.pos.y) {
-                    c.memory.outerStuck = { x: c.pos.x, y: c.pos.y, t: Game.time };
+                } else if (!m || m.room != c.pos.roomName || m.x != c.pos.x || m.y != c.pos.y) {
+                    // 记上房间名：原来只有 x/y，跨房同坐标会被当成「没动过」——
+                    // 实测据此误读成「防守爬卡了 1076 tick」，其实它是在岗位上驻守。
+                    c.memory.outerStuck = { room: c.pos.roomName, x: c.pos.x, y: c.pos.y, t: Game.time };
                 }
             });
             if (Memory.outerPaused && Memory.outerPaused[targetRoomName] > Game.time) continue;

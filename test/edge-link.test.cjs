@@ -906,7 +906,14 @@ function defenceGateFixture(defenders) {
                    isBorder: () => false, lookFor: () => [],
                    findInRange: (type, range, opts) => {
                        if (type !== CONSTANTS.FIND_DROPPED_RESOURCES) return [];
-                       return opts && opts.filter ? groundDrops.filter(opts.filter) : groundDrops;
+                       // 忠实实现 findInRange：先按**切比雪夫距离 ≤ range** 筛，再套 filter。
+                       // 以前这里把 range 参数丢掉了，于是「身边的堆」和「8 格外的堆」在
+                       // 测试里完全等价 —— 可是两者的门槛本来就不同：身边（容器格上
+                       // keeper 溢出的那些）不设门槛，绕路去捡才要求 500。
+                       const cx = 32, cy = 31;
+                       const near = groundDrops.filter(d =>
+                           Math.max(Math.abs(d.pos.x - cx), Math.abs(d.pos.y - cy)) <= range);
+                       return opts && opts.filter ? near.filter(opts.filter) : near;
                    },
                    getRangeTo: () => 1, inRangeTo: () => true },
             headTask: () => ({ taskName: "harvestEnergyOuterCarry", id: "sA", roomName: "W34N55", x: 32, y: 32 }),
@@ -964,10 +971,20 @@ function defenceGateFixture(defenders) {
     assert.deepEqual(pile.calls.find(c => c[0] === "pickup"), ["pickup", 600],
         "站在容器旁边就要能捡到容器格上的 600 能量堆");
 
-    // ⑨ 500 以下的小堆不专门绕路（在容器边则无条件捡，见外矿容器分支）
+    // ⑨ **身边（范围 1）的小堆必须无条件捡**：它就在脚下、不用绕路，捡多少都是净赚。
+    //    容器满时溢出的正是这种小堆 —— 线上实测 W34N55 容器格 (32,31) 上压着 145、
+    //    (9,34) 旁边 191，全都低于 500。旧代码给「身边」也套了 500 门槛，于是它们
+    //    永远没人收：容器已经满了、别处也收不走，只能一直躺在地上。
     const small = carryScene({ storeEnergy: 200, containerEnergy: 0, keeperAlive: true, wait: 0,
                                drops: [{ amount: 120 }] });
-    assert.ok(!small.calls.some(c => c[0] === "pickup"), "120 的小堆不值得占搬运爬一趟的位置");
+    assert.ok(small.calls.some(c => c[0] === "pickup" && c[1] === 120),
+        "身边的 120 小堆要顺手捡掉，不能因为低于 500 就放着");
+
+    // ⑩ 但**行进途中**（8 格扫描）的小堆不值得占搬运爬一趟的位置：门槛 500。
+    const far = carryScene({ storeEnergy: 200, containerEnergy: 0, keeperAlive: true, wait: 0,
+                             drops: [{ amount: 120, x: 37, y: 31 }] });
+    assert.ok(!far.calls.some(c => c[0] === "pickup"),
+        "8 格外的 120 小堆不值得让搬运爬偏离路线");
 }
 
 // ───────── 9) 外矿路完整性：掉血到阈值以下算「没修好」，提前派修路爬 ─────────
@@ -1359,6 +1376,94 @@ function defenceGateFixture(defenders) {
     home.storage.store.energy = 1000;
     S2.trySpawnOuterHarKeeper("W33N55", home);
     assert.equal(spawned.length, 1, "storage 掉到滞回下限以下 → 下一次评估立刻恢复补员");
+}
+
+// ────── 10) 外矿补员闸门不能自锁：车全没了 + 外矿有货 = 必须放行 ──────
+//
+// outerMineStarvesSpawnRoom 的输入（主房能量）恰好是外矿搬运爬的产出，所以一旦
+// 车队归零就成环：车没了 → 货回不来 → 主房穷 → 闸门恒真 → 永远不出车。
+// 2026-10-04 与 2026-10-07 两次实测都是这个形状。
+{
+    function gateScene({ storageEnergy, terminalEnergy, containerEnergies, fleet }) {
+        const ctx = makeContext();
+        vm.runInNewContext(read("station_sources.js"), ctx);
+        const containers = {};
+        const stationSources = {};
+        containerEnergies.forEach((amount, i) => {
+            const id = "cont" + i;
+            containers[id] = { id: id, store: makeStore({ energy: amount }, 2000) };
+            const path = [{ roomName: "W34N55", x: 5, y: 5 },
+                          { roomName: "W33N55", x: 1, y: 23 },
+                          { roomName: "W33N55", x: 21, y: 33 }];
+            stationSources["s" + i] = {
+                id: "s" + i, roomName: "W34N55", x: 3, y: 17, container: id,
+                roadPathStr: encodePath(path), roadPathTick: 99999,
+            };
+        });
+        ctx.Memory.rooms = { W34N55: { stationSources: stationSources }, W33N55: { stationSources: {} } };
+        const spawnRoom = {
+            name: "W33N55", my: true, level: 8,
+            memory: ctx.Memory.rooms.W33N55,
+            storage: { id: "st", store: makeStore({ energy: storageEnergy }, 1000000),
+                       pos: { x: 21, y: 34, roomName: "W33N55" } },
+            terminal: { id: "tm", store: makeStore({ energy: terminalEnergy }, 300000),
+                        pos: { x: 22, y: 35, roomName: "W33N55" } },
+            energyCapacityAvailable: 12900,
+            getEnergyAvailable: () => 12900,
+            energyAvailable: 12900,
+            spawnFailure: false,
+            find: () => [],
+            lookForAt: () => [],
+            creeps: (role) => (role === "outerHarvestEnergyCarrier" ? fleet : []),
+        };
+        for (const key in containers) { /* 容器不需要挂在房间里 */ }
+        ctx.Game.rooms = { W33N55: spawnRoom };
+        ctx.Game.getObjectById = id => containers[id] || null;
+        return { S: ctx.StationSources, spawnRoom: spawnRoom };
+    }
+
+    // 线上现场：storage 4242 / terminal 48350，外矿三容器 2000/2000 全满，一只车都没有
+    const live = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
+                             containerEnergies: [2000, 2000, 2000], fleet: [] });
+    assert.equal(live.S.outerMineEnergyWaiting(live.spawnRoom), 6000, "外矿存货 = 三个容器之和");
+    assert.equal(live.S.outerCarrierBacklogQuota(live.spawnRoom), 2,
+        "6000 存货 / 一只满编车 2500 = 该有 2 只");
+    assert.equal(live.S.outerMineStarvesSpawnRoom(live.spawnRoom, true), true,
+        "按主房口径仍然算穷（storage + terminal 超额 只有 22592 < 3 万）");
+    // 这就是补员闸的最终判据：闸门判真 && 车队 >= 配额 才挡
+    const blocked = live.S.outerMineStarvesSpawnRoom(live.spawnRoom, true)
+        && live.spawnRoom.creeps("outerHarvestEnergyCarrier", false).length
+            >= live.S.outerCarrierBacklogQuota(live.spawnRoom);
+    assert.equal(blocked, false, "车队 0 < 配额 2 → 必须放行补员（旧代码在这里死锁）");
+
+    // 负对照 ①：外矿真的没货 → 配额 0 → 闸门照旧挡住，不许凭空出车
+    const empty = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
+                              containerEnergies: [0, 0, 0], fleet: [] });
+    assert.equal(empty.S.outerCarrierBacklogQuota(empty.spawnRoom), 0, "没货 → 配额 0");
+    assert.equal(empty.S.outerMineStarvesSpawnRoom(empty.spawnRoom, true)
+        && empty.spawnRoom.creeps("outerHarvestEnergyCarrier", false).length
+            >= empty.S.outerCarrierBacklogQuota(empty.spawnRoom), true,
+        "没货就老老实实被闸门挡住");
+
+    // 负对照 ②：车队已经到配额 → 不再多出，豁免不会把闸门永久架空
+    const stocked = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
+                                containerEnergies: [2000, 2000, 2000], fleet: [{}, {}] });
+    assert.equal(stocked.S.outerMineStarvesSpawnRoom(stocked.spawnRoom, true)
+        && stocked.spawnRoom.creeps("outerHarvestEnergyCarrier", false).length
+            >= stocked.S.outerCarrierBacklogQuota(stocked.spawnRoom), true,
+        "车队 2 ≥ 配额 2 → 不再补员");
+
+    // 负对照 ③：主房能量足 → 闸门本来就假，跟豁免无关
+    const rich = gateScene({ storageEnergy: 60000, terminalEnergy: 0,
+                             containerEnergies: [0, 0, 0], fleet: [] });
+    assert.equal(rich.S.outerMineStarvesSpawnRoom(rich.spawnRoom, true), false,
+        "storage 6 万 → 不穷");
+
+    // reserve 口径：市场储备不能比闸门阈值本身还大，否则 terminal 整份作废
+    const fromTerminal = gateScene({ storageEnergy: 0, terminalEnergy: 60000,
+                                     containerEnergies: [0, 0, 0], fleet: [] });
+    assert.equal(fromTerminal.S.outerMineStarvesSpawnRoom(fromTerminal.spawnRoom, true), false,
+        "terminal 6 万 - 储备 3 万 = 3 万可支配 → 不该判穷（旧口径 reserve 5 万只剩 1 万，误判穷）");
 }
 
 console.log("edge link / hauler body / defence gate checks passed");

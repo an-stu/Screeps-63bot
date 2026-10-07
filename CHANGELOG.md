@@ -1,3 +1,68 @@
+## v0.78.79 — The outer hauler gate could not be satisfied by its own output
+
+Live: **zero** `outerHarvestEnergyCarrier` in the whole account, both outer rooms of W33N55
+dead, and ~18k energy parked outside while the home room looked poor.
+
+    W33N55 (home)   storage 4242   terminal 48350
+    W34N55          3 containers 2000/2000 (full) + 5714 on the ground   no creeps at all
+    W35N55          3 containers 2000/2000 (full)                        no creeps at all
+
+`trySpawnOuterHarCarrier` gated recruitment on `outerMineStarvesSpawnRoom(spawnRoom, true)`,
+which gates on the **home room's** energy - and the home room's energy is exactly what the
+outer haulers produce. That is a feedback lock:
+
+    no haulers -> the freight never comes home -> the home looks starved
+               -> the gate stays true -> no haulers are ever spawned
+
+### Fixed
+
+- **The market reserve was larger than the gate it feeds.** `OUTER_TERMINAL_RESERVE` is
+  50000 and the carrier threshold is 30000, so a terminal contributed **nothing** until it
+  passed 50000, and a room needed 80000 in the terminal to clear the bar at all. W33N55 had
+  48350 sitting in its terminal and was scored as "4242 disposable". The reserve is now
+  clamped to the threshold (`Math.min(reserve, threshold)`), which is what the 2026-10-04
+  comment intended when it started counting the terminal in the first place.
+- **`outerMineEnergyWaiting(spawnRoom)`** (new): how much freight is stacked in the outer
+  rooms of this home (the `stationSources[*].container` stores, plus ground spills when the
+  containers alone are not conclusive). Same "home-room route" predicate as
+  `outerRouteUnion` / `outerCarrierFleetCap` so the three cannot drift apart. Cached per tick.
+- **`outerCarrierBacklogQuota(spawnRoom)`** (new): `backlog / OUTER_CARRIER_COST` - how many
+  haulers the *freight itself* justifies (one costs 2500 and hauls 1700, so anything above
+  2500 pays for itself in one trip). The carrier gate is now
+  `starved && fleet >= quota`, so the deadlock breaks while the gate keeps working: the
+  quota falls to 0 the moment the freight is cleared, so this cannot permanently disable it.
+
+`outerMineEnergyWaiting` reads the containers by the ids recorded in station memory, so it is
+0 without vision - deliberately conservative, it just falls back to the old gate.
+
+### Fixed (cont.)
+
+- **Sub-500 spills next to the hauler were uncollectable.** `outerCarryNearbyDrop` used the
+  same `amount > 500` filter as the travelling detour scan, so the small piles that spill
+  onto the container tile while a keeper stands on it were never collected by anyone - the
+  container is full and nothing else can reach them. Live: 145 on (32,31) and 191 next to
+  (9,34). The 500 bar only ever made sense for *detouring* (that is
+  `OUTER_CARRY_DROP_PICK`, on the 8-tile scan); at range 1 the pile is underfoot and picking
+  it up costs nothing, so that path is now unconditional. The existing test asserted the old
+  behaviour while its own comment said the opposite - the fixture also ignored
+  `findInRange`'s `range` argument, which is why "next to me" and "8 tiles away" were
+  indistinguishable in the suite. Both are fixed, and the two cases are now asserted
+  separately.
+
+### Investigated, no change needed
+
+- **Towers cannot heal outer creeps** and that is not a bug: heal is the tower's *first*
+  branch (`station_tower.js:102`, ahead of attack and repair), but a tower cannot reach
+  another room and the outer rooms are keeper rooms where we own nothing. Field healing is
+  the defenders' job (they carry 11 HEAL and heal allies every tick,
+  `station_sources.js` `outerDefense`); keepers and haulers carry no HEAL and disengage.
+- **W34N55 (34,29) does have a road** (2100/5000) and is waypoint #1 of two routes - it was
+  on the miss-list only during the v0.78.58 maintenance-stall window. The real symptom is
+  that it decayed below the 50% repair bar with nobody walking the route.
+- **The duplicate T3 defenders were already fixed** in `6cd06b0` (`outerDefenseQuota` returns
+  1 for an invader kite squad instead of the baseline 2). No boosted creeps beyond T2 exist
+  online now.
+
 ## v0.78.78 — The flee search was the 13.7 CPU/tick hotspot (never compute PathFinder every tick)
 
 Round-16 telemetry still showed the bucket pinned near zero with `roles last` naming the
