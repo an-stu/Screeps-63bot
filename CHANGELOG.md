@@ -1,3 +1,40 @@
+## v0.78.82 — A room that cannot afford energy does not get to burn it on ops
+
+`StrategyHighLevel.processPowerSpawn` converts 50 energy + 1 power into 1 ops per tick. Its
+only gate was the **account-level** `StationHive.isEnergyAbundant()`, so a room whose storage
+had run dry kept burning as long as the account as a whole looked comfortable. Live today:
+
+    ecoBalance: abundant=true  avg=91699  min=41636
+
+    room      storage   terminal   powerSpawn [energy, power]
+    W33N55          0      41636    [15, 41]      <- storage empty, still counted as rich
+    E41S32       3077      57202    [4016, 40]
+    E41S23      11901      57740    [4987, 89]
+    W32N56      29325      59688    [4970, 34]
+    ...
+
+`isEnergyAbundant` turns on at `avg >= 120000 && min >= 40000` and off at `avg < 80000 ||
+min < 20000`, so its hysteresis band (20k-40k) is exactly where a room is already poor.
+
+### Fixed
+
+- `StrategyHighLevel.roomEnergyAbundant(room)` (new): the **room-level** counterpart, and
+  `processPowerSpawn` now requires both gates. Threshold `POWER_SPAWN_ENERGY_FLOOR = 30000`,
+  overridable with `Memory.marketSettings.powerSpawnEnergyFloor`.
+- It deliberately reads **storage only, not `storage + terminal`**. The terminal holds the
+  market reserve, and letting it vouch for optional energy spending is what produced the
+  W33N55 row above - a room with an empty storage and 41k parked in its terminal. The same
+  reasoning that made `OUTER_TERMINAL_RESERVE` a reserve in the first place.
+- The account-level gate is untouched and still runs first: a rich room in a poor account
+  still stops (asserted).
+
+### Tests
+
+New `test/power-spawn.test.cjs` (8 assertions) runs the real module in a VM: storage 0 /
+3077 / 29999 must not burn, exactly 30000 and 120000 must, a room without storage must not,
+the account gate must still veto, and the Memory override must be honoured. Negative control:
+restoring the account-only version fails on "storage 0 的房绝不能再烧 50 energy/tick".
+
 ## v0.78.81 — Cut the far outer room, and make stopRemote survive losing vision
 
 The account is CPU-budget-saturated (see v0.78.80): recent 100-tick buckets average ~20.6

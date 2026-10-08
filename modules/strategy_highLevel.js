@@ -1,6 +1,23 @@
 /**
  * 在有 storage使用的策略
  */
+
+/**
+ * 本房 storage 能量低于这个数就别再烧 powerSpawn（每 tick 50 energy 换 ops）。
+ *
+ * 为什么只看 **storage**、不看 terminal：terminal 里那部分是**市场储备**，
+ * 不能拿来给「可选的能量消耗」背书。反例（2026-10-08 实测）：W33N55 的
+ * storage 是 **0**，却因为在 terminal 里躺着 41636 而被账号级信号算成「充裕」，
+ * 照样每 tick 烧 50 energy；同一时刻 E41S32 的 storage 只有 3077、
+ * E41S23 只有 11901，12 个房的 powerSpawn 全在烧。
+ *
+ * 阈值取 3 万：与 StationHive.isEnergyAbundant 的账号级门槛同量级（它要求
+ * 每个房 storage+terminal ≥ 4 万才敢开），略低一点是为了不把「本房 storage
+ * 3 万、terminal 空」的房也一起停掉。可用 Memory.marketSettings.powerSpawnEnergyFloor
+ * 覆盖。
+ */
+const POWER_SPAWN_ENERGY_FLOOR = 30000;
+
 let pro = {
     workerManager(room) {
         // 空 hive 保护：hive 缺口大且可用能量很低时不再生 worker，
@@ -434,9 +451,28 @@ let pro = {
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
         room.memory.carryBusy.push(room.creeps("carrier").filter(e => !e.isFree()).reduce((a) => a + 1, 0))
     },
+    /**
+     * 本房是否「有余力做可选的能量消耗」（只看本房 storage，见
+     * POWER_SPAWN_ENERGY_FLOOR 的推导）。
+     *
+     * 与 StationHive.isEnergyAbundant 是两个层次：那个是**账号级**（含滞回，
+     * 决定「整个号是不是宽裕」），这个是**本房级**。只判账号级会漏掉
+     * 「账号宽裕但本房已经见底」——那正是 2026-10-08 用户报的
+     * 「energy 过少的房间不要烧 power」。
+     */
+    roomEnergyAbundant(room) {
+        if (!room || !room.storage) return false;
+        let floor = Number(Memory.marketSettings && Memory.marketSettings.powerSpawnEnergyFloor)
+            || POWER_SPAWN_ENERGY_FLOOR;
+        return (room.storage.store[RESOURCE_ENERGY] || 0) >= floor;
+    },
     processPowerSpawn(room) {
-        // 能量不充裕时暂停 power 处理：50 energy/tick 换 ops 的优先级低于保能量。
+        // 50 energy/tick 换 ops 的优先级低于保能量，所以两道闸都要过：
+        //   1. 账号级充裕（StationHive.isEnergyAbundant，自带滞回）
+        //   2. **本房**有余力（roomEnergyAbundant）
+        // 原来只有第 1 道，于是「账号充裕」就能让一个 storage 见底的房一直烧。
         if (!StationHive.isEnergyAbundant()) return;
+        if (!pro.roomEnergyAbundant(room)) return;
         if (room.powerSpawn) {
             if (room.powerSpawn.store[RESOURCE_ENERGY] >= 50 && room.powerSpawn.store[RESOURCE_POWER] >= 1) {
                 room.powerSpawn.processPower()
