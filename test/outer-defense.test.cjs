@@ -664,3 +664,33 @@ console.log("outer defense checks passed");
     assert.ok(!idle.calls.some(c => c[0] === "attack" || c[0] === "rangedAttack"),
         "a hostile pair within engage spread must be covered by the engaged defender alone");
 }
+
+// ───────── stopRemote：常驻停用某矿，判据**不能依赖视野** ─────────
+//
+// 旧写法 `Game.rooms[rn] && Game.rooms[rn].flags("stopRemote")` 要求先看得见那个房。
+// 但常驻停用恰恰要在「爬撤走、失去视野」之后依然生效 —— 一没视野守卫就静默失效、
+// 又开始补员，而 keeper 不需要视野也能走进矿里，矿会自己活回来。所以改成遍历
+// Game.flags（旗子始终属于账号，不依赖视野）按「名字前缀 + 房名」查。
+{
+    const ctx = loadHarvest({ rooms: {} });
+    const S = ctx.StrategyOuterHarvest;
+    ctx.Game.flags = {};
+
+    assert.equal(S.hasStopRemoteFlag("W35N55"), false, "没有旗就是不暂停");
+
+    ctx.Game.flags = { stopRemote_W35N55: { pos: { roomName: "W35N55" } } };
+    // 本用例的关键前提：Game 里**根本没有** rooms（= 完全没有视野）
+    assert.equal(ctx.Game.rooms, undefined, "前提：没有房间视野");
+    assert.equal(S.hasStopRemoteFlag("W35N55"), true, "失去视野也要认出停用旗");
+    assert.equal(S.hasStopRemoteFlag("W34N55"), false, "只管自己那个房");
+
+    // 语义与引擎 Room.prototype.flags(name) 一致：**名字前缀**匹配
+    ctx.Game.flags = { stopRemote2: { pos: { roomName: "W35N55" } } };
+    assert.equal(S.hasStopRemoteFlag("W35N55"), true, "前缀匹配");
+
+    ctx.Game.flags = { har_W33N55_W35N55: { pos: { roomName: "W35N55" } } };
+    assert.equal(S.hasStopRemoteFlag("W35N55"), false, "har 旗不是停用旗");
+
+    assert.equal(S.hasStopRemoteFlag(undefined), false, "空房名不能炸");
+}
+

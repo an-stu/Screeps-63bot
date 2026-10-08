@@ -1,3 +1,50 @@
+## v0.78.81 — Cut the far outer room, and make stopRemote survive losing vision
+
+The account is CPU-budget-saturated (see v0.78.80): recent 100-tick buckets average ~20.6
+against a limit of 20, so the bucket sits on the `bucket > 40` floor and the bot runs at
+roughly 90% duty. The work has to come down; the outer mines are the cheapest thing to give
+up, and among them W35N55 is twice the haul of W34N55:
+
+    room     source   pathTime   route len
+    W34N55   2d12        78          76
+    W34N55   2d15        43          45
+    W34N55   2d16        68          68
+    W35N55   2af3       106          88
+    W35N55   2af4       125         125
+    W35N55   2af5       108         104
+
+W35N55 is two rooms from the home room W33N55 and its hauls cross W34N55, so it costs ~2x
+the in-flight time for the same throughput.
+
+### Changed (live state, no code)
+
+- **Deleted the `har_W33N55_W35N55` flag.** `StrategyOuterHarvest.exec` only ever iterates
+  `har*` flags, so with the flag gone W35N55 stops being dispatched entirely — no keepers, no
+  haulers, no defenders. Creeps already in the room are deliberately left alone (the same
+  rule the congestion pause documents), so they finish their trips and die out instead of
+  being stranded mid-route. Reversible: recreate the flag (its memory was `{spawnRoom:
+  "W33N55"}`, position W35N55 (25,25), colour 1; a backup is kept at
+  `.workbuddy/tmp/flag-backup-har_W33N55_W35N55.json`).
+- The energy parked there is not lost: container contents and never-decaying ground piles
+  stay put, so reopening the mine later still finds them.
+
+### Fixed
+
+- **The `stopRemote` pause silently stopped working without vision.** It was
+  `Game.rooms[targetRoomName] && Game.rooms[targetRoomName].flags("stopRemote").length` -
+  which requires us to currently *see* the room. That is exactly backwards for a permanent
+  opt-out: the moment the creeps leave and vision drops, the guard disappears and the mine
+  quietly comes back (keepers do not need vision, see the "普通外矿不依赖当前视野" note in the
+  same function). It now scans `Game.flags` by name prefix + room name via
+  `StrategyOuterHarvest.hasStopRemoteFlag`, matching the engine's `Room.flags(name)` prefix
+  semantics without needing vision. Nothing uses `stopRemote` today, so live behaviour is
+  unchanged - this only makes the existing switch actually work if it is used.
+
+### Tests
+
+`test/outer-defense.test.cjs` +1 case, including the regression that matters: it asserts
+`hasStopRemoteFlag` is true **while `Game.rooms` is undefined**, i.e. with no vision at all.
+
 ## v0.78.80 — The hauling backlog is per mine, not per account
 
 v0.78.79 broke the outer-hauler deadlock and the chain came back (0 -> 8 haulers, 32 keepers,

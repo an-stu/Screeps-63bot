@@ -202,6 +202,27 @@ let pro = {
         }
         return true;
     },
+    /**
+     * 目标矿区里是否有 `stopRemote*` 旗（= 该矿常驻停用）。
+     *
+     * 语义与引擎的 `Room.prototype.flags(name)` 一致：**名字前缀**匹配。
+     * 但**不依赖视野** —— 遍历 `Game.flags`（旗子一直属于账号，任何房间的旗都读得到），
+     * 因为常驻停用必须在失去视野之后仍然生效。
+     *
+     * 用途：用户 10-08 指示「砍掉更远的那个房间的外矿」来给 CPU 预算腾空间 ——
+     * W35N55 离主房 W33N55 隔两房，单程路线 88~125 格（W34N55 只有 43~78），
+     * 同样的运力要占一倍的在途时间。用旗子停用是**可逆**的：撤旗即恢复，
+     * 而且容器里已存的能量不会消失，将来重新开矿还在。
+     */
+    hasStopRemoteFlag(targetRoomName) {
+        if (!targetRoomName) return false;
+        for (let name in Game.flags) {
+            if (name.indexOf("stopRemote") != 0) continue;
+            let flag = Game.flags[name];
+            if (flag && flag.pos && flag.pos.roomName == targetRoomName) return true;
+        }
+        return false;
+    },
     exec(room) {
         if ((Game.time + room.hashCode()) % 6 != 0) return;
         let flags = ManagerFlags.getFlagsByPrefix("har");
@@ -214,8 +235,15 @@ let pro = {
             - Game.map.getRoomLinearDistance(room.name, b.pos.roomName));
         for (let flag of flags) {
             let targetRoomName = flag.pos.roomName;
-            // 矿区放 stopRemote 旗则暂停该矿
-            if (Game.rooms[targetRoomName] && Game.rooms[targetRoomName].flags("stopRemote").length) continue;
+            // 矿区放 stopRemote 旗则暂停该矿（常驻停用）。
+            //
+            // ⚠️ 判据**不能依赖视野**。原来写的是
+            // `Game.rooms[targetRoomName] && Game.rooms[targetRoomName].flags("stopRemote")`
+            // —— 它要求我们先看得见那个房间，而常驻停用恰恰要在「爬撤走、失去视野」
+            // 之后依然生效。一没视野这个守卫就失效、又开始补员，而 keeper 不需要
+            // 视野也能走进去（见下面「普通外矿不依赖当前视野」那段），矿会自己活回来。
+            // 所以改用 Game.flags 按「名字前缀 + 所在房名」查，不依赖视野。
+            if (pro.hasStopRemoteFlag(targetRoomName)) continue;
             // 每个旗子只由它选择的派发房间处理，避免多个已方房间重复派发
             let spawnRoom = flag.memory.spawnRoom && Game.rooms[flag.memory.spawnRoom];
             if (!spawnRoom || !spawnRoom.my) {
