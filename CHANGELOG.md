@@ -1,3 +1,42 @@
+## v0.78.80 — The hauling backlog is per mine, not per account
+
+v0.78.79 broke the outer-hauler deadlock and the chain came back (0 -> 8 haulers, 32 keepers,
+W33N55 storage 4242 -> 8448). But the exemption it added compared a **global** quota against a
+**global** fleet, and haulers do not spread themselves across mines:
+
+    W34N55   5 haulers   3070 in containers
+    W35N55   2 haulers   6000 in containers + 7105 on the ground (never decays)
+
+`outerCarrierBacklogQuota` returned `floor(3070 / 2500) = 1` for the whole spawn room, so with
+7 haulers alive both target rooms were told "you have enough". W35N55 kept its ~13k.
+
+### Fixed
+
+- `outerMineEnergyWaiting(spawnRoom, roomFilter)` and
+  `outerCarrierBacklogQuota(spawnRoom, roomFilter)` now take the target mine, and the per-tick
+  cache is keyed by it. A hauler only ever runs one mine's route, so the quota has to be read
+  per mine.
+- The gate counts the haulers **on that mine** (`headTask().roomName == targetName`), not the
+  whole fleet. `roomCarriers` is already fetched for the fleet cap, so this is a filter over
+  ~8 creeps, not a second scan.
+
+The global cap (`outerCarrierFleetCap` / `Memory.marketSettings.outerCarrierMax`) is unchanged
+and still runs first-class; this only corrects which number the starvation exemption compares
+against.
+
+### Tests
+
+`test/edge-link.test.cjs` +1 case with two outer rooms of different depth (3070 vs 6000),
+asserting that the same global fleet that satisfies W34N55 must still let W35N55 recruit.
+
+### Note on the CPU budget
+
+The revived outer chain costs roughly 1.8 CPU/tick, which this account does not have: recent
+100-tick buckets average ~20.6 against a limit of 20, so the bucket has settled against the
+`bucket > 40` floor in `main.js` and the bot is running at roughly half duty. That is a
+budget problem, not a bug in this change - it is what reviving six outer mines costs. Tracked
+separately.
+
 ## v0.78.79 — The outer hauler gate could not be satisfied by its own output
 
 Live: **zero** `outerHarvestEnergyCarrier` in the whole account, both outer rooms of W33N55

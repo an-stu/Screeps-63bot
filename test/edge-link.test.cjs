@@ -1466,4 +1466,55 @@ function defenceGateFixture(defenders) {
         "terminal 6 万 - 储备 3 万 = 3 万可支配 → 不该判穷（旧口径 reserve 5 万只剩 1 万，误判穷）");
 }
 
+// ────── 11) 存货配额必须**按矿房**算，不能拿全局数比全局车数 ──────
+//
+// 一辆搬运爬只跑一条矿点路线。用全局配额比全局车数，会把「A 房挤了 5 只、
+// B 房一只没有」判成「够了」，B 房就永远没人去清。
+// 2026-10-08 实测：W34N55 3070/5 只，W35N55 6000 容器 + 7105 地面/2 只，
+// 全局配额 floor(3070/2500)=1，被全局挡住。
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+
+    const containers = {};
+    const mkRoom = (roomName, amounts) => {
+        const stations = {};
+        amounts.forEach((amount, i) => {
+            const id = roomName + "c" + i;
+            containers[id] = { id: id, store: makeStore({ energy: amount }, 2000) };
+            stations["s" + i] = {
+                id: "s" + i, roomName: roomName, x: 5, y: 5, container: id,
+                roadPathStr: encodePath([{ roomName: roomName, x: 5, y: 5 },
+                                         { roomName: "W33N55", x: 1, y: 23 }]),
+                roadPathTick: 99999,
+            };
+        });
+        return { stationSources: stations };
+    };
+    ctx.Memory.rooms = {
+        W34N55: mkRoom("W34N55", [1700, 1370, 0]),      // 3070
+        W35N55: mkRoom("W35N55", [2000, 2000, 2000]),   // 6000
+        W33N55: { stationSources: {} },
+    };
+    ctx.Game.rooms = { W33N55: { name: "W33N55" } };
+    ctx.Game.getObjectById = id => containers[id] || null;
+    const spawnRoom = { name: "W33N55", my: true };
+
+    assert.equal(S.outerMineEnergyWaiting(spawnRoom, "W34N55"), 3070, "按房取 W34N55 的存货");
+    assert.equal(S.outerMineEnergyWaiting(spawnRoom, "W35N55"), 6000, "按房取 W35N55 的存货");
+    assert.equal(S.outerMineEnergyWaiting(spawnRoom), 9070, "不传房名 = 全部外矿房之和");
+    assert.equal(S.outerCarrierBacklogQuota(spawnRoom, "W34N55"), 1, "W34N55 只喂得起 1 只");
+    assert.equal(S.outerCarrierBacklogQuota(spawnRoom, "W35N55"), 2, "W35N55 喂得起 2 只");
+
+    // 关键：全局车数（这里模拟 5 只）已经超过全局配额，但 W35N55 只有 1 只
+    // → 对 W35N55 必须仍然放行。
+    const globalFleet = 5;
+    const onW35 = 1;
+    assert.ok(globalFleet >= S.outerCarrierBacklogQuota(spawnRoom),
+        "全局判据会误判成「够了」");
+    assert.ok(onW35 < S.outerCarrierBacklogQuota(spawnRoom, "W35N55"),
+        "按房判据才看得出 W35N55 还缺车 → 必须放行");
+}
+
 console.log("edge link / hauler body / defence gate checks passed");

@@ -3233,8 +3233,13 @@ let pro = {
         return cap;
     },
     /**
-     * 外矿房里**堆着等运**的能量总量（每个矿点容器的存量；容器的存量不够说明
-     * 问题时再补扫地面掉落）。
+     * 外矿房里**堆着等运**的能量总量。
+     *
+     * `roomFilter` 给定时只统计那一个外矿房，否则统计本房主房下的全部外矿房。
+     * **必须能按房分开算**：出货的缺口是**分矿点**的，一辆车也只能服务一条路线
+     * —— 只按全局总量判，会出现「W34N55 挤了 5 只、W35N55 一只没有，而全局
+     * 车数已够」这种分布失衡（2026-10-08 实测：W34N55 3070/5 只，W35N55
+     * 6000 容器 + 7105 地面/2 只）。
      *
      * 「以本房为主房」的判据与 outerRouteUnion / outerCarrierFleetCap 完全一致
      * （roadPathStr 的房间清单含本房），这样三处不会各自漂移。
@@ -3245,12 +3250,16 @@ let pro = {
      * 掉在容器那一格，正常情况下容器存量本身就已经远超判据，不必再多做两次
      * `room.find(FIND_DROPPED_RESOURCES)`（带 filter 的全房扫描不便宜）。
      */
-    outerMineEnergyWaiting(spawnRoom) {
-        if (spawnRoom._outerMineWaiting !== undefined) return spawnRoom._outerMineWaiting;
+    outerMineEnergyWaiting(spawnRoom, roomFilter) {
+        let cacheKey = roomFilter || "*";
+        let cache = spawnRoom._outerMineWaiting;
+        if (!cache) cache = spawnRoom._outerMineWaiting = {};   // room 对象每 tick 重建
+        if (cache[cacheKey] !== undefined) return cache[cacheKey];
         let total = 0;
         let outerRooms = {};
         for (let roomName in Memory.rooms) {
             if (roomName == spawnRoom.name) continue;
+            if (roomFilter && roomName != roomFilter) continue;
             let stations = Memory.rooms[roomName][pro.stationName];
             if (!stations) continue;
             _.values(stations).forEach(data => {
@@ -3271,7 +3280,7 @@ let pro = {
                     .forEach(e => { total += e.amount || 0; });
             }
         }
-        spawnRoom._outerMineWaiting = total;        // room 对象每 tick 重建，不需要清
+        cache[cacheKey] = total;
         return total;
     },
     /**
@@ -3290,11 +3299,18 @@ let pro = {
      * 返回值 = 存货能喂饱几只（每只成本 OUTER_CARRIER_COST、一趟运 1700），
      * 天然收敛：货清完就归零，**不会把闸门永久架空**。所以只在闸门判真时拿它
      * 当豁免，不用它取代闸门。
+     *
+     * `roomFilter` 必须按**目标矿房**传（调用点已经有一个 targetName）：
+     * 一辆搬运爬只跑一条矿点路线，拿全局配额去比全局车数会把「A 房挤了 5 只、
+     * B 房一只没有」判成「够了」。见 outerMineEnergyWaiting 的实测数字。
      */
-    outerCarrierBacklogQuota(spawnRoom) {
-        if (spawnRoom._outerCarrierBacklogQuota !== undefined) return spawnRoom._outerCarrierBacklogQuota;
-        let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom) / OUTER_CARRIER_COST);
-        spawnRoom._outerCarrierBacklogQuota = quota;
+    outerCarrierBacklogQuota(spawnRoom, roomFilter) {
+        let cacheKey = roomFilter || "*";
+        let cache = spawnRoom._outerCarrierBacklogQuota;
+        if (!cache) cache = spawnRoom._outerCarrierBacklogQuota = {};
+        if (cache[cacheKey] !== undefined) return cache[cacheKey];
+        let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom, roomFilter) / OUTER_CARRIER_COST);
+        cache[cacheKey] = quota;
         return quota;
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
@@ -3353,11 +3369,20 @@ let pro = {
         //
         // **但闸门不能自锁**：它的输入（主房能量）恰好是外矿搬运爬的产出，
         // 车一没就是环 —— 车没了 → 货回不来 → 主房穷 → 闸门恒真 → 永远不出车。
-        // 实测两次（2026-10-04 / 2026-10-07，见 outerCarrierBacklogQuota 注释）。
-        // 豁免按**外矿存货**折算出该有几只（每只成本 2500、一趟运 1700），
-        // 存货清完自动失效，所以不会把闸门永久架空；车队已经到配额就不再多出。
+        // 实测两次（2026-10-04 / 2026-10-07 / 10-08，见 outerCarrierBacklogQuota 注释）。
+        // 豁免按**本矿房存货**折算出该有几只（每只成本 2500、一趟运 1700），
+        // 存货清完自动失效，所以不会把闸门永久架空；本矿房的车队已经到配额就不再多出。
+        //
+        // 计数必须**只数跑这条矿点**的车（按 headTask 的目标房名），不能用全局
+        // 车数：一辆车只服务一条路线，全局计数会把「别的矿点挤满了、这个矿点
+        // 一只没有」判成「够了」——2026-10-08 实测 W34N55 5 只 / W35N55 2 只，
+        // 而 W35N55 还压着 6000 容器 + 7105 地面。
+        let onThisMine = roomCarriers.filter(c => {
+            let t = c.headTask && c.headTask();
+            return t && t.roomName == targetName;
+        }).length;
         if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)
-            && roomCarriers.length >= pro.outerCarrierBacklogQuota(spawnRoom)) return null;
+            && onThisMine >= pro.outerCarrierBacklogQuota(spawnRoom, targetName)) return null;
         if (roomCarriers.length >= carrierMax) return null;
         // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
         // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
