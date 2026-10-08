@@ -1,3 +1,44 @@
+## v0.78.83 — Stop buying power, and raise the power bank bar to 6000
+
+Two user instructions (2026-10-08).
+
+### `autoBuyPower` no longer buys anything
+
+It was already unreachable - its only call site in `autoBuy()` was commented out, and live
+there is exactly one buy order (40k energy in W33N55, no power). But the **body** still built
+orders, so re-enabling one line would have started buying 3000 power per room again (price
+capped at 2200) and repricing existing ones.
+
+It is now the opposite: cancel any power buy order we own, and the call is wired back in so
+it runs every 100 ticks. `Game.market.orders` only ever contains our own orders, so this
+cannot touch anybody else's. It only cancels **buys** - a power sell order is left alone.
+
+### Power bank collection threshold: 5000 -> 6000
+
+`strategy_powerBank.js` had two thresholds stacked on the same decision:
+
+    if (isSaveCpu && powerBankData.power < Math.min(10000 - bucket, 5000)) skip
+    if (powerBankData.power < MIN_POWER) skip          // MIN_POWER = 5000
+
+The first one is a no-op and always has been: `Math.min(10000 - bucket, 5000)` can never
+exceed 5000, so the `MIN_POWER` check right below it was the binding one. Worse, it is a
+second copy of the same number - raising `MIN_POWER` to 6000 would have left it there
+silently pulling the bar back to 5000 whenever the bucket dropped. Both the dead expression
+and the redundant branch are gone; `MIN_POWER = 6000` is now the single source of truth.
+
+### Tests
+
+New `test/power-market.test.cjs`. It loads the real `strategy_market.js` in a VM and asserts
+that two power buys are cancelled, no order is created, no price is touched, and that energy
+/ ops buys and power **sells** survive. Plus a source-level guard tying `MIN_POWER` to 6000
+and asserting the dead bucket-adaptive expression is gone (the assertion strips `//` comments
+first - the explanatory comment quotes the removed expression verbatim, which is exactly how
+the first version of this test failed).
+
+Negative control is behavioural, not a stub artifact: restoring the old `autoBuyPower` makes
+it fail on "自家 power 买单要全部撤掉" (the stub deliberately *records* `changeOrderPrice`
+instead of throwing, so the old code runs to completion).
+
 ## v0.78.82 — A room that cannot afford energy does not get to burn it on ops
 
 `StrategyHighLevel.processPowerSpawn` converts 50 energy + 1 power into 1 ops per tick. Its

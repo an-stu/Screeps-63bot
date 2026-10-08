@@ -4,7 +4,7 @@
 let avoidRoom = ["W35N50", "W34N50", "W33N50", "W33N60", "W32N60", "W31N60", "E44S40"]
 let hostileRoom = ['W30N53', "W30N51", "W30N52", "W30N54", "W30N55", 'W36N50', 'W37N50']
 
-let MIN_POWER = 5000 // 少于这个量的不去挖
+let MIN_POWER = 6000 // 少于这个量的不去挖（用户 2026-10-08 从 5000 提到 6000）
 let MIN_DECAY = 4200 // 第一次看到的消失时间少于此值不采集
 let ROOM_MAX_POWER_CNT = 300000 // 房间抛瓦大于这么多就不挖了
 
@@ -289,10 +289,14 @@ let pro = {
             pro.recordMissionDecision(targetRoomName, powerBankData, "skip:power-stock-cap", spawnRoomName);
             return;
         }
-        if (isSaveCpu && powerBankData.power < Math.min((10000 - Game.cpu.bucket), 5000)) {
-            pro.recordMissionDecision(targetRoomName, powerBankData, "skip:cpu-power-threshold", spawnRoomName);
-            return;
-        }
+        // 采集阈值：少于 MIN_POWER 的窝不去打（用户 2026-10-08 要求抬到 6000）。
+        //
+        // 这里原来还压着一层「桶自适应」：
+        //   if (isSaveCpu && powerBankData.power < Math.min(10000 - bucket, 5000))
+        // 意图是「桶满时连小窝也顺路打」。但它的取值**永远 ≤ 5000**，而紧随其后的
+        // `power < MIN_POWER`（当时也是 5000）才是真正生效的那道 —— 也就是说那层
+        // 自适应从来没起过作用，只是一次多余计算 + 一个会随 MIN_POWER 漂移的重复
+        // 数字：MIN_POWER 一旦抬到 6000，它还会把阈值偷偷降回 5000。已删除。
         if (powerBankData.power < MIN_POWER) {
             pro.recordMissionDecision(targetRoomName, powerBankData, "skip:low-power", spawnRoomName);
             return;

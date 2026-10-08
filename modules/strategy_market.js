@@ -210,7 +210,9 @@ let pro = {
             }
             // RCL<8 的升级房持续大量买能量，不依赖 buyEnergy 开关。
             pro.autoBuyLowRclEnergy();
-            // pro.autoBuyPower();
+            // 不买 power（用户 2026-10-08）：这一路现在只负责**撤销**自家 power 买单，
+            // 见 autoBuyPower 的说明。
+            pro.autoBuyPower();
             // 自动买depo
             // if (Game.shard.name.startsWith("shard2")) {
             //     let depoBuyPriceMap = StrategyMarketPrice.getAutoBuyDepoPrice();
@@ -577,34 +579,23 @@ let pro = {
             }
         }
     },
+    /**
+     * **不再买 power**（用户 2026-10-08 指示）。
+     *
+     * 原实现：本房能量 >25 万且 power ≤1000 时挂 3000 的买单（价上限 2200），
+     * 并把已有买单持续抬到市价。调用点早先已被注释掉，所以实际上没在买；
+     * 但函数体还留着「会建单」的代码 —— 一旦有人把调用接回去就会重新开始买。
+     *
+     * 现在反过来做**收敛**：把账号下任何 power 买单撤掉。
+     *  - 只动自己的单：`Game.market.orders` 本来就只有自己的，
+     *    别人挂的单不会出现在里面，`cancelOrder` 也只对自己有效；
+     *  - 放在 autoBuy 的常规路径里跑（每 100 tick 一次），
+     *    这样即便历史上留下的单、或将来哪条路径又偷偷建了单，都会被清掉。
+     */
     autoBuyPower() {
-        let myRoomSet = ManagerRooms.getNormalRoom().map(e => e.name).toSet()
-        let myRooms = _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == RESOURCE_POWER)
-            .map(e => e.roomName).filter(e => myRoomSet.has(e)).toSet();
-        let maxPrice = StrategyMarket.getAllOrdersCacheList(RESOURCE_POWER, ORDER_BUY)
-            .filter(e => !myRoomSet.has(e.roomName))
-            .map(e => e.price).maxBy(e => e) || 0
-        maxPrice += StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
-        if (maxPrice > 2200) maxPrice = 2200;
-        _.values(Game.market.orders).filter(e => e.remainingAmount && e.resourceType == RESOURCE_POWER && e.type == ORDER_BUY).forEach(e => {
-            // 价格没变就不调：抬价时引擎按 (新价-旧价)×剩余量×5% 收信用点
-            if (Math.abs(e.price - maxPrice) < 0.001) return;
-            Game.market.changeOrderPrice(e.id, maxPrice)
-        });
-
-        ManagerRooms.getNormalRoom().filter(e => !myRooms.has(e.name) && e.terminal).map(room => {
-            let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY)
-            let powerCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_POWER)
-            if (energyCnt > 250000 && powerCnt <= 1000) {
-                let isBuy = pro.buySome(room, RESOURCE_POWER, maxPrice * 1.05, 3000)
-                if (!isBuy) Game.market.createOrder({
-                    type: ORDER_BUY,
-                    resourceType: RESOURCE_POWER,
-                    price: maxPrice,
-                    totalAmount: 3000,
-                    roomName: room.name,
-                })
-            }
+        _.values(Game.market.orders).forEach(e => {
+            if (e.type != ORDER_BUY || !e.remainingAmount || e.resourceType != RESOURCE_POWER) return;
+            Game.market.cancelOrder(e.id);
         });
     },
     /**
