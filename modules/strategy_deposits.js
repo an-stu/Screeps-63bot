@@ -8,8 +8,13 @@
  * 可挖量已经不多；那些爬不如放到新出现的窝上。
  *
  * 用户 10-09 指示「减少采集 deposit、提高效率」，shard3 由 60 降到 **40**
- * （挖到约 2/3 就收手）。**注意续派还会放宽 `offset`（walkableAroundCnt*10-10，
- * 最多 +20）**，所以实际「在挖」的末刻度是 60 而不是 40。
+ * （挖到约 2/3 就收手）。
+ *
+ * **「派新队」和「续派补员」两道闸用同一个数**。原先是「派新队用上限、续派再加
+ * `offset = walkableAroundCnt*10-10`（最多 +20）」—— 后者让一个已经挖到上限的窝
+ * 还能继续补员到 +20，等于把刚下调的阈值又抬回去（实测：把派新队降到 40 后，
+ * 45/56/57 的三个任务照旧在补员）。既然现在的语义是「挖到 N 就收手」，
+ * 两道闸就该同源；walkableAroundCnt 只用来定**同时在岗几只**，不再定挖多久。
  */
 let MAX_COOL_DOWM_DEFAULT = (() => {
     if (Game.shard.name == "shard3") return 40;
@@ -228,8 +233,7 @@ let pro = {
             if (!flag.memory.walkableAroundCnt) {
                 flag.memory.walkableAroundCnt = Math.min(flag.pos.walkableAroundCnt(), 3)
             }
-            let offset = Math.min(flag.memory.walkableAroundCnt, 3) * 10 - 10
-            if (Game.time < flag.memory.disappearTime && flag.memory.lastCooldown < maxCoolDown() + offset
+            if (Game.time < flag.memory.disappearTime && flag.memory.lastCooldown < maxCoolDown()
                 && (flag.memory.depositType != RESOURCE_MIST || flag.memory.lastCooldown < maxCoolDown())) {// 如果是mist减半，少挖点，没啥用
                 if (flag.memory.beAttackTime + ATTACKED_SLEEP > Game.time) return;
                 let harTtlCreepCnt = flag.memory.harvesters.map(id => Game.getObjectById(id)).filter(e => e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 150).length

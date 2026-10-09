@@ -1,3 +1,34 @@
+## v0.78.85 — The deposit limit has to govern reinforcement too, or nothing changes
+
+v0.78.84 lowered the deposit bar to 40 but **nothing moved**: the seven live missions kept the
+same 13 `harDeposits` / 6 `carrierDeposits` and the ones sitting at `lastCooldown` 45 / 56 / 57
+kept being reinforced.
+
+The reason is that there were two bars on the same decision:
+
+    createOrUpdateDepositMission:  lastCooldown > maxCoolDown()        -> do not commit
+    reinforcement gate:            lastCooldown < maxCoolDown() + offset
+
+`offset = walkableAroundCnt * 10 - 10` (up to +20) was meant to let a deposit with more
+walkable tiles keep going longer. But it sits on the *continue* side, so raising the bar to 40
+still left reinforcement running to 60 - the new number was silently overridden by the second
+copy, exactly the pattern v0.78.83 fixed for the power bank bar.
+
+### Fixed
+
+- Both gates now use `maxCoolDown()`. `walkableAroundCnt` still decides **how many harvesters
+  stand on the deposit at once** - it no longer decides **how long we keep mining it**.
+- Dead `offset` local removed.
+
+### Tests
+
+`test/deposit-threshold.test.cjs` +2 assertions: the reinforcement gate must not add anything
+to `maxCoolDown()`, and the `offset` local must not come back. Negative control: re-introducing
+the `+ offset` fails on "续派闸不能再用 offset 放宽上限".
+
+Also carries a small v0.78.84 addendum: the earlier entry described the offset as retained, which
+was true of that deploy and is corrected here.
+
 ## v0.78.84 — Mine deposits less, and stop committing teams to spent ones
 
 User instruction (2026-10-09): keep deposit harvesting, but there are seven missions running -

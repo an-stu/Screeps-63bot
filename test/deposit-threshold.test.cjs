@@ -63,6 +63,13 @@ function load({ shard = "shard3", marketSettings = {} } = {}) {
     assert.ok(!/\bMAX_COOL_DOWM\b/.test(codeOnly.replace(/MAX_COOL_DOWM_DEFAULT/g, "")),
         "不应再残留裸的 MAX_COOL_DOWM 引用（旧常量已改名）");
     assert.ok(codeOnly.includes("maxCoolDown()"), "判定点必须用 maxCoolDown()");
+    // 「派新队」与「续派补员」两道闸必须同源。原来续派会再加 offset
+    // （walkableAroundCnt*10-10，最多 +20），把刚下调的阈值又抬回去 ——
+    // 实测把派新队降到 40 后，45/56/57 的三个任务照旧在补员。
+    assert.ok(!/lastCooldown\s*<\s*maxCoolDown\(\)\s*\+/.test(codeOnly),
+        "续派闸不能再用 offset 放宽上限");
+    assert.ok(!/let offset = Math\.min\(flag\.memory\.walkableAroundCnt/.test(codeOnly),
+        "offset 只用来定在岗只数，不该再参与「挖多久」");
 }
 
 console.log("deposit harvest threshold checks passed");
