@@ -1,11 +1,32 @@
 
-let MAX_COOL_DOWM = (() => {
-    if (Game.shard.name == "shard3") return 60;
+/**
+ * 一处 deposit 挖到「已开采刻度」超过这个值就不再**派新队**（shard3 缺省值）。
+ *
+ * `lastCooldown` 是**已经挖掉的刻度**：0 = 刚出现，越大越接近耗尽，它单调增长而
+ * 剩下的可挖量随之减少。末段的收益/成本比很差 —— 一个矿点要配 1~3 只
+ * `harDeposits` + 1 只 `carrierDeposits`，再加单程 pathTime 的跑路，而剩下的
+ * 可挖量已经不多；那些爬不如放到新出现的窝上。
+ *
+ * 用户 10-09 指示「减少采集 deposit、提高效率」，shard3 由 60 降到 **40**
+ * （挖到约 2/3 就收手）。**注意续派还会放宽 `offset`（walkableAroundCnt*10-10，
+ * 最多 +20）**，所以实际「在挖」的末刻度是 60 而不是 40。
+ */
+let MAX_COOL_DOWM_DEFAULT = (() => {
+    if (Game.shard.name == "shard3") return 40;
     if (Game.shard.name == "shard2") return 120;
     if (Game.shard.name == "shard1") return 120;
     if (Game.shard.name == "shard0") return 120;
     return 50;
 })();
+/**
+ * 取当前的采集上限。**每次读取时判 Memory**，所以
+ * `Memory.marketSettings.depositMaxCooldown` 改完立刻生效，不必重传代码
+ * （原写法在模块加载时把常量算死，调参要等下一次 reload）。
+ */
+let maxCoolDown = () => {
+    let knob = Number(Memory.marketSettings && Memory.marketSettings.depositMaxCooldown);
+    return knob > 0 ? knob : MAX_COOL_DOWM_DEFAULT;
+};
 let BOOST_COOL_DOWN = 90
 let ATTACKED_SLEEP = 1200
 let AVOID_ROOMS = ["W30N51", "W30N50", "W34N50", "E44S40"]
@@ -103,7 +124,7 @@ Creep.prototype.carryDeposit = function () {
         let deposit = Game.getObjectById(task["id"]);
         if (deposit) {
             flag.memory.lastCooldown = deposit.lastCooldown;
-            if (flag.memory.harvesters.length == 0 && deposit && deposit.lastCooldown >= MAX_COOL_DOWM) {
+            if (flag.memory.harvesters.length == 0 && deposit && deposit.lastCooldown >= maxCoolDown()) {
                 flag.memory.waitTime = (flag.memory.waitTime || 0) + 1
             }
         }
@@ -148,7 +169,7 @@ let pro = {
     createOrUpdateDepositMission(targetRoomName, depositData) {//
         if (AVOID_ROOMS.indexOf(targetRoomName) !== -1) return;
         let spawnRoomName = StationObserver.getClosedMyRoomName(targetRoomName);
-        if (!spawnRoomName || depositData.lastCooldown > MAX_COOL_DOWM) return;
+        if (!spawnRoomName || depositData.lastCooldown > maxCoolDown()) return;
         let flagName = "deposit_" + spawnRoomName + "_" + targetRoomName + "_" + depositData.x + "_" + depositData.y;
         if (!Memory.flags[flagName]) Memory.flags[flagName] = {}
         let flagMemory = Memory.flags[flagName];
@@ -208,8 +229,8 @@ let pro = {
                 flag.memory.walkableAroundCnt = Math.min(flag.pos.walkableAroundCnt(), 3)
             }
             let offset = Math.min(flag.memory.walkableAroundCnt, 3) * 10 - 10
-            if (Game.time < flag.memory.disappearTime && flag.memory.lastCooldown < MAX_COOL_DOWM + offset
-                && (flag.memory.depositType != RESOURCE_MIST || flag.memory.lastCooldown < MAX_COOL_DOWM)) {// 如果是mist减半，少挖点，没啥用
+            if (Game.time < flag.memory.disappearTime && flag.memory.lastCooldown < maxCoolDown() + offset
+                && (flag.memory.depositType != RESOURCE_MIST || flag.memory.lastCooldown < maxCoolDown())) {// 如果是mist减半，少挖点，没啥用
                 if (flag.memory.beAttackTime + ATTACKED_SLEEP > Game.time) return;
                 let harTtlCreepCnt = flag.memory.harvesters.map(id => Game.getObjectById(id)).filter(e => e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 150).length
                 let carrierTtlCreepCnt = flag.memory.carriers.map(id => Game.getObjectById(id)).filter(e => e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 300).length

@@ -1,3 +1,53 @@
+## v0.78.84 — Mine deposits less, and stop committing teams to spent ones
+
+User instruction (2026-10-09): keep deposit harvesting, but there are seven missions running -
+are there really that many? Mine less of each deposit and be more efficient about it.
+
+Live, all seven were `biomass`, holding 19 creeps between them:
+
+    mission            type      lastCooldown  remaining life  har  carrier  walkable
+    E41S32/E44S30      biomass        61            48309       0      0        3
+    E53S21/E57S20      biomass        56            49042       2      1        3
+    E41S23/E40S19      biomass        57            48633       3      1        3
+    E41S23/E40S23      biomass        35            48618       1      1        1
+    E53S21/E50S21      biomass        45            49052       1      1        3
+    E49S31/E50S28      biomass        37            49135       3      1        3
+    E41S32/E40S29      biomass        16            49145       3      1        3
+
+`lastCooldown` is the **amount already extracted** (0 = fresh, larger = closer to spent), and it
+only ever grows while the remaining resource shrinks. The tail of a deposit is the worst part
+of it: a mission still costs 1-3 `harDeposits` plus a `carrierDeposits` and a full one-way
+`pathTime` of walking, for a shrinking return. Those creeps are better spent on a fresh
+deposit.
+
+### Changed
+
+- `MAX_COOL_DOWM` on shard3: **60 -> 40** (roughly two thirds extracted, then stop).
+  The other shards keep 120/120/120/50. Note the spawn gate still adds `offset`
+  (`walkableAroundCnt * 10 - 10`, up to +20), so a deposit that already has a team is
+  reinforced up to 60 - the 40 only governs committing a *new* team.
+- The constant is no longer frozen at module load. `maxCoolDown()` reads
+  `Memory.marketSettings.depositMaxCooldown` on every call, so retuning no longer needs a
+  code upload. `MAX_COOL_DOWM_DEFAULT` keeps the per-shard defaults.
+- Cleaned the name: the old `MAX_COOL_DOWM` is gone so there is exactly one place that
+  answers "how far do we mine this", rather than a second copy that a future edit could miss.
+
+### Found, not changed
+
+`BOOST_COOL_DOWN = 90` is unreachable. Boosting needs `lastCooldown > 90`, but the spawning
+gate above it closes at `maxCoolDown() + offset` <= 80 (and <= 60 now), so the branch that
+sets `needBoost` can never see a qualifying value - deposit harvesters are never boosted, and
+the boost compounds the code prepares are never spent. Left as-is because tuning boost is a
+separate decision; flagged here.
+
+### Tests
+
+New `test/deposit-threshold.test.cjs` slices the constant block out of the module (same trick
+as `market-phase.test.cjs`, since the module's top level needs live game objects) and asserts:
+shard3 = 40, the other shards unchanged, the Memory override wins, and that the override is
+read **live** (mutating Memory flips the answer without reloading). Two negative controls:
+restoring 60 fails, and freezing it back into a load-time constant fails.
+
 ## v0.78.83 — Stop buying power, and raise the power bank bar to 6000
 
 Two user instructions (2026-10-08).
