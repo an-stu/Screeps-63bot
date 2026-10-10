@@ -1,3 +1,51 @@
+## v0.78.88 — A wedged OpSource task was blocking the whole power creep
+
+User asked why the OP-source ability (PWR_REGEN_SOURCE) is not used when so many rooms have it,
+and pointed out that **both** sources need it or the energy income drops.
+
+It *is* used: 12 power creeps all carry `PWR_REGEN_SOURCE` at lv4-5 with cooldown 0, and 19 of
+the 26 sources carry the effect. But **7 sources are bare**, and the reason is not the ability:
+
+    P5  (E59S38)  pc=41,31  target=38,35  d=4  effect none
+    P9  (E41S23)  pc=31,46  target=27,45  d=4  effect none
+
+`PWR_REGEN_SOURCE` has **range 3**. Both creeps sit at distance 4 and do not move (P5 was at
+41,31 at tick 83544466 and still there 13 ticks later). And `OpSource` only pops its task when
+`usePower` returns OK:
+
+    if (code == OK) { ...; this.popTask().addTask(goToNearPop).execLastTask(); }
+
+so the failing `usePower` left the task queued **forever**. `isFree()` stayed false, which means
+`StrategyFactoryPowerCreep.execRoom`'s `if (pc.isFree())` block never ran again - the creep could
+not do *anything* else (OpExt, OpSpawn, OpStorage, ...) and that source never got its effect.
+All four probed creeps were stuck on exactly one task: `OpSource`.
+
+### Fixed
+
+- `OpSource` counts consecutive failures (out of range, or `usePower` != OK) and, after
+  `OP_SOURCE_STUCK_ATTEMPTS` (3), **pops the task** and marks that source unreachable for
+  `OP_SOURCE_UNREACHABLE_TTL` (200 ticks). The counter and the mark are cleared on success.
+- `needOpSource` **skips sources marked unreachable**, so the creep goes and does the *other*
+  source instead of hammering the one it cannot reach - which is the behaviour the user asked
+  for. The mark expires, so it retries later rather than giving up for good.
+
+### Also found (not changed)
+
+**W34N52 has no power creep and no `OPF` flag at all** (12 flags for 13 rooms), so neither of its
+sources can ever get the effect. Spawning a 13th power creep is a bigger decision (power creep
+count is capped by GCL), so it is reported rather than done.
+
+### Tests
+
+New `test/power-source.test.cjs` (loads the real module in a VM; the top level copies
+`Creep.prototype` onto `PowerCreep.prototype`, so `_` and `Creep` must exist before it loads, and
+the array `head` extension is needed too). Covers: both sources covered -> no action; one bare ->
+that one; **one marked unreachable -> the other one**; both unreachable -> nothing; TTL expiry ->
+retry; cooldown -> nothing; and for `OpSource`, that 3 consecutive failures pop the task and set
+the unreachable mark (both for out-of-range and for a failing `usePower`), plus the success path
+clearing both. Negative control: the old implementation fails on
+"a 暂时够不到 → 换 b，而不是死磕 a".
+
 ## v0.78.87 — A stopped mineral chain must not keep a container site around
 
 User instruction (2026-10-10): if the mineral chain is off, do not build a container next to

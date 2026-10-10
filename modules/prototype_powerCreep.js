@@ -45,15 +45,30 @@ let OPS_MIN_CARRY_CNT = 200
 
 
 let OP_SOURCE_WAIT_TIME = 50
+/**
+ * 连续几次「够不到 source / 放不出技能」之后，就先把这个 source 记成**暂时不可达**、
+ * 让 PC 去照顾**另一个** source（用户 10-10：两个 source 都要，否则能量少很多）。
+ *
+ * 背景：`OpSource` 只在 `usePower` 返回 OK 时才弹栈，所以只要 PC 进不了射程
+ * （实测 P5/P9 停在 range 4，技能 range 3、而且原地不动），这个任务就**永远挂着**
+ * —— `isFree()` 恒 false，PC 的其它能力（OpExt / OpSpawn / OpStorage…）全都轮不到，
+ * 对应的 source 也永远上不了 REGEN。全服 26 个 source 里 7 个是这个状态。
+ */
+let OP_SOURCE_STUCK_ATTEMPTS = 3
+/** 记成不可达的时长（tick），到点自动重试，不会永久放弃 */
+let OP_SOURCE_UNREACHABLE_TTL = 200
 PowerCreep.prototype.needOpSource = function () {
     let pcPower = this.powers[PWR_REGEN_SOURCE]//
     if (pcPower && pcPower.cooldown < OP_SOURCE_WAIT_TIME) {
         let source = this.mainRoom().source;
+        // 暂时够不到的先跳过（见 OP_SOURCE_STUCK_ATTEMPTS 的说明）——
+        // 不跳的话它会一直返回同一个够不到的 source，另一个永远轮不到。
+        let unreach = this.memory.opSourceUnreachable || {};
         for (let s of source) {
             let pathTime = StationSources.sourcePathTime(this.mainRoom(), s);
-            if (!s.effects || !s.effects.length || s.effects.head().ticksRemaining < pathTime + 5) {
-                return s
-            }
+            if (s.effects && s.effects.length && s.effects.head().ticksRemaining >= pathTime + 5) continue;
+            if (unreach[s.id] && unreach[s.id] > Game.time) continue;
+            return s
         }
     }
     return false;
@@ -91,20 +106,42 @@ PowerCreep.prototype.OpSource = function () {
     let source = this.lastTaskObj();
     if (pcPower.cooldown > OP_SOURCE_WAIT_TIME || !source) {
         // 必须 return：否则下面会拿着已弹出/undefined 的 source 继续 moveTo+usePower
+        this.memory.opSourceStuck = 0;
         this.popTask().execLastTask();
         return;
     }
+    // 够不到 / 放不出技能时**必须计数并最终弹栈**：原实现只在 usePower==OK 时弹栈，
+    // 一旦 PC 进不了射程（实测卡在 range 4，技能 range 3）任务就永久挂着 ——
+    // isFree() 恒 false，PC 的其它能力全被堵死，这个 source 也永远不上 REGEN。
+    let stuck = () => {
+        let n = (this.memory.opSourceStuck || 0) + 1;
+        this.memory.opSourceStuck = n;
+        if (n < OP_SOURCE_STUCK_ATTEMPTS) return false;
+        let u = this.memory.opSourceUnreachable || (this.memory.opSourceUnreachable = {});
+        u[source.id] = Game.time + OP_SOURCE_UNREACHABLE_TTL;
+        this.memory.opSourceStuck = 0;
+        this.popTask().execLastTask();
+        return true;
+    };
     if (!this.pos.inRangeTo(source, 3)) {
         this.moveTo(source, { range: 3 });
+        stuck();
+        return;
     }
     if (pcPower.cooldown) return;
     let code = this.usePower(PWR_REGEN_SOURCE, source);
     if (code == OK) {
+        this.memory.opSourceStuck = 0;
+        if (this.memory.opSourceUnreachable) delete this.memory.opSourceUnreachable[source.id];
         StationSources.powerSource(this.room, source, pcPower.level);// 标记被用power ，使得爬的体积变大
         let mainRoom = this.mainRoom();
         let obj = mainRoom.storage || mainRoom.terminal || mainRoom.powerSpawn
         if (obj) this.popTask().addTask(UtilsTask.task(obj, "goToNearPop")).execLastTask();
+        return;
     }
+    // 在射程内但技能放不出去（ops 不够 / 目标无效等）：同样要走计数，
+    // 否则照样是这个任务永远挂着。
+    stuck();
 }
 
 PowerCreep.prototype.hasPBInRoom = function (room) {
