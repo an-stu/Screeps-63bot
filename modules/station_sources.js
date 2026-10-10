@@ -1625,11 +1625,19 @@ let pro = {
         let reserve = Math.min(OUTER_TERMINAL_RESERVE, threshold);
         let disposableEnergy = (spawnRoom.storage.store[RESOURCE_ENERGY] || 0)
             + Math.max(0, terminalEnergy - reserve);
-        // 主房可支配能量：再减去 spawn/extension 的缺口
-        let capacity = (spawnRoom.energyCapacityAvailable || 0);
-        let available = spawnRoom.getEnergyAvailable();
-        let deficit = Math.max(0, capacity - available);
-        let disposable = disposableEnergy - deficit;
+        // ⚠️ **不要**再减 spawn/extension 的缺口。原来是
+        //   `disposable = disposableEnergy - (capacity - available)`
+        // 意图是「hive 还等着补，那部分算已被占用」。但那个缺口是**瞬时值**：
+        // hive 容量 12900，只要正在出爬（3 个 spawn 同时工作很常见），缺口就是
+        // 几千到一万四，而它相对 keeper 阈值（2 万）占了 60%+。结果是闸门**跟着
+        // 出爬节奏反复开合**，而外矿 keeper 恰恰是主房的能量来源 —— 一关就没收入，
+        // 房间更穷，闸门关得更死。2026-10-10 实测 W34N55：
+        //   storage 17166 / terminal 24212 / hive 7580/12900
+        //   disposableEnergy 21378 → 减掉 deficit 5320 = 16058 < 20000 → 判穷
+        //   ⇒ 三个容器 2000/2000 全满、房里 0 只矿工、0 只搬运爬
+        // 而且 hive 的补员是由**本房 carrier** 做的，那道闸从来不挡它们 ——
+        // 缺口被重复扣了一次。去掉这一项后同一时刻 21378 > 20000，闸门正常放开。
+        let disposable = disposableEnergy;
         return disposable < threshold;
     },
     getHarvesterBodyConfig(energy, isOutRoom, level, data) {

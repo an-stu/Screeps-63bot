@@ -32,7 +32,22 @@ let maxCoolDown = () => {
     let knob = Number(Memory.marketSettings && Memory.marketSettings.depositMaxCooldown);
     return knob > 0 ? knob : MAX_COOL_DOWM_DEFAULT;
 };
-let BOOST_COOL_DOWN = 90
+/**
+ * 采到多少刻度之后才值得给 harDeposits 上 boost（避免刚开工就烧化合物）。
+ *
+ * 原来这里写死 **90**，而上面的闸在 `maxCoolDown() + offset`（最多 80，现在 60）就关了
+ * ⇒ `lastCooldown > 90` 恒假，**deposit 采集爬从来没被 boost 过**，代码里准备的
+ * boost 资源也从来没花出去（用户 10-10 指示把这个不一致修掉）。
+ *
+ * 现在按 `maxCoolDown()` 折算（一半）—— 两者永远同源：调采集上限时 boost 点跟着走，
+ * 不会再出现「boost 条件落在可达范围之外」这种死代码。可用
+ * `Memory.marketSettings.depositBoostCooldown` 覆盖。
+ */
+let boostCoolDown = () => {
+    let knob = Number(Memory.marketSettings && Memory.marketSettings.depositBoostCooldown);
+    if (knob > 0) return knob;
+    return Math.max(1, Math.floor(maxCoolDown() / 2));
+};
 let ATTACKED_SLEEP = 1200
 let AVOID_ROOMS = ["W30N51", "W30N50", "W34N50", "E44S40"]
 let ATTACK_ROOMS = ['E50S31', 'E50S30', 'E50S29', 'E50S28', 'E50S27']
@@ -259,7 +274,7 @@ let pro = {
                     extraHars.slice(0, harActiveCnt - flag.memory.walkableAroundCnt).forEach(c => c.suicide());
                 }
                 if (harTtlCreepCnt < flag.memory.walkableAroundCnt && (carrierTtlCreepCnt || harTtlCreepCnt < 2)) {
-                    let needBoost = flag.memory.lastCooldown > BOOST_COOL_DOWN // 超过一定值后才boost，避免浪费资源
+                    let needBoost = flag.memory.lastCooldown > boostCoolDown() // 采到一定进度才boost，避免刚开工就烧化合物
                         && !flag.memory.harvesters.map(id => Game.getObjectById(id)).find(e => e.memory.isBoost && (e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 150))
                     pro.trySpawnHarDeposits(room, flag.memory, needBoost);
                     return;

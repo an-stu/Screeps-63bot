@@ -1384,7 +1384,7 @@ function defenceGateFixture(defenders) {
 // 车队归零就成环：车没了 → 货回不来 → 主房穷 → 闸门恒真 → 永远不出车。
 // 2026-10-04 与 2026-10-07 两次实测都是这个形状。
 {
-    function gateScene({ storageEnergy, terminalEnergy, containerEnergies, fleet }) {
+    function gateScene({ storageEnergy, terminalEnergy, containerEnergies, fleet, hiveEnergy }) {
         const ctx = makeContext();
         vm.runInNewContext(read("station_sources.js"), ctx);
         const containers = {};
@@ -1409,8 +1409,8 @@ function defenceGateFixture(defenders) {
             terminal: { id: "tm", store: makeStore({ energy: terminalEnergy }, 300000),
                         pos: { x: 22, y: 35, roomName: "W33N55" } },
             energyCapacityAvailable: 12900,
-            getEnergyAvailable: () => 12900,
-            energyAvailable: 12900,
+            getEnergyAvailable: () => (hiveEnergy === undefined ? 12900 : hiveEnergy),
+            energyAvailable: hiveEnergy === undefined ? 12900 : hiveEnergy,
             spawnFailure: false,
             find: () => [],
             lookForAt: () => [],
@@ -1458,6 +1458,24 @@ function defenceGateFixture(defenders) {
                              containerEnergies: [0, 0, 0], fleet: [] });
     assert.equal(rich.S.outerMineStarvesSpawnRoom(rich.spawnRoom, true), false,
         "storage 6 万 → 不穷");
+
+    // ⑤ **出爬造成的 hive 缺口不该把主房判穷**（2026-10-10 现场）。
+    //    原来 disposable = disposableEnergy - (capacity - available)，而 hive 缺口
+    //    是瞬时值（12900 容量下动辄几千），keeper 阈值才 2 万 —— 闸门跟着出爬节奏
+    //    反复开合，外矿 keeper（主房的能量来源）一关就没收入，房间更穷、闸门更死。
+    //    实测 W33N55：storage 17166 / terminal 24212 / hive 7580，disposable 从
+    //    21378 被减到 16058 < 20000 ⇒ 判穷 ⇒ W34N55 三个容器全满却没有一只矿工。
+    const hiveGap = gateScene({ storageEnergy: 17166, terminalEnergy: 24212,
+                                containerEnergies: [2000, 2000, 2000], fleet: [],
+                                hiveEnergy: 7580 });
+    assert.equal(hiveGap.S.outerMineStarvesSpawnRoom(hiveGap.spawnRoom, false), false,
+        "hive 缺口不能把主房判穷（否则外矿矿工永远派不出去）");
+    // 但主房真的没能量时仍然要判穷（不能把闸门废掉）
+    const reallyPoor = gateScene({ storageEnergy: 1000, terminalEnergy: 0,
+                                  containerEnergies: [0, 0, 0], fleet: [],
+                                  hiveEnergy: 0 });
+    assert.equal(reallyPoor.S.outerMineStarvesSpawnRoom(reallyPoor.spawnRoom, false), true,
+        "storage 1000 才是真穷");
 
     // reserve 口径：市场储备不能比闸门阈值本身还大，否则 terminal 整份作废
     const fromTerminal = gateScene({ storageEnergy: 0, terminalEnergy: 60000,

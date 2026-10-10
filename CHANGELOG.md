@@ -1,3 +1,50 @@
+## v0.78.86 — The hive refill was locking the outer mines out of their own income
+
+Checked the outer mines today and found W34N55 stalled: **three containers full at 2000 each,
+one defender in the room, zero miners, zero haulers.**
+
+### Root cause: a transient hive gap decided the keeper gate
+
+`trySpawnOuterHarKeeper` bails out on `outerMineStarvesSpawnRoom(spawnRoom, false)` (threshold
+20000 for keepers), which computed
+
+    disposable = storage + max(0, terminal - reserve) - (capacity - available)
+
+That last term is the spawn/extension **gap right now**. With a hive capacity of 12900 and three
+spawns working, the gap is routinely several thousand - 60%+ of the keeper threshold - so the
+gate flips with the spawning rhythm. And the outer keeper is the **home room's income**, so
+closing it is self-defeating:
+
+    W33N55: storage 17166  terminal 24212  hive 7580/12900
+    disposableEnergy = 21378, deficit = 5320 -> disposable = 16058 < 20000 -> "starved"
+    -> no keeper is ever dispatched -> 3 full containers, no income -> still "starved"
+
+The gap also double-counts: the hive is refilled by the room's **own** carriers, and that gate
+never blocks them. The term is gone; `disposable = disposableEnergy`.
+
+Verified live before and after on the same numbers: 16058 -> 21378, i.e. the gate opens. The
+frame still cuts in for a genuinely poor room (storage 1000 -> starved), asserted.
+
+### Boost threshold is now derived from the mining limit (user instruction)
+
+`BOOST_COOL_DOWN = 90` could never fire: boosting needs `lastCooldown > 90` while the mining
+gate closes at `maxCoolDown() + offset` (80, now 60), so **deposit harvesters were never
+boosted** and the compounds the code prepares were never spent. It is now
+`boostCoolDown() = floor(maxCoolDown() / 2)` (20 on shard3), so the two move together and the
+condition can never fall out of reach again. Overridable with
+`Memory.marketSettings.depositBoostCooldown`.
+
+### Tests
+
+- `test/edge-link.test.cjs`: the hive gap must not mark a room poor (the live numbers), and a
+  genuinely poor room must still be marked poor. Negative control re-adding the deficit fails
+  on "hive 缺口不能把主房判穷（否则外矿矿工永远派不出去）".
+- `test/deposit-threshold.test.cjs`: `boostCoolDown()` = 20, strictly below `maxCoolDown()`,
+  tracks it when the limit changes, honours its own override, **and** asserts on the call site
+  (`lastCooldown > boostCoolDown()`, no hardcoded 90). The first version of that assertion only
+  checked the constant, so hardcoding the call site back to 90 slipped through; the comment
+  stripper also had to learn block comments, since the docs quote the removed expression.
+
 ## v0.78.85 — The deposit limit has to govern reinforcement too, or nothing changes
 
 v0.78.84 lowered the deposit bar to 40 but **nothing moved**: the seven live missions kept the
