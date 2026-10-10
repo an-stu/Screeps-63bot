@@ -934,8 +934,9 @@ Creep.prototype.outerDefense = function () {
         // 最近接手者却是看不见它的组 1，两边都不动（实测 (4,15) keeper 无人接战，
         // 西源矿工被屠）。
         let allies = pro.defenseAllies(this.room);
-        let allLairs = pro.defenseHostileStructures(this.room)
-            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR);
+        // 与 outerDefensePosts / hostileDefenseGroup 共用**同一份排序好的**列表，
+        // 否则各自的顺序不同会把 outerDefenseLairGroups 的缓存互相打掉（见 defenseLairs）。
+        let allLairs = pro.defenseLairs(this.room);
         let hostileCreeps = pro.defenseHostiles(this.room)
             .filter(e => allLairs.some(l => e.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS)
                 || allies.some(c => c.pos.getRangeTo(e.pos) <= OUTER_DEFENSE_HELP_RADIUS));
@@ -3616,9 +3617,9 @@ let pro = {
      */
     outerDefenseAssignmentForSpawn(harRoom, front, replacingFront) {
         if (!harRoom) return {};
-        let lairs = harRoom.find(FIND_HOSTILE_STRUCTURES)
-            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
-            .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
+        // 与运行时共用同一份缓存列表（排序一致 = 分组表缓存命中），
+        // 且顺带走 `defenseHostileStructures` 的访问器而不是裸 find。
+        let lairs = pro.defenseLairs(harRoom);
         if (!lairs.length) return {};
         let groups = pro.outerDefenseLairGroups(harRoom, lairs);
         if (!groups || !groups.length) return {};
@@ -3643,6 +3644,32 @@ let pro = {
         });
         let least = Math.min.apply(null, cnt);
         return pick(cnt.indexOf(least));
+    },
+    /**
+     * 本房 keeper lair 列表（**已按坐标排序**），同 tick 同房只算一次。
+     *
+     * 三个地方要用它：`outerDefense`（威胁判定）、`outerDefensePosts`（岗位分配）、
+     * `hostileDefenseGroup` → `outerDefenseLairGroups`（分组表）。
+     *
+     * ⚠️ **排序不是为了好看，是为了缓存键稳定**：`outerDefenseLairGroups` 的键就是
+     * `lairs.map(id).join(",")`，所以**传入顺序不同 = 两个不同的键**。
+     * 原来 `outerDefense` 传的是 `room.find()` 的引擎顺序、`outerDefensePosts` 传的是
+     * 坐标排序后的顺序 ⇒ 两边每 tick 互相把对方的缓存打掉，
+     * **整组 `PathFinder.search`（4 个窝 = 6 次跨房寻路）被反复重算**，
+     * 3 只防守爬一 tick 能跑几十次 —— 实测 `outerHarvestDefenser` 3 只吃
+     * 3.47 CPU/tick（1.16/只，占全部爬的 37%），这里就是主因。
+     * 统一成一份排序好的列表，缓存键就稳定了。
+     *
+     * room 对象每 tick 重建 ⇒ 缓存天然过期，不会读到跨 tick 的旧位置。
+     */
+    defenseLairs(room) {
+        if (!room) return [];
+        if (room._defLairsCache) return room._defLairsCache;
+        let lairs = pro.defenseHostileStructures(room)
+            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
+            .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
+        room._defLairsCache = lairs;
+        return lairs;
     },
     /**
      * 防守爬共用的「我方爬列表」缓存：同 tick 同房只扫一次。
@@ -3680,9 +3707,9 @@ let pro = {
         let room = creep.room;
         // 走房间缓存访问器（内部优先 room.getHostileStructures），否则每只防守爬
         // 每 tick 一次裸 room.find(FIND_HOSTILE_STRUCTURES)。
-        let lairs = pro.defenseHostileStructures(room)
-            .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
-            .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
+        // 顺序必须与 outerDefense / hostileDefenseGroup 一致：那份顺序就是
+        // outerDefenseLairGroups 的缓存键（见 defenseLairs）。
+        let lairs = pro.defenseLairs(room);
         if (!lairs.length) return [];
         let groups = pro.outerDefenseLairGroups(room, lairs);
         let keys = groups.map(g => pro.defenseGroupKey(g));
@@ -3865,6 +3892,13 @@ let pro = {
         return undefined;
     },
     outerDefenseLairGroups(room, lairs) {
+        // 键是「lair id 按传入顺序 join」⇒ **所有调用点必须传同一个顺序**。
+        // 现在三处（outerDefense / outerDefensePosts / outerDefenseAssignmentForSpawn）
+        // 统一走 `defenseLairs(room)`（坐标排序 + 同 tick 缓存），所以键是稳定的；
+        // 原来 outerDefense 传的是 room.find 的引擎顺序、outerDefensePosts 传的是
+        // 坐标排序顺序，两边每 tick 互相把对方的缓存打掉 —— 整组 PathFinder
+        // （4 个窝 = 6 次跨房寻路）被反复重算，那是 outerHarvestDefenser
+        // 1.16 CPU/只的主因。新增调用点时请务必也用 defenseLairs。
         let key = lairs.map(e => e.id).join(",");
         let mem = room.memory;
         if (mem.defenseLairGroups && mem.defenseLairGroupsKey == key) {

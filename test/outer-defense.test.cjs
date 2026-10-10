@@ -149,6 +149,9 @@ function loadStation(extra) {
         RoomPosition: function (x, y, roomName) { return makePos(x, y, roomName); },
         StationMineral: { stationName: "stationMineral" },
         StationHive: { trySpawn: () => undefined },
+        // `outerDefenseLairGroups` 用 PathFinder 算「窝 ↔ 窝」的真实寻路距离来决定分组；
+        // 桩只要返回一条有长度的路径即可（测试只关心分组/是否重算，不关心具体数值）。
+        PathFinder: { search: () => ({ path: [0, 1, 2, 3, 4] }) },
         UtilsTask: {
             task: (target, taskName) => ({ id: target.id, taskName }),
             taskData: taskName => ({ taskName }),
@@ -368,8 +371,12 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     //（keeper 贴着窝出怪，真实场景里它必然落在守卫半径内）
     const keeper = { id: "k1", body: [{ type: "attack" }], getActiveBodyparts: t => (t === "attack" ? 1 : 0), pos: makePos(40, 15, "W34N55") };
     ctx.Game.getObjectById = id => (id === "core1" ? core : id === "k1" ? keeper : null);
-    creep.room.find = c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [keeper]
-        : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []);
+    // ⚠️ 必须换一个**新的 room 对象**：引擎里 room 对象每 tick 重建，
+    // defenseAllies / defenseLairs 这些「同 tick 同房只算一次」的缓存正是靠这个
+    // 天然过期。这条测试复用同一个 room 桩跑两次 outerDefense（= 两个 tick），
+    // 沿用旧对象会读到上一个 tick 的缓存，把「按 lair 半径判威胁」这条判据整条跳过。
+    creep.room = { name: "W34N55", find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? [keeper]
+        : c == CONSTANTS.FIND_HOSTILE_STRUCTURES ? [lair] : []) };
     ctx.Creep.prototype.outerDefense.call(creep);
     assert.equal(creep.memory.targetId, "k1", "live enemies take priority every tick");
     assert.ok(creep.calls.some(c => c[0] === "attack" && c[1] === "k1"));
@@ -692,5 +699,49 @@ console.log("outer defense checks passed");
     assert.equal(S.hasStopRemoteFlag("W35N55"), false, "har 旗不是停用旗");
 
     assert.equal(S.hasStopRemoteFlag(undefined), false, "空房名不能炸");
+}
+
+// ───────── 分组表的缓存键必须稳定：调用点不能传不同顺序的 lair 列表 ─────────
+//
+// outerDefenseLairGroups 的键就是 `lairs.map(id).join(",")`，所以**传入顺序不同 =
+// 两个不同的键**。原来 outerDefense 传 room.find 的引擎顺序、outerDefensePosts 传
+// 坐标排序顺序 ⇒ 每 tick 互相把对方的缓存打掉，整组 PathFinder（4 个窝 = 6 次跨房
+// 寻路）被反复重算。实测 outerHarvestDefenser 3 只吃 3.47 CPU/tick（1.16/只，
+// 占全部爬的 37%），主因就是这个。现在三处统一走 defenseLairs。
+{
+    let searches = 0;
+    const ctx = loadStation({ PathFinder: { search: () => { searches++; return { path: [0, 1, 2, 3, 4] }; } } });
+    const S = ctx.StationSources;
+
+    // 故意让「引擎顺序」与「坐标排序」不同：(7,17) 的 x 更小，应排到前面
+    const east = { id: "a1", structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    const west = { id: "b2", structureType: "keeperLair", pos: makePos(7, 17, "W34N55") };
+    const room = { name: "W34N55", memory: {}, getHostileStructures: () => [east, west] };
+
+    const lairs = S.defenseLairs(room);
+    assert.deepEqual(lairs.map(e => e.id), ["b2", "a1"],
+        "defenseLairs 按 x 升序排序（这份顺序就是缓存键），与传入的引擎顺序不同");
+    assert.equal(S.defenseLairs(room), lairs, "同 tick 同房只算一次（返回同一份）");
+
+    S.outerDefenseLairGroups(room, lairs);
+    const first = searches;
+    assert.ok(first > 0, "首次要真算：PathFinder 至少跑一次");
+
+    S.outerDefenseLairGroups(room, lairs);
+    assert.equal(searches, first, "同一份列表第二次必须命中缓存，不再寻路");
+
+    // 反过来演示「顺序不同就打掉缓存」—— 这正是原来的 bug 形态，
+    // 所以三个调用点必须全部走 defenseLairs，不能自建列表。
+    // 注意要传真正的反序（[a1, b2]），排序后的 [b2, a1] 和上面同序、不会让键变化。
+    S.outerDefenseLairGroups(room, [east, west]);
+    assert.ok(searches > first, "顺序不同就会重算（所以调用点必须同源）");
+
+    // 源码层面兜一层：自建 keeper lair 列表只应出现在 defenseLairs 内部
+    const codeOnly = stationSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    const builders = codeOnly.match(/filter\(e => e\.structureType == STRUCTURE_KEEPER_LAIR\)/g) || [];
+    assert.equal(builders.length, 1,
+        "只允许 defenseLairs 内部自建列表；别处自建会让缓存键漂移（曾经因此每 tick 重跑整组寻路）");
+    assert.ok(/let lairs = pro\.defenseLairs\(room\)/.test(codeOnly),
+        "outerDefensePosts 必须走 defenseLairs");
 }
 

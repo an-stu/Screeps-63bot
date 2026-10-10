@@ -1,3 +1,54 @@
+## v0.78.91 — The lair-group cache was being invalidated by its own two callers
+
+CPU review of the outer-mining code (user request: cut CPU without changing behaviour). The
+target was already identified by profile: `outerHarvestDefenser` costs **3.47 CPU/tick for 3
+creeps (1.16 each, 37% of all creep CPU)**, while keepers and haulers are healthy (0.074 and
+0.094 per creep).
+
+`outerDefenseLairGroups` caches its pairing table in `room.memory` under
+`defenseLairGroupsKey`, which is built as `lairs.map(e => e.id).join(",")` - **the key depends on
+the order the caller passes the lairs in.** And the two callers disagreed:
+
+    outerDefense          -> pro.defenseHostileStructures(room).filter(...)   // engine order
+    outerDefensePosts     -> the same, then .sort(by x, then y)              // sorted order
+
+So each caller evicted the other's cache on every tick, and every miss re-runs the **whole
+pathfinding batch** inside `outerDefenseLairGroups` - `PathFinder.search` for every pair of
+lairs (4 lairs = 6 cross-room searches). With three defenders calling in twice a tick that is
+tens of cross-room searches per tick, which is the right order of magnitude for the 1.16
+CPU/creep.
+
+### Fixed
+
+- `defenseLairs(room)` (new): the keeper-lair list, **sorted by coordinates**, cached on the
+  room object (which the engine rebuilds every tick, so it cannot go stale). All three callers
+  now use it - `outerDefense`, `outerDefensePosts`, `outerDefenseAssignmentForSpawn` - so the
+  cache key is stable and the pathfinding batch runs once per room per tick at most.
+- `outerDefenseAssignmentForSpawn` was building its own list with a raw
+  `harRoom.find(FIND_HOSTILE_STRUCTURES)`, bypassing both the cached accessor and the whitelist
+  path; it now shares the same cached list.
+- Filtering and sorting the lairs per defender per tick is gone with it (4-element sort, small,
+  but it was per defender per tick).
+
+### Not measured
+
+The outer mining is paused right now (`stopRemote` on W34N55), so the engagement path cannot be
+exercised to confirm the delta. The mechanism is covered by test instead: the new case asserts
+that the same list hits the cache while a reordered list misses it, and that no other call site
+builds its own list.
+
+### Tests
+
+`test/outer-defense.test.cjs`: `defenseLairs` sorts and caches, the group table is computed once
+for a repeated call and recomputed for a reordered one, plus source assertions that only
+`defenseLairs` builds the list and that `outerDefensePosts` uses it. Two pre-existing harness
+gaps had to be fixed on the way: the defence test reused one room stub across two simulated
+ticks (the engine rebuilds the room object every tick, which these caches rely on **and** which
+is what exposed the stale read), and it had no `PathFinder` stub - `outerDefenseLairGroups` had
+never actually been reached in that test before, because the stale cache short-circuited it.
+Negative control: making `outerDefense` build its own list again fails on "只允许 defenseLairs
+内部自建列表".
+
 ## v0.78.90 — A mission that has been committed to gets finished
 
 User instruction (2026-10-10): **do not pause an unfinished power bank / deposit mission** - a
