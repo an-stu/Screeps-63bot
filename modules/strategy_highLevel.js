@@ -18,11 +18,32 @@
  */
 const POWER_SPAWN_ENERGY_FLOOR = 30000;
 
+/**
+ * 本房没有可花的能量时**不生 worker**（用户 10-11 指示：「有的主房间没有能量
+ * 就不要生产 worker 了，也用不了」）。
+ *
+ * worker 的活 —— 建造 / 修墙 / 升级 / 送资源 —— **每一步都要耗能量**：
+ * 房间没能量时生出来确实干不了活，还要和 spawn / keeper 抢那点存货。
+ *
+ * 判据两条，满足其一即可：
+ *   1. **本房有收入**（还活着 keeper 在挖）→ worker 有能量可花，不算「用不了」；
+ *   2. 否则看存量，阈值 `WORKER_ENERGY_FLOOR`（只看 storage —— terminal 是市场
+ *      储备，不给可选消耗背书，见 POWER_SPAWN_ENERGY_FLOOR 的推导）。
+ * 可用 `Memory.marketSettings.workerEnergyFloor` 覆盖。
+ *
+ * ⚠️ **「死房自救」那条路刻意不受影响**：`workerManagerAfterCarrier` 里生的是
+ * **直接去挖矿**的 worker（它自己就是能量来源，产出是能量本身），
+ * 拿存量当门槛会把死房永久锁死。
+ */
+const WORKER_ENERGY_FLOOR = 10000;
+
 let pro = {
     workerManager(room) {
         // 空 hive 保护：hive 缺口大且可用能量很低时不再生 worker，
         // 把 spawn 能量留给 keeper 和 bootstrap carrier（E53S21 教训）。
         if (StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500) return;
+        // 本房根本没能量可花 → 不生 worker（见 WORKER_ENERGY_FLOOR 的说明）
+        if (!pro.workerHasEnergyToSpend(room)) return;
         let spawnWorker = () => {
             let body = StationWork.getMiddleLevelWorkerBodyConfig(room);
             let partCnt = body.filter(e => e == WORK).length;
@@ -450,6 +471,19 @@ let pro = {
         }
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
         room.memory.carryBusy.push(room.creeps("carrier").filter(e => !e.isFree()).reduce((a) => a + 1, 0))
+    },
+    /**
+     * 本房是否有「可供 worker 消耗」的能量（见 WORKER_ENERGY_FLOOR）。
+     *
+     * 有 keeper 在挖 = 有收入 = 花掉的会被补回来；否则要求 storage 达到阈值。
+     */
+    workerHasEnergyToSpend(room) {
+        if (!room) return false;
+        // 有收入（本房还活着挖矿的 keeper）→ worker 干得了活，不算「用不了」
+        if (room.creeps("harvestEnergyKeeper", false).length) return true;
+        let floor = Number(Memory.marketSettings && Memory.marketSettings.workerEnergyFloor)
+            || WORKER_ENERGY_FLOOR;
+        return !!(room.storage && (room.storage.store[RESOURCE_ENERGY] || 0) >= floor);
     },
     /**
      * 本房是否「有余力做可选的能量消耗」（只看本房 storage，见

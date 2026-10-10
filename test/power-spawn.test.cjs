@@ -109,4 +109,40 @@ function makeRoom(storageEnergy, { hasStorage = true } = {}) {
     assert.deepEqual(high.calls, ["processPower"], "9 万仍在覆盖后的门槛之上");
 }
 
+{
+    // ⑦ 本房没有能量就**不生 worker**（用户 10-11：「没有能量就不要生产 worker 了，
+    //    也用不了」）。worker 的活（建造 / 修墙 / 升级 / 送资源）每一步都要耗能量。
+    //    注意「死房自救」那条路刻意不受影响（它生的是去挖矿的 worker）。
+    const ctx = makeContext();
+    const S = ctx.StrategyHighLevel;
+    const mkRoom = ({ storage, keepers }) => ({
+        name: "W33N55",
+        storage: storage === undefined ? undefined : { store: { energy: storage } },
+        creeps: () => new Array(keepers).fill({}),
+    });
+
+    assert.equal(S.workerHasEnergyToSpend(mkRoom({ storage: 50000, keepers: 0 })), true,
+        "存量够 → 可以生");
+    assert.equal(S.workerHasEnergyToSpend(mkRoom({ storage: 0, keepers: 0 })), false,
+        "既没存量又没收入 → 不生（生出来也用不了）");
+    assert.equal(S.workerHasEnergyToSpend(mkRoom({ storage: 9999, keepers: 0 })), false,
+        "差一点也按没能量算");
+    assert.equal(S.workerHasEnergyToSpend(mkRoom({ storage: 0, keepers: 2 })), true,
+        "有 keeper 在挖（有收入）→ 仍然可以生，花掉的会被补回来");
+    assert.equal(S.workerHasEnergyToSpend(mkRoom({ storage: undefined, keepers: 0 })), false,
+        "没有 storage 的房也不生");
+    assert.equal(S.workerHasEnergyToSpend(undefined), false, "拿不到房间不能炸");
+
+    // Memory 覆盖阈值
+    const ctx2 = makeContext({ marketSettings: { workerEnergyFloor: 100 } });
+    assert.equal(ctx2.StrategyHighLevel.workerHasEnergyToSpend(mkRoom({ storage: 200, keepers: 0 })), true,
+        "阈值可覆盖");
+
+    // 调用点必须真的挂上（只测 helper 抓不到「helper 在、但没人调」）
+    const codeOnly = read("strategy_highLevel.js")
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/if \(!pro\.workerHasEnergyToSpend\(room\)\) return;/.test(codeOnly),
+        "workerManager 开头必须挂这道闸");
+}
+
 console.log("powerSpawn energy floor checks passed");

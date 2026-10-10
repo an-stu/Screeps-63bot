@@ -1,3 +1,40 @@
+## v0.78.89 — A room with nothing to spend does not get a worker
+
+User instruction (2026-10-11): rooms with no energy should not produce workers - they cannot be
+used anyway. Every worker job (build / repair rampart / upgrade / deliver) spends energy per
+tick, so in a room with nothing to spend the worker either idles or competes with the spawn and
+the keepers for the dregs.
+
+`workerManager` previously only checked the *hive*: `HiveNeedToFill(room) && energyAvailable <
+2500`. That says nothing about the room's own pool - a room whose storage is dry but whose hive
+happens to hold 2500 still got a repair worker, and `StationDefense.needBuildWall(room) &&
+EnergyOk` alone is enough to keep spawning one.
+
+### Changed
+
+- `StrategyHighLevel.workerHasEnergyToSpend(room)`, checked at the top of `workerManager`. True
+  if either (a) **the room still has a live keeper** - there is income, so what the worker spends
+  comes back, and it is demonstrably not "unusable"; or (b) storage holds at least
+  `WORKER_ENERGY_FLOOR` (10000), overridable with `Memory.marketSettings.workerEnergyFloor`.
+  Storage only, not `storage + terminal`: the terminal is the market reserve and does not vouch
+  for optional spending (same rule as `POWER_SPAWN_ENERGY_FLOOR`).
+- **The dead-room self-rescue path is deliberately untouched.** `workerManagerAfterCarrier`'s
+  bootstrap spawns a worker that goes *straight to mining* - its product is energy itself - so
+  putting a stock threshold in front of it would lock a dead room out permanently.
+
+### Note
+
+This is protection, not an immediate behaviour change: all 13 rooms currently hold 7270+ in
+storage and 2+ keepers, so every room passes. It bites when a room loses its keepers *and* its
+storage.
+
+### Tests
+
+`test/power-spawn.test.cjs` +1 case: stock above/below the floor, keeper-only rooms (allowed),
+`9999` (blocked), no storage (blocked), a missing room (false), the Memory override, and a
+**call-site** assertion - helper tests alone cannot catch "helper exists but nobody calls it".
+Negative control: deleting the call-site guard fails on "workerManager 开头必须挂这道闸".
+
 ## v0.78.88 — A wedged OpSource task was blocking the whole power creep
 
 User asked why the OP-source ability (PWR_REGEN_SOURCE) is not used when so many rooms have it,
