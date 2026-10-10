@@ -1,3 +1,33 @@
+## v0.78.87 — A stopped mineral chain must not keep a container site around
+
+User instruction (2026-10-10): if the mineral chain is off, do not build a container next to
+the mineral.
+
+Live, the mismatch was visible: W34N55's mineral (H, 42,16) had a container construction site
+parked beside it at **0/5000 progress**, while **zero** `harMineralOuterKeeper` and **zero**
+`harMineralOuterCarrier` existed anywhere in the account. Nothing was going to build it, and
+it occupies that room's construction-site quota indefinitely.
+
+### Changed
+
+- `trySpawnOuterMineralKeeper` now checks `StationSources.outerMineralOff(roomName)` before
+  creating the site, and **removes any lingering container site next to the mineral** (and
+  clears `data.containerSite`) when the chain is off.
+- `outerMineralOff` keys on the *same* predicate `strategy_outerHarvest` uses to decide whether
+  to dispatch mineral creeps - `Memory.stopOuterMineral` or
+  `StrategyOuterHarvest.shouldHarvestRemoteMineral(room)` - so "no creeps dispatched, site still
+  built" cannot happen. With no `StrategyOuterHarvest` available it returns false rather than
+  guessing the chain is off.
+
+### Tests
+
+`test/outer-mineral.test.cjs` +1 case: `outerMineralOff` for all four states (running, global
+pause, filtered out, strategy object missing), and that the cleanup removes only container
+sites **next to the mineral** while leaving a road site alone. Plus a source assertion on the
+**call site**, because testing the helpers alone cannot catch "helper exists but nobody calls
+it" - the first version of the negative control (deleting the call-site guard) passed until
+that assertion was added.
+
 ## v0.78.86 — The hive refill was locking the outer mines out of their own income
 
 Checked the outer mines today and found W34N55 stalled: **three containers full at 2000 each,

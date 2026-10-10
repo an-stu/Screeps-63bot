@@ -20,6 +20,8 @@ const CONSTANTS = {
     FIND_TOMBSTONES: 4,
     FIND_DROPPED_RESOURCES: 6,
     LOOK_STRUCTURES: "structures",
+    FIND_MY_CONSTRUCTION_SITES: 5,
+    STRUCTURE_CONTAINER: "container",
 };
 
 /** 简易 store 桩：支持数字下标读取 / getUsedCapacity / getFreeCapacity / getCapacity */
@@ -185,6 +187,52 @@ function makeCreep(ctx, { x, y, roomName, store, capacity, near }) {
     ctx.Creep.prototype.harvestMineralOuterKeeper.call(keeper);
     assert.ok(!calls.some(c => c[0] === "withdraw") && !calls.some(c => c[0] === "pickup"),
         "a full container must stop the keeper from looting more energy");
+}
+
+// ───────── 矿物链停用时：不立容器工地，并清掉遗留工地（用户 10-10 指示） ─────────
+//
+// 现场：W34N55 的 mineral（H，42,16）旁边挂着一个 0/5000 的容器工地，而全服
+// 0 只矿物矿工、0 只运矿车 —— 矿爬不派、工地却一直占着该房的工地配额。
+{
+    const ctx = makeContext();
+    const S = ctx.StationSources;
+
+    // ① 链开着
+    ctx.Memory.stopOuterMineral = false;
+    ctx.StrategyOuterHarvest = { shouldHarvestRemoteMineral: () => true };
+    assert.equal(S.outerMineralOff("W34N55"), false, "链开着 → 不算停用");
+
+    // ② 一键暂停
+    ctx.Memory.stopOuterMineral = true;
+    assert.equal(S.outerMineralOff("W34N55"), true, "stopOuterMineral 一键暂停 → 停用");
+    ctx.Memory.stopOuterMineral = false;
+
+    // ③ 价值过滤说不值得采（必须与派矿物爬那道闸同源，否则「爬不派、工地照立」）
+    ctx.StrategyOuterHarvest = { shouldHarvestRemoteMineral: () => false };
+    assert.equal(S.outerMineralOff("W34N55"), true, "这个矿不值得采 → 停用");
+
+    // ④ 拿不到策略对象时保守处理：不算停用，也不能抛
+    delete ctx.StrategyOuterHarvest;
+    assert.equal(S.outerMineralOff("W34N55"), false, "拿不到策略对象 → 保守认为没停用");
+
+    // ⑤ 清工地：只清 mineral 旁边的 container 工地，记录一起清掉
+    const ctx2 = makeContext();
+    const removed = [];
+    const mk = (id, structureType, near) => ({
+        id, structureType, pos: { isNearTo: () => near }, remove: () => removed.push(id),
+    });
+    const room = { find: () => [mk("s1", "container", true), mk("s2", "container", false),
+                                mk("s3", "road", true)] };
+    const data = { containerSite: "s1" };
+    ctx2.StationSources.removeOuterMineralContainerSites(room, { pos: {} }, data);
+    assert.deepEqual(removed, ["s1"], "只清 mineral 旁边的 container 工地（不动别处的路）");
+    assert.equal(data.containerSite, undefined, "记录里的 containerSite 也要清掉");
+
+    // ⑥ 调用点必须真的过这道闸 —— 只测 helper 抓不到「helper 在、但没人调」。
+    //    先剥块注释与行注释（说明「为什么加这道闸」的注释里会引用被删的代码）。
+    const src = stationSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/if \(pro\.outerMineralOff\(/.test(src), "立工地之前必须过 outerMineralOff 这道闸");
+    assert.ok(/pro\.removeOuterMineralContainerSites\(/.test(src), "停用时必须清掉遗留工地");
 }
 
 console.log("outer mineral checks passed");

@@ -3077,6 +3077,16 @@ let pro = {
         // 容器被拆/过期时把记录清掉，下次重新走建容器流程
         data["container"] = container ? container.id : undefined;
         if (!container) {
+            // 矿物链**停用时不在这里立工地**（用户 10-10 指示）。
+            // 判据与 strategy_outerHarvest 派发矿物爬那道闸同源：一键暂停开关
+            // `Memory.stopOuterMineral`，或这个矿的价值不够（shouldHarvestRemoteMineral）。
+            // 停用时顺手**清掉遗留工地**：没人修会一直占着该房的工地配额，
+            // 而且矿爬的生出条件正是「container 存在」（见上面的函数注释）——
+            // 矿不采了，容器既没用又挡事。
+            if (pro.outerMineralOff(harRoom.name)) {
+                pro.removeOuterMineralContainerSites(harRoom, mineral, data);
+                return;
+            }
             let site = pro.ensureOuterMineralContainerSite(harRoom, mineral, data);
             if (site && mineral.mineralAmount > 0) pro.trySpawnOuterMineralContainerBuilder(roomName, spawnRoom, site);
             return;
@@ -3121,6 +3131,30 @@ let pro = {
         let tasks = [UtilsTask.taskOutView(data["id"], targetName, data["x"], data["y"],
             "harvestMineralOuterCarry", undefined, { homeRoom: spawnRoom.name })];
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, role, tasks);
+    },
+    /**
+     * 外矿矿物链是否**已停用**：一键暂停开关 `Memory.stopOuterMineral`，
+     * 或这个房不值得采矿（价值过滤 H/X/L）。
+     *
+     * 判据必须与 `strategy_outerHarvest` 派发矿物爬的那道闸**同源**
+     * （那里是 `harRoom && !Memory.stopOuterMineral && shouldHarvestRemoteMineral(...)`），
+     * 否则会出现「矿物爬不派、但容器工地照立」的错配。
+     */
+    outerMineralOff(roomName) {
+        if (Memory.stopOuterMineral) return true;
+        let S = global.StrategyOuterHarvest;
+        if (S && typeof S.shouldHarvestRemoteMineral == "function") {
+            return !S.shouldHarvestRemoteMineral(roomName);
+        }
+        return false;
+    },
+    /** 清掉 mineral 旁边遗留的容器工地与记录（链停用时用，用户 10-10 指示） */
+    removeOuterMineralContainerSites(harRoom, mineral, data) {
+        if (!harRoom || !mineral) return;
+        harRoom.find(FIND_MY_CONSTRUCTION_SITES)
+            .filter(e => e.structureType == STRUCTURE_CONTAINER && e.pos.isNearTo(mineral.pos))
+            .forEach(e => e.remove());
+        if (data) delete data["containerSite"];
     },
     /**
      * 外矿矿物容器：整房只保留**一个**工地，id 写进 data["containerSite"]。
