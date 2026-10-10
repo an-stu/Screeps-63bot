@@ -228,6 +228,25 @@ let BOOST_L1 = 2
 let BOOST_L2 = 3
 
 let pro = {
+
+    /**
+     * 这个 PB 任务还有没有活着的队伍成员（attacker / healer / carrier）。
+     *
+     * 用途见执行段「被打了又出不了 T2」那一支：任务**只在没人可派时**才允许撤掉，
+     * 否则旗一删、在途的队伍就失去任务引用直接搁浅（用户 10-10 的方针：
+     * 任务要么不做、要么做完，不许中途暂停/放弃）。
+     */
+    pbTeamAlive(flag) {
+        let mem = (flag && flag.memory) || {};
+        let ids = [];
+        for (let k of ["attacker", "healer", "carrier"]) {
+            let m = mem[k];
+            if (!m) continue;
+            if (Array.isArray(m)) ids = ids.concat(m);
+            else for (let j in m) ids.push(m[j]);
+        }
+        return ids.some(id => id && Game.getObjectById(id));
+    },
     recordMissionDecision(targetRoomName, powerBankData, decision, spawnRoomName) {
         // A PB is only visible for the Observer tick in which it was scanned.
         // Keep one compact, replace-in-place decision record so `dash` can
@@ -496,7 +515,15 @@ let pro = {
                 else if ((isSaveCpu || flag.memory.beingAttack) && StationLab.boostAble(room,
                     { [BOOST_RES["damage"][2]]: 30 * 5, [BOOST_RES["attack"][1]]: 30 * 20, [BOOST_RES["heal"][1]]: 30 * 25 }) && hostileRoom.contains(flag.memory.roomName)
                 ) boostLevel = BOOST_L2
-                if (flag.memory.beingAttack && boostLevel != BOOST_L1 && boostLevel != BOOST_L2) return flag.remove();// 被打了，并且出不了t2就直接不出兵了
+                if (flag.memory.beingAttack && boostLevel != BOOST_L1 && boostLevel != BOOST_L2) {
+                    // 被打了又出不了 T2：**只有确定没人可派时才撤掉任务**。
+                    // 原来是无条件 `flag.remove()` —— 旗一删，已经派出去/在途的队伍就
+                    // 失去了任务引用，直接搁浅到老死（用户 10-10：任务要么不做、
+                    // 要么做完，不许中途暂停或放弃）。有人在外面就保留旗，
+                    // 让它们按自己的任务逻辑打完 / 撤退，这里只负责不再补员。
+                    if (!pro.pbTeamAlive(flag)) return flag.remove();
+                    return;
+                }
                 if (boostLevel == BOOST_L1) flag.memory.L1Boosted = true;
                 if (boostLevel == BOOST_L2) flag.memory.L2Boosted = true;
                 if (!pro.spawnPBTeam(room, flag, boostLevel)) return;

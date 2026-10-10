@@ -65,21 +65,6 @@ Creep.prototype.registerHarvestDepositCarrier = function () {
 };
 
 
-Creep.prototype.harvestDeposit = function () {
-    let task = this.headTask();
-    if (task.roomName != this.room.name) {
-        this.goTo(task);
-    } else {
-        let deposit = Game.getObjectById(task["id"]);
-        if (this.freeCapacity() < this.getPartCnt(WORK)) {
-        }
-        else if (deposit && this.harvest(deposit) == ERR_NOT_IN_RANGE) {
-            this.goTo(deposit)
-        }
-        if (deposit && !this.memory.concated && this.pos.inRangeTo(deposit, 3)) this.concatDeposit()
-    }
-};
-
 Creep.prototype.registerHarvestDeposit = function () {
     let headTask = this.headTask();
     let flag = Game.flags[headTask.flagName];
@@ -135,11 +120,22 @@ Creep.prototype.harvestDeposit = function () {
 
 Creep.prototype.carryDeposit = function () {
     let task = this.headTask();
+    // ⚠️ 旗子没了就**无论在哪都直接回家**。原来只在「已经到了目标房」那一支里查旗，
+    // 于是**在途**的爬会一直朝一个已经没有任务的目标房赶（`goTo(task)` 那一支
+    // 根本不看任务还在不在），到了才发现没活干、站着老死 ——
+    // 用户 10-10 报的 shard3_83543262_1 卡在去 E57S20 的必经高速房 E53S20 上。
+    if (task && task.flagName && !Game.flags[task.flagName]) {
+        pro.sendDepositCreepHome(this);
+        return;
+    }
     if (task.roomName != this.room.name) {
         this.goTo(task);
     } else {
         let flag = Game.flags[task.flagName];
-        if (!flag) return;//
+        if (!flag) {
+            pro.sendDepositCreepHome(this);
+            return;
+        }
         flag.memory.harvesters = flag.memory.harvesters || [];
         let deposit = Game.getObjectById(task["id"]);
         if (deposit) {
@@ -185,6 +181,21 @@ Creep.prototype.carryDeposit = function () {
 };
 
 let pro = {
+
+    /**
+     * 任务没了（旗被撤 / 任务完成 / 目标消失）时把 deposit 爬**送回家**：
+     * 弹掉任务 → 回收 → 把身上的货卸进主房。
+     *
+     * 判据是「任务还在不在」，与爬当前在哪无关 —— 在途的爬也必须掉头，
+     * 否则会朝一个已经没有任务的目标房一直赶，到了站着老死。
+     */
+    sendDepositCreepHome(creep) {
+        if (!creep) return;
+        creep.popTask();
+        creep.addTask([UtilsTask.taskData("recycleCreep")]);
+        creep.fillAllMainRoomStorage();
+        creep.execLastTask();
+    },
 
     createOrUpdateDepositMission(targetRoomName, depositData) {//
         if (AVOID_ROOMS.indexOf(targetRoomName) !== -1) return;
@@ -250,7 +261,14 @@ let pro = {
             }
             if (Game.time < flag.memory.disappearTime && flag.memory.lastCooldown < maxCoolDown()
                 && (flag.memory.depositType != RESOURCE_MIST || flag.memory.lastCooldown < maxCoolDown())) {// 如果是mist减半，少挖点，没啥用
-                if (flag.memory.beAttackTime + ATTACKED_SLEEP > Game.time) return;
+                // ⚠️ 挨打后的「停 1200 tick」**只能挡住还没派人的任务**，不能停一个
+                // 已经在干的任务（用户 10-10 明确要求：任务要么不做，要么做完，
+                // 不许中途暂停 —— 停了就永远完不成）。
+                // 原来是无条件 return：采集爬掉 1000 血就把 flag.memory.beAttackTime
+                // 一写（见 harvestDeposit 开头），随后 1200 tick 不补员、不淘汰，
+                // 在途的队伍只能自己老死，任务烂尾。
+                if ((flag.memory.harvesters.length == 0 && flag.memory.carriers.length == 0)
+                    && flag.memory.beAttackTime + ATTACKED_SLEEP > Game.time) return;
                 let harTtlCreepCnt = flag.memory.harvesters.map(id => Game.getObjectById(id)).filter(e => e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 150).length
                 let carrierTtlCreepCnt = flag.memory.carriers.map(id => Game.getObjectById(id)).filter(e => e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 300).length
                 // spawning creep 不在 flag.memory 数组里，按 headTask.id 补算，

@@ -1,3 +1,50 @@
+## v0.78.90 — A mission that has been committed to gets finished
+
+User instruction (2026-10-10): **do not pause an unfinished power bank / deposit mission** - a
+paused mission never completes. Reported symptom: `shard3_83543262_1` stranded in E53S20, the
+first highway room on the way from E53S21 to the deposit at E57S20.
+
+That creep had already expired by the time it was investigated (it was ~1400 of its 1500 ticks
+old), so the two mechanisms that can strand a committed team were found by reading instead.
+
+### Deposit
+
+- **The post-attack sleep could freeze a running mission.** `harvestDeposit` sets
+  `flag.memory.beAttackTime` as soon as one harvester has lost 1000 hits, and the maintenance
+  loop then did `return` unconditionally for `ATTACKED_SLEEP` (1200 ticks) - no reinforcement, no
+  over-cap cleanup, and the mission would run out of creeps and never finish. It is now gated on
+  `harvesters.length == 0 && carriers.length == 0`: the sleep may stop a mission **nobody has
+  been sent to**, but never one that is already being worked.
+- **A hauler whose task flag disappeared idled in place.** `carryDeposit` only checked
+  `Game.flags[task.flagName]` in the branch for *already in the target room*; the travelling
+  branch just called `goTo(task)` and kept heading for a room whose mission had ended - arriving
+  only to stand there until it died. The check now happens before the room comparison, so a
+  hauler turns around wherever it is and goes home (`sendDepositCreepHome`: pop the task, recycle,
+  unload into the main room). The old in-room `return;` became the same call.
+- Removed a duplicate `Creep.prototype.harvestDeposit` definition. The file had two; the second
+  silently overrode the first, so the first was dead code that would have to be maintained for no
+  reason.
+
+### Power bank
+
+- `if (beingAttack && boostLevel != L1/L2) return flag.remove();` deleted the mission flag
+  outright, which takes away the task reference the dispatched team is holding - the same
+  stranding shape. It now removes only when `pbTeamAlive(flag)` is false (attacker / healer /
+  carrier arrays all dead); with anyone still out there the flag stays so their own task logic
+  can finish or retreat, and this path just stops reinforcing.
+- Left alone: the two `flag.remove()` calls for "the power bank no longer exists / has expired"
+  (lines 513/517). Those are the target disappearing, not a pause on an unfinished mission.
+
+### Tests
+
+New `test/deposit-mission.test.cjs`, loading both real modules. Deposit: transit with a live flag
+-> `goTo`; transit and in-room with a dead flag -> pop + recycle + unload, and explicitly **no
+`goTo`**; the sleep gate must carry the "nobody committed" condition; `harvestDeposit` defined
+exactly once. Power bank: `pbTeamAlive` for live/dead teams, object-shaped `healer` and
+array-shaped `carrier`, undefined flag; plus a call-site assertion. Negative controls: the old
+deposit code fails on "任务没了要先弹掉任务", and reverting the power bank call site fails on
+"「被打又出不了 T2」必须先在 pbTeamAlive 为空时才撤任务".
+
 ## v0.78.89 — A room with nothing to spend does not get a worker
 
 User instruction (2026-10-11): rooms with no energy should not produce workers - they cannot be
