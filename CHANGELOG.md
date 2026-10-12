@@ -1,3 +1,40 @@
+## v0.78.92 — "Unreachable" counted travel, so every source was written off
+
+User asked why the PCs in E53S21 and elsewhere were not using PWR_REGEN_SOURCE. The answer was
+worse than a per-room issue: **all 26 sources in the account had no effect at all.**
+
+    P10 (E53S21)  lv4 cd0  774 ops  busy (1 task)  needOpSource -> 8,4
+    P3  (E55S39)  lv4 cd0  706 ops  free, 0 tasks  needOpSource -> false
+    P2  (E49S31)  lv5 cd0 1260 ops  free, 0 tasks  needOpSource -> false
+
+`needOpSource` returning false while every source is bare means only one thing: they are all
+marked unreachable, and they were - **all 12 creeps had both of their sources marked**, with
+3-189 ticks left on each.
+
+### Root cause (my own regression from v0.78.88)
+
+The stuck counter I added then incremented on **every tick the creep was out of range**, and
+gave up after 3. But a creep walks from the power spawn to the source - tens of tiles - and is
+out of range the whole way while moving perfectly well. So it walked three tiles, decided the
+source was unreachable, marked it for 200 ticks and popped the task. Both sources, every room,
+forever: mark -> TTL lapses -> try -> 3 ticks -> mark again.
+
+The counter now keys on **whether the position actually changed** (same shape as the existing
+`outerStuck` / `outerRoadStuck` handles): travelling resets it, and only three consecutive
+ticks in the identical tile count as stuck. The semantics are "3 ticks in the same place", so
+the first sighting counts as 1.
+
+Also split out a second case: in range with the cooldown at 0 but `usePower` still failing
+(insufficient ops, bad target). That pops the task - it must not stay queued forever - but it
+does **not** mark the source unreachable, because that failure says nothing about reachability.
+
+### Tests
+
+`test/power-source.test.cjs`: a creep that moves 30 ticks while out of range must never pop and
+must never be marked; one that sits still for 3 ticks must pop and be marked; an in-range
+`usePower` failure must pop without marking. Negative control: restoring the unconditional
+counter fails on "一路在移动就绝不弹栈（这是原来 26/26 全灭的根因）".
+
 ## v0.78.91 — The lair-group cache was being invalidated by its own two callers
 
 CPU review of the outer-mining code (user request: cut CPU without changing behaviour). The

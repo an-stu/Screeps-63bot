@@ -115,33 +115,58 @@ function makePC(ctx, { sources, cooldown = 0, inRange = true, usePowerCode = 0 }
 }
 
 {
-    // ── OpSource：够不到时必须计数并最终弹栈 ──
+    // ── OpSource：**赶路途中绝不能判「够不到」**（10-10 的回归） ──
+    //
+    // PC 从 powerSpawn 走到 source 有几十格，一路都不在射程内、但一直在移动。
+    // 第一版按「累计失败次数」计数 ⇒ 走到第 3 tick 就被判够不到、把 source 冷藏
+    // 200 tick —— 实测 12 只 PC 的 2 个 source 全被标记、26/26 source 没有 REGEN。
+    // 正确判据只能是「位置完全没变」。
+    const ctx0 = load();
+    const P0 = ctx0.PowerCreep.prototype;
+    const src0 = makeSource("a", 38, 35, undefined);
+    const traveller = makePC(ctx0, { sources: [src0], inRange: false });
+    for (let step = 0; step < 30; step++) {
+        traveller.pos.x = 10 + step;             // 每 tick 都在动
+        traveller.pos.y = 30;
+        P0.OpSource.call(traveller);
+    }
+    assert.equal(traveller.calls.pop, 0, "一路在移动就绝不弹栈（这是原来 26/26 全灭的根因）");
+    assert.ok(!traveller.memory.opSourceUnreachable, "更不能打不可达标记");
+    assert.ok(traveller.memory.opSourceStuck < 3, "移动时计数永远不会累积到阈值（停在 1 = 刚到此地）");
+}
+
+{
+    // ── OpSource：真的原地不动 3 tick → 弹栈 + 标记不可达 ──
     const ctx = load();
     const P = ctx.PowerCreep.prototype;
     const src = makeSource("a", 38, 35, undefined);
     const pc = makePC(ctx, { sources: [src], inRange: false });
+    pc.pos.roomName = "E53S21";
 
     P.OpSource.call(pc);
     assert.equal(pc.calls.moveTo, 1, "够不到 → 先 moveTo");
-    assert.equal(pc.calls.pop, 0, "第 1 次还不够弹栈");
+    assert.equal(pc.calls.pop, 0, "第 1 tick 不动还不弹栈");
     P.OpSource.call(pc);
-    assert.equal(pc.calls.pop, 0, "第 2 次也不够弹栈");
+    assert.equal(pc.calls.pop, 0, "第 2 tick 不动也不弹栈");
     P.OpSource.call(pc);
-    assert.equal(pc.calls.pop, 1, "连续 3 次够不到 → **弹栈**（原实现会永久挂着）");
+    assert.equal(pc.calls.pop, 1, "连续 3 tick 原地不动 → 弹栈（原实现会永久挂着）");
     assert.ok(pc.memory.opSourceUnreachable && pc.memory.opSourceUnreachable.a > ctx.Game.time,
         "并把这个 source 记成暂时不可达，让 PC 去照顾另一个");
     assert.equal(pc.memory.opSourceStuck, 0, "计数器复位");
 }
 
 {
-    // ── OpSource：在射程内但技能放不出去，也要计数并最终弹栈 ──
+    // ── OpSource：在射程内但技能放不出去 → 弹栈，但**不要**打不可达标记 ──
+    //    这是「ops 不够 / 目标无效」那类失败，跟可达性无关，
+    //    打标记会因为一个无关原因把 source 冷藏 200 tick。
     const ctx = load();
     const P = ctx.PowerCreep.prototype;
     const src = makeSource("a", 38, 35, undefined);
     const pc = makePC(ctx, { sources: [src], inRange: true, usePowerCode: -11 });
-    P.OpSource.call(pc); P.OpSource.call(pc); P.OpSource.call(pc);
-    assert.equal(pc.calls.usePower, 3, "一直在试放技能");
-    assert.equal(pc.calls.pop, 1, "ops 不够之类的失败也要弹栈，不能永久挂着");
+    P.OpSource.call(pc);
+    assert.equal(pc.calls.usePower, 1, "在射程内直接试放技能");
+    assert.equal(pc.calls.pop, 1, "失败要弹栈，不能永久挂着");
+    assert.ok(!pc.memory.opSourceUnreachable, "不能因为放不出技能就判 source 不可达");
 }
 
 {

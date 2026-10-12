@@ -46,13 +46,14 @@ let OPS_MIN_CARRY_CNT = 200
 
 let OP_SOURCE_WAIT_TIME = 50
 /**
- * 连续几次「够不到 source / 放不出技能」之后，就先把这个 source 记成**暂时不可达**、
- * 让 PC 去照顾**另一个** source（用户 10-10：两个 source 都要，否则能量少很多）。
+ * 连续多少个 tick **原地不动**（位置完全没变）才认定这个 source 够不到、
+ * 先把它记成「暂时不可达」、让 PC 去照顾**另一个** source
+ *（用户 10-10：两个 source 都要，否则能量少很多）。
  *
- * 背景：`OpSource` 只在 `usePower` 返回 OK 时才弹栈，所以只要 PC 进不了射程
- * （实测 P5/P9 停在 range 4，技能 range 3、而且原地不动），这个任务就**永远挂着**
- * —— `isFree()` 恒 false，PC 的其它能力（OpExt / OpSpawn / OpStorage…）全都轮不到，
- * 对应的 source 也永远上不了 REGEN。全服 26 个 source 里 7 个是这个状态。
+ * ⚠️ 判据必须是「**没移动**」，不能是「累计失败次数」：PC 从 powerSpawn 走到
+ * source 要几十格，路上每一 tick 都「不在射程内」但一直在动。10-10 第一版写的
+ * 就是无条件计数，结果走到第 3 tick 就被判够不到、把 source 冷藏 200 tick ——
+ * 12 只 PC 的 2 个 source 全被标记，**26/26 source 一个 REGEN 都没有**。
  */
 let OP_SOURCE_STUCK_ATTEMPTS = 3
 /** 记成不可达的时长（tick），到点自动重试，不会永久放弃 */
@@ -110,13 +111,24 @@ PowerCreep.prototype.OpSource = function () {
         this.popTask().execLastTask();
         return;
     }
-    // 够不到 / 放不出技能时**必须计数并最终弹栈**：原实现只在 usePower==OK 时弹栈，
-    // 一旦 PC 进不了射程（实测卡在 range 4，技能 range 3）任务就永久挂着 ——
-    // isFree() 恒 false，PC 的其它能力全被堵死，这个 source 也永远不上 REGEN。
+    // 够不到 / 放不出技能时必须**最终弹栈**，否则任务永久挂着（isFree 恒 false，
+    // PC 的其它能力全被堵死）。但计数**只能算「原地不动」**：
+    //
+    // ⚠️ 10-10 第一版是无条件计数，结果 PC 从 powerSpawn 往 source 走的路上
+    // （几十格、每 tick 都在移动）连数 3 tick 就被判「够不到」，把 source 标记成
+    // 不可达 —— 12 只 PC 的 2 个 source **全被标记**，26/26 source 一个 REGEN 都没有，
+    // `needOpSource` 恒返回 false，整条链看起来「能力没在用」。
+    // 现在按位置是否变化计数（与 outerStuck / outerRoadStuck 同一套写法）：
+    // 还在赶路就清零，真的贴着墙不动 3 tick 才认。
     let stuck = () => {
-        let n = (this.memory.opSourceStuck || 0) + 1;
-        this.memory.opSourceStuck = n;
-        if (n < OP_SOURCE_STUCK_ATTEMPTS) return false;
+        let key = this.pos.roomName + ":" + this.pos.x + ":" + this.pos.y;
+        if (this.memory.opSourceLastPos === key) {
+            this.memory.opSourceStuck = (this.memory.opSourceStuck || 0) + 1;
+        } else {
+            this.memory.opSourceLastPos = key;
+            this.memory.opSourceStuck = 1;      // 本 tick 就是「待在原地」的第 1 次
+        }
+        if (this.memory.opSourceStuck < OP_SOURCE_STUCK_ATTEMPTS) return false;
         let u = this.memory.opSourceUnreachable || (this.memory.opSourceUnreachable = {});
         u[source.id] = Game.time + OP_SOURCE_UNREACHABLE_TTL;
         this.memory.opSourceStuck = 0;
@@ -132,6 +144,7 @@ PowerCreep.prototype.OpSource = function () {
     let code = this.usePower(PWR_REGEN_SOURCE, source);
     if (code == OK) {
         this.memory.opSourceStuck = 0;
+        delete this.memory.opSourceLastPos;
         if (this.memory.opSourceUnreachable) delete this.memory.opSourceUnreachable[source.id];
         StationSources.powerSource(this.room, source, pcPower.level);// 标记被用power ，使得爬的体积变大
         let mainRoom = this.mainRoom();
@@ -139,9 +152,11 @@ PowerCreep.prototype.OpSource = function () {
         if (obj) this.popTask().addTask(UtilsTask.task(obj, "goToNearPop")).execLastTask();
         return;
     }
-    // 在射程内但技能放不出去（ops 不够 / 目标无效等）：同样要走计数，
-    // 否则照样是这个任务永远挂着。
-    stuck();
+    // 在射程内、冷却也是 0，但技能还是放不出去（ops 不够 / 目标无效）——
+    // 这是**另一类**失败，跟「够不到」无关。只弹栈让它去干别的，
+    // **不要**打不可达标记：否则会因为一个与可达性无关的原因把这个 source 冷藏 200 tick。
+    this.memory.opSourceStuck = 0;
+    this.popTask().execLastTask();
 }
 
 PowerCreep.prototype.hasPBInRoom = function (room) {
