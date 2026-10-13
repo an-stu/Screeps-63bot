@@ -22,12 +22,39 @@ Creep.prototype.repairWall = function () {
 
 let pro = {
     stationName: "stationDefense",
+    /**
+     * 「本房能量够不够养一只修墙 worker」的门槛（只看 storage）。
+     *
+     * 修 rampart 是**纯消耗**：1 能量换 100 血，RCL8 满血 3 亿 ⇒ **单个墙约需 300 万能量**，
+     * 远超一房 storage 的容量（我们各房 storage 只有 4~10 万）。能量不够还一直修，
+     * 等于把这个房的收入持续烧进墙里 —— 用户 10-13 报的
+     * 「新房间 worker 修 rampart 应该看本房间能量是否充足，不要一直买」就是这个：
+     * 原来 `getRepairWorkerLimit` 里 `energy < 1000000` 只是把编制降到 1，
+     * **照样永远保留一只**，跟本房有没有能量无关
+     *（实测 E53S21：38 个 rampart 都卡在 29M 血，补到 300M 要约 1 亿能量）。
+     *
+     * 判据只看本房 storage（terminal 是市场储备，不给可选消耗背书，沿用既有口径），
+     * 可用 `Memory.marketSettings.repairWallEnergyFloor` 覆盖。
+     */
+    get repairWallEnergyFloor() {
+        return Number(Memory.marketSettings && Memory.marketSettings.repairWallEnergyFloor)
+            || 100000;
+    },
+    repairWallAffordable(room) {
+        if (!room) return false;
+        if (!room.storage) return false;      // 还没起 storage 的房：先发展经济，别修墙
+        return (room.storage.store[RESOURCE_ENERGY] || 0) >= pro.repairWallEnergyFloor;
+    },
     levelWallHits: {
         // 1:5000,2:5000,3:5000,4:50000,5:500000,6:1000000,7:3000000,8:(Game.shard.name == "shard3"?10:100)*1000000 // 8级最少修10m墙壁
         1: 5000, 2: 5000, 3: 5000, 4: 5000, 5: 5000, 6: 500000, 7: 5000000, 8: (Game.shard.name == "shard3" ? 300 : 150) * 1000000
     },
     HitsCPUSave: 100 * 1000000,
     getRepairWorkerLimit(room) {
+        // 本房能量不足 → **一只修墙 worker 都不派**（见 repairWallEnergyFloor 的推导）。
+        // 返回 0 之后 workerManager 的 `workerCount < workerLimit` 恒假，那一条出兵路径
+        // 自然就断了；建造工地走的是另一条分支（`room.constructionSite.length`），不受影响。
+        if (!pro.repairWallAffordable(room)) return 0;
         // Rampart work is intentionally sparse near the target. Once a wall
         // reaches the 99.9% maintenance threshold, no replacement is made;
         // the remaining worker expires naturally and a later small deficit

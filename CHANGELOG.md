@@ -1,3 +1,37 @@
+## v0.78.94 — Rampart repair has to be affordable for *that* room
+
+User instruction (2026-10-13): a room's repair worker should check whether **that room** has
+enough energy - it should not just keep grinding.
+
+`getRepairWorkerLimit` only ever lowered the count, never refused:
+
+    if (!wall || !target || energy < 1000000) return 1;
+
+Since no room holds anything like 1,000,000 energy (they run 42k-99k), the limit was **always 1**,
+so every room kept one repair worker regardless of what it could afford. Repairing is a pure
+sink: 1 energy buys 100 hits, an RCL8 rampart caps at 300M hits, so **one wall costs about 3M
+energy** - tens of times a room's entire storage. Live, E53S21 was the room paying for it: all 38
+of its ramparts sat at 29M hits (the other twelve rooms are already at the 300M cap), and topping
+it up would take ~100M energy.
+
+### Changed
+
+- `StationDefense.repairWallAffordable(room)`: storage holds at least `repairWallEnergyFloor`
+  (**100000**, overridable via `Memory.marketSettings.repairWallEnergyFloor`). Storage only, not
+  `storage + terminal` - the terminal is the market reserve and does not vouch for optional
+  spending, the same rule as `POWER_SPAWN_ENERGY_FLOOR`. A room without a storage yet is never
+  affordable: it should build its economy first.
+- `getRepairWorkerLimit` returns **0** when unaffordable, which makes `workerCount < workerLimit`
+  permanently false and cuts that spawn path off at a single point. Construction is unaffected -
+  it goes through the `room.constructionSite.length` branch.
+
+### Tests
+
+New `test/repair-wall.test.cjs`: the floor boundary (200k yes, 50k and 99999 no), no storage, no
+room, the Memory override, and `getRepairWorkerLimit` returning 0 at 46k while still returning 1
+at 200k and 2 for a storage >= 1M with a wall far below target. Negative control (removing the
+gate) fails on "storage 4.6 万（实测 E53S21）→ 一只都不派".
+
 ## v0.78.93 — A dead raL1 team's flag is cleaned up again
 
 User decision (2026-10-13): raL1 teams are one-shot — when the team dies the mission is over and
