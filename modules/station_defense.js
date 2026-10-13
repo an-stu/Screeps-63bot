@@ -70,13 +70,22 @@ let pro = {
         return wall.hits < target * 0.6 ? 2 : 1;
     },
     // wallListMap:{},
+    /**
+     * 「本房有墙要修」—— **且本房修得起**。
+     *
+     * 这两个谓词是修墙的**全部入口**：`workerManager` 用它决定要不要出修墙 worker，
+     * `workerManagerAfterCarrier` 用它决定要不要把空闲 worker 派去修墙。
+     * 所以能量闸放在这里，两条路一起管住（`getRepairWorkerLimit` 里那个 0 是第二层）。
+     */
     needBuildWall(room) {
+        if (!pro.repairWallAffordable(room)) return false;
         if (!pro.needRepairWallMap[room.name]) return false;
         let wall = Game.getObjectById(pro.needRepairWallMap[room.name].head());
         return wall && wall.hits < pro.levelWallHits[room.level]*0.999
             || (isSaveCpu && Game.cpu.bucket > 8000 && room.level == 8 && wall && wall.hits < pro.HitsCPUSave);
     },
     needBuildWallWorkerFree(room) {
+        if (!pro.repairWallAffordable(room)) return false;
         if (!pro.needRepairWallMap[room.name]) return false;
         let wall = Game.getObjectById(pro.needRepairWallMap[room.name].head());
         return wall && wall.hits < pro.levelWallHits[room.level];

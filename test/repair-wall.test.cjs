@@ -93,10 +93,30 @@ function makeRoom(ctx, { name = "E53S21", level = 8, storageEnergy = 50000, hasS
 }
 
 {
-    // ⑥ 调用点仍在（只测 helper 抓不到「helper 在、但没人调」）
+    // ⑥ 两个谓词（修墙的**全部入口**）也必须带能量闸：
+    //    needBuildWall → 出兵；needBuildWallWorkerFree → 把空闲 worker 派去修墙。
+    //    只堵 getRepairWorkerLimit 的话，房里有 worker 就还会被派去修墙。
+    const ctx = load({ wallHits: 100000000 });     // 墙远低于 RCL8 目标 3 亿
+    const S = ctx.StationDefense;
+    S.needRepairWallMap["E53S21"] = ["wall1"];
+
+    const poor = makeRoom(ctx, { name: "E53S21", storageEnergy: 46019 });
+    assert.equal(S.getRepairWorkerLimit(poor), 0, "穷房编制 0");
+    assert.equal(S.needBuildWall(poor), false, "穷房：不该出兵修墙");
+    assert.equal(S.needBuildWallWorkerFree(poor), false, "穷房：也不该把空闲 worker 派去修墙");
+
+    const rich = makeRoom(ctx, { name: "E53S21", storageEnergy: 500000 });
+    assert.equal(S.needBuildWall(rich), true, "有钱的房墙有缺口 → 照常修");
+    assert.equal(S.needBuildWallWorkerFree(rich), true, "有钱的房照常派空闲 worker");
+}
+
+{
+    // ⑦ 调用点仍在（只测 helper 抓不到「helper 在、但没人调」）
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(/if \(!pro\.repairWallAffordable\(room\)\) return 0;/.test(codeOnly),
         "getRepairWorkerLimit 必须先过能量闸");
+    assert.equal((codeOnly.match(/if \(!pro\.repairWallAffordable\(room\)\) return false;/g) || []).length, 2,
+        "needBuildWall / needBuildWallWorkerFree 两个入口都要挂能量闸");
 }
 
 console.log("rampart repair energy-floor checks passed");

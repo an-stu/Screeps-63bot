@@ -1,3 +1,26 @@
+## v0.78.95 — The rampart energy gate has to cover both entrances
+
+Follow-up to v0.78.94, same instruction. Gating `getRepairWorkerLimit` alone was not enough: it
+only covers the *spawn* path (`workerManager`'s wall branch). The other entrance is
+`workerManagerAfterCarrier`, which hands an **already idle worker** the repair task via
+`needBuildWallWorkerFree(room)` - so a room that happened to have a worker from construction work
+would still be sent to grind ramparts it cannot afford.
+
+`needBuildWall` (the spawn gate) and `needBuildWallWorkerFree` (the task-assignment gate) now both
+short-circuit on `repairWallAffordable(room)`. Those two predicates are the only entrances to
+rampart repair, so the energy rule sits on the rule itself rather than on one of its callers;
+`getRepairWorkerLimit`'s 0 stays as the second layer.
+
+Side effect worth knowing: in a room below RCL8 that is too poor to repair, the task chain now
+falls through to the upgrade branch (`!needBuildWallWorkerFree && room.level < 8`) instead of
+repair - RCL progress rather than rampart grinding, which is the intent.
+
+### Tests
+
+`test/repair-wall.test.cjs` extended: for a poor room both predicates must be false (and the
+limit 0), while a room with 500k storage still reports both true. Negative control removing only
+the `needBuildWallWorkerFree` gate fails on "穷房：也不该把空闲 worker 派去修墙".
+
 ## v0.78.94 — Rampart repair has to be affordable for *that* room
 
 User instruction (2026-10-13): a room's repair worker should check whether **that room** has
