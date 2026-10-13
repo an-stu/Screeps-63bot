@@ -1,3 +1,39 @@
+## v0.78.93 — A dead raL1 team's flag is cleaned up again
+
+User decision (2026-10-13): raL1 teams are one-shot — when the team dies the mission is over and
+it is not rebuilt, so the flag should be removed. Option (a) of the two offered.
+
+The cleanup already existed in the file, commented out under `execSpawn` (lines 352-364):
+
+    // if(!Game.creeps[flag.memory.creepName]){
+    //     if(flag.name.indexOf("_keeper")>=0){ ...clear the name so it respawns... }
+    //     else{ flag.remove(); }
+
+With it disabled, nothing ever clears `flag.memory.creepName`, so the rebuild condition on the
+first line of `execSpawn` (`!flag.memory.creepName`) is permanently false: **a dead team neither
+respawns nor gets cleaned up.** `raL1_E59S38_1` was still holding the name of a creep that had
+been dead for ~340k ticks.
+
+### Added
+
+`TeamRaL1.expireDeadTeamFlag(flag)`, called at the top of `execSpawn` and returning true when the
+flag has been handled. Deliberately conservative:
+
+- `_keeper` flags are the standing variant (they clear the name and respawn) - untouched.
+- Flags with a `taskId` belong to the cross-shard flow - untouched.
+- **Debounced against the spawn race**: in the tick or two right after `trySpawn`, `Game.creeps`
+  may not list the creep yet, and removing the flag then would kill a team that is spawning
+  normally. It takes 3 consecutive misses (exec runs every 3 ticks, so ~9 ticks) and at least 10
+  ticks since `spawnTime` before anything is removed.
+- No `creepName` at all means no team has been dispatched yet - left to the spawn logic below.
+
+### Tests
+
+New `test/team-ral1.test.cjs` (loads the real module): removal after 3 misses; a live creep never
+removes and resets the miss counter; a fresh `spawnTime` is never removed; `_keeper` and `taskId`
+flags are never removed; no `creepName` is not removed; plus a call-site assertion. Negative
+control: deleting the call site fails on "execSpawn 开头必须挂这道清理".
+
 ## v0.78.92 — "Unreachable" counted travel, so every source was written off
 
 User asked why the PCs in E53S21 and elsewhere were not using PWR_REGEN_SOURCE. The answer was

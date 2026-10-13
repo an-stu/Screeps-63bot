@@ -329,7 +329,41 @@ let pro = {
             flag.memory.taskId = ManagerCrossShard.addCrossShardRequest("shard2",mission)
         }
     },
+    /**
+     * 死队的旗该不该清掉（用户 2026-10-13 选 (a)：队伍死了任务即结束，**不重生**）。
+     *
+     * 这段逻辑本来就有，被注释在 `execSpawn` 下面（352-364 行）：
+     *   `if(!Game.creeps[flag.memory.creepName]) { ... else { flag.remove(); } }`
+     * 注释掉之后，`flag.memory.creepName` 永远不会被清空，于是
+     * `execSpawn` 第一行的重建条件 `!flag.memory.creepName` 恒假 ——
+     * **队伍死了既不重生、旗也永远不被清**，变成僵尸旗
+     * （实测 `raL1_E59S38_1` 里记的爬 34 万 tick 前就死了，旗一直挂着）。
+     *
+     * 返回 true 表示这面旗已经处理完（删了），调用方直接 return。
+     *
+     * 几个保守条件，避免误杀：
+     *  · `_keeper` 型是常驻队，走「清名重生」那条路，不清旗；
+     *  · 带 `taskId` 的队由跨片流程管（`execSpawnCrossShard`），不清旗；
+     *  · **防抖**：刚 `trySpawn` 出来的那一两 tick 里 `Game.creeps` 可能还没有这只爬，
+     *    直接删会误杀正在出生的队伍 —— 要连续 3 次查不到（exec 每 3 tick 一次，
+     *    即约 9 tick）才算，且距 spawnTime 至少 10 tick。
+     */
+    expireDeadTeamFlag (flag) {
+        let name = flag.memory.creepName;
+        if (!name) return false;
+        if (flag.name.indexOf("_keeper") >= 0) return false;
+        if (flag.memory.taskId) return false;
+        if (Game.creeps[name] || !flag.memory.spawnTime || Game.time - flag.memory.spawnTime < 10) {
+            flag.memory.missingCnt = 0;
+            return false;
+        }
+        flag.memory.missingCnt = (flag.memory.missingCnt || 0) + 1;
+        if (flag.memory.missingCnt < 3) return false;
+        flag.remove();
+        return true;
+    },
     execSpawn (flag,raBody,raBoost) {
+        if (pro.expireDeadTeamFlag(flag)) return;
         if (!flag.memory.concatTime) flag.memory.concatTime = Game.map.getRoomLinearDistance(flag.pos.roomName, flag.getRoomName()) * 50;
         if(!flag.memory.creepName || (flag.name.indexOf("_keeper")>=0 && flag.memory.spawnTime+1450-flag.memory.concatTime<Game.time)){
             let room = Game.rooms[flag.getRoomName()]
