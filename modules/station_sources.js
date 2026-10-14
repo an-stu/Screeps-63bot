@@ -291,6 +291,17 @@ Creep.prototype.registerStationSourcesCarryInRoom = function () {
     }
 };
 
+/**
+ * keeper 接班的**额外余量**（tick）。
+ *
+ * 提前量 = 移动时间（spawn→source）+ 孵化时间（体型×3）+ 本余量，
+ * 记在 `data.spawnTime = 抵达时刻 − 提前量`，触发判据 `Game.time - spawnTime > 1500`
+ * 因此在老那只死前正好「提前量」tick 发出续派 ⇒ 接班人在老那只死前 MARGIN tick 到位，
+ * 不留空档。留正余量而不是「刚好卡死」的原因：spawn 可能被占、能量可能不够，
+ * 那几 tick 就是容错（用户 10-14 明确「再加几 t 的提前量」）。
+ */
+let KEEPER_SUCCESSION_MARGIN = 10;
+
 Creep.prototype.concatStationSources = function () {
     let rm = Memory.rooms[this.headTask().roomName];
     if (rm) {
@@ -312,24 +323,30 @@ Creep.prototype.concatStationSources = function () {
             this.execLastTask();
             return;
         }
-        let pathTime = Game.time - data["spawnTime"];//（出生时间 - 接触时间 = 移动时间）
-        // pathTime 是实测的「出生 → 抵达矿点」tick 数，正常应该≈路线长度（外矿无路时
-        // 1 格/tick）。但它同时被 trySpawnOuterHarCarrier 当**运力需求**用：
-        //   NeedCarryPartCnt = ceil(pathTime * 2 * 10 / 50)   // ≈ pathTime * 0.4 个 CARRY 部件
-        // 于是形成正反馈：路上堵 → pathTime 变大 → 派更多 carrier → 堵得更厉害。
-        // W33N55 实测 pathTime 飙到 843（应约 65），一次性堆了 8 只 carrier，
-        // keeper 走 843 tick 才到矿点，源在这期间一直是满的没人采。
-        // 用缓存路线长度做上界（留 3 倍余量）把回路掐断。
-        // 上界取 1.2×路线长度：路线长度本身就是「1 格/tick 走完」的最佳时间，
-        // 而 W33N55 实测一路畅通时也差不多就是这个数。取 3 倍时算出来的运力需求
-        // 仍然偏高 —— 3 个矿点会被派到 11 只 carrier，把单格宽的外矿道彻底堵死，
-        // 结果 3 个源全停在 4000 没人采。
+        // ===== 移动时间：**用爬自己的存活时长量**（用户 10-14 强调，之前量错了）=====
+        //
+        // `ticksToLive` 是**孵化完成之后**才开始扣的（孵化期间为 undefined），
+        // 而 keeper 一出生就直奔矿点，所以 `1500 - ticksToLive` 就是「出生 → 抵达」的
+        // 移动时间。原写法 `Game.time - data["spawnTime"]` **只在第一代成立** ——
+        // spawnTime 本来就被倒推过，第二代起量到的是「上次记录到此刻的间隔」
+        // （实测 W32N56 本房 keeper 被量成 50 / 15，本该是 1~5）。
+        let travel = Math.max(1, 1500 - (this.ticksToLive || 1500));
+        // 运力需求（trySpawnOuterHarCarrier 会读 pathTime）仍要留个**有上界**的值，
+        // 否则会形成「路上堵 → pathTime 变大 → 派更多 carrier → 堵得更厉害」的正反馈
+        // （W33N55 实测 pathTime 飙到 843，一次性堆了 8 只 carrier）。
         let path = pro.getOuterRoadPath(data);
         let cap = path && path.length ? Math.round(path.length * 1.2) : 300;
-        if (pathTime > cap) pathTime = cap;
-        if (pathTime < 1) pathTime = 1;
-        data["spawnTime"] -= pathTime + this.body.length * 3 - 6;// （移动时间）+ 生的时间 -  这样下次走到那边就可以刚刚好前面那只死掉,再缓冲 10tick 理论上走到后寿命不足1500t 不和能量重生重合
-        data["pathTime"] = pathTime;
+        data["pathTime"] = Math.min(travel, cap);
+        // ===== 提前量 = 移动时间 + 孵化时间 + 余量 =====
+        //
+        // 触发判据是 `Game.time - spawnTime > 1500`，所以只要把 spawnTime 记成
+        // 「抵达时刻 − 提前量」，续派就正好在**老那只死前 `提前量` tick** 发出，
+        // 接班人在老那只死前 KEEPER_SUCCESSION_MARGIN tick 到位（有余量，不留空档）。
+        //
+        // ⚠️ 必须是**赋值**，不能像原来那样 `-=`：累减会让每一代再往前推一段，
+        // 越派越早，最后 spawnTime 低到被上面那句净化钳成「现在」⇒ 立刻补员
+        // （实测 E41S32 的 spawnTime 已被钳成 0）。
+        data["spawnTime"] = Game.time - (travel + this.body.length * 3 + KEEPER_SUCCESSION_MARGIN);
     }
     this.popTask();
     this.execLastTask();
@@ -3051,6 +3068,12 @@ let pro = {
                 let t = e.headTask && e.headTask();
                 return t && t.id == data.id;
             });
+            // ① **已经有接班人在孵化** ⇒ 别重复派。
+            //    这一条不能省：在岗那只一旦死掉，它的 memory（连同标记）一并消失，
+            //    而孵化中的接班人还没打标记 ⇒ 触发条件里 `data.creeps.length == 0`
+            //    立刻成立 ⇒ 又派一只（实测 E41S32 2 个源同时有 3 只在孵、W33N55 5 只 keeper）。
+            if (mine.some(e => e.spawning)) return;
+            // ② 在岗那只已被标记（接班人在路上）⇒ 也别重复派。
             if (mine.some(e => e.memory && e.memory.successorSpawned)) return;
             if (Game.time - data["spawnTime"] > 1500 || (data["creeps"] || []).length == 0) {
                 // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。

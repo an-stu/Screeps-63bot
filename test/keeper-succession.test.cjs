@@ -140,6 +140,42 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
 }
 
 {
+    // ③b **已经有接班人在孵化** → 不重复派。
+    //     在岗那只死后它的 memory（连同标记）一起消失，此时孵化中的接班人还没标记，
+    //     若不看 spawning，`data.creeps.length == 0` 会立刻再派一只
+    //     （实测 E41S32 两个源同时 3 只在孵、W33N55 攒到 5 只 keeper）。
+    const ctx = loadStation();
+    const S = ctx.StationSources;
+    const stationName = S.stationName;
+    ctx.Memory.rooms["W1N1"] = {
+        [stationName]: { src1: { id: "src1", spawnTime: ctx.Game.time - 1600, creeps: [] } },
+    };
+    const spawning = {
+        id: "k2", name: "k2", spawning: true, ticksToLive: undefined, memory: { role: "harvestEnergyKeeper" },
+        headTask: () => ({ id: "src1", taskName: "harvestEnergyKeeper" }),
+    };
+    const spawnCalls = [];
+    ctx.StationHive.trySpawn = (...a) => { spawnCalls.push(a); return "x"; };
+    ctx.StationSources.outerMineStarvesSpawnRoom = () => false;
+    ctx.StationSources.homeMiningPaused = () => false;
+    ctx.StationSources.getHarvesterBodyConfig = () => [ctx.MOVE];
+    ctx.StationSources.generatorHarTask = () => [];
+    ctx.Game.getObjectById = id => (id === "k2" ? spawning : null);
+    const room = {
+        name: "W1N1", my: true, level: 8, spawnFailure: false,
+        getEnergyCapacityAvailable: () => 12900, energyAvailable: 12900,
+        creeps(role) {
+            if (role === "harvestEnergyKeeper") return [spawning];
+            if (role === "carrier") return [{ ticksToLive: 1000 }];
+            return [];
+        },
+        find: () => [],
+    };
+    S.trySpawnOuterHarKeeper("W1N1", room);
+    assert.equal(spawnCalls.length, 0, "已有接班人在孵化 ⇒ 绝不再派（否则会滚雪球）");
+}
+
+{
     // ④ 派兵失败（spawn 忙/能量不够）→ **不能**打标记，下一 tick 还要能重试
     const ctx = loadStation();
     const S = ctx.StationSources;
@@ -159,14 +195,54 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
 }
 
 {
-    // ⑥ 源码层面兜一层：旧的「有人就 return」写法必须已经不存在
+    // ⑥ **提前量公式**（用户 10-14 明确）：移动时间 + 孵化时间 + 余量。
+    //    移动时间用爬自己的存活时长量（ticksToLive 孵化完成后才开始扣）。
+    const ctx = loadStation();
+    const S = ctx.StationSources;
+    const stationName = S.stationName;
+    ctx.Memory.rooms["W1N1"] = { [stationName]: { src1: { id: "src1" } } };
+    S.getOuterRoadPath = () => undefined;          // 内矿没有外矿路线 ⇒ cap = 300
+
+    const lived = 10;                              // 出生到抵达走了 10 tick
+    const bodyLen = 20;                            // 孵化 = 20×3 = 60 tick
+    const keeper = {
+        id: "k1", name: "k1", spawning: false, ticksToLive: 1500 - lived,
+        body: new Array(bodyLen).fill({ type: ctx.MOVE }),
+        memory: {}, pos: { x: 10, y: 10, roomName: "W1N1" },
+        headTask: () => ({ id: "src1", taskName: "harvestEnergyKeeper", roomName: "W1N1" }),
+        popTask() { return this; }, execLastTask() { return this; },
+    };
+    ctx.Creep.prototype.concatStationSources.call(keeper);
+    const data = ctx.Memory.rooms["W1N1"][stationName].src1;
+    assert.equal(data.spawnTime, ctx.Game.time - (lived + bodyLen * 3 + 10),
+        "spawnTime 必须记成「抵达时刻 −（移动 + 孵化 + 余量）」");
+    assert.equal(data.pathTime, lived, "pathTime 记的是真实移动时间（不是那个会漂的差值）");
+
+    // 跨代不能累漂：第二代到达时，spawnTime 必须按**它自己的到达时刻**重算，
+    // 而不是在上一代的值上再减一段（原来 `-=` 就是这么越派越早，最后被钳成「现在」）。
+    const cycle = 1500;
+    ctx.Game.time += cycle;
+    keeper.ticksToLive = 1500 - lived;             // 新爬同样走 10 tick 抵达
+    ctx.Creep.prototype.concatStationSources.call(keeper);
+    assert.equal(data.spawnTime, ctx.Game.time - (lived + bodyLen * 3 + 10),
+        "第二代必须按自己的到达时刻重算（原 -= 累减会变成「再往前推 80」）");
+}
+
+{
+    // ⑦ 调用点仍在（只测 helper 抓不到「helper 在、但没人调」）
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(!/if \(existingKeepers > 0\) return;/.test(codeOnly),
         "旧的守卫必须删掉（它把提前量作废了）");
+    assert.ok(/if \(mine\.some\(e => e\.spawning\)\) return;/.test(codeOnly),
+        "必须挡住「已有接班人在孵化」的情形，否则会滚雪球");
     assert.ok(/if \(mine\.some\(e => e\.memory && e\.memory\.successorSpawned\)\) return;/.test(codeOnly),
         "新守卫必须查 successorSpawned 标记");
     assert.ok(/if \(StationHive\.trySpawn\([\s\S]{0,200}?successorSpawned = true/.test(codeOnly),
         "标记只能在 trySpawn 返回真之后打");
+    assert.ok(!/data\["spawnTime"\] -=/.test(codeOnly),
+        "spawnTime 必须是赋值，不能是 -=（累减会让提前量越漂越早）");
+    assert.ok(/data\["spawnTime"\] = Game\.time - \(travel \+ this\.body\.length \* 3 \+ KEEPER_SUCCESSION_MARGIN\)/
+        .test(codeOnly), "提前量公式必须是 移动 + 孵化 + 余量");
 }
 
 console.log("keeper succession checks passed");
