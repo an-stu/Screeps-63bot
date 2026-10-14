@@ -3034,11 +3034,24 @@ let pro = {
             if (!data["spawnTime"] || data["spawnTime"] < -1000 || data["spawnTime"] > Game.time) data["spawnTime"] = Game.time;
             // 防止 spawn 完成/注册前重复补员：spawning creep 也有 memory.tasks，
             // 直接按目标 source id 计数，避免同一矿点一次生 2~3 只 keeper。
-            let existingKeepers = spawnRoom.creeps("harvestEnergyKeeper", false).filter(e => {
+            // ⚠️ 守卫**只挡真正的重复**（用户 10-14 定案）：不能一看见「本矿点已经有人」
+            // 就 return —— 那条路会把上面精心算出来的提前量整个作废。
+            //
+            // 原实现是 `spawnRoom.creeps(role, false).filter(...).length > 0 ⇒ return`，
+            // 而 `creeps(role, false)` 的 false 表示**不滤掉正在孵化的**（见
+            // prototype_room.js:7 的注释）⇒ 老 keeper 还活着时它恒为 1 ⇒ 提前量判据
+            // （`Game.time - spawnTime > 1500`，设计上是「老那只死前 pathTime+体型时间-6
+            // tick」触发）永远走不到 ⇒ 实际只能等老那只**死掉**才派，断档 = 整个孵化时间
+            // （66~99 tick）+ 赶路，而不是设计的 ~6 tick。实测 W33N53 的源因此满仓。
+            //
+            // 现在改成显式标记：**派出接班人时，在在岗那只的 memory 上打 successorSpawned**，
+            // 只要同一矿点还有一只带这个标记的爬（在孵或在岗都算），就不再重复派。
+            // 老那只死后它的 memory 一并消失，接班人是干净的，下一轮照常触发。
+            let mine = spawnRoom.creeps("harvestEnergyKeeper", false).filter(e => {
                 let t = e.headTask && e.headTask();
                 return t && t.id == data.id;
-            }).length;
-            if (existingKeepers > 0) return;
+            });
+            if (mine.some(e => e.memory && e.memory.successorSpawned)) return;
             if (Game.time - data["spawnTime"] > 1500 || (data["creeps"] || []).length == 0) {
                 // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。
                 // 按当前可用能量收缩体型，至少保证 550 能量的基础 keeper，
@@ -3046,7 +3059,10 @@ let pro = {
                 let energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(spawnRoom.energyAvailable, 550));
                 let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
-                StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)
+                if (StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)) {
+                    // 派成功了才打标记：接班人在路上，其余的在岗爬不用再补
+                    mine.forEach(e => { if (e.memory && !e.spawning) e.memory.successorSpawned = true; });
+                }
             }
         });
     },

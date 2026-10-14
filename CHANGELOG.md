@@ -1,3 +1,52 @@
+## v0.78.96 — The keeper handover guard blocks only real duplicates
+
+User report: the room's sources sat at full energy in W33N53, and the question was whether the
+replacement keeper is dispatched early enough and whether the spawn was saturated.
+
+The advance IS computed. On arrival a keeper back-dates its own spawn moment:
+
+    data["spawnTime"] -= pathTime + this.body.length * 3 - 6;
+
+so the dispatch trigger `Game.time - data["spawnTime"] > 1500` fires exactly
+`pathTime + body*3 - 6` ticks before the predecessor dies - designed for a seamless handover.
+Live numbers check out (W33N53's sources report spawnTime ages of 58/51, i.e. its body's spawn
+time).
+
+**But the guard defeated it.** The dispatch counted keepers with
+
+    spawnRoom.creeps("harvestEnergyKeeper", false)
+
+and `Room.prototype.creeps(role, spawned = true)` returns **everything, including spawning
+creeps**, when the second argument is false (prototype_room.js:7). So while the predecessor was
+alive the count was 1, the guard returned, and the advance-time branch was never reached: the
+replacement could only start once the predecessor was gone, making the real gap the full spawn
+time (66-99 ticks) plus travel instead of the designed ~6.
+
+Spawn saturation was **not** the cause: 12 of 13 rooms had 0/3 spawns busy, and the account-wide
+spawn occupancy works out around 16%.
+
+### Changed
+
+The guard now blocks only real duplicates, using an explicit marker on the incumbent's memory
+(user's suggestion): after `StationHive.trySpawn` **returns success**, `successorSpawned` is set
+on the keepers serving that source. While any keeper of that source carries the flag - spawning
+or on station - no further keeper is dispatched. The predecessor's memory disappears with it, so
+the successor starts clean and the next cycle triggers normally. A failed spawn sets nothing, so
+the dispatch keeps retrying until a spawn slot and the energy are available.
+
+That is safe against double-crewing: `cleanupDuplicateKeepers` only culls within `data.creeps`,
+and a spawning successor is not registered there yet, so the incumbent is not killed early; if
+both do end up registered, the lower-TTL one is culled, which is the wanted direction.
+
+### Tests
+
+New `test/keeper-succession.test.cjs` (loads the real module): incumbent far from expiry -> no
+spawn; **at the deadline with the incumbent at 60 TTL -> spawn, and the flag is set** (the case
+the old guard blocked); flag present -> no spawn; spawn failure -> no flag, so it retries;
+empty mine -> immediate spawn; plus source assertions that the old guard is gone and that the
+flag is only set after a successful `trySpawn`. Negative control restoring the old guard fails on
+"到点就要提前派（提前量必须生效）".
+
 ## v0.78.95 — The rampart energy gate has to cover both entrances
 
 Follow-up to v0.78.94, same instruction. Gating `getRepairWorkerLimit` alone was not enough: it
