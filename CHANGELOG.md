@@ -1,3 +1,42 @@
+## v0.78.97 — The keeper advance is measured off the creep itself
+
+Two defects from the previous change, surfaced by a live report about W32N56 and confirmed by the
+user's own formulation: **the advance is the spawn-to-source walk, plus the body's spawn time,
+plus a few ticks of margin.**
+
+### 1. The travel time was never measured honestly
+
+It came from `Game.time - data["spawnTime"]`, but `spawnTime` is itself back-dated, so that only
+holds for the first generation. From the second on it measures "ticks since the last record"
+rather than the walk (live: W32N56's own-room keepers read 50 and 15 where they should read 1-5),
+and the `-=` idiom then pushed every generation further ahead until the sanitiser clamped it to
+"now" and fired an immediate replacement (E41S32 was already clamped).
+
+The travel is now read off the creep itself, exactly as the user suggested: `ticksToLive` only
+starts counting once spawning completes - it is `undefined` while spawning - and keepers walk
+straight to their source, so `1500 - ticksToLive` **is** the spawn-to-source walk. The record is
+an **assignment** from the arrival tick rather than a decrement, so generations cannot drift.
+`pathTime`, which `trySpawnOuterHarCarrier` reads as its capacity input, keeps its capped value
+so the congestion feedback loop described in that comment stays broken.
+
+### 2. The guard let successors snowball
+
+It only checked the flag on the incumbent. Once the incumbent dies, its memory - and the flag -
+vanish, while the spawning successor carries no flag yet, so the trigger's
+`data.creeps.length == 0` clause fired immediately and dispatched another keeper.
+Live: E41S32 had 4 keepers for 2 sources with 3 of them spawning at once, W33N55 had 5,
+E49S31 4.
+
+The guard now also returns when any keeper serving that source is **currently spawning** - one
+successor in flight is enough, and the flag covers the on-station case.
+
+### Tests
+
+`test/keeper-succession.test.cjs`: the advance is asserted to be exactly
+`travel + body*3 + margin`; a second generation is asserted to recompute from its own arrival
+rather than accumulate; a spawning successor must block dispatch. Negative controls restore the
+decrement and the old single-condition guard.
+
 ## v0.78.96 — The keeper handover guard blocks only real duplicates
 
 User report: the room's sources sat at full energy in W33N53, and the question was whether the
