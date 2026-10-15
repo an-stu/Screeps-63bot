@@ -3084,7 +3084,20 @@ let pro = {
             if (roomName != spawnRoom.name
                 && mine.some(e => !e.spawning)
                 && pro.outerMineStarvesSpawnRoom(spawnRoom, false)) return;
-            if (Game.time - data["spawnTime"] > 1500 || (data["creeps"] || []).length == 0) {
+            // ④ 触发：老那只**剩余寿命 ≤ 提前量** ⇒ 现在就必须派接班人。
+            //    提前量 = 赶路（pathTime）+ 孵化（体型×3）+ 余量（用户 10-14 的定义）。
+            //
+            // ⚠️ **不要**再用 `Game.time - data["spawnTime"] > 1500`。`spawnTime` 会被
+            // `registerStationSources`（本文件 262 行）在**孵化期间每 tick** 改写成
+            // 「当前 tick」，孵化结束时它正好 = **出生时刻** ⇒ 这条判据只有在
+            // **老那只死的那一刻**才成立 ⇒ 提前量被清零，断档 = 整个孵化时间 + 赶路。
+            // 铁证：实测所有主房源的 `记录龄 + ttl` **恒等于 1500**。
+            // 爬自己的 `ticksToLive` 才是不受别人改写的不可变事实（见 10-14 那条教训）。
+            let inc = mine.filter(e => !e.spawning).head();
+            let lead = (Number(data["pathTime"]) || 0)
+                + (inc ? inc.body.length * 3 : 150)
+                + KEEPER_SUCCESSION_MARGIN;
+            if ((inc && inc.ticksToLive <= lead) || mine.length == 0) {
                 // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。
                 // 按当前可用能量收缩体型，至少保证 550 能量的基础 keeper，
                 // 让 E53S21 这类缺能房先恢复挖矿，而不是 spawnFailure 卡死。

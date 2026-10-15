@@ -18,6 +18,14 @@ const vm = require("node:vm");
 const root = path.resolve(__dirname, "..");
 const src = fs.readFileSync(path.join(root, "modules/station_sources.js"), "utf8");
 
+// lodash 的数组扩展在游戏里由全局加载提供，宿主 realm 也要有（源码用了 .head()）
+if (!Array.prototype.head) {
+    Object.defineProperty(Array.prototype, "head", {
+        value: function () { return this.length ? this[0] : undefined; },
+        enumerable: false, configurable: true, writable: true,
+    });
+}
+
 const CONSTANTS = {
     OK: 0, ERR_NOT_OWNER: -1, ERR_NO_PATH: -2, ERR_BUSY: -4, ERR_INVALID_TARGET: -7,
     ERR_NOT_IN_RANGE: -9, ERR_NO_BODYPART: -12, ERR_NOT_ENOUGH_ENERGY: -6,
@@ -77,6 +85,8 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     };
     const keeper = keeperTtl === null ? null : {
         id: "k1", name: "k1", spawning: false, ticksToLive: keeperTtl,
+        body: [{ type: ctx.MOVE }, { type: ctx.MOVE }, { type: ctx.MOVE },
+               { type: ctx.MOVE }, { type: ctx.MOVE }],   // 5 部件 ⇒ 孵化 15 tick
         memory: Object.assign({ role: "harvestEnergyKeeper" }, keeperMemory),
         headTask: () => ({ id: "src1", taskName: "harvestEnergyKeeper" }),
     };
@@ -120,10 +130,13 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
 }
 
 {
-    // ② **核心**：到点了、老那只还剩 ~60 tick（原来这里被 existingKeepers>0 挡死）→ 必须派
+    // ② **核心**：老那只剩余寿命 ≤ 提前量（赶路+孵化+余量）→ 必须派。
+    //    注意 spawnTimeAge = 1490 是**实测的真实值**（所有主房源满足 `记录龄 + ttl = 1500`，
+    //    因为 registerStationSources 在孵化期间把 spawnTime 写成出生时刻）—— 旧判据
+    //    `Game.time - spawnTime > 1500` 在这个真实值下**不会触发**，正是断档的原因。
     const ctx = loadStation();
     const S = ctx.StationSources;
-    const { room, keeper, spawnCalls } = setup(ctx, { keeperTtl: 60, spawnTimeAge: 1600 });
+    const { room, keeper, spawnCalls } = setup(ctx, { keeperTtl: 10, spawnTimeAge: 1490 });
     S.trySpawnOuterHarKeeper("W1N1", room);
     assert.equal(spawnCalls.length, 1, "到点就要提前派（提前量必须生效）");
     assert.equal(spawnCalls[0][3], "harvestEnergyKeeper", "派的是 keeper");
@@ -134,7 +147,7 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     // ③ 已经打了标记（接班人在路上/已在岗）→ 不重复派
     const ctx = loadStation();
     const S = ctx.StationSources;
-    const { room, spawnCalls } = setup(ctx, { keeperTtl: 60, spawnTimeAge: 1600, keeperMemory: { successorSpawned: true } });
+    const { room, spawnCalls } = setup(ctx, { keeperTtl: 10, spawnTimeAge: 1490, keeperMemory: { successorSpawned: true } });
     S.trySpawnOuterHarKeeper("W1N1", room);
     assert.equal(spawnCalls.length, 0, "带标记就不再重复生");
 }
@@ -179,7 +192,7 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     // ④ 派兵失败（spawn 忙/能量不够）→ **不能**打标记，下一 tick 还要能重试
     const ctx = loadStation();
     const S = ctx.StationSources;
-    const { room, keeper, spawnCalls } = setup(ctx, { keeperTtl: 60, spawnTimeAge: 1600, spawnOk: false });
+    const { room, keeper, spawnCalls } = setup(ctx, { keeperTtl: 10, spawnTimeAge: 1490, spawnOk: false });
     S.trySpawnOuterHarKeeper("W1N1", room);
     assert.equal(spawnCalls.length, 1, "尝试派了");
     assert.notEqual(keeper.memory.successorSpawned, true, "失败不能打标记，否则永远补不上");

@@ -1,3 +1,36 @@
+## v0.78.99 — The keeper successor was never dispatched early: the trigger read a clobbered field
+
+User asked to audit the *home* rooms' keeper succession with outer mining stopped. It showed a
+clean signature: for every home source, `age + ttl == 1500` exactly. That is not a coincidence,
+it means `spawnTime` holds the keeper's **birth tick**, so the trigger
+`Game.time - data["spawnTime"] > 1500` only becomes true **at the moment of death** - the advance
+is exactly zero and every handover costs the full spawn time plus travel.
+
+`spawnTime` is written during spawning, every tick, by `registerStationSources`
+(station_sources.js:262):
+
+    if (this.spawning) { source["spawnTime"] = Game.time }
+
+so it ends up holding the last tick of spawning, i.e. the birth. The intended correction is
+`concatStationSources`, which on arrival records `arrival - (travel + body*3 + margin)`, but the
+field cannot be relied on: whatever the ordering, a freshly spawned keeper reads back as birth.
+
+The trigger now uses an **immutable fact** - the incumbent's own `ticksToLive` - rather than a
+field other code rewrites:
+
+    let inc = mine.filter(e => !e.spawning).head();
+    let lead = (data.pathTime || 0) + (inc ? inc.body.length * 3 : 150) + KEEPER_SUCCESSION_MARGIN;
+    if ((inc && inc.ticksToLive <= lead) || mine.length == 0) { ...spawn... }
+
+This is the same rule as the v0.78.97 lesson, applied where it actually bites.
+
+### Tests
+
+`test/keeper-succession.test.cjs` now feeds a **realistic** `spawnTime` (age = 1500 - ttl, exactly
+what the live game shows) so the negative control is meaningful: restoring the old trigger then
+fails on "到点就要提前派（提前量必须生效）" - i.e. the old code provably does not dispatch on
+time. Ten cases total.
+
 ## v0.78.98 — The outer keeper dispatch no longer locks itself out
 
 User report: `shard3_83651808_1`, an outer keeper, was nearly out of TTL with no successor
