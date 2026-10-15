@@ -3024,9 +3024,12 @@ let pro = {
         // carrier 补员被 spawnFailure 连锁挡死，主房经济崩溃（E53S21 事件）。
         // 注意：只挡外矿（roomName != spawnRoom.name），主房自己的 keeper
         // 是能量源头，永远不能挡——否则主房无能量来源，恶性循环
-        if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, false)) return null;
-        // 重复 keeper 清理必须在生爬门槛之前执行：生爬失败（能量不足）时
-        // spawnFailure 会挡住后续逻辑，导致重复 keeper 一直无法清理
+        // ⚠️ 「主房能量优先」那条闸门**已经挪进下面的循环、按矿点判**（原来在这里做函数级
+        // 早返回）：keeper 是外矿**唯一的能量输入**，连「这个矿点一只在岗 keeper 都没有」
+        // 也一起挡掉 = 外矿收入归零 = 主房永远回不来 —— 就是 10-08 记过的**闸门自锁**。
+        // 实测 W33N55 storage 掉到 4~8k（阈值 2 万）期间，外矿 keeper 全部派不出去，
+        // `shard3_83651808_1` 老死后无人接班。豁免口径与 carrier 那条（3466 行的
+        // `onThisMine >= outerCarrierBacklogQuota`）同源：**已有覆盖就不补，一个都没有就必须补**。
         pro.cleanupDuplicateKeepers(roomName);
         if (spawnRoom.spawnFailure) return null;
         // log(roomName,spawnRoom.name)
@@ -3075,6 +3078,12 @@ let pro = {
             if (mine.some(e => e.spawning)) return;
             // ② 在岗那只已被标记（接班人在路上）⇒ 也别重复派。
             if (mine.some(e => e.memory && e.memory.successorSpawned)) return;
+            // ③ 主房能量优先：外矿在「主房穷」时缓一缓 —— **但只在这个矿点已经有在岗
+            //    keeper 时才缓**。一只都没有时（新矿点 / 老 keeper 刚死）必须放行，
+            //    否则外矿收入归零、主房永远穷，闸门自锁（见上面挪走那条的注释）。
+            if (roomName != spawnRoom.name
+                && mine.some(e => !e.spawning)
+                && pro.outerMineStarvesSpawnRoom(spawnRoom, false)) return;
             if (Game.time - data["spawnTime"] > 1500 || (data["creeps"] || []).length == 0) {
                 // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。
                 // 按当前可用能量收缩体型，至少保证 550 能量的基础 keeper，

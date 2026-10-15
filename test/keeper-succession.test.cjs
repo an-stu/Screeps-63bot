@@ -229,7 +229,54 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
 }
 
 {
-    // ⑦ 调用点仍在（只测 helper 抓不到「helper 在、但没人调」）
+    // ⑧ 外矿 + 主房穷 + **本矿点一只在岗 keeper 都没有** → 必须放行。
+    //    这是防「闸门自锁」的豁免：keeper 是外矿唯一的能量输入，挡掉等于收入归零。
+    const ctx = loadStation({ Game: { time: 100000, cpu: { bucket: 10000 }, shard: { name: "shard3" },
+        getObjectById: () => null, creeps: {}, map: { getRoomLinearDistance: () => 1 } } });
+    const S = ctx.StationSources;
+    S.stationName = "stationSources";
+    ctx.Memory.rooms["W2N2"] = { stationSources: { out1: { id: "out1", spawnTime: ctx.Game.time - 3000, creeps: [] } } };
+    const calls = [];
+    ctx.StationHive.trySpawn = (...a) => { calls.push(a); return "newK"; };
+    S.getHarvesterBodyConfig = () => [ctx.MOVE];
+    S.generatorOuterHarTask = () => [];
+    S.outerMineStarvesSpawnRoom = () => true;          // 主房很穷
+    const room = {
+        name: "W1N1", my: true, level: 8, spawnFailure: false,
+        getEnergyCapacityAvailable: () => 12900, energyAvailable: 12900,
+        creeps: () => [], find: () => [],
+    };
+    S.trySpawnOuterHarKeeper("W2N2", room);
+    assert.equal(calls.length, 1, "主房穷、但矿点一只 keeper 都没有 ⇒ 必须派（否则闸门自锁）");
+}
+
+{
+    // ⑨ 外矿 + 主房穷 + **已有在岗 keeper** → 缓一缓（闸门原本的保护仍然生效）
+    const ctx = loadStation();
+    const S = ctx.StationSources;
+    ctx.Memory.rooms["W2N2"] = { stationSources: { out1: { id: "out1", spawnTime: ctx.Game.time - 3000, creeps: ["k1"] } } };
+    const keeper = {
+        id: "k1", name: "k1", spawning: false, ticksToLive: 60, body: [ctx.MOVE],
+        memory: { role: "harvestEnergyKeeper" },
+        headTask: () => ({ id: "out1", taskName: "harvestEnergyOuterKeeper" }),
+    };
+    const calls = [];
+    ctx.StationHive.trySpawn = (...a) => { calls.push(a); return "newK"; };
+    S.getHarvesterBodyConfig = () => [ctx.MOVE];
+    S.generatorOuterHarTask = () => [];
+    S.outerMineStarvesSpawnRoom = () => true;
+    ctx.Game.getObjectById = id => (id === "k1" ? keeper : null);
+    const room = {
+        name: "W1N1", my: true, level: 8, spawnFailure: false,
+        getEnergyCapacityAvailable: () => 12900, energyAvailable: 12900,
+        creeps: () => [keeper], find: () => [],
+    };
+    S.trySpawnOuterHarKeeper("W2N2", room);
+    assert.equal(calls.length, 0, "主房穷且矿点有人在岗 ⇒ 缓一缓");
+}
+
+{
+    // ⑩ 调用点仍在（只测 helper 抓不到「helper 在、但没人调」）
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(!/if \(existingKeepers > 0\) return;/.test(codeOnly),
         "旧的守卫必须删掉（它把提前量作废了）");

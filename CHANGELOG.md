@@ -1,3 +1,31 @@
+## v0.78.98 — The outer keeper dispatch no longer locks itself out
+
+User report: `shard3_83651808_1`, an outer keeper, was nearly out of TTL with no successor
+dispatched.
+
+`trySpawnOuterHarKeeper` opened with a function-level early return:
+
+    if (roomName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, false)) return null;
+
+That is the "home room comes first" gate - and for an outer mine it has no exemption. A keeper
+**is** the mine's only energy input, so blocking it when the home room is poor zeroes the mine's
+income and the home room never recovers. Live: W33N55's disposable energy fell to 4-8k (the
+keeper threshold is 20k), so every outer keeper dispatch was refused while it lasted; when the
+incumbent died nothing replaced it. The gate has since opened again (W33N55 is back to 119k) and
+a sweep of all 26 keepers currently finds none past its trigger without a successor - but the
+lock-out is real and intermittent.
+
+The same gate already had exactly this exemption on the carrier side
+(`onThisMine >= outerCarrierBacklogQuota(...)`). The keeper gate now matches: it moved into the
+per-source loop and only defers when that source **already has an on-station keeper**. An empty
+mine - new, or with the incumbent just dead - is never deferred.
+
+### Tests
+
+`test/keeper-succession.test.cjs` extended: an outer mine whose home room is starved and which has
+no keeper must still dispatch; the same mine with a keeper on station must defer. Negative control
+removing the exemption fails on "主房穷、但矿点一只 keeper 都没有 ⇒ 必须派（否则闸门自锁）".
+
 ## v0.78.97 — The keeper advance is measured off the creep itself
 
 Two defects from the previous change, surfaced by a live report about W32N56 and confirmed by the
