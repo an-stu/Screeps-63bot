@@ -1,3 +1,26 @@
+## v0.78.105 — Import the locally provided lyric pack as the chatter corpus
+
+The user supplied an offline pack at `/Users/an/Documents/hot200-lyrics` (their own fetch, 219 LRC
+files covering the NetEase hot-200 plus 19 translations) and asked for it to be imported and
+cleaned. That is the path offered in v0.78.104 - material supplied by the user, wiring and cleaning
+on this side - so it is a mechanical transform of their own data, not sourcing.
+
+`scripts/build-chat-corpus.cjs` reads the pack and writes `modules/闲聊语料自定义.js`
+(`global.TalkCustom = [...]`), which `闲聊 v1.0`'s `TALK()` picks up automatically.
+
+Cleaning, as requested:
+
+- strip the `[mm:ss.xxx]` time axis - **including the repeated-timestamp form**
+  (`[00:12.3][00:15.6]lyric`, used for reused choruses), which the first pass missed and which left
+  11 entries with a stray stamp in the live check
+- drop `[ti:]/[ar:]/[al:]/[by:]/[rank:]/[offset:]` metadata
+- drop credit lines (`作词 : …`, `作曲 : …`, `编曲 : …`, `制作人 : …`, more)
+- drop instrumental markers and lines shorter than 3 characters, cap at 120 with a break at a
+  punctuation mark, and de-duplicate globally (choruses repeat a lot)
+
+Result: 200 songs -> **6820 unique lines**, 246 KB, `uploadedModules` 72. Live: 6820 entries, zero
+entries still carrying a timestamp or a credit prefix, `errorCount` 0.
+
 ## v0.78.104 — Every creep sings, and the corpus is pluggable
 
 Follow-up to v0.78.103, per "as much as possible every creep should sing, and split anything longer
