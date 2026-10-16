@@ -60,10 +60,10 @@ function parseLrc(text) {
 
 function main() {
     if (!fs.existsSync(LYRICS_DIR)) throw new Error(`歌词目录不存在: ${LYRICS_DIR}`);
-    const files = fs.readdirSync(LYRICS_DIR).filter(f => f.toLowerCase().endsWith(".lrc"));
-    const seen = new Set();
-    const lines = [];
-    let usedFiles = 0, skippedTrans = 0;
+    const files = fs.readdirSync(LYRICS_DIR).filter(f => f.toLowerCase().endsWith(".lrc")).sort();
+    const seenGlobal = new Set();
+    const songs = [];               // 每首一个子数组，**保留歌曲边界**
+    let usedFiles = 0, skippedTrans = 0, lines = 0;
 
     for (const f of files) {
         if (SKIP_TRANS && /\.trans\.lrc$/i.test(f)) { skippedTrans++; continue; }
@@ -71,24 +71,30 @@ function main() {
         const parsed = parseLrc(text);
         if (!parsed.length) continue;
         usedFiles++;
+        const seenSong = new Set();
+        const song = [];
         for (const l of parsed) {
-            if (seen.has(l)) continue;    // 副歌会重复很多遍，全局去重
-            seen.add(l);
-            lines.push(l);
+            // 曲内去重（副歌在同一首歌里重复很多遍），跨曲保留 —— 不同的歌可以共用句子
+            if (seenSong.has(l)) continue;
+            seenSong.add(l);
+            song.push(l);
         }
+        if (song.length) { songs.push(song); lines += song.length; }
     }
 
     const header = `// 由 scripts/build-chat-corpus.cjs 生成，请勿手改。\n`
-        + `// 素材：${LYRICS_DIR}（${usedFiles} 首；已去时间轴/元数据/署名行并全局去重）\n`
+        + `// 素材：${LYRICS_DIR}（${usedFiles} 首；已去时间轴/元数据/署名行，曲内去重）\n`
+        + `// 结构：**每首一个子数组**，顺序即歌词顺序 —— 播放逻辑按行推进、整首唱完再换歌，\n`
+        + `//       所以边界必须保留（原来拍平成一个数组就丢了「唱到哪首唱完」的信息）。\n`
         + `// 本文件只放数据；播放逻辑在 modules/闲聊 v1.0.js，非空即优先于内置语料。\n`;
     const body = "global.TalkCustom = [\n"
-        + lines.map(l => "    " + JSON.stringify(l)).join(",\n")
+        + songs.map(song => "  [\n" + song.map(l => "    " + JSON.stringify(l)).join(",\n") + "\n  ]").join(",\n")
         + "\n];\n";
     fs.writeFileSync(OUT_FILE, header + body);
 
     const bytes = fs.statSync(OUT_FILE).size;
     console.log(`歌词文件 ${files.length} 个（跳过翻译 ${skippedTrans}），实际使用 ${usedFiles} 首`);
-    console.log(`去重后语料 ${lines.length} 条，输出 ${OUT_FILE}（${Math.round(bytes / 1024)} KB）`);
+    console.log(`曲内去重后共 ${lines} 行，输出 ${OUT_FILE}（${Math.round(bytes / 1024)} KB）`);
 }
 
 main();

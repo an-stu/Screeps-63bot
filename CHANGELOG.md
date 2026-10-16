@@ -1,3 +1,33 @@
+## v0.78.106 — A creep recites one song in order, and only then changes song
+
+User: no random line-hopping - a creep should sing one song straight through and pick the next one
+only after it is completely finished.
+
+The old logic picked a random array entry every time a creep started a line, so a creep jumped
+between songs line by line. Two things had to change:
+
+- **The corpus lost its song boundaries.** `scripts/build-chat-corpus.cjs` flattened everything into
+  one array, so "which song am I in and is it finished" was not representable. It now emits **one
+  sub-array per song**, in lyric order (still time-axis/metadata/credit-free, now deduplicated
+  within a song rather than globally, since two songs may share a line). 200 songs, 6933 lines.
+- **The playback is now a per-creep cursor** `{s, i, p}` (song, line, page): advance the page, when
+  the line is done move to the next line, and only when the last line of a song is done switch
+  songs, then wrap around. `SONGS()` accepts either the nested corpus or a flat array (treated as
+  a single song).
+
+Starting song is a hash of the creep's name - reproducible, not random, and different names spread
+across songs so the field is not all on one track. `Memory.chatChance` now means *which* creeps
+sing; once a creep starts, the probability no longer gates it and it recites to the end.
+
+### Tests
+
+New `test/chat-recite.test.cjs` (loads the real module in a VM, feeds a two-song corpus with a
+17-character line): drives `randomSay` tick by tick and asserts the **complete expected page
+sequence** - line order, 10-character paging, song switch only after the last line, wraparound -
+plus reproducible starting song, spread across creeps, `chance=0` behaviour, and the flat-array
+corpus. Negative control (switch song after every line) fails on "逐句完全符合：行内 10 字分页、
+整首唱完才换歌".
+
 ## v0.78.105 — Import the locally provided lyric pack as the chatter corpus
 
 The user supplied an offline pack at `/Users/an/Documents/hot200-lyrics` (their own fetch, 219 LRC

@@ -10,53 +10,52 @@ global.Talk= [ "/涩图排行","涩图来","涩图来","哦对了，这个排行
 let roomMap={};
 let creepMap={};
 
-// 语料来源：优先 `global.TalkCustom`（用户自行提供/替换），否则用本文件顶部的 global.Talk。
-// 每次调用现取，所以运行时替换 global.TalkCustom 立即生效。
-let TALK = function () {
-    return (Array.isArray(global.TalkCustom) && global.TalkCustom.length) ? global.TalkCustom : Talk;
+/**
+ * 语料：优先 `global.TalkCustom`，否则内置 `global.Talk`。
+ * 两种结构都吃：**每首一个子数组**（推荐，由 scripts/build-chat-corpus.cjs 生成，
+ * 保留歌曲边界），或扁平字符串数组（那时整体当作"一首歌"）。
+ * 每次调用现取 ⇒ 运行时替换 global.TalkCustom 立即生效。
+ */
+let SONGS = function () {
+    let c = global.TalkCustom;
+    if (Array.isArray(c) && c.length) return Array.isArray(c[0]) ? c : [c];
+    return [Talk];
 };
-let randomTalk=function (creep,array) {
-    if(!roomMap[creep.room.name])
-        roomMap[creep.room.name]=Math.floor(array.length*Math.random());
-    roomMap[creep.room.name]=(1+roomMap[creep.room.name])%array.length;
-    let index=roomMap[creep.room.name];
-    return {
-        i:index,//index
-        p:0,//page
-        l:array[index].length/10//length
+
+// 起始曲目由**名字散列**决定：同一只爬每次重启都从同一首开始（可复现，不是随机），
+// 名字不同 ⇒ 自然错开，不会全场同时唱同一首歌。
+let startSong = function (name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 100003;
+    return h;
+};
+
+/**
+ * 一只爬**一首一首按顺序唱**（用户 10-16：不要 random、整首唱完再换歌）：
+ *   · 同一首歌内按歌词顺序一行一行推进；
+ *   · **最后一行也念完**（整首结束）才换下一首，循环；
+ *   · 每行按 **10 字分页** —— Screeps 的 say 上限就是 10 字符，所以长句自然分成几句。
+ * 状态：creepMap[name] = { s: 第几首, i: 第几行, p: 第几页 }。
+ */
+Creep.prototype.randomSay=function(chance){
+    let songs = SONGS();
+    if (!songs.length) return;
+    let st = creepMap[this.name];
+    if (!st) {
+        // 还没开唱：按概率决定这次要不要起唱（chance=1 ⇒ 立即开唱）
+        if (!(chance > Math.random())) return;
+        st = creepMap[this.name] = { s: startSong(this.name) % songs.length, i: 0, p: 0 };
+    }
+    // 推进指针，最多绕几圈防呆（空歌/空行）
+    for (let guard = 0; guard < 4; guard++) {
+        let song = songs[st.s % songs.length] || [];
+        if (!song.length) { st.s = (st.s + 1) % songs.length; st.i = 0; st.p = 0; continue; }
+        if (st.i >= song.length) { st.s = (st.s + 1) % songs.length; st.i = 0; st.p = 0; continue; } // 整首唱完 ⇒ 换歌
+        let line = song[st.i] || "";
+        if (st.p * 10 >= line.length) { st.i++; st.p = 0; continue; }                                 // 这行念完 ⇒ 下一行
+        this.say(line.substr(st.p * 10, 10), true);
+        st.p++;
+        return;
     }
 };
 
-
-
-Creep.prototype.randomSay=function(float){
-    if(creepMap[this.name]){
-        creepMap[this.name].p+=1;
-        if (creepMap[this.name].p >= creepMap[this.name].l) {
-            delete creepMap[this.name]
-        }else{
-            this.say(TALK()[creepMap[this.name].i].substr(creepMap[this.name].p*10,10),true)
-        }
-    }else if(float>Math.random()){
-        let $talk = randomTalk(this,TALK());   // 必须用 TALK()：索引要和实际语料同一个数组
-        if($talk.l>1)creepMap[this.name]= $talk;
-        this.say(TALK()[$talk.i].substr(0,10),true)
-    }
-};
-
-
-
-global.TalkAll=function () {
-    // 用户 10-16：「尽可能每一只爬自己会唱歌」⇒ 默认概率 1（每只每次都会被轮到，
-    // 正在念的爬继续念下一页，念完自动接下一句）。用 Memory.chatChance 调 0~1。
-    let chance = Number(Memory.chatChance);
-    if (!(chance >= 0 && chance <= 1)) chance = 1;
-    _.values(Game.creeps).forEach(e=>e.randomSay(chance));
-    if(Game.time%3253==0){//质数
-        _.keys(creepMap).forEach(name=>{
-            if (!Game.creeps[name]) {
-                delete creepMap[name];
-            }
-        });
-    }
-};
