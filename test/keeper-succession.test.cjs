@@ -26,6 +26,9 @@ if (!Array.prototype.head) {
     });
 }
 
+// 余量常量以源码为准（改常量不必改测试）
+const MARGIN = Number((src.match(/let KEEPER_SUCCESSION_MARGIN = (\d+)/) || [0, 0])[1]);
+
 const CONSTANTS = {
     OK: 0, ERR_NOT_OWNER: -1, ERR_NO_PATH: -2, ERR_BUSY: -4, ERR_INVALID_TARGET: -7,
     ERR_NOT_IN_RANGE: -9, ERR_NO_BODYPART: -12, ERR_NOT_ENOUGH_ENERGY: -6,
@@ -227,8 +230,8 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     };
     ctx.Creep.prototype.concatStationSources.call(keeper);
     const data = ctx.Memory.rooms["W1N1"][stationName].src1;
-    assert.equal(data.spawnTime, ctx.Game.time - (lived + bodyLen * 3 + 10),
-        "spawnTime 必须记成「抵达时刻 −（移动 + 孵化 + 余量）」");
+    assert.equal(data.spawnTime, ctx.Game.time - (lived + bodyLen * 3 + MARGIN),
+        `spawnTime 必须记成「抵达时刻 −（移动 + 孵化 + 余量 ${MARGIN}）」`);
     assert.equal(data.pathTime, lived, "pathTime 记的是真实移动时间（不是那个会漂的差值）");
 
     // 跨代不能累漂：第二代到达时，spawnTime 必须按**它自己的到达时刻**重算，
@@ -237,7 +240,7 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     ctx.Game.time += cycle;
     keeper.ticksToLive = 1500 - lived;             // 新爬同样走 10 tick 抵达
     ctx.Creep.prototype.concatStationSources.call(keeper);
-    assert.equal(data.spawnTime, ctx.Game.time - (lived + bodyLen * 3 + 10),
+    assert.equal(data.spawnTime, ctx.Game.time - (lived + bodyLen * 3 + MARGIN),
         "第二代必须按自己的到达时刻重算（原 -= 累减会变成「再往前推 80」）");
 }
 
@@ -348,6 +351,13 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
         "spawnTime 必须是赋值，不能是 -=（累减会让提前量越漂越早）");
     assert.ok(/data\["spawnTime"\] = Game\.time - \(travel \+ this\.body\.length \* 3 \+ KEEPER_SUCCESSION_MARGIN\)/
         .test(codeOnly), "提前量公式必须是 移动 + 孵化 + 余量");
+}
+
+{
+    // 政策断言：余量必须留够（用户 10-16：keeper「没有提前孵化」）。
+    // 只要 ~10 tick 时，续派发出后必须立刻有空闲 spawn + hive 能量就绪，
+    // spawn 被搬运爬/worker 占一轮就断档。留 150 tick 容错是刻意的决定。
+    assert.ok(MARGIN >= 100, `keeper 接班余量必须留够（现 ${MARGIN}，应 >= 100）`);
 }
 
 console.log("keeper succession checks passed");

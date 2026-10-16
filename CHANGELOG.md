@@ -1,3 +1,26 @@
+## v0.78.101 — Give the keeper successor real slack, not 10 ticks
+
+User: "harvestEnergyKeeper 明显没有接力上，没有提前孵化". The live audit right after v0.78.100
+showed the succession *is* firing - every keeper past the line had `successorSpawned` set and a
+successor spawning toward its source - but the lead left no slack at all:
+
+    W34N52: lead = pathTime(7) + body*3(141) + 10 = 158, successor needs 141 + 7 = 148
+            -> arrives ~10 ticks before the incumbent dies
+
+Ten ticks of margin means the spawn must start on the exact tick with a free spawn and a charged
+hive. One carrier or worker taking a spawn slot and the mine goes dark until the next attempt.
+
+`KEEPER_SUCCESSION_MARGIN` goes from 10 to **150**, and is now overridable at runtime via
+`Memory.marketSettings.keeperSuccessionMargin` (no re-upload needed, like the other knobs). The
+cost is two keepers on one source for ~10% of a keeper's life, and a source's regeneration rate is
+the cap anyway, so the overlap does not produce extra energy - it just buys tolerance for 100-150
+ticks of spawn-queue jitter.
+
+### Tests
+
+The suite reads the margin out of the source so it cannot drift from the constant, and a policy
+assertion requires `MARGIN >= 100` so a later edit cannot quietly go back to a just-in-time lead.
+
 ## v0.78.100 — Carriers that are still spawning count as carriers
 
 `trySpawnOuterHarKeeper` opens with a function-level early return meant to give haulers priority:

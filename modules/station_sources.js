@@ -292,15 +292,20 @@ Creep.prototype.registerStationSourcesCarryInRoom = function () {
 };
 
 /**
- * keeper 接班的**额外余量**（tick）。
+ * keeper 接班的**额外余量**（tick）。默认 150，可用
+ * `Memory.marketSettings.keeperSuccessionMargin` 覆盖。
  *
- * 提前量 = 移动时间（spawn→source）+ 孵化时间（体型×3）+ 本余量，
- * 记在 `data.spawnTime = 抵达时刻 − 提前量`，触发判据 `Game.time - spawnTime > 1500`
- * 因此在老那只死前正好「提前量」tick 发出续派 ⇒ 接班人在老那只死前 MARGIN tick 到位，
- * 不留空档。留正余量而不是「刚好卡死」的原因：spawn 可能被占、能量可能不够，
- * 那几 tick 就是容错（用户 10-14 明确「再加几 t 的提前量」）。
+ * 提前量 = 移动时间（spawn→source）+ 孵化时间（体型×3）+ 本余量，判据写成
+ * 「在岗那只的 `ticksToLive` ≤ 提前量就派」，因此接班人会在老那只死前**余量** tick 到位。
+ *
+ * 为什么不是「几 t」而是 150（用户 10-16：harvestEnergyKeeper「没有提前孵化」）：
+ * 只要 10 tick 余量时，续派发出后**必须**在那一刻立刻有空闲 spawn、且 hive 能量就绪 ——
+ * 实测 W34N52 是 `lead=158 / 需要 148`，只早到 10 tick；spawn 被搬运爬/worker 占一轮
+ * 就直接断档（源头满仓没人采）。留 150 tick 余量的代价只是「两只 keeper 同源约 10% 生命周期」，
+ * 而源的能量**再生速率才是上限**，多一只并不增产，所以这点重叠几乎不浪费；
+ * 换来的是 spawn 队列波动 100~150 tick 也接得上。
  */
-let KEEPER_SUCCESSION_MARGIN = 10;
+let KEEPER_SUCCESSION_MARGIN = 150;
 
 Creep.prototype.concatStationSources = function () {
     let rm = Memory.rooms[this.headTask().roomName];
@@ -3100,9 +3105,12 @@ let pro = {
             // 铁证：实测所有主房源的 `记录龄 + ttl` **恒等于 1500**。
             // 爬自己的 `ticksToLive` 才是不受别人改写的不可变事实（见 10-14 那条教训）。
             let inc = mine.filter(e => !e.spawning).head();
+            // 余量可调：`Memory.marketSettings.keeperSuccessionMargin`（改完立刻生效，不必重传代码）
+            let margin = Number(Memory.marketSettings && Memory.marketSettings.keeperSuccessionMargin);
+            if (!(margin >= 0)) margin = KEEPER_SUCCESSION_MARGIN;
             let lead = (Number(data["pathTime"]) || 0)
                 + (inc ? inc.body.length * 3 : 150)
-                + KEEPER_SUCCESSION_MARGIN;
+                + margin;
             if ((inc && inc.ticksToLive <= lead) || mine.length == 0) {
                 // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。
                 // 按当前可用能量收缩体型，至少保证 550 能量的基础 keeper，
