@@ -3035,7 +3035,13 @@ let pro = {
         // log(roomName,spawnRoom.name)
         if (roomName == spawnRoom.name
             && spawnRoom.creeps("harvestEnergyKeeper").filter(e => e.ticksToLive > 300).length
-            && spawnRoom.creeps("carrier").filter(e => e.ticksToLive > 300).length == 0) return; // 如果低等级低，有存在har 并且没有搬运的时候，优先生搬运的，避免一直挖而没有搬运的
+            && spawnRoom.creeps("carrier").filter(e => e.ticksToLive > 300).length == 0
+            // ⚠️ 已经在孵化的搬运爬也算「有搬运」。原判据只数**长大**的（ttl>300），
+            // 于是搬运爬换班的那 ~150 tick 里 keepers 的续派被一起挡住 ——
+            // 实测 W34N52：carrier=[孵,孵]、keeper ttl=71、carrier(>300)=0 ⇒ 直接 return，
+            // 老 keeper 死后要等新搬运爬长大才补 ⇒ 白丢一段挖矿。
+            // 与 keeper 自己那条守卫同理：**有一个在路上就够了**。
+            && spawnRoom.creeps("carrier", false).filter(e => e.spawning).length == 0) return; // 低等级且「一个搬运都没有（连在孵的也没有）」时才优先生搬运
         delete Memory.rooms[roomName][StationSources.stationName]["undefined"]
 
         for (let k in Memory.rooms[roomName][StationSources.stationName])

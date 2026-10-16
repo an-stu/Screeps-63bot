@@ -289,6 +289,51 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
 }
 
 {
+    // ⑪ 主房里搬运爬**全在孵化**（没有长大的）⇒ 不能因此拦住 keeper 续派。
+    //    原判据只数 ttl>300 的搬运爬 ⇒ 搬运换班那 ~150 tick 里 keeper 交接被一起挡掉
+    //    （实测 W34N52：carrier=[孵,孵] / keeper ttl=71 / carrier>300=0 ⇒ 直接 return）。
+    const mkRoom = (ctx, spawningCarriers) => ({
+        name: "W1N1", my: true, level: 8, spawnFailure: false,
+        getEnergyCapacityAvailable: () => 12900, energyAvailable: 12900,
+        creeps(role, spawned = true) {
+            // 房里另有一只**长大**的 keeper（另一个源）—— 那条守卫要的正是「有 har 在岗」
+            if (role === "harvestEnergyKeeper") return [warmKeeper, matureKeeper];
+            if (role === "carrier") return spawned ? [] : spawningCarriers;
+            return [];
+        },
+        find: () => [],
+    });
+    const warmKeeper = { id: "k1", spawning: false, ticksToLive: 10, body: [0, 1, 2, 3, 4],
+        memory: { role: "harvestEnergyKeeper" }, headTask: () => ({ id: "src1" }) };
+    // 另一个源上长大的 keeper（ttl>300）⇒ 触发那条「有 har 在岗」的守卫
+    const matureKeeper = { id: "k9", spawning: false, ticksToLive: 1000, body: [0, 1],
+        memory: { role: "harvestEnergyKeeper" }, headTask: () => ({ id: "src2" }) };
+
+    const ctx = loadStation();
+    const S = ctx.StationSources;
+    ctx.Memory.rooms["W1N1"] = { [S.stationName]: { src1: { id: "src1", spawnTime: ctx.Game.time - 1490, creeps: ["k1"] } } };
+    const calls = [];
+    ctx.StationHive.trySpawn = (...a) => { calls.push(a); return "newK"; };
+    S.getHarvesterBodyConfig = () => [ctx.MOVE];
+    S.generatorHarTask = () => [];
+    ctx.Game.getObjectById = id => (id === "k1" ? warmKeeper : null);
+    S.trySpawnOuterHarKeeper("W1N1", mkRoom(ctx, [{ spawning: true, memory: { role: "carrier" } }]));
+    assert.equal(calls.length, 1, "搬运爬都在孵化时，keeper 续派不能也被挡");
+
+    // ⑫ 连在孵的搬运都没有 ⇒ 仍然「优先生搬运」（原意图保留）
+    const ctx2 = loadStation();
+    const S2 = ctx2.StationSources;
+    ctx2.Memory.rooms["W1N1"] = { [S2.stationName]: { src1: { id: "src1", spawnTime: ctx2.Game.time - 1490, creeps: ["k1"] } } };
+    const calls2 = [];
+    ctx2.StationHive.trySpawn = (...a) => { calls2.push(a); return "newK"; };
+    S2.getHarvesterBodyConfig = () => [ctx2.MOVE];
+    S2.generatorHarTask = () => [];
+    ctx2.Game.getObjectById = id => (id === "k1" ? warmKeeper : null);
+    S2.trySpawnOuterHarKeeper("W1N1", mkRoom(ctx2, []));
+    assert.equal(calls2.length, 0, "一只搬运都没有（含孵化中）⇒ 仍然先搬运");
+}
+
+{
     // ⑩ 调用点仍在（只测 helper 抓不到「helper 在、但没人调」）
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(!/if \(existingKeepers > 0\) return;/.test(codeOnly),

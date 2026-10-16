@@ -1,3 +1,28 @@
+## v0.78.100 — Carriers that are still spawning count as carriers
+
+`trySpawnOuterHarKeeper` opens with a function-level early return meant to give haulers priority:
+
+    if (roomName == spawnRoom.name
+        && spawnRoom.creeps("harvestEnergyKeeper").filter(e => e.ticksToLive > 300).length
+        && spawnRoom.creeps("carrier").filter(e => e.ticksToLive > 300).length == 0) return;
+
+It only counted **grown** carriers (`ttl > 300`), so during the ~150 ticks a carrier is being
+replaced the room reads as "no haulers at all" and keeper succession is blocked with it. Live:
+W34N52 had `carrier=[孵, 孵]`, a keeper at ttl 71 and no grown carrier, so the dispatch returned
+and the room had to wait for the new carriers to mature before replacing the keeper that was
+about to die. Found while re-auditing the home keeper succession after v0.78.99.
+
+A carrier already in the spawning queue is a carrier. The gate now also requires that there are no
+spawning carriers - the same "one in flight is enough" rule the keeper's own guard uses.
+
+### Tests
+
+`test/keeper-succession.test.cjs`, two new cases: with the room's only carriers still spawning the
+keeper dispatch must proceed, and with no carriers at all (not even spawning) it must still defer
+to haulers. The case needed a grown keeper on the room's *other* source, because that is what the
+guard actually keys on. Negative control removing the exemption fails on "搬运爬都在孵化时，
+keeper 续派不能也被挡".
+
 ## v0.78.99 — The keeper successor was never dispatched early: the trigger read a clobbered field
 
 User asked to audit the *home* rooms' keeper succession with outer mining stopped. It showed a
