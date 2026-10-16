@@ -1,3 +1,12 @@
+## v0.78.109 — Keeper succession margin 6 -> 16
+
+User: "all energy keeper handovers get another 10 ticks, nothing else changes."
+
+`KEEPER_SUCCESSION_MARGIN` 6 -> 16, so the dispatch fires `pathTime + body*3 + 16` ticks before the
+incumbent dies and the successor arrives with 16 ticks of slack instead of 6. One constant, no other
+behaviour touched. The test reads the margin out of the source, so its formula assertions follow
+automatically, and the policy assertion (`> 0 && <= 30`) still holds.
+
 ## v0.78.108 — The chatter was not running at all: my edit had deleted its entry point
 
 User: "singing was never deployed? one line per tick."

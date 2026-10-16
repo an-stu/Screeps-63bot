@@ -305,7 +305,7 @@ Creep.prototype.registerStationSourcesCarryInRoom = function () {
  *   2) 「优先生搬运爬」那条守卫只数长大的搬运爬，搬运换班期间把 keeper 交接一起挡掉（已修）。
  * 这两条修好之后，余量只用来吸收「孵化完成 → 迈出第一步」的抖动，6 tick 足够。
  */
-let KEEPER_SUCCESSION_MARGIN = 6;
+let KEEPER_SUCCESSION_MARGIN = 16;   // 6 → 16：用户 10-16「所有 energykeeper 的接力再加 10t」
 
 Creep.prototype.concatStationSources = function () {
     let rm = Memory.rooms[this.headTask().roomName];
