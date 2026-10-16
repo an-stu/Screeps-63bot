@@ -1,3 +1,33 @@
+## v0.78.107 — Containers that are not mineral containers hold energy only
+
+User report: some containers hold more than one kind of thing - clean them up and move the excess to
+the storage; the ones next to sources should hold energy only.
+
+Survey (13 rooms) found **10 mixed containers**. Three sources of contamination:
+
+- **boost compound residue** - GO/KO/ZH/UH/OH in the source containers of E41S32, E55S31, E55S39,
+  W33N55 (and OH in E41S32)
+- **biomass** - 593 and 528 left in E41S32 / E48S41, residue from the deposit harvesting
+- **power** - 100 sitting in an E49S31 container from a power bank run
+
+The other five mixed containers are the **mineral containers** (H/O), which are supposed to hold
+their mineral while waiting for the hauler - so they are exempt.
+
+`StrategyHighLevel.cleanDirtyContainers(room, freeCarries)` is called from the carrier dispatch
+right after `freeCarries` is refreshed. For each container it takes one free carrier, queues a
+`carryRes` for **each non-energy resource** (never energy) and then `fillAllMainRoomStorage()`, and
+returns immediately - one container per tick per room, so this tidy-up work cannot drain hauling
+capacity. A container with nothing dirty returns the carrier to the pool. Full storage, or no free
+carrier, means no action.
+
+### Tests
+
+New `test/container-cleanup.test.cjs` (loads the real module in a VM): only non-energy resources
+get a `carryRes`, the target is that container, the follow-up is `fillAllMainRoomStorage`; the
+mineral container is exempt; a clean container queues nothing and the carrier comes back; no free
+carrier and a full storage are both no-ops; plus a call-site assertion. Two negative controls -
+dropping the mineral exemption, and dropping the non-energy filter - each fail on their assertion.
+
 ## v0.78.106 — A creep recites one song in order, and only then changes song
 
 User: no random line-hopping - a creep should sing one song straight through and pick the next one

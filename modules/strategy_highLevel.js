@@ -177,6 +177,38 @@ let pro = {
             }
         })
     },
+    /**
+     * 容器清理：**非矿物容器应当只装能量**。
+     *
+     * 用户 2026-10-16：「有部分 container 里面不止有一种东西，把 container 清理一下，
+     * 多余的搬到 storage。source 旁边的应该只有能量。」
+     * 实测混进来的三种来源：
+     *   · 强化化合物 GO/KO/ZH/UH/OH —— boost 流程的残留
+     *   · biomass —— deposit 采集的残留
+     *   · power —— 打完 powerBank 收回来的
+     * **矿物容器豁免**（StationMineral 登记的那个）—— 矿物本来就该在那里等运矿车。
+     *
+     * 一轮只派一只 carrier 清一个容器：这是收尾活儿，不能把运力从能量搬运上抽走，
+     * 所以先 pop 一只空闲 carrier、没活儿再放回去。
+     */
+    cleanDirtyContainers(room, freeCarries) {
+        if (!room.storage || room.storage.store.getFreeCapacity() == 0) return;
+        if (!freeCarries || !freeCarries.length) return;
+        let mineral = room.memory[StationMineral.stationName];
+        let mineralContainer = mineral && mineral.container;
+        let carrier = freeCarries.pop();
+        let containers = room.find(FIND_STRUCTURES, { filter: e => e.structureType == STRUCTURE_CONTAINER });
+        for (let c of containers) {
+            if (c.id == mineralContainer) continue;                       // 矿物容器：豁免
+            let dirty = _.keys(c.store).filter(r => r != RESOURCE_ENERGY && c.store[r] > 0);
+            if (!dirty.length) continue;
+            // 逐种资源 withdraw 出来，再统一灌进 storage/terminal（fillAllMainRoomStorage）
+            carrier.addTask(dirty.map(r => UtilsTask.task(c, "carryRes", "registerStationCarryDrop", { resType: r })));
+            carrier.fillAllMainRoomStorage();
+            return;
+        }
+        freeCarries.push(carrier);   // 没有脏容器 ⇒ 把 carrier 还回去
+    },
     carrierOperatorBoost(room) {
         if (!global.StationLab) return;
         //boost lab 操作
@@ -289,6 +321,9 @@ let pro = {
             }
         }
         freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.ticksToLive > 50);
+        // 容器清理：把混进来的非能量搬回 storage（见 pro.cleanDirtyContainers）。
+        // 放在这里是因为 freeCarries 刚算好，且本函数就是 room 级的运力调度点。
+        pro.cleanDirtyContainers(room, freeCarries);
 
         // 捡起任务 9tick更新一次，比较耗时 缓存起来
         let pickTasks = pro.pickTasksMap[room.name] || []
