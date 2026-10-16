@@ -292,20 +292,20 @@ Creep.prototype.registerStationSourcesCarryInRoom = function () {
 };
 
 /**
- * keeper 接班的**额外余量**（tick）。默认 150，可用
+ * keeper 接班的**额外余量**（tick），默认 6，可用
  * `Memory.marketSettings.keeperSuccessionMargin` 覆盖。
  *
- * 提前量 = 移动时间（spawn→source）+ 孵化时间（体型×3）+ 本余量，判据写成
+ * 提前量 = 移动时间（spawn→source）+ 孵化时间（体型×3）+ 本余量；判据写成
  * 「在岗那只的 `ticksToLive` ≤ 提前量就派」，因此接班人会在老那只死前**余量** tick 到位。
  *
- * 为什么不是「几 t」而是 150（用户 10-16：harvestEnergyKeeper「没有提前孵化」）：
- * 只要 10 tick 余量时，续派发出后**必须**在那一刻立刻有空闲 spawn、且 hive 能量就绪 ——
- * 实测 W34N52 是 `lead=158 / 需要 148`，只早到 10 tick；spawn 被搬运爬/worker 占一轮
- * 就直接断档（源头满仓没人采）。留 150 tick 余量的代价只是「两只 keeper 同源约 10% 生命周期」，
- * 而源的能量**再生速率才是上限**，多一只并不增产，所以这点重叠几乎不浪费；
- * 换来的是 spawn 队列波动 100~150 tick 也接得上。
+ * 用户 10-16 定案：**6 就够**（与老代码那句 `- 6` 同量级）—— 前提是 spawn 与 hive 正常。
+ * 之前那批「接不上」并不是余量不够，而是两个真 bug：
+ *   1) 触发判据读 `data.spawnTime`，而它被 `registerStationSources` 在孵化期写成出生时刻
+ *      ⇒ 提前量整个归零（已改成用爬自己的 `ticksToLive`，见下面循环里 ④）；
+ *   2) 「优先生搬运爬」那条守卫只数长大的搬运爬，搬运换班期间把 keeper 交接一起挡掉（已修）。
+ * 这两条修好之后，余量只用来吸收「孵化完成 → 迈出第一步」的抖动，6 tick 足够。
  */
-let KEEPER_SUCCESSION_MARGIN = 150;
+let KEEPER_SUCCESSION_MARGIN = 6;
 
 Creep.prototype.concatStationSources = function () {
     let rm = Memory.rooms[this.headTask().roomName];

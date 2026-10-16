@@ -1,3 +1,27 @@
+## v0.78.102 — Keeper succession margin back to 6 ticks
+
+User decision: with spawn and hive assumed healthy, 6 ticks of margin is enough - it does not need
+the 150 added in v0.78.101.
+
+That is right, and the reason is worth recording: the batch of keepers that were genuinely failing
+to hand over was **not** a margin problem. The two real defects were
+
+1. the trigger read `data["spawnTime"]`, which `registerStationSources` overwrites to the birth
+   tick during spawning, so the lead collapsed to zero (v0.78.99 moved the trigger onto the
+   creep's own `ticksToLive`), and
+2. the "prioritise haulers" guard counted only grown carriers, so a keeper handover was blocked
+   for the whole ~150 ticks of a carrier replacement (v0.78.100).
+
+With those fixed the margin only has to absorb the jitter between spawning completing and the
+creep taking its first step, so `KEEPER_SUCCESSION_MARGIN` goes back to **6** - the same order as
+the `- 6` in the original code. It stays overridable via
+`Memory.marketSettings.keeperSuccessionMargin` if reality disagrees.
+
+### Tests
+
+The `MARGIN` policy assertion moves from `>= 100` to `> 0 && <= 30` (small positive, not large,
+so two keepers do not end up sharing a source for long), with the reasoning in a comment.
+
 ## v0.78.101 — Give the keeper successor real slack, not 10 ticks
 
 User: "harvestEnergyKeeper 明显没有接力上，没有提前孵化". The live audit right after v0.78.100

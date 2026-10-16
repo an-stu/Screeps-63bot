@@ -354,10 +354,12 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
 }
 
 {
-    // 政策断言：余量必须留够（用户 10-16：keeper「没有提前孵化」）。
-    // 只要 ~10 tick 时，续派发出后必须立刻有空闲 spawn + hive 能量就绪，
-    // spawn 被搬运爬/worker 占一轮就断档。留 150 tick 容错是刻意的决定。
-    assert.ok(MARGIN >= 100, `keeper 接班余量必须留够（现 ${MARGIN}，应 >= 100）`);
+    // 政策断言（用户 2026-10-16 定案）：余量取**小正数**即可（6）。
+    // 之前那批「接不上」不是余量不够，而是 ① 触发判据读到被写坏的 spawnTime（已修）、
+    // ② 搬运爬守卫把交接一起挡掉（已修）。这两条修好后，余量只吸收「孵化完成 →
+    // 迈出第一步」的抖动，所以只要求 > 0 且不过分大（过大会让两只 keeper 长期同源）。
+    assert.ok(MARGIN > 0 && MARGIN <= 30,
+        `keeper 接班余量应是小正数（现 ${MARGIN}，用户定案 6）`);
 }
 
 console.log("keeper succession checks passed");
