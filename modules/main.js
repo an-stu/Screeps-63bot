@@ -151,6 +151,18 @@ let pro = {
                 stats.max = Math.max(stats.max, used);
                 stats.lastTick = Game.time;
             });
+        // 闲聊：让 creep 说话（气泡），语料来自 `modules/闲聊 v1.0.js` 顶部的 `global.Talk`
+        // —— 原始语料是 6g3y 整理的 8124 条**群聊记录**（2020-10 截止），
+        // 换语料只需要改那一行数组，与本文件无关。
+        //
+        // 开关：默认**开**（`chat` 不在 CPU_OPT_IN_FEATURES 里，语义是 `value !== false`），
+        // 置 `Memory.cpuFeatures.chat = false` 即可关。
+        // 限流：MIN_CPU / 低桶不跑；2 tick 一次 —— 分页推进随之减半（气泡更新慢一点），
+        // 80 只爬 × 约 15% 触发 ≈ 每 tick 十条气泡，成本主要是 RoomVisual 文本。
+        if (!MIN_CPU && global.TalkAll && isCpuFeatureEnabled("chat")
+            && Game.cpu.bucket >= 5000
+            && HelperCpuUsed.shouldRun(2, 1))
+            HelperError.catchError(() => TalkAll());
         if (!MIN_CPU && global.HelperVisual && isCpuFeatureEnabled("visual")
             && HelperCpuUsed.shouldRun(10, OPTIONAL_CPU_OFFSETS.visual))
             HelperError.catchError(() => HelperVisual.exec());

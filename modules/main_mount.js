@@ -33,9 +33,9 @@ global.isCpuFeatureEnabled = name => {
 // the online cross-shard feature gate is temporarily disabled.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.78.102",
-    uploadedModules: 70,
-    restoredSnapshotModules: 68,
+    version: "0.78.103",
+    uploadedModules: 71,
+    restoredSnapshotModules: 69,
     intentionallyExcluded: []
 }
 
@@ -119,3 +119,7 @@ require('strategy_GCLRoom');
 require('strategy_atkL2');
 require('strategy_defenserHighWay');
 require('team_raL1');
+
+// 闲聊（creep 气泡）。语料 = 模块顶部那一行 `global.Talk = [...]`，换语料只改那里。
+// 默认开；`Memory.cpuFeatures.chat = false` 可关。调用点在 main.js 的 exec() 尾巴上。
+require('闲聊 v1.0');

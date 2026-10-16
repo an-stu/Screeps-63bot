@@ -1,3 +1,23 @@
+## v0.78.103 — Turn the chatter back on (creep say-bubbles)
+
+The bot had a `闲聊 v1.0` module that was never in the build: it existed only in the read-only
+`.screeps-code.json` snapshot from 2026-07-31 and in a stale `MODULES.tsv`, while `modules/` and
+`deploy/core-modules.json` did not carry it (noted in CODE_REVIEW.md at the time). Restored:
+
+- `modules/闲聊 v1.0.js` - the module verbatim from the snapshot. `global.Talk` is 8124 lines of
+  group-chat log (compiled by 6g3y, up to 2020-10), `Creep.prototype.randomSay` makes a creep say
+  a line **ten characters at a time** (the `say` limit), and `global.TalkAll()` drives it.
+- `require('闲聊 v1.0')` in main_mount, `"闲聊 v1.0"` added to the deploy list (71 modules now),
+  and `TalkAll()` called from `main.js`'s optional phase.
+
+Cost control: `MIN_CPU` and `bucket < 5000` skip it, and it runs every other tick - which halves
+the page advance rate, so a bubble update is a little slower. The switch is
+`Memory.cpuFeatures.chat` (the `chat` key is not in `CPU_OPT_IN_FEATURES`, so it defaults **on**;
+set it to `false` to silence the creeps).
+
+The corpus is one enormous line at the top of the module (`global.Talk = [ ... ]`). Swapping it is
+that line and nothing else - see the note in the module about the options.
+
 ## v0.78.102 — Keeper succession margin back to 6 ticks
 
 User decision: with spawn and hive assumed healthy, 6 ticks of margin is enough - it does not need
