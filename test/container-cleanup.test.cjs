@@ -67,7 +67,7 @@ function makeCarrier(name = "c1") {
 function makeRoom({ containers = [], mineralContainer = undefined, storageFree = 100000 } = {}) {
     return {
         name: "E41S32",
-        memory: mineralContainer ? { stationMineral: { container: mineralContainer } } : {},
+        memory: mineralContainer ? { stationMineral: { container: mineralContainer, resType: arguments[0].mineralRes } } : {},
         storage: { store: { getFreeCapacity: () => storageFree } },
         find(type, opts) { return containers.filter(c => opts.filter(c)); },
     };
@@ -88,13 +88,22 @@ function makeRoom({ containers = [], mineralContainer = undefined, storageFree =
 }
 
 {
-    // ② 矿物容器豁免：里面的矿物不能被动
+    // ② 矿物容器：**只豁免它自己那种矿物**，别的照样要搬
     const ctx = makeContext();
     const mineral = makeContainer("cM", { O: 537 });
     const carrier = makeCarrier();
-    const room = makeRoom({ containers: [mineral], mineralContainer: "cM" });
+    const room = makeRoom({ containers: [mineral], mineralContainer: "cM", mineralRes: "O" });
     ctx.StrategyHighLevel.cleanDirtyContainers(room, [carrier]);
-    assert.equal(carrier.calls.length, 0, "矿物容器必须豁免（矿物在那儿等运矿车）");
+    assert.equal(carrier.calls.length, 0, "矿物容器里属于自己的矿物必须豁免（在那儿等运矿车）");
+
+    // ②b 同一个矿物容器里混了别的东西（实测 E49S31 的 power / W31N55 的 GH）⇒ 仍要搬
+    const ctx2 = makeContext();
+    const mixed = makeContainer("cM", { O: 537, power: 100, GH: 25 });
+    const carrier2 = makeCarrier();
+    const room2 = makeRoom({ containers: [mixed], mineralContainer: "cM", mineralRes: "O" });
+    ctx2.StrategyHighLevel.cleanDirtyContainers(room2, [carrier2]);
+    const kinds = carrier2.calls.filter(c => c && c.taskName === "carryRes").map(c => c.data.resType).sort();
+    assert.deepEqual(kinds, ["GH", "power"], "矿物容器里的非本行矿物仍要搬走，本行矿物(O)留着");
 }
 
 {

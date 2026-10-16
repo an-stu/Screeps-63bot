@@ -196,11 +196,18 @@ let pro = {
         if (!freeCarries || !freeCarries.length) return;
         let mineral = room.memory[StationMineral.stationName];
         let mineralContainer = mineral && mineral.container;
+        let mineralRes = mineral && mineral.resType;
         let carrier = freeCarries.pop();
         let containers = room.find(FIND_STRUCTURES, { filter: e => e.structureType == STRUCTURE_CONTAINER });
         for (let c of containers) {
-            if (c.id == mineralContainer) continue;                       // 矿物容器：豁免
-            let dirty = _.keys(c.store).filter(r => r != RESOURCE_ENERGY && c.store[r] > 0);
+            let dirty = _.keys(c.store).filter(r => {
+                if (r == RESOURCE_ENERGY || !(c.store[r] > 0)) return false;
+                // 矿物容器**不是整个豁免**，它只允许装「自己那种矿物」（+能量）：
+                // 实测 E49S31 的矿物容器里躺着 power x100、W31N55 里混了 GH x25，
+                // 这些照样是多余的，一样要搬走。
+                if (c.id == mineralContainer && r == mineralRes) return false;
+                return true;
+            });
             if (!dirty.length) continue;
             // 逐种资源 withdraw 出来，再统一灌进 storage/terminal（fillAllMainRoomStorage）
             carrier.addTask(dirty.map(r => UtilsTask.task(c, "carryRes", "registerStationCarryDrop", { resType: r })));
