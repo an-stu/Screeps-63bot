@@ -1,3 +1,36 @@
+## v0.78.108 — The chatter was not running at all: my edit had deleted its entry point
+
+User: "singing was never deployed? one line per tick."
+
+They were right, and the cause was mine. When v0.78.106 rewrote the playback into a per-creep song
+cursor, the scripted edit computed its cut point one line short and **removed the entire
+`global.TalkAll = function () { ... }` block**, leaving only `randomSay`. Consequences:
+
+- the file was still **syntactically valid**, so `node --check` and the build passed;
+- `main.js` calls `global.TalkAll && ... `, so the guard was simply false **every tick** and the
+  chatter silently never ran - no exception, nothing in `errorCount`, no log line.
+
+My verification missed it because I checked `randomSay` and `global.TalkCustom` (200 songs loaded)
+but not that the **export** still existed. A coverage hole, not bad luck.
+
+### Fixed
+
+- `global.TalkAll` restored, with the chance handling and the periodic `creepMap` cleanup.
+- Cadence is now **one page per tick** (was every other tick) per the same request.
+- Two diagnostic counters on `global` (readable from the console, deliberately not named `_` so
+  lodash is untouched): `__chatAll` (how many times TalkAll ran) and `__chatSays` (how many lines
+  actually went out). These separate "the driver is not running" from "the driver runs but says
+  nothing" - the distinction that cost time here.
+
+### Tests
+
+`test/chat-recite.test.cjs` gains case ⑦: `TalkAll` must be a function, calling it must make a
+creep speak, and both counters must advance. Its negative control **reproduces the accident**
+(delete the block) and fails on "global.TalkAll 必须存在（main.js 靠它驱动）".
+
+Live after deploy: `__chatAll` = 14 after 14 ticks, `__chatSays` = 1064 with 75 creeps - about 76
+lines a tick, i.e. every creep speaking every tick. `errorCount` 0.
+
 ## v0.78.107 — Containers that are not mineral containers hold energy only
 
 User report: some containers hold more than one kind of thing - clean them up and move the excess to

@@ -124,4 +124,20 @@ function makeCreep(ctx, name) {
     assert.deepEqual(ctx.__says[0].said, ["一句", "两句"], "扁平数组按一首歌顺序念");
 }
 
+{
+    // ⑦ **导出必须存在且真的驱动 randomSay**。
+    //    2026-10-16 事故：重写播放逻辑时把整段 `global.TalkAll=function(){…}` 切掉了，
+    //    文件语法仍然合法、`node --check` 通过，而 main.js 里 `global.TalkAll && …` 恒为假
+    //    ⇒ 闲聊静默不跑、没有任何报错，用户只能看到「爬不说话」。
+    //    负对照 = 再把这段删掉，本用例必须失败。
+    const ctx = load();
+    assert.equal(typeof ctx.TalkAll, "function", "global.TalkAll 必须存在（main.js 靠它驱动）");
+    const creep = makeCreep(ctx, "shard3_11_1");
+    ctx.Game.creeps[creep.name] = creep;
+    ctx.TalkAll();
+    assert.ok(ctx.__says[0].said.length > 0, "TalkAll 必须真的让爬说话");
+    assert.ok(ctx.__chatAll >= 1, "__chatAll 诊断计数应递增");
+    assert.ok(ctx.__chatSays >= 1, "__chatSays 诊断计数应递增");
+}
+
 console.log("chat recite checks passed");

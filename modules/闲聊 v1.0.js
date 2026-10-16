@@ -54,8 +54,31 @@ Creep.prototype.randomSay=function(chance){
         let line = song[st.i] || "";
         if (st.p * 10 >= line.length) { st.i++; st.p = 0; continue; }                                 // 这行念完 ⇒ 下一行
         this.say(line.substr(st.p * 10, 10), true);
+        global.__chatSays = (global.__chatSays || 0) + 1;   // 诊断：真正说出口的句数
         st.p++;
         return;
     }
 };
 
+/**
+ * 主循环里调用一次（见 modules/main.js）。**这个导出必须存在** ——
+ * 2026-10-16 出过一次事故：重写播放逻辑时把整段 `global.TalkAll=function(){…}` 切掉了，
+ * 文件语法仍然合法、`node --check` 通过，而 main.js 里那句 `global.TalkAll && …` 恒为假，
+ * 于是「闲聊」静默不跑，没有任何报错。所以测试里专门断言它有定义。
+ */
+global.TalkAll=function () {
+    // 用户 10-16：「尽可能每一只爬自己会唱歌」⇒ 默认概率 1（每只都会起唱）。
+    // 起唱之后就不再受概率影响：会一路把整首歌按顺序念完再换下一首。
+    // Memory.chatChance 调 0~1 —— 含义是「哪些爬在唱」（1=全部都唱）。
+    let chance = Number(Memory.chatChance);
+    if (!(chance >= 0 && chance <= 1)) chance = 1;
+    global.__chatAll = (global.__chatAll || 0) + 1;   // 诊断：TalkAll 被调次数（控制台可读）
+    _.values(Game.creeps).forEach(e=>e.randomSay(chance));
+    if(Game.time%3253==0){//质数
+        _.keys(creepMap).forEach(name=>{
+            if (!Game.creeps[name]) {
+                delete creepMap[name];
+            }
+        });
+    }
+};
