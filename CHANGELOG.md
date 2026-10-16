@@ -1,3 +1,27 @@
+## v0.78.104 — Every creep sings, and the corpus is pluggable
+
+Follow-up to v0.78.103, per "as much as possible every creep should sing, and split anything longer
+than ten characters into several phrases".
+
+- `TalkAll` used to call `randomSay(0.15)`, so a creep spoke roughly once every seven ticks and most
+  creeps were silent at any moment. It now defaults to **1** - every creep gets its turn each
+  invocation, keeps reciting the line it is in the middle of, and starts a new one when it finishes.
+  Rate is tunable at runtime with `Memory.chatChance` (0..1).
+- Paging is now explicit: `substr(p*10, 10)` for both the first phrase and the continuations. It used
+  to be `substr(p*10)`, which returned the whole remainder and relied on the engine truncating the
+  bubble to ten characters.
+- The corpus is pluggable: if `global.TalkCustom` is a non-empty array it wins over the built-in
+  `global.Talk`, resolved on every call so it can be swapped at runtime. That is the hook for
+  supplying your own corpus without touching this module.
+
+### Not done, deliberately
+
+A corpus of popular song lyrics was requested, including fetching it from public lyrics APIs. Lyrics
+are protected works - under 《著作权法》第二十三条 the term is the author's life plus fifty years,
+which covers essentially all current pop songs - and bundling a hundred of them into the repository
+is reproduction, not personal use. What I can do instead: any corpus the user supplies goes in
+through `global.TalkCustom`, or a public-domain corpus (Tang/Song poems and older) can be installed.
+
 ## v0.78.103 — Turn the chatter back on (creep say-bubbles)
 
 The bot had a `闲聊 v1.0` module that was never in the build: it existed only in the read-only

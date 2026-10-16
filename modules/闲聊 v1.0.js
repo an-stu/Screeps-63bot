@@ -10,10 +10,15 @@ global.Talk= [ "/涩图排行","涩图来","涩图来","哦对了，这个排行
 let roomMap={};
 let creepMap={};
 
+// 语料来源：优先 `global.TalkCustom`（用户自行提供/替换），否则用本文件顶部的 global.Talk。
+// 每次调用现取，所以运行时替换 global.TalkCustom 立即生效。
+let TALK = function () {
+    return (Array.isArray(global.TalkCustom) && global.TalkCustom.length) ? global.TalkCustom : Talk;
+};
 let randomTalk=function (creep,array) {
     if(!roomMap[creep.room.name])
         roomMap[creep.room.name]=Math.floor(array.length*Math.random());
-    roomMap[creep.room.name]=(1+roomMap[creep.room.name])%Talk.length;
+    roomMap[creep.room.name]=(1+roomMap[creep.room.name])%array.length;
     let index=roomMap[creep.room.name];
     return {
         i:index,//index
@@ -30,19 +35,23 @@ Creep.prototype.randomSay=function(float){
         if (creepMap[this.name].p >= creepMap[this.name].l) {
             delete creepMap[this.name]
         }else{
-            this.say(Talk[creepMap[this.name].i].substr(creepMap[this.name].p*10),true)
+            this.say(TALK()[creepMap[this.name].i].substr(creepMap[this.name].p*10,10),true)
         }
     }else if(float>Math.random()){
-        let $talk = randomTalk(this,Talk);
+        let $talk = randomTalk(this,TALK());   // 必须用 TALK()：索引要和实际语料同一个数组
         if($talk.l>1)creepMap[this.name]= $talk;
-        this.say(Talk[$talk.i],true)
+        this.say(TALK()[$talk.i].substr(0,10),true)
     }
 };
 
 
 
 global.TalkAll=function () {
-    _.values(Game.creeps).forEach(e=>e.randomSay(0.15));
+    // 用户 10-16：「尽可能每一只爬自己会唱歌」⇒ 默认概率 1（每只每次都会被轮到，
+    // 正在念的爬继续念下一页，念完自动接下一句）。用 Memory.chatChance 调 0~1。
+    let chance = Number(Memory.chatChance);
+    if (!(chance >= 0 && chance <= 1)) chance = 1;
+    _.values(Game.creeps).forEach(e=>e.randomSay(chance));
     if(Game.time%3253==0){//质数
         _.keys(creepMap).forEach(name=>{
             if (!Game.creeps[name]) {
