@@ -39,10 +39,24 @@ let pro = {
             pc.spawnPowerCreep(room.powerSpawn, "OPF", flag.pos.roomName)
         }
         if (!pc.ticksToLive) return;
+        let mainRoom = pc.mainRoom();
+        if (!mainRoom) return;
+        // 工厂卡在 produce + !powered 时，PC 可能正停在 goToNearPop（停车）上，
+        // 导致 needPower 永远轮不到。停车可以稍后再做，先把工厂的电补上。
+        // （E53S21 hydraulics 曾因此 16k tick 不推进；2026-10-18）
+        if (global.StationFactory && mainRoom.factory && pc.powers[PWR_OPERATE_FACTORY]
+            && StationFactory.needPower(mainRoom)) {
+            let head = pc.headTask && pc.headTask();
+            if (head && head.taskName == "goToNearPop") {
+                pc.popTask();
+                if (pc.isFree()) {
+                    pc.addTask(UtilsTask.task(mainRoom.factory, "OpFactory"));
+                    return;
+                }
+            }
+        }
         if (pc.isFree()) {
             let obj = undefined
-            let mainRoom = pc.mainRoom();
-            if (!mainRoom) return;
             if (pc.needRenewInRoom()) pc.addRenewMainRoomTask();
             else if (pc.needGetOps()) pc.getRoomOps();
             else if (obj = pc.needOpExt()) pc.addTask(UtilsTask.task(obj, "OpExt"))

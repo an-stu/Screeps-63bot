@@ -58,8 +58,8 @@ Creep.prototype.minRoomUpgrade=function () {
             if(!rampart)spawn.pos.createConstructionSite(STRUCTURE_RAMPART)
 
             if(this.room.terminal){
-                let terminal = this.room.terminal.pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_RAMPART).head();
-                if(!rampart)terminal.pos.createConstructionSite(STRUCTURE_RAMPART)
+                let terminalRampart = this.room.terminal.pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_RAMPART).head();
+                if(!terminalRampart)this.room.terminal.pos.createConstructionSite(STRUCTURE_RAMPART)
             }
 
             rampart = this.pos.findInRange(FIND_STRUCTURES,1,{filter:e=>e.structureType==STRUCTURE_RAMPART&&e.my}).maxBy(e=>-e.hits)

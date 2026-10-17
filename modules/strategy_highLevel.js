@@ -335,7 +335,7 @@ let pro = {
         // 捡起任务 9tick更新一次，比较耗时 缓存起来
         let pickTasks = pro.pickTasksMap[room.name] || []
         if ((Game.time + room.hashCode()) % 9 == 0) {
-            onlyEnergy = false
+            let onlyEnergy = false
             if (room.storage.store.getFreeCapacity() < 5000 && !room.terminal) {
                 onlyEnergy = true
             }

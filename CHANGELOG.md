@@ -1,3 +1,27 @@
+## v0.78.110 — L5 commodities can trade, 5 small bugs, factory parking yields to OP
+
+### Fixed
+
+- `strategy_market.js`: the minimum commodity deal was a flat 100 units. Every L5 buy order is
+  only 1–18 units (organism 10, machine 3/5/10, device 10, essence 2/5/5), so **all L5 deals were
+  skipped** — E55S31 terminal held 1002 organism, 137 machine, 283 device and 18 essence with
+  zero `market.sell` in the money history. L5 now uses a 1-unit floor; L0–L4 keep 100.
+- `strategy_factoryPowerCreep.js`: when a factory is in `produce + !powered`, a PC parked on
+  `goToNearPop` starves `needPower`. The parking task is popped and `OpFactory` is queued
+  immediately (E53S21 hydraulics had been stuck for 16k ticks).
+- `strategy_GCLRoom.js:454`: `!room.level>=6` → `room.level < 6`.
+- `strategy_highLevel.js`: `onlyEnergy` was an implicit global → `let`.
+- `strategy_minSizeRoom.js`: the terminal rampart check used the spawn's `rampart` variable.
+- `station_upgrade.js`: `moveTo(obj, opts, {range:3})` passed `{range:3}` as a third argument,
+  which the engine ignores.
+- `station_carry.js`: `if (resCount < 0) break` could never fire → `<= 0`.
+
+### Notes
+
+- Deliberately did **not** touch `highProfitMargin`, `MAX_COMMODITY_KEEP[5]`, the outer-road
+  PathFinder fallback, or other behavior-sensitive optimizations.
+- Tests: 17/17 passed.
+
 ## v0.78.109 — Keeper succession margin 6 -> 16
 
 User: "all energy keeper handovers get another 10 ticks, nothing else changes."

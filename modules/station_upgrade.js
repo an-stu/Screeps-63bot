@@ -129,7 +129,7 @@ Creep.prototype.upgrade = function () {
     let code = this.upgradeController(obj);
     if (code == ERR_NOT_IN_RANGE) {
         if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20, visualizePathStyle:{stroke:'#fffa00'}});
-        else this.moveTo(obj, { visualizePathStyle: { stroke: '#fffa00' } }, { range: 3 });
+        else this.moveTo(obj, { range: 3, visualizePathStyle: { stroke: '#fffa00' } });
     } else if (upgradePosition && !this.pos.isEqualTo(upgradePosition)) {
         this.moveTo(upgradePosition, {range:0, reusePath:20, visualizePathStyle:{stroke:'#fffa00'}});
     }

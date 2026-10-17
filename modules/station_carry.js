@@ -44,7 +44,7 @@ let pro = {
             let currentCnt = Math.min(target.store[resType] || 0, resCount);
             resCount -= currentCnt
             if (currentCnt) tasks.push(UtilsTask.task(target, "carryRes", regFun, { resType: resType, resCount: currentCnt }))
-            if (resCount < 0) break;
+            if (resCount <= 0) break;
         }
         return tasks;
     },

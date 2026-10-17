@@ -1048,7 +1048,12 @@ let pro = {
         if (!doCommodityDeal) break;
         let resType = item.resType;
         let available = room.terminal.store[resType] || 0;
-        if (available < MARKET_MIN_COMMODITY_DEAL) continue;
+        // L5 商品的买单量通常只有 1~18 个（单价几千万），用 100 个的最小成交量
+        // 会让 organism / machine / device / essence 永远吃不到单（实测 0 成交）。
+        // L0~L4 仍保留 100 的下限，避免低价商品被拆成碎片交易。
+        let commodityLevel = (COMMODITIES[resType] && COMMODITIES[resType].level) || 0;
+        let minDeal = commodityLevel >= 5 ? 1 : MARKET_MIN_COMMODITY_DEAL;
+        if (available < minDeal) continue;
         
         let maxPrice = sellPrice[resType];
         // 高频 deal 不必要：exec 每 ~20 tick 才轮到本房间一次，这就是"适当
@@ -1066,7 +1071,7 @@ let pro = {
         for (let order of buyList) {
             if (!order.amount || !order.roomName || Game.market.orders[order.id]) continue;
             let amount = Math.min(order.amount, available, MARKET_MAX_COMMODITY_DEAL);
-            if (amount < MARKET_MIN_COMMODITY_DEAL) continue;
+            if (amount < minDeal) continue;
             let energyNeed = txCost(amount, order.roomName);
             let totalPrice = -energyNeed * energyPrice + amount * order.price;
             let price = totalPrice / amount;
@@ -1089,7 +1094,7 @@ let pro = {
             if (transactionEnergy > terminalEnergy && transactionEnergy > 0) {
                 sellAmount = Math.floor(sellAmount * terminalEnergy / transactionEnergy * 0.95);
             }
-            if (sellAmount < MARKET_MIN_COMMODITY_DEAL) continue;
+            if (sellAmount < minDeal) continue;
             transactionEnergy = txCost(sellAmount, maxOrder.roomName);
             bestPrice = (maxOrder.price * sellAmount - transactionEnergy * energyPrice) / sellAmount;
             if (bestPrice < maxPrice) continue;

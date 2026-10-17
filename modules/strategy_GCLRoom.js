@@ -451,7 +451,7 @@ let pro = {
     autoBuyGCLEnergyBoost(flag) {
         let room = flag.room
         if(!room||(flag.memory.lastVis||0)>Game.time-30)return;
-        if(!room.terminal||!room.level>=6)return;
+        if(!room.terminal||room.level<6)return;
         flag.memory.lastVis = Game.time;
         let avg = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
         // let energyCnt = StationCarry.roomMassStoreCnt(Game.rooms[e.roomName],RESOURCE_ENERGY)
