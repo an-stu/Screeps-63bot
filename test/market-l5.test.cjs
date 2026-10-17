@@ -58,5 +58,9 @@ assert.ok(marketSource.includes("no-buy-order"),
     "high-profit buying must skip products without a buy order");
 assert.ok(marketSource.includes("Memory.diagBuy"),
     "buy decisions must be logged to Memory.diagBuy");
+assert.ok(marketSource.includes("keepComponents"),
+    "components still needed by a high-profit product must be kept");
+assert.ok(marketSource.includes("diag.canceled"),
+    "low-profit component buy orders must be canceled and logged");
 
 console.log("market L5 / daily-high / real-margin checks passed");

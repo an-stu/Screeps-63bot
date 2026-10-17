@@ -314,6 +314,7 @@ let pro = {
             real: [],
             actions: [],
             skipped: [],
+            canceled: [],
         };
         Memory.diagBuy = diag;
         if (!candidates.length || !factoryRooms.length) return;
@@ -324,6 +325,8 @@ let pro = {
             if (type == ORDER_SELL) return list.reduce((min, o) => Math.min(min, o.price), Infinity);
             return list.reduce((max, o) => Math.max(max, o.price), 0);
         };
+        let keepComponents = {};       // 仍有高利润商品需要的原料
+        let skippedCandidates = [];    // 被判定为低利润/无买单的商品
 
         // 每个商品最多挑前 2 个利润最高的处理，控制买入品种数量
         candidates.slice(0, 2).forEach(([resType, data]) => {
@@ -344,19 +347,18 @@ let pro = {
             let realMargin = cost > 0 && salePrice > 0 ? (salePrice - cost) / cost * 100 : 0;
             diag.real.push([resType, Math.round(data.profitMargin), Math.round(realMargin),
                 Math.round(salePrice), Math.round(cost)]);
-            if (!(salePrice > 0)) {
-                diag.skipped.push([resType, "no-buy-order", 0]);
+            let skipReason = !(salePrice > 0) ? "no-buy-order"
+                : (!(cost > 0) ? "no-cost"
+                    : (realMargin < threshold ? "low-margin" : ""));
+            if (skipReason) {
+                diag.skipped.push([resType, skipReason, Math.round(realMargin)]);
+                skippedCandidates.push([resType, components]);
+                if (skipReason == "low-margin") {
+                    console.log(`[buyHighProfit] skip ${resType}: real ${Math.round(realMargin)}% < ${threshold}%`);
+                }
                 return;
             }
-            if (!(cost > 0)) {
-                diag.skipped.push([resType, "no-cost", 0]);
-                return;
-            }
-            if (realMargin < threshold) {
-                diag.skipped.push([resType, "low-margin", Math.round(realMargin)]);
-                console.log(`[buyHighProfit] skip ${resType}: real ${Math.round(realMargin)}% < ${threshold}%`);
-                return;
-            }
+            for (let comp in components) keepComponents[comp] = true;
             factoryRooms.forEach(room => {
                 let level = StrategyFactoryPowerCreep.getPowerFactoryLevel(room) || 0;
                 if (needLevel > level) return; // 该房间工厂等级不足以合成
@@ -397,10 +399,27 @@ let pro = {
                 }
             });
         });
+        // 低利润/无买单的商品：撤销它为“仍未被高利润商品需要”的原料买单。
+        // 例如 machine realMargin 795% < 1000% 时，metal 买单会被撤销；
+        // 但 zynthium_bar / energy 仍被 organism 需要，保留。
+        skippedCandidates.forEach(([resType, components]) => {
+            for (let comp in components) {
+                if (keepComponents[comp]) continue;
+                _.values(Game.market.orders).forEach(o => {
+                    if (o.type != ORDER_BUY || o.resourceType != comp || !o.remainingAmount) return;
+                    if (!factoryRooms.some(r => r.name == o.roomName)) return;
+                    if (Game.market.cancelOrder(o.id) == OK) {
+                        diag.canceled.push([o.roomName, comp, o.remainingAmount, resType]);
+                        console.log(`[buyHighProfit] cancel ${o.roomName} ${comp} ${o.remainingAmount} (${resType} low profit)`);
+                    }
+                });
+            }
+        });
         // 诊断数组收敛，避免 Memory 随轮次膨胀
         diag.real = diag.real.slice(0, 2);
         diag.actions = diag.actions.slice(0, 8);
         diag.skipped = diag.skipped.slice(0, 5);
+        diag.canceled = diag.canceled.slice(0, 8);
     },
     autoBuyDepo(resType, maxPrice, maxCnt = 10000) {
         let room = _.shuffle(ManagerRooms.getNormalRoom().filter(e => e.storage && e.terminal)).head();//随机一个房间

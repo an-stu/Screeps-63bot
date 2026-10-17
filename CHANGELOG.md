@@ -1,3 +1,15 @@
+## v0.78.112 — Cancel low-profit component buy orders
+
+### Fixed
+
+- When a high-profit candidate fails the real-margin gate, its component buy orders were left in
+  place and could still fill (the machine chain was real 795% < 1000%, but the metal buy order
+  remained). `autoBuyHighProfitComponents` now cancels our buy orders for those components in the
+  OPF factory rooms, except components still needed by a passing high-profit product
+  (`keepComponents`). Cancellations are logged in `Memory.diagBuy.canceled`.
+- Example: `metal` is canceled for machine (795%), while `zynthium_bar` / `energy` stay because
+  organism (real 1119%) still needs them.
+
 ## v0.78.111 — L5 sells against the recent daily high; buys must clear a real-profit gate
 
 ### Changed
