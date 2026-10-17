@@ -48,6 +48,25 @@ let COMMODITY_ANALYSIS_TTL = 5000;
 let marketPriceMapCache = {time:-1e9,prices:{}};
 let commodityAnalysisCache = {time:-1e9,result:null};
 
+/**
+ * 最近 days 天的“日高”参考价。
+ *
+ * `Game.market.getHistory` 只提供 avgPrice / stddevPrice，没有真正的 high；
+ * 这里用 `avgPrice + stddevPrice` 作为日高近似，取最近 days 天里的最大值。
+ * 没有历史时返回 0，调用方应回退到历史均价。
+ */
+function recentDailyHighFromHistory(history, days = 1) {
+    if (!history || !history.length) return 0;
+    let n = Math.max(1, Math.floor(days) || 1);
+    let recent = history.slice(-n);
+    let high = 0;
+    for (let entry of recent) {
+        let price = (entry.avgPrice || 0) + (entry.stddevPrice || 0);
+        if (price > high) high = price;
+    }
+    return high;
+}
+
 
 
 let pro = {
@@ -206,6 +225,9 @@ let pro = {
     },
     getResTypeHistory  (resType){ // 资源平均价格价格
         return pro.getMarketPriceMap()[resType]||DEFAULT_PRICE[resType]||0;
+    },
+    getRecentDailyHigh (resType, days = 1) { // 最近 days 天的日高近似（avg + stddev 的最大值）
+        return recentDailyHighFromHistory(pro.getHistory(resType) || [], days);
     },
     updateDepoPrice (){ // 计算合成的成本
         let price = pro.getBaseResTypeHistory();

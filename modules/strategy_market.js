@@ -299,23 +299,64 @@ let pro = {
             .map(k => [k, analysis.commodities[k]])
             .filter(([k, d]) => d.profitMargin >= threshold && d.marketPrice > 0)
             .sort((a, b) => b[1].profitMargin - a[1].profitMargin);
-        if (!candidates.length) return;
         // 工厂房间：有 OPF 旗子且 power creep 在位能运营工厂的房间
         let factoryRooms = ManagerFlags.getFlagsByPrefix("OPF")
             .map(f => Game.rooms[f.pos.roomName])
             .filter(r => r && r.my && r.storage && r.terminal
                 && StrategyFactoryPowerCreep.getPowerFactoryLevel(r));
-        Memory.diagBuy = {
+        // 诊断日志：历史利润率 vs 现价真实利润率、买入动作、跳过原因
+        let diag = {
             t: Game.time,
+            credits: Game.market.credits,
+            threshold: threshold,
             candidates: candidates.slice(0, 3).map(([k, d]) => k + ":" + Math.round(d.profitMargin)),
             factoryRooms: factoryRooms.map(r => r.name),
-            credits: Game.market.credits,
+            real: [],
+            actions: [],
+            skipped: [],
         };
-        if (!factoryRooms.length) return;
+        Memory.diagBuy = diag;
+        if (!candidates.length || !factoryRooms.length) return;
+
+        let bestPriceOf = (resType, type, fallback) => {
+            let list = pro.getAllOrdersCacheList(resType, type).filter(o => o.amount > 0 && o.price > 0);
+            if (!list.length) return fallback || 0;
+            if (type == ORDER_SELL) return list.reduce((min, o) => Math.min(min, o.price), Infinity);
+            return list.reduce((max, o) => Math.max(max, o.price), 0);
+        };
+
         // 每个商品最多挑前 2 个利润最高的处理，控制买入品种数量
         candidates.slice(0, 2).forEach(([resType, data]) => {
             let needLevel = data.level;
             let components = data.components || {};
+            // === 真实利润：原料按当前卖单现价、成品按当前最高买单现价 ===
+            // 历史利润率只用于排序；真正决定买不买的是这个 realMargin。
+            let cost = 0;
+            for (let comp in components) {
+                let fallback = (data.componentDetails && data.componentDetails[comp]
+                    ? data.componentDetails[comp].price : 0)
+                    || StrategyMarketPrice.getResTypeHistory(comp);
+                let p = bestPriceOf(comp, ORDER_SELL, fallback);
+                if (!(p > 0)) { cost = 0; break; }
+                cost += components[comp] * p;
+            }
+            let salePrice = bestPriceOf(resType, ORDER_BUY, 0);
+            let realMargin = cost > 0 && salePrice > 0 ? (salePrice - cost) / cost * 100 : 0;
+            diag.real.push([resType, Math.round(data.profitMargin), Math.round(realMargin),
+                Math.round(salePrice), Math.round(cost)]);
+            if (!(salePrice > 0)) {
+                diag.skipped.push([resType, "no-buy-order", 0]);
+                return;
+            }
+            if (!(cost > 0)) {
+                diag.skipped.push([resType, "no-cost", 0]);
+                return;
+            }
+            if (realMargin < threshold) {
+                diag.skipped.push([resType, "low-margin", Math.round(realMargin)]);
+                console.log(`[buyHighProfit] skip ${resType}: real ${Math.round(realMargin)}% < ${threshold}%`);
+                return;
+            }
             factoryRooms.forEach(room => {
                 let level = StrategyFactoryPowerCreep.getPowerFactoryLevel(room) || 0;
                 if (needLevel > level) return; // 该房间工厂等级不足以合成
@@ -336,20 +377,30 @@ let pro = {
                     let hasBuyOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
                         && e.resourceType == comp && e.type == ORDER_BUY && e.roomName == room.name);
                     if (hasBuyOrder) continue;
-                    let isBuy = pro.buySome(room, comp, price * 1.2, Math.min(gap, 30000));
-                    if (!isBuy && Game.market.credits > 100000) {
-                        Game.market.createOrder({
+                    let amount = Math.min(gap, 30000);
+                    let isBuy = pro.buySome(room, comp, price * 1.2, amount);
+                    if (isBuy) {
+                        diag.actions.push([room.name, comp, amount, resType]);
+                    } else if (Game.market.credits > 100000) {
+                        let code = Game.market.createOrder({
                             type: ORDER_BUY,
                             resourceType: comp,
                             price: price,
-                            totalAmount: Math.min(gap, 30000),
+                            totalAmount: amount,
                             roomName: room.name,
                         });
-                        console.log(`[buyHighProfit] ${room.name} ${comp} ${Math.min(gap, 30000)} @ ${price} for ${resType}`);
+                        if (code == OK) {
+                            diag.actions.push([room.name, comp, amount, resType]);
+                            console.log(`[buyHighProfit] ${room.name} ${comp} ${amount} @ ${price} for ${resType}`);
+                        }
                     }
                 }
             });
         });
+        // 诊断数组收敛，避免 Memory 随轮次膨胀
+        diag.real = diag.real.slice(0, 2);
+        diag.actions = diag.actions.slice(0, 8);
+        diag.skipped = diag.skipped.slice(0, 5);
     },
     autoBuyDepo(resType, maxPrice, maxCnt = 10000) {
         let room = _.shuffle(ManagerRooms.getNormalRoom().filter(e => e.storage && e.terminal)).head();//随机一个房间
@@ -1056,13 +1107,29 @@ let pro = {
         if (available < minDeal) continue;
         
         let maxPrice = sellPrice[resType];
-        // 高频 deal 不必要：exec 每 ~20 tick 才轮到本房间一次，这就是"适当
-        // 时间"。成交门槛 = 历史均价 × (1+溢价)，溢价默认 10%
-        // （Memory.marketSettings.dealPremium 可调）——买价没高过平常价
-        // 一部分就不 deal，避免贱卖；与成本底线取大
+        // L0~L4：历史均价 × (1+溢价)，溢价默认 10%（Memory.marketSettings.dealPremium）。
+        // L5：改用“最近日高”参考价（avg+stddev 的日高近似 × 容忍系数，默认 0.96）。
+        // 日高比历史均价更贴近“几乎最高价卖”的要求，也避免吃到过低的二线买单。
         let historyAvg = StrategyMarketPrice.getResTypeHistory(resType);
         let dealPremium = Number(Memory.marketSettings && Memory.marketSettings.dealPremium || 0.1);
-        if (historyAvg > 0) maxPrice = Math.max(maxPrice, historyAvg * (1 + dealPremium));
+        let dailyHigh = 0;
+        let dailyTolerance = 0;
+        if (commodityLevel >= 5 && StrategyMarketPrice.getRecentDailyHigh) {
+            dailyHigh = StrategyMarketPrice.getRecentDailyHigh(resType);
+            let tol = Number(Memory.marketSettings && Memory.marketSettings.dailyHighTolerance);
+            if (!(tol >= 0 && tol <= 1)) tol = 0.96;
+            dailyTolerance = tol;
+            if (dailyHigh > 0) maxPrice = Math.max(maxPrice, dailyHigh * tol);
+            else if (historyAvg > 0) maxPrice = Math.max(maxPrice, historyAvg * (1 + dealPremium));
+        } else if (historyAvg > 0) {
+            maxPrice = Math.max(maxPrice, historyAvg * (1 + dealPremium));
+        }
+        if (commodityLevel >= 5) {
+            Memory.diagSell = {
+                t: Game.time, r: resType, hi: Math.round(dailyHigh),
+                tol: dailyTolerance, max: Math.round(maxPrice),
+            };
+        }
         let buyList = pro.getAllOrdersCacheList(resType, ORDER_BUY);
         let maxOrder = undefined;
         let bestPrice = 0;
@@ -1101,6 +1168,14 @@ let pro = {
             
             let code = Game.market.deal(maxOrder.id, sellAmount, room.name);
             if (code == OK) {
+                if (commodityLevel >= 5) {
+                    Memory.diagSell.ok = true;
+                    Memory.diagSell.amt = sellAmount;
+                    Memory.diagSell.price = Math.round(bestPrice);
+                }
+                let sales = Memory.marketSales = Memory.marketSales || [];
+                sales.push([Game.time, resType, sellAmount, Math.round(bestPrice)]);
+                if (sales.length > 50) sales.splice(0, sales.length - 50);
                 console.log(`[售卖] ${room.name} ${resType} ${sellAmount} 价格${bestPrice.toFixed(3)} ` +
                           `利润率${item.profitMargin.toFixed(1)}% ${item.series}系列`);
                 maxOrder.amount -= sellAmount;

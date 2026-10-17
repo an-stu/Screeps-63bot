@@ -1,3 +1,28 @@
+## v0.78.111 — L5 sells against the recent daily high; buys must clear a real-profit gate
+
+### Changed
+
+- **L5 sell reference** (`strategy_market.js`): L5 now uses `StrategyMarketPrice.getRecentDailyHigh()`
+  instead of `historyAvg * (1 + dealPremium)`. The helper uses the latest day's
+  `avgPrice + stddevPrice` (the API has no true daily high) and a configurable tolerance
+  `Memory.marketSettings.dailyHighTolerance` (default `0.96`, i.e. within 4% of the daily high).
+  L0–L4 keep the old `historyAvg * (1 + dealPremium)` gate.
+- **Real-profit buying** (`autoBuyHighProfitComponents`): before buying machine/organism components,
+  compute `realMargin` from the **current sell-order prices** of the expanded components and the
+  **current best buy order** of the product. Only buy when `realMargin >= highProfitMargin`
+  (default 1000%); skip on `low-margin`, `no-buy-order`, or `no-cost`. Historical margin is only
+  used for ranking.
+- **Logs**: `Memory.diagBuy` now records historical vs real margin, actions, and skip reasons;
+  `Memory.diagSell` records the L5 daily high / tolerance / max price; `Memory.marketSales` keeps
+  the last 50 successful deals. `tools/monitor.py` prints these and the CPU phase/telemetry from
+  the current `cpuModuleTelemetry` / `cpuTelemetry` keys.
+
+### Notes
+
+- Deliberately unchanged: `highProfitMargin` value, `MAX_COMMODITY_KEEP`, the outer-road
+  PathFinder fallback, and commodity sell-order creation.
+- Tests: 18/18 passed (new `test/market-l5.test.cjs`).
+
 ## v0.78.110 — L5 commodities can trade, 5 small bugs, factory parking yields to OP
 
 ### Fixed
