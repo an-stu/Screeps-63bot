@@ -1,3 +1,20 @@
+## v0.78.113 — Only deal cheap component asks; no 20k resting metal order
+
+### Changed
+
+- `autoBuyHighProfitComponents` no longer places resting buy orders. It only deals against asks
+  whose price is at most `history × (1 + highProfitBuyPremium)` (default **0.02**); otherwise it
+  logs `noCheap` and waits. Single-order size is capped by `highProfitOrderMax` (default **10000**).
+- This removes the source of the 21,000-unit metal bid at 239.6: that order was below the asks
+  (254–255), never filled (remaining 21,000), and was already canceled by v0.78.112 when machine
+  real margin was 829% < 1000%. The actual metal buys that cost 40.95M/14h came from `buySome`
+  paying the 254–255 asks under the old 1.2× tolerance; that tolerance is now 1.02×.
+
+### Notes
+
+- `Memory.diagBuy.noCheap` records `[component, cheapestAsk, maxBuyPrice]` when the market is too
+  expensive. No changes to `autoBuyMineral` (lab/O/U/Z needs) or to the L5 daily-high sell logic.
+
 ## v0.78.112 — Cancel low-profit component buy orders
 
 ### Fixed

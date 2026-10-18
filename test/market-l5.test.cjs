@@ -62,5 +62,19 @@ assert.ok(marketSource.includes("keepComponents"),
     "components still needed by a high-profit product must be kept");
 assert.ok(marketSource.includes("diag.canceled"),
     "low-profit component buy orders must be canceled and logged");
+assert.ok(marketSource.includes("highProfitBuyPremium"),
+    "cheap-buy premium must be configurable");
+assert.ok(marketSource.includes("highProfitOrderMax"),
+    "single component order size must be capped");
+assert.ok(marketSource.includes("noCheap"),
+    "asks above the cheap-buy ceiling must be logged");
+const buyStart = marketSource.indexOf("autoBuyHighProfitComponents()");
+const buyEnd = marketSource.indexOf("autoBuyDepo(", buyStart);
+assert.ok(buyStart > 0 && buyEnd > buyStart, "autoBuyHighProfitComponents must exist");
+const buyBlock = marketSource.slice(buyStart, buyEnd);
+assert.ok(!buyBlock.includes("Game.market.createOrder"),
+    "high-profit buying must not place resting orders (the 21k metal order)");
+assert.ok(buyBlock.includes("maxBuyPrice") && buyBlock.includes("minSellPrice > maxBuyPrice"),
+    "only asks at/below history+premium may be bought");
 
 console.log("market L5 / daily-high / real-margin checks passed");

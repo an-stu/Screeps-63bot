@@ -292,6 +292,12 @@ let pro = {
         // 动态平衡：能量不充裕时停止追买高利润组件原料，先让能源经济回血。
         if (!StationHive.isEnergyAbundant()) return;
         let threshold = Number(Memory.marketSettings && Memory.marketSettings.highProfitMargin || 1000);
+        // 只买“便宜”的原料：成交价最多比历史均价高 highProfitBuyPremium（默认 2%）。
+        // 单笔最多 highProfitOrderMax（默认 1 万），不再挂 2 万+ 的 resting order。
+        let buyPremium = Number(Memory.marketSettings && Memory.marketSettings.highProfitBuyPremium);
+        if (!(buyPremium >= 0 && buyPremium <= 1)) buyPremium = 0.02;
+        let orderMax = Number(Memory.marketSettings && Memory.marketSettings.highProfitOrderMax);
+        if (!(orderMax > 0)) orderMax = 10000;
         let analysis = StrategyMarketPrice.calculateAllCommoditiesProfit();
         if (!analysis || !analysis.commodities) return;
         // 按利润率降序，只保留达标商品
@@ -315,6 +321,7 @@ let pro = {
             actions: [],
             skipped: [],
             canceled: [],
+            noCheap: [],
         };
         Memory.diagBuy = diag;
         if (!candidates.length || !factoryRooms.length) return;
@@ -370,32 +377,23 @@ let pro = {
                     if (gap < 1000) continue;
                     let price = StrategyMarketPrice.getResTypeHistory(comp);
                     if (!price || price <= 0) price = 0.01;
-                    // 市场没有卖单或最低卖价明显高于我们能接受的价格时，不挂买不到的单。
+                    // 只吃“便宜”的卖单：卖一价最多比历史均价高 buyPremium。
+                    // 买不到就等，不再挂高价/大额买单（metal 2w @239 的教训）。
+                    let maxBuyPrice = price * (1 + buyPremium);
                     let sellList = pro.getAllOrdersCacheList(comp, ORDER_SELL).filter(o => o.amount > 0);
                     if (!sellList.length) continue;
                     let minSellPrice = sellList.reduce((min, o) => Math.min(min, o.price), Infinity);
-                    if (minSellPrice > price * 1.2) continue;
+                    if (minSellPrice > maxBuyPrice) {
+                        diag.noCheap.push([comp, Math.round(minSellPrice), Math.round(maxBuyPrice)]);
+                        continue;
+                    }
                     // 已有该房间该原料买单则跳过（防止重复挂单）
                     let hasBuyOrder = _.values(Game.market.orders).some(e => e.remainingAmount > 0
                         && e.resourceType == comp && e.type == ORDER_BUY && e.roomName == room.name);
                     if (hasBuyOrder) continue;
-                    let amount = Math.min(gap, 30000);
-                    let isBuy = pro.buySome(room, comp, price * 1.2, amount);
-                    if (isBuy) {
-                        diag.actions.push([room.name, comp, amount, resType]);
-                    } else if (Game.market.credits > 100000) {
-                        let code = Game.market.createOrder({
-                            type: ORDER_BUY,
-                            resourceType: comp,
-                            price: price,
-                            totalAmount: amount,
-                            roomName: room.name,
-                        });
-                        if (code == OK) {
-                            diag.actions.push([room.name, comp, amount, resType]);
-                            console.log(`[buyHighProfit] ${room.name} ${comp} ${amount} @ ${price} for ${resType}`);
-                        }
-                    }
+                    let amount = Math.min(gap, orderMax);
+                    let isBuy = pro.buySome(room, comp, maxBuyPrice, amount);
+                    if (isBuy) diag.actions.push([room.name, comp, amount, resType]);
                 }
             });
         });
@@ -420,6 +418,7 @@ let pro = {
         diag.actions = diag.actions.slice(0, 8);
         diag.skipped = diag.skipped.slice(0, 5);
         diag.canceled = diag.canceled.slice(0, 8);
+        diag.noCheap = diag.noCheap.slice(0, 8);
     },
     autoBuyDepo(resType, maxPrice, maxCnt = 10000) {
         let room = _.shuffle(ManagerRooms.getNormalRoom().filter(e => e.storage && e.terminal)).head();//随机一个房间
