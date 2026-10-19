@@ -223,6 +223,26 @@ let pro = {
         }
         return false;
     },
+    // 成熟前多久就停派：留够让在役 keeper（1500 tick 寿命）自然退役的余量
+    INVADER_CORE_MATURE_WARN: 5000,
+    // 核心多久没再被看到就认为已消失（观测者一轮约 100 tick，给足冗余）
+    INVADER_CORE_GONE_CLEAR: 3000,
+    /**
+     * 外矿是否因 Invader Core 被暂停（用户 2026-10-19）。
+     *
+     * 记忆由 `StationObserver.observeLastRoom` 在**有视野时**就地刷新：
+     *   Memory.rooms[room].invaderCore = { lastSeen, deployAt }
+     * 规则：
+     *   · 核心**存在且快成熟**（deployAt - now ≤ WARN）⇒ 暂停派发（停止外矿）
+     *   · 核心**消失足够久**（now - lastSeen > GONE_CLEAR）⇒ 恢复
+     * 判据只读 Memory：停派之后爬撤走就没视野了，绝不能依赖调用时刻的可见性。
+     */
+    invaderCoreBlocks(roomName) {
+        let m = Memory.rooms[roomName] && Memory.rooms[roomName].invaderCore;
+        if (!m || !m.lastSeen) return false;
+        if (Game.time - m.lastSeen > pro.INVADER_CORE_GONE_CLEAR) return false;
+        return (m.deployAt || 0) - Game.time <= pro.INVADER_CORE_MATURE_WARN;
+    },
     exec(room) {
         if ((Game.time + room.hashCode()) % 6 != 0) return;
         let flags = ManagerFlags.getFlagsByPrefix("har");
@@ -244,6 +264,10 @@ let pro = {
             // 视野也能走进去（见下面「普通外矿不依赖当前视野」那段），矿会自己活回来。
             // 所以改用 Game.flags 按「名字前缀 + 所在房名」查，不依赖视野。
             if (pro.hasStopRemoteFlag(targetRoomName)) continue;
+            // Invader Core 闸门（用户 2026-10-19）：核心存在且**快成熟**时停止派发该外矿；
+            // 核心消失足够久之后再恢复。判据只读 Memory（由 StationObserver.observeLastRoom
+            // 在有视野时刷新），**不依赖调用时刻有没有视野** —— 停派后爬撤走就没视野了。
+            if (pro.invaderCoreBlocks(targetRoomName)) continue;
             // 每个旗子只由它选择的派发房间处理，避免多个已方房间重复派发
             let spawnRoom = flag.memory.spawnRoom && Game.rooms[flag.memory.spawnRoom];
             if (!spawnRoom || !spawnRoom.my) {

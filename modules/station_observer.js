@@ -155,6 +155,20 @@ let pro={
             Memory.rooms[room.name] = Memory.rooms[room.name] || {};
             Memory.rooms[room.name].lastHostileSeen = Game.time;
         }
+        // Invader Core 记忆（用户 2026-10-19：「核心存在且快长大了就停止外矿，足够久消失后再开」）。
+        // 与 lastHostileSeen 同一个套路：观测只给 1 tick 视野，而外矿策略每 6 tick 才决策一次，
+        // 两个节拍几乎必然错开 —— 所以必须**趁有视野时就地刷新**，别指望决策时能看见。
+        // 记两个数：lastSeen（最近一次看到核心）与 deployAt（它的下一次成熟时刻）。
+        if (global.StrategyOuterHarvest) {
+            Memory.rooms[room.name] = Memory.rooms[room.name] || {};
+            let core = room.find(FIND_STRUCTURES).find(e => e.structureType == STRUCTURE_INVADER_CORE);
+            if (core) {
+                Memory.rooms[room.name].invaderCore = {
+                    lastSeen: Game.time,
+                    deployAt: Game.time + (core.ticksToDeploy || 0),
+                };
+            }
+        }
         let deposits = global.StrategyDeposits && isCpuFeatureEnabled("deposits") ? room.find(FIND_DEPOSITS) : [];
         let powerBanks = global.StrategyPowerBank && isCpuFeatureEnabled("powerBank")
             ? room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_POWER_BANK}) : [];

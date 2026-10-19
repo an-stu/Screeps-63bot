@@ -1,3 +1,32 @@
+## v0.78.116 — An Invader Core that is about to mature pauses the outer mine
+
+User: after turning W34N55 back on, add a rule - if an Invader Core exists **and is close to
+maturing**, stop the outer mining; reopen it after it has been gone for long enough.
+
+Detection follows the pattern `StationObserver.observeLastRoom` already uses for `lastHostileSeen`:
+observation only grants **one tick** of vision while the outer-harvest strategy decides every six
+ticks, so the two beats essentially never line up - the observer therefore records the core itself
+the moment it has the room in view:
+
+    Memory.rooms[room].invaderCore = { lastSeen: Game.time, deployAt: Game.time + core.ticksToDeploy }
+
+`StrategyOuterHarvest.invaderCoreBlocks(roomName)` reads only that memory (never the current
+visibility - the creeps leave once we stop dispatching) and answers:
+
+- core **exists and is about to mature** (`deployAt - now <= INVADER_CORE_MATURE_WARN`, 5000 ticks,
+  enough for an in-service keeper to retire naturally) -> pause the mine
+- core **absent for long enough** (`now - lastSeen > INVADER_CORE_GONE_CLEAR`, 3000 ticks, generous
+  against the observer's ~100-tick round) -> resume
+
+It sits next to the existing `stopRemote` guard in the dispatch loop.
+
+### Tests
+
+`test/invader-core-gate.test.cjs` (real module in a VM): no memory, near-maturity (stop), far from
+maturity (keep mining), gone-for-long (resume), just inside the gone threshold, both maturity
+boundaries, plus call-site assertions for the gate and for the observer's write. Two negative
+controls (dropping the recovery branch, ignoring maturity) each fail on their own assertion.
+
 ## v0.78.115 — An upgrader that exists always works; the spawn gate decides the count
 
 User: "shard3_83743327_1 is an upgrader sitting there not working. If it is alive it must work. Low
