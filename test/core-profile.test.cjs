@@ -193,8 +193,14 @@ assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop mu
 assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache must only span consecutive ticks");
 assert.ok(main.includes("CPU_PROFILE_INTERVAL = 97"), "detailed CPU profiling must use a low-frequency prime interval to avoid aliasing");
 assert.ok(main.includes("OPTIONAL_CPU_OFFSETS") && main.includes("marketAutoBuy:19") && main.includes("autoPlanner:7") && main.includes("visual:3"), "optional jobs must use separate CPU schedule offsets");
-assert.ok(main.includes("room.controller.ticksToDowngrade < 20000"), "upgrader throttling must preserve controllers near downgrade");
-assert.ok(main.includes("Game.cpu.bucket < 9950) return 2"), "near-full buckets must ramp upgrader CPU smoothly");
+// 用户 2026-10-19：「在位肯定要工作；能量低/快降级是不**派** upgrader，不是**暂停**工作，不要浪费」
+// ⇒ main.js 的 shouldRunCreep 不再按降级计时器/存量/bucket 按住**在职**的 upgrader。
+assert.ok(!main.includes("room.controller.ticksToDowngrade > 120000") && !/stock < 30000/.test(main),
+    "upgraders must not be paused in the main loop: once spawned they always work");
+assert.ok(stationUpgrade.includes("ticksToDowngrade < 80000"),
+    "the spawn gate in station_upgrade must remain the only place deciding how many upgraders exist");
+assert.ok(stationUpgrade.includes("room.creeps(\"upgrader\", false).length == 0"),
+    "the spawn gate must still spawn when a room has no upgrader at all");
 assert.ok(main.includes("Game.cpu.bucket >= 6000") && !main.includes("plannerAverage <"), "auto planner must stay enabled above the bucket safety floor");
 assert.ok(main.includes("health.autoPlanner"), "auto planner CPU must be measured online");
 assert.ok(main.includes("POWER_CREEP_TICK_INTERVAL = 2") && main.includes("function shouldRunPowerCreeps()"),

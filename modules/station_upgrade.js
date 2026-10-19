@@ -415,10 +415,10 @@ let pro = {
                 || (room.storage.store[RESOURCE_ENERGY] > 10000 && minUpgraderCnt > room.creeps("upgrader", false).length))
                 spawn()
         }
-        // Spawn 与 CPU bucket 解耦：升级动作本身由 main.js 的 shouldRunCreep
-        // 按 bucket/能量存量节流，但降级计时器低于 spawn 阈值时必须保证有
-        // 一只 upgrader 存在，否则 bucket 长期 <9000 时 RCL8 会在没有任何
-        // upgrader 的情况下被慢慢拖到降级（E41S23/E41S32 等曾降到 51k）。
+        // 这里是**唯一**的 upgrader 数量闸门（main.js 的 shouldRunCreep 已不再节流在职者，
+        // 见其注释：用户 2026-10-19 明确「在位就必须工作，能量低/快降级是不派，不是暂停」）。
+        // RCL8 只在降级计时器 < 80000 时补 1 只 —— 这样既不会闲置在职者，也不会为了
+        // 还很久才降级的控制器持续供养新爬（E41S23/E41S32 曾降到 51k 的那次教训仍在）。
         else if (checkGCL()
             && room.energyAvailable >= (room.controller.ticksToDowngrade < 5000 ? 2000 : 2500)
             && room.controller.ticksToDowngrade < 80000

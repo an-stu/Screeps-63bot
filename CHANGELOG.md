@@ -1,3 +1,29 @@
+## v0.78.115 — An upgrader that exists always works; the spawn gate decides the count
+
+User: "shard3_83743327_1 is an upgrader sitting there not working. If it is alive it must work. Low
+energy / close to downgrade means don't SPAWN upgraders - not pause the work. Don't waste."
+
+That creep was in W33N53 with `ticksToDowngrade` right at 120k, a stock of 150k, its `upgradeKeeper`
+task queued and 70 energy in its store. `main.js`'s `shouldRunCreep` was freezing it:
+
+    if (room.controller.ticksToDowngrade > 120000) return false;   // plus stock <30k stop, <60k half speed
+    // plus a bucket-based interval
+
+But `station_upgrade.js:398~429` already owns the spawn decision completely: below RCL8 it spawns on
+no-upgrader / progress / stock conditions, and at RCL8 it only tops up when
+`ticksToDowngrade < 80000`. So the main-loop throttle was **duplicate and pure waste** - the energy
+already spent on spawning the creep and its 1500 ticks of life were parked for nothing.
+
+`shouldRunCreep` now returns true: upgraders run like every other role, and whether an upgrader
+should exist is decided solely by the spawn gate. The bucket<=40 MIN_CPU emergency path still goes
+through `ROLE_PRIORITY` - that is CPU survival, unrelated to this.
+
+### Tests
+
+`test/core-profile.test.cjs` no longer asserts the old throttle; it now asserts the opposite (no
+`ticksToDowngrade > 120000` pause, no `stock < 30000` pause), that the spawn gate still holds the
+`ticksToDowngrade < 80000` RCL8 top-up, and that a room with no upgrader still spawns one.
+
 ## v0.78.113 — Only deal cheap component asks; no 20k resting metal order
 
 ### Changed
