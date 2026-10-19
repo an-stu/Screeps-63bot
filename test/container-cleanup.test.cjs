@@ -69,6 +69,8 @@ function makeRoom({ containers = [], mineralContainer = undefined, storageFree =
         name: "E41S32",
         memory: mineralContainer ? { stationMineral: { container: mineralContainer, resType: arguments[0].mineralRes } } : {},
         storage: { store: { getFreeCapacity: () => storageFree } },
+        // 源码优先用缓存 getter `room.container`；这里同时提供，保证走快路径
+        container: containers,
         find(type, opts) { return containers.filter(c => opts.filter(c)); },
     };
 }
