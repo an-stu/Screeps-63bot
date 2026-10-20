@@ -1,3 +1,26 @@
+## v0.78.121 — Defence rebalancing was gated behind "never assigned", so one group went unmanned
+
+Why nobody attacked the last Source Keeper in W34N55: all four defenders carried the **same**
+`defenseLairIds` (one 49-character group key = one group's two lair ids), so the group lookup
+`keys.indexOf(creep.memory.defenseLairIds)` resolved everyone to the same group. The only thing that
+could have spread them out was the load-balancing line, and it was guarded by
+
+    if (creep.memory.defenseLairIds === undefined && cnt[g] > least) ...
+
+i.e. it only ran for creeps that had never been assigned. Since the spawn-time assignment writes
+`defenseLairIds` for every defender, that condition was **never** true - the imbalance could never be
+corrected. Result: the east/middle group had everyone, the west group (lairs 7,17 and 7,38) had
+nobody, and a full-health keeper sat at (4,16) untouched.
+
+The rebalance is now unconditional. Stability does not come from the removed guard but from the
+"exclude yourself" count: once one creep moves, both counts are equal and nothing flips back
+(the 10-04 oscillation was two creeps pushing each other, not balancing itself).
+
+### Tests
+
+`test/outer-defense.test.cjs` asserts the unconditional rebalance line is present and that the
+old "never assigned" guard is gone.
+
 ## v0.78.120 — Outer defence quota is one defender per two lairs
 
 User: the outer mine sent three defenders; the lairs are four, and the requirement is two - one

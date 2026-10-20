@@ -612,6 +612,13 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
 assert.ok(/Math\.ceil\(lairs \/ 2\)/.test(stationSource), "编制必须用 ceil(lair/2)");
 assert.ok(/STRUCTURE_KEEPER_LAIR/.test(stationSource), "编制必须按 keeper lair 数量算");
 
+// 均衡不能被"记忆已定义"挡住（10-20：出生时把同一组 ids 写给了所有爬，
+// 均衡从此永不执行 ⇒ 一组挤满、另一组整组无人）。断言条件里不再有 undefined 前置。
+assert.ok(/if \(cnt\[g\] > least\) g = cnt\.indexOf\(least\);/.test(stationSource),
+    "人少均衡必须无条件执行");
+assert.ok(!/defenseLairIds === undefined && cnt\[g\] > least/.test(stationSource),
+    "不得再用「从未定过岗」作为均衡的前置条件");
+
 console.log("outer defense checks passed");
 {
     // === 已接战别的目标的防守爬不参与新目标竞争：次近的空闲者接手 ===

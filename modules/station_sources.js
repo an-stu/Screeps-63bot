@@ -3808,8 +3808,18 @@ let pro = {
             g = creep.memory.defenseGroup;
             if (g === undefined || g < 0 || g >= groups.length) g = cnt.indexOf(least);
         }
-        // 从来没定过岗（本次部署前出生的老爬）才做一次均衡，避免一上来两组不均
-        if (creep.memory.defenseLairIds === undefined && cnt[g] > least) g = cnt.indexOf(least);
+        // 均衡：只要**自己这组比别组挤**，就换到人最少的那组。
+        //
+        // 原来这里有一道 `creep.memory.defenseLairIds === undefined` 的前置条件，
+        // 意思是「只给从没定过岗的老爬做一次均衡」。后果是：一旦出生时把
+        // **同一组的 defenseLairIds 写给了所有防守爬**（2026-10-20 实测 W34N55：
+        // 4 只爬的 defenseLairIds 完全相同，都是同一个 49 字符组键），
+        // 这个记忆就永远"已定义"，均衡再也不执行 → 4 只全挤在一组、另一组（西侧的
+        // 7,17 / 7,38）整组无人，keeper 站在那儿满血 5000/5000 没人打。
+        //
+        // 现在无条件均衡。稳定性靠下面「排除自己」的计数保证：移动方一拍之后
+        // 两组计数相等，不会再来回对调（10-04 的抖动问题是两只互相挤，而非均衡本身）。
+        if (cnt[g] > least) g = cnt.indexOf(least);
         // 覆盖兜底：**别组一个人都没有**时，才允许离开自己记下来的岗位去补位。
         //
         // 为什么需要它：工位稳定之后就没人「看谁少去哪」了，而岗位的交接总有
