@@ -1,3 +1,36 @@
+## v0.78.118 — Deposit boost was structurally unreachable; judge it by remaining life
+
+User: "the boost still does not open."
+
+It never could. The boost is decided in the harvester-spawn branch only:
+
+    if (harTtlCreepCnt < walkableAroundCnt && ...) {
+        let needBoost = lastCooldown > boostCoolDown() && !alreadyBoosted;
+        trySpawnHarDeposits(room, memory, needBoost);   // boost = a lab task at spawn time
+        return;
+    }
+
+But the team is filled at the **start** of the mission, when `lastCooldown` is about 0, and by the
+time it passes the threshold `harTtlCreepCnt` already equals `walkableAroundCnt`, so no further
+spawn happens - and the harvesters live 1500 ticks, longer than a deposit mission, so no death
+replaces them either. The branch is therefore never entered. (The 10-10 fix addressed a different
+layer: the threshold was 90, above the reachable range.)
+
+Now the judgement is the deposit's **remaining life**:
+
+    remainLife = flag.memory.disappearTime - Game.time
+    needBoost  = remainLife > pathTime * 2 + 600 && !alreadyBoosted
+
+which is known at spawn time, so the first team is spawned already boosted and never has to walk
+home to a lab. `boostCoolDown()` is kept as a knob (`Memory.marketSettings.depositBoostCooldown`)
+but no longer decides the boost.
+
+### Tests
+
+`test/deposit-threshold.test.cjs`: the old "must call boostCoolDown()" contract is replaced by
+"must judge by remainLife" plus "must not use the old `lastCooldown > boostCoolDown()`"; negative
+control reverts the judgement and fails on the new assertion.
+
 ## v0.78.117 — shard3 deposit harvest cap 40 -> 70
 
 User: "shard3 to 70."

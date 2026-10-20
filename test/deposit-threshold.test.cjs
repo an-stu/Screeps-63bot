@@ -80,8 +80,12 @@ function load({ shard = "shard3", marketSettings = {} } = {}) {
         "不应再残留裸的 MAX_COOL_DOWM 引用（旧常量已改名）");
     assert.ok(codeOnly.includes("maxCoolDown()"), "判定点必须用 maxCoolDown()");
     // boost 断言必须落在**调用点**上：只查常量值抓不到「常量对、但用的时候写死了别的数」
-    assert.ok(/lastCooldown\s*>\s*boostCoolDown\(\)/.test(codeOnly),
-        "boost 判定点必须调用 boostCoolDown()");
+    // 10-20：boost 判据改为「deposit 剩余寿命」（原来 lastCooldown > boostCoolDown() 在 spawn 时刻
+    // 永远达不到：团队开局就派满、采集爬寿命 1500 又比任务长 ⇒ boost 从未触发过）。
+    assert.ok(/remainLife\s*>\s*\(flag\.memory\.pathTime \|\| 0\)\s*\*\s*2\s*\+\s*600/.test(codeOnly),
+        "boost 判定点必须按 deposit 剩余寿命（remainLife）判断");
+    assert.ok(!/lastCooldown\s*>\s*boostCoolDown\(\)/.test(codeOnly),
+        "旧的 lastCooldown > boostCoolDown() 判据不得再用于决定 boost");
     assert.ok(!/lastCooldown\s*>\s*90\b/.test(codeOnly),
         "不该再有写死的 boost 阈值 90（那样 boost 永远不会触发）");
     // 「派新队」与「续派补员」两道闸必须同源。原来续派会再加 offset
