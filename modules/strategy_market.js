@@ -127,6 +127,13 @@ let ON_SALE = {};
 let allRoomRes = { updateTime: 0 }
 let MARKET_SELL_PRICE_TTL = 1000;
 let MARKET_ORDER_TTL = 100;
+// 压缩 bar 的利润率门槛：低于这个就不自己压（用户 2026-10-20：低于 40% 不考虑）
+let COMPRESS_MIN_MARGIN = 40
+// 利润率扫描间隔（tick）：订单缓存 TTL 为 100，扫太勤只是白烧 CPU
+let COMPRESS_SCAN_INTERVAL = 500
+// 原矿 → bar
+let COMPRESS_BAR_MAP = { U: "utrium_bar", L: "lemergium_bar", K: "keanium_bar",
+    Z: "zynthium_bar", O: "oxidant", H: "reductant", X: "purifier" }
 let MARKET_MAX_COMMODITY_DEAL = 10000;
 let MARKET_MIN_COMMODITY_DEAL = 100;
 let sellPriceCache = {updateTime:-1e9,prices:{},bestCommodities:{}};
@@ -178,6 +185,50 @@ let pro = {
     
     return out;
     },
+    /** 最低卖单价（= 我们要付的价）。没有卖单返回 0。 */
+    minSellPrice(resType) {
+        let list = pro.getAllOrdersCacheList(resType, ORDER_SELL);
+        let best = 0;
+        for (let o of list) {
+            if (!o || !o.amount) continue;
+            if (!best || o.price < best) best = o.price;
+        }
+        return best;
+    },
+    /**
+     * 定时扫描「自己压 bar vs 市场买」的利润率，写进 `Memory.marketSettings.compressBars`。
+     *
+     * 用户 2026-10-20：「低于 40% 的就不考虑了，一段时间定时扫描利润。」
+     *
+     * 一根 bar = **5 原矿 + 2 能量**（500 原矿 + 200 能量 → 100 根，见 COMMODITIES）。
+     * 成本与售价都取**最低卖单**（成本 = 我们要付的价；售价 = 替代采购的价），
+     *   margin = (barAsk - (5*rawAsk + 2*energyAsk)) / barAsk
+     * 只看按这个口径算的毛利率，低于 COMPRESS_MIN_MARGIN 的由工厂侧过滤掉。
+     *
+     * 节奏：每 COMPRESS_SCAN_INTERVAL tick 一次（订单缓存 TTL 是 100，扫太勤只是白烧 CPU）。
+     */
+    scanCompressMargin() {
+        Memory.marketSettings = Memory.marketSettings || {};
+        let ms = Memory.marketSettings;
+        if (ms.compressScanAt && Game.time - ms.compressScanAt < COMPRESS_SCAN_INTERVAL) return;
+        ms.compressScanAt = Game.time;
+        let energy = pro.minSellPrice(RESOURCE_ENERGY);
+        let out = {};
+        let detail = {};
+        for (let raw in COMPRESS_BAR_MAP) {
+            let bar = COMPRESS_BAR_MAP[raw];
+            let barAsk = pro.minSellPrice(bar);
+            let rawAsk = pro.minSellPrice(raw);
+            if (barAsk <= 0 || rawAsk <= 0 || energy <= 0) continue;
+            let cost = rawAsk * 5 + energy * 2;
+            out[bar] = Math.round((barAsk - cost) / barAsk * 1000) / 10;   // 毛利率，百分比保留一位
+            detail[bar] = { ask: Math.round(barAsk * 100) / 100, cost: Math.round(cost * 100) / 100 };
+        }
+        ms.compressBars = out;
+        ms.compressBarsDetail = detail;
+        // 门槛也写进 Memory：工厂侧只读这一个值，不再自己维护一份常量（避免两侧阈值漂移）
+        ms.compressMinMargin = COMPRESS_MIN_MARGIN;
+    },
     getAllOrdersCacheList(resourceType, type) {
         let key = type+":"+resourceType;
         let cached = orderCache[key];
@@ -196,6 +247,8 @@ let pro = {
         // 矿物按 2 个/次轮转、高利润组件隔次执行，把尖峰摊平——单个资源
         // 的决策延迟变为 400 tick（组件 200 tick），对以小时计的挂单成交
         // 毫无影响。
+        // 每 500 tick 重算一次「自己压 bar」的毛利率（工厂侧据此过滤，低于 40% 不压）
+        pro.scanCompressMargin();
         _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
         // 先清一遍历史遗留的重复买单；本轮所有建单路径跑完之后还会再收敛一次
         // （见本函数末尾），确保一轮结束时必然收敛。

@@ -1,3 +1,31 @@
+## v0.78.126 — Only compress bars with a 40% margin, scanned every 500 ticks
+
+User: ignore anything below 40%; scan profitability periodically.
+
+`StrategyMarket.scanCompressMargin()` (called from `autoBuy`, which runs every 100 ticks, internally
+rate-limited to 500) prices each bar pair on the **cheapest sell orders**:
+
+    cost   = 5 * rawAsk + 2 * energyAsk        // one bar is 5 raw + 2 energy
+    margin = (barAsk - cost) / barAsk * 100
+
+and writes `Memory.marketSettings.compressBars` (per-bar margin), `compressBarsDetail`
+(ask/cost for inspection) and `compressMinMargin` (the 40 threshold - a single source of truth, the
+factory does not carry its own copy).
+
+`station_factory.noLevel()` now refuses to compress when the margin is below that threshold **or
+when the market has not been scanned yet** - unknown means don't burn energy on a guessed price.
+
+At the prices seen today this leaves only three bars above 40%: utrium_bar (57%), oxidant (46%),
+keanium_bar (44%). zynthium_bar lands at 35%, purifier 14%, lemergium_bar 9%, reductant 9%, so those
+four stay raw and are bought if genuinely needed.
+
+### Tests
+
+`test/factory-compress.test.cjs` gains the margin cases (39.9% -> no compression, exactly 40% ->
+allowed, no scan -> no compression) and a source-level check that the scanner writes both Memory
+keys, prices with 5 raw + 2 energy, and is rate limited to 500 ticks. Negative controls: dropping
+the factory gate and lowering the threshold to 30 each fail.
+
 ## v0.78.125 — Keep more raw minerals, count the energy, and stop decompressing
 
 User: keep more raw mineral, avoid decompression (it burns energy and energy is not cheap), and

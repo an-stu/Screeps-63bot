@@ -266,6 +266,14 @@ let pro={
             // ≥ 6000 ⇒ 这条分支从来没有触发过 —— 13 个工厂 cooldown 全是 0，终端里
             // 每种原料各 39,000 躺着，同时还在市场上买 oxidant/purifier/reductant。
             // 改成按可压数量算：3,000 原矿、保留 1,000 ⇒ 可压 400 根（2,000 原矿 + 800 能量）。
+            // 利润率门槛（用户 2026-10-20：「低于 40% 的就不考虑了，一段时间定时扫描利润」）。
+            // 数值由 StrategyMarket.scanCompressMargin 每 500 tick 扫一次写进 Memory，
+            // **工厂这边只读，不自己维护常量**（两侧各写一个数迟早漂移）。
+            // 还没扫过（Memory 里没有）⇒ 一律不压：宁可等一轮，也不按猜的价格烧能量。
+            let msC = Memory.marketSettings;
+            let minMargin = msC ? msC.compressMinMargin : undefined;
+            let margin = msC && msC.compressBars ? msC.compressBars[resType] : undefined;
+            if (!(minMargin > 0) || !(margin >= minMargin)) continue;
             if (barCnt < 1500) {
                 // components 是「一批（amount 根）」的用量，换算成**每根**才和 bar 数对齐
                 let perBar = COMMODITIES[resType].components[rawType] / COMMODITIES[resType].amount;

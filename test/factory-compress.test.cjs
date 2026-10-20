@@ -46,8 +46,22 @@ const COMMODITIES = {
 // 这些只作标识符用，自动补成「去掉前缀的小写名」即可，避免逐个手写漏掉。
 const ALL_RESOURCE_TOKENS = Array.from(new Set(src.match(/RESOURCE_[A-Z0-9_]+/g) || []));
 
-function load(counts) {
+const ALL_BARS = ["utrium_bar", "lemergium_bar", "keanium_bar", "zynthium_bar",
+    "oxidant", "reductant", "purifier"];
+
+/**
+ * @param counts  本房 mass store 里的资源数量
+ * @param margins 各 bar 的毛利率（%）；默认全部 60%，只有专门测门槛的用例才覆盖。
+ *                `null` 表示「市场还没扫过」——Memory 里没有 compressBars。
+ */
+function load(counts, margins) {
     const calls = [];
+    const ms = {};
+    if (margins !== null) {
+        ms.compressMinMargin = 40;
+        ms.compressBars = {};
+        for (const b of ALL_BARS) ms.compressBars[b] = margins && margins[b] !== undefined ? margins[b] : 60;
+    }
     const extra = {};
     for (const tok of ALL_RESOURCE_TOKENS) {
         if (!(tok in RESOURCES)) extra[tok] = tok.slice("RESOURCE_".length).toLowerCase();
@@ -56,7 +70,7 @@ function load(counts) {
         console,
         COMMODITIES,
         Game: { time: 100000, shard: { name: "shard3" }, cpu: { bucket: 10000 } },
-        Memory: { rooms: {} },
+        Memory: { rooms: {}, marketSettings: ms },
         OK: 0,
         ERR_NOT_ENOUGH_RESOURCES: -6,
         ERR_INVALID_TARGET: -7,
@@ -180,6 +194,33 @@ const ENERGY_RICH = { energy: 150000 };
     const codeOnly = marketSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(/let barPrice = maxPrice \* 5 \+ 2 \* StrategyMarketPrice\.getResTypeHistory\(RESOURCE_ENERGY\)/.test(codeOnly),
         "bar 自制成本必须是 5 原矿 + 2 能量（写 1 份能量会把自制算便宜、更容易去买）");
+}
+
+// ⑩ 利润率门槛：低于 40% 一律不压（用户 10-20），没扫过也不压
+{
+    const low = load(Object.assign({ U: 3000 }, ENERGY_RICH), { utrium_bar: 39.9 });
+    assert.equal(low.StationFactory.noLevel({ name: "W33N53" }), undefined,
+        "毛利率 39.9% < 40% ⇒ 不压");
+    assert.equal(low.__calls.length, 0);
+
+    const edge = load(Object.assign({ U: 3000 }, ENERGY_RICH), { utrium_bar: 40 });
+    assert.ok(edge.StationFactory.noLevel({ name: "W33N53" }), "刚好 40% ⇒ 允许（门槛是闭区间）");
+
+    const unscanned = load(Object.assign({ U: 3000 }, ENERGY_RICH), null);
+    assert.equal(unscanned.StationFactory.noLevel({ name: "W33N53" }), undefined,
+        "市场还没扫过（Memory 无 compressBars）⇒ 不压，宁可等一轮");
+}
+
+// ⑪ 扫描侧必须把门槛与逐项毛利率写进 Memory（工厂只读这两个键）
+{
+    const marketSrc = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
+    const codeOnly = marketSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/ms\.compressBars = out/.test(codeOnly), "扫描必须写 compressBars");
+    assert.ok(/ms\.compressMinMargin = COMPRESS_MIN_MARGIN/.test(codeOnly), "门槛必须写进 Memory（单一口径）");
+    assert.ok(/const COMPRESS_MIN_MARGIN = 40|let COMPRESS_MIN_MARGIN = 40/.test(codeOnly), "门槛是 40%");
+    assert.ok(/rawAsk \* 5 \+ energy \* 2/.test(codeOnly), "成本必须按 5 原矿 + 2 能量算");
+    assert.ok(/Game\.time - ms\.compressScanAt < COMPRESS_SCAN_INTERVAL/.test(codeOnly),
+        "扫描必须限频（每 500 tick），不能每 tick 调市场");
 }
 
 console.log("factory compress checks passed");
