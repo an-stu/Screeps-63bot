@@ -3949,6 +3949,13 @@ let pro = {
         // 闸门仍按 2 判满，外矿生产会被永久锁死（allDefendersFull 那次的教训）。
         let invaders = hostiles.filter(c => c.owner && c.owner.username == "Invader");
         if (invaders.length >= 2) return 1;
+        // 用户 2026-10-20：编制改成按 **lair 数量 ÷ 2**（一爬管两个窝），不再按 Source Keeper 数量 1:1。
+        // 一个 source keeper 房是 **4 个 lair / 3 个源** —— 按源数或按 keeper 数都会算错：
+        // 实测 W34N55 开局 3 只 keeper ⇒ 派了 3 只，清到只剩 1 只后第 3 只就白站（且没有退役逻辑）。
+        // 4 lair ⇒ ceil(4/2) = 2 只，正好是「一只盯两窝」的原始设计。
+        let lairs = room.find(FIND_STRUCTURES).filter(s2 => s2.structureType == STRUCTURE_KEEPER_LAIR).length;
+        if (lairs) return Math.max(base, Math.min(4, Math.ceil(lairs / 2)));
+        // 没视野 / 拿不到 lair 数据时退回旧口径
         let keepers = hostiles.filter(c => c.owner && c.owner.username == "Source Keeper").length;
         return Math.max(base, Math.min(4, keepers));
     },

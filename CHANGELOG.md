@@ -1,3 +1,22 @@
+## v0.78.120 — Outer defence quota is one defender per two lairs
+
+User: the outer mine sent three defenders; the lairs are four, and the requirement is two - one
+creep handles two lairs.
+
+The old formula counted **Source Keeper creeps** one-to-one: `max(base, min(4, keepers))`. A source
+keeper room has **4 lairs but 3 sources**, so at mission start there were 3 keepers and the quota
+came out as 3. Now it is `max(base, min(4, ceil(lairs / 2)))` - 4 lairs gives 2, which is the
+original "one defender watches two lairs" design. The keeper-based fallback stays for the case where
+the room is not visible (no lair list).
+
+Consequence to be aware of: the existing third defender has no over-quota retirement (only keepers
+have that), so it will finish its life unless removed manually.
+
+### Tests
+
+`test/outer-defense.test.cjs` asserts the quota uses `ceil(lairs / 2)` over keeper lairs; negative
+control drops that branch and fails.
+
 ## v0.78.119 — Deposit boost switched off (kept behind a Memory switch)
 
 User: turn the deposit boost off.

@@ -608,6 +608,10 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     assert.ok(solo.calls.some(c => c[0] === "attack"), "本组无人时照打，不能把窝晾着");
 }
 
+// 编制必须按 lair 数量 ÷ 2（用户 10-20：一爬负责两个窝）。4 lair ⇒ 2 只，不是按 keeper 1:1。
+assert.ok(/Math\.ceil\(lairs \/ 2\)/.test(stationSource), "编制必须用 ceil(lair/2)");
+assert.ok(/STRUCTURE_KEEPER_LAIR/.test(stationSource), "编制必须按 keeper lair 数量算");
+
 console.log("outer defense checks passed");
 {
     // === 已接战别的目标的防守爬不参与新目标竞争：次近的空闲者接手 ===
