@@ -298,8 +298,11 @@ let pro = {
                     // 等 lastCooldown 真的超过阈值时 harTtlCreepCnt 已满 ⇒ 不会再 spawn；而采集爬寿命 1500
                     // 比任务本身还长 ⇒ 也不会因死亡补员。**那个分支永远进不去，boost 一次都没发生过。**
                     // 现在：剩余寿命够覆盖「往返 + 采集」才值得烧化合物，开局就带 boost 孵化，不用跑回家。
+                    // 用户 2026-10-20：**关闭** deposit 采集的 boost。用 Memory 开关而不是删代码，
+                    // 想恢复只需 `Memory.marketSettings.depositBoost = true`（默认关）。
+                    let boostEnabled = !!(Memory.marketSettings && Memory.marketSettings.depositBoost === true);
                     let remainLife = (flag.memory.disappearTime || 0) - Game.time;
-                    let needBoost = remainLife > (flag.memory.pathTime || 0) * 2 + 600
+                    let needBoost = boostEnabled && remainLife > (flag.memory.pathTime || 0) * 2 + 600
                         && !flag.memory.harvesters.map(id => Game.getObjectById(id)).find(e => e.memory.isBoost && (e.spawning || e.ticksToLive > (flag.memory.pathTime || 0) + 150))
                     pro.trySpawnHarDeposits(room, flag.memory, needBoost);
                     return;

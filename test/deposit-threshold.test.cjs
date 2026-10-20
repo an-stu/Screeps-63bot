@@ -97,4 +97,14 @@ function load({ shard = "shard3", marketSettings = {} } = {}) {
         "offset 只用来定在岗只数，不该再参与「挖多久」");
 }
 
+// ⑤ boost 必须受 Memory 开关控制，且**默认关闭**（用户 10-20 要求关掉这个功能）
+//    注意：必须在**剥掉注释的源码**上断言 —— 注释里也提到了这个开关名。
+{
+    const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/let boostEnabled = !!\(Memory\.marketSettings && Memory\.marketSettings\.depositBoost === true\)/.test(stripped),
+        "boost 必须由 Memory.marketSettings.depositBoost 开关控制");
+    assert.ok(/let needBoost = boostEnabled &&/.test(stripped),
+        "needBoost 必须先过开关：默认（未设）必须是 false，不能默认开启");
+}
+
 console.log("deposit harvest threshold checks passed");

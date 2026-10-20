@@ -1,3 +1,21 @@
+## v0.78.119 — Deposit boost switched off (kept behind a Memory switch)
+
+User: turn the deposit boost off.
+
+Instead of deleting the machinery, it now sits behind a switch that defaults to **off**:
+
+    Memory.marketSettings.depositBoost === true   // required for any boost
+
+`needBoost = boostEnabled && remainLife > ...` - a missing or non-true value means no boost, so the
+feature is off out of the box and can be re-enabled by setting that one value (no redeploy).
+
+### Tests
+
+`test/deposit-threshold.test.cjs` asserts the switch exists and that `needBoost` starts with
+`boostEnabled &&` (i.e. default off). The assertions run against the comment-stripped source, since
+the explanatory comment itself mentions the switch name. Negative control (dropping the switch)
+fails on "needBoost 必须先过开关".
+
 ## v0.78.118 — Deposit boost was structurally unreachable; judge it by remaining life
 
 User: "the boost still does not open."
