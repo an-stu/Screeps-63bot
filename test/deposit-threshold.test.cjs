@@ -1,7 +1,7 @@
 /**
  * Deposit 采集上限（用户 2026-10-09：「减少采集 deposit、提高效率」）。
  *
- * `lastCooldown` 是**已挖掉的刻度**（0 = 刚出现，越大越接近耗尽）。上限从 60 降到 40，
+ * `lastCooldown` 是**已挖掉的刻度**（0 = 刚出现，越大越接近耗尽）。上限 60→40（10-09）→70（10-20），
  * 并且改成**读取时判 Memory**，这样 `Memory.marketSettings.depositMaxCooldown`
  * 改完立刻生效，不必等下一次重传代码。
  *
@@ -36,9 +36,9 @@ function load({ shard = "shard3", marketSettings = {} } = {}) {
 }
 
 {
-    // ① shard3 缺省 = 40（原来 60）
+    // ① shard3 缺省 = 70（10-20 由 40 上调）
     const ctx = load();
-    assert.equal(ctx.__maxCoolDown(), 40, "shard3 的 deposit 采集上限必须是 40");
+    assert.equal(ctx.__maxCoolDown(), 70, "shard3 的 deposit 采集上限必须是 70");
 
     // ② 其它 shard 保持原值（只动了 shard3）
     assert.equal(load({ shard: "shard2" }).__maxCoolDown(), 120, "shard2 不受影响");
@@ -52,17 +52,17 @@ function load({ shard = "shard3", marketSettings = {} } = {}) {
 
     // ④ **活读**：改 Memory 立刻生效，不需要重传代码/重载模块
     const live = load({ marketSettings: {} });
-    assert.equal(live.__maxCoolDown(), 40, "起始 40");
+    assert.equal(live.__maxCoolDown(), 70, "起始 70");
     live.Memory.marketSettings.depositMaxCooldown = 15;
     assert.equal(live.__maxCoolDown(), 15, "改 Memory 后立刻变 15（证明不是加载时固化的常量）");
     live.Memory.marketSettings.depositMaxCooldown = 0;
-    assert.equal(live.__maxCoolDown(), 40, "设 0/非法值 → 回落到 shard 缺省");
+    assert.equal(live.__maxCoolDown(), 70, "设 0/非法值 → 回落到 shard 缺省");
 
     // ⑤ boost 阈值必须**和采集上限同源**，不能落在可达范围之外（用户 10-10 指示）。
     //    原来写死 90，而采集闸在 80（现在 60）就关了 ⇒ `lastCooldown > 90` 恒假，
     //    deposit 采集爬从来没被 boost 过，准备的 boost 资源也从来没花出去。
     const b = load();
-    assert.equal(b.__boostCoolDown(), 20, "shard3 缺省 = maxCoolDown()/2 = 20");
+    assert.equal(b.__boostCoolDown(), 35, "shard3 缺省 = maxCoolDown()/2 = 35");
     assert.ok(b.__boostCoolDown() < b.__maxCoolDown(),
         "boost 点必须**严格小于**采集上限，否则永远触发不到（这就是原来那个死代码）");
     // 跟着采集上限走：调上限时 boost 点自动跟着变

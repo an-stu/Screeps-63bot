@@ -7,8 +7,9 @@
  * `harDeposits` + 1 只 `carrierDeposits`，再加单程 pathTime 的跑路，而剩下的
  * 可挖量已经不多；那些爬不如放到新出现的窝上。
  *
- * 用户 10-09 指示「减少采集 deposit、提高效率」，shard3 由 60 降到 **40**
- * （挖到约 2/3 就收手）。
+ * 用户 10-09 指示「减少采集 deposit、提高效率」，shard3 由 60 降到 40（挖到约 2/3 收手）；
+ * **用户 10-20 又定为 70**（挖得更尽一些），代码缺省值与线上
+ * `Memory.marketSettings.depositMaxCooldown` 保持一致。
  *
  * **「派新队」和「续派补员」两道闸用同一个数**。原先是「派新队用上限、续派再加
  * `offset = walkableAroundCnt*10-10`（最多 +20）」—— 后者让一个已经挖到上限的窝
@@ -17,7 +18,7 @@
  * 两道闸就该同源；walkableAroundCnt 只用来定**同时在岗几只**，不再定挖多久。
  */
 let MAX_COOL_DOWM_DEFAULT = (() => {
-    if (Game.shard.name == "shard3") return 40;
+    if (Game.shard.name == "shard3") return 70;
     if (Game.shard.name == "shard2") return 120;
     if (Game.shard.name == "shard1") return 120;
     if (Game.shard.name == "shard0") return 120;

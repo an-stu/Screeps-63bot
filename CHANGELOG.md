@@ -1,3 +1,23 @@
+## v0.78.117 — shard3 deposit harvest cap 40 -> 70
+
+User: "shard3 to 70."
+
+`MAX_COOL_DOWM_DEFAULT` for shard3 is now 70 (other shards untouched: 120 / 120 / 120, unknown 50).
+Recall `lastCooldown` is the **amount already harvested** (0 = fresh, monotonically growing), not a
+time cooldown - so 40 meant stopping at roughly two thirds, 70 goes substantially deeper.
+
+Set in two places so they cannot drift:
+
+- live: `Memory.marketSettings.depositMaxCooldown = 70` (takes effect immediately, no reload)
+- code default: so a Memory reset does not silently fall back to 40
+
+The boost point follows automatically (`maxCoolDown()/2`), now **35** rather than 20.
+
+### Tests
+
+`test/deposit-threshold.test.cjs` updated: shard3 default 70, the live-read case 70, the invalid-knob
+fallback 70, and the derived boost point 35.
+
 ## v0.78.116 — An Invader Core that is about to mature pauses the outer mine
 
 User: after turning W34N55 back on, add a rule - if an Invader Core exists **and is close to
