@@ -1,3 +1,43 @@
+## v0.78.125 — Keep more raw minerals, count the energy, and stop decompressing
+
+User: keep more raw mineral, avoid decompression (it burns energy and energy is not cheap), and
+recompute the compression cost with energy included.
+
+**Compression cost, energy included.** One bar is 5 raw + **2 energy** (500 raw + 200 energy -> 100
+bars), not the one energy the market guard used. At the cheapest energy sell order (20.83, so 41.7
+per bar):
+
+| bar | 5 raw | + 2 energy | total | market ask | saved |
+|---|---|---|---|---|---|
+| utrium_bar | 78.6 | 41.7 | 120.3 | 278.4 | 158 (57%) |
+| keanium_bar | 74.8 | 41.7 | 116.4 | 209.4 | 93 (44%) |
+| zynthium_bar | 73.8 | 41.7 | 115.5 | 176.6 | 61 (35%) |
+| oxidant | 105.5 | 41.7 | 147.2 | 272.5 | 125 (46%) |
+| lemergium_bar | 740.0 | 41.7 | 781.7 | 858.1 | 76 (9%) |
+| reductant | 720.0 | 41.7 | 761.7 | 835.2 | 73 (9%) |
+| purifier | 1292.7 | 41.7 | 1334.4 | 1544.1 | 210 (14%) |
+
+Still positive everywhere, but lemergium / reductant / purifier are thin (9-14%). At the expensive
+energy price (34.79) those three drop to 5-12% while utrium/keanium/zynthium/oxidant stay at 19-47%.
+
+**Changes**
+
+- `BASE_COMPRESSION_RESERVE` 1000 -> **2000**: 3,000 raw per room now yields only 200 bars, and the
+  bulk stays raw for the labs.
+- The market guard (`barPrice = maxPrice * 5 + ...`) now counts **2 energy** per bar instead of one,
+  so "make it yourself" is no longer under-priced and we do not buy bars we could make cheaply.
+- Decompression is effectively off: the gate moved from `bar > 9000 && energy > 120k` to
+  `bar > 30000 && raw < reserve && energy > 300k`. Missing material for a higher-tier recipe is
+  still handled by `checkNoLevelRes` recursively compressing, which is the cheap direction.
+
+### Tests
+
+`test/factory-compress.test.cjs`: 3,000 raw makes 200 bars, raw at the 2,000 reserve makes nothing,
+9,000 raw caps at 600, 1,500 bars stops it, the 100k room-energy guard holds, oxidant maps the same
+way, 20,000 bars + 400k energy no longer decompresses (the old gate would), 35,000 bars + 400k energy
+still does, and `strategy_market` must price a bar at 5 raw + 2 energy. Negative controls (reserve
+1000, old decompress gate, one energy unit) each fail on their own assertion.
+
 ## v0.78.124 — Mineral compression could never trigger; it now keeps a lab reserve
 
 Survey on request: the market has plenty of buy orders for the element bars (utrium_bar 290.5,

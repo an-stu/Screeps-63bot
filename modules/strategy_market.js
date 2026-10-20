@@ -792,7 +792,10 @@ let pro = {
         if (StationHive.isEnergyAbundant()) {
             let bar = { "U": "utrium_bar", "L": "lemergium_bar", "K": "keanium_bar", "Z": "zynthium_bar", "X": "purifier", "O": "oxidant", "H": "reductant" }
             let barResType = bar[resType]
-            let barPrice = maxPrice * 5 + StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
+            // 一根 bar = **5 原矿 + 2 能量**（500 原矿 + 200 能量 → 100 根，见 COMMODITIES）。
+            // 原来只算了 1 份能量，把「自己做」的成本算低了 ⇒ 更容易去买 bar。
+            // 用户 2026-10-20：「压缩的成本需要算上能量，能量价格也不便宜」。
+            let barPrice = maxPrice * 5 + 2 * StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
             let barMaxPrice = StrategyMarket.getAllOrdersCacheList(barResType, ORDER_BUY).filter(e => !myRoomSet.has(e.roomName)).map(e => e.price).maxBy(e => e) || 0;
             if (barMaxPrice < barPrice) StrategyMarket.autoBuySome(barResType, 3000)
         }

@@ -110,15 +110,15 @@ const ENERGY_RICH = { energy: 150000 };
     const out = ctx.StationFactory.noLevel({ name: "W33N53" });
     assert.ok(out, "3,000 原矿必须能触发压缩（旧逻辑要求 ≥6000，13 个工厂从来没压过一次）");
     assert.equal(out.produceResType, "utrium_bar");
-    assert.equal(ctx.__calls[0].amount, 400,
-        "保留 1,000 → 只压 2,000 原矿 = 400 根（不能把实验室要用的原矿吃光）");
+    assert.equal(ctx.__calls[0].amount, 200,
+        "保留 2,000 → 只压 1,000 原矿 = 200 根（原矿要多留，不能把实验室的料吃光）");
 }
 
 // ② 原矿正好等于保留量：一根都不压
 {
-    const ctx = load(Object.assign({ U: 1000 }, ENERGY_RICH));
+    const ctx = load(Object.assign({ U: 2000 }, ENERGY_RICH));
     const out = ctx.StationFactory.noLevel({ name: "W33N53" });
-    assert.equal(out, undefined, "只够保留量时不压（实验室要用）");
+    assert.equal(out, undefined, "只够保留量（2,000）时不压（实验室要用）");
     assert.equal(ctx.__calls.length, 0);
 }
 
@@ -150,7 +150,36 @@ const ENERGY_RICH = { energy: 150000 };
     const ctx = load(Object.assign({ O: 3000 }, ENERGY_RICH));
     const out = ctx.StationFactory.noLevel({ name: "E55S31" });
     assert.equal(out.produceResType, "oxidant");
-    assert.equal(ctx.__calls[0].amount, 400);
+    assert.equal(ctx.__calls[0].amount, 200);
+}
+
+// ⑦ 解压**默认不做**：2 万根 bar + 原矿见底 + 15 万能量。
+//    这正是旧门槛（>9,000 根 / >12 万能量）会解压、而新门槛（>30,000 根 / >30 万能量）不会的场景
+//    —— 用户 10-20：解压要烧能量，能量不便宜。
+{
+    // 能量给到 40 万（旧门槛的「>12 万」也满足），只有「>30,000 根 bar」这一条能挡住它
+    const ctx = load(Object.assign({ utrium_bar: 20000, U: 1000 }, { energy: 400000 }));
+    const out = ctx.StationFactory.noLevel({ name: "W33N53" });
+    assert.equal(out, undefined, "2 万根 bar + 40 万能量时不许解压");
+    assert.equal(ctx.__calls.length, 0, "解压门槛是 30,000 根 + 30 万能量，正常运行时进不来");
+}
+
+// ⑧ 极端堆积时才允许解压（确认这条分支只是被抬高、不是被删掉）
+{
+    const ctx = load({ utrium_bar: 35000, U: 500, energy: 400000 });
+    ctx.StationFactory.noLevel({ name: "W33N53" });
+    assert.equal(ctx.__calls.length, 1, "3.5 万根 bar + 能量 40 万 ⇒ 允许解压兜底");
+    assert.equal(ctx.__calls[0].res, "U", "解压产物是原矿");
+    assert.equal(ctx.__calls[0].amount, 15000);
+}
+
+// ⑨ 「自己做 bar」的成本必须把**能量**算全：一根 = 5 原矿 + 2 能量。
+//    市场那条判断（买 bar 还是自己做）原来只算 1 份能量，把自制成本算低了。
+{
+    const marketSrc = fs.readFileSync(path.join(root, "modules/strategy_market.js"), "utf8");
+    const codeOnly = marketSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/let barPrice = maxPrice \* 5 \+ 2 \* StrategyMarketPrice\.getResTypeHistory\(RESOURCE_ENERGY\)/.test(codeOnly),
+        "bar 自制成本必须是 5 原矿 + 2 能量（写 1 份能量会把自制算便宜、更容易去买）");
 }
 
 console.log("factory compress checks passed");

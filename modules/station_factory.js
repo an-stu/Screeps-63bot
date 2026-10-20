@@ -38,9 +38,10 @@ let STAT_FILL = "fill"
 let STAT_PRODUCE = "produce"
 let FACTORY_SLEEP_TIME = 20
 let BASE_BATCH_SIZE =  30  // 无等级合成的批次
-// 压缩原矿时**每房每种至少留这么多**：实验室做强化化合物要用 U/L/K/Z/O/H/X，
-// 不能全压成 bar —— 反向解压要「bar > 9000」才触发，压光了会长期拿不到原矿。
-let BASE_COMPRESSION_RESERVE = 1000
+// 压缩原矿时**每房每种至少留这么多**：实验室做强化化合物要用 U/L/K/Z/O/H/X。
+// 用户 2026-10-20：「原矿多剩一点」「尽可能别解压 —— 解压要烧能量，能量也不便宜」。
+// 留 2,000 ⇒ 每房 3,000 原矿只压 1,000（200 根），大头仍然是原矿形态。
+let BASE_COMPRESSION_RESERVE = 2000
 let BAR_BATCH_SIZE =  6  // 压缩商品 合成的批次
 
 let minimum_compression_requires_energy_cnt = 7000000 // 压缩电池的阈值 0.7m
@@ -276,9 +277,14 @@ let pro={
                     if(out)return out;
                 }
             }
-            // by an_w
-            else if (barCnt > 9000 && rawCnt < 6000 && StationCarry.roomMassStoreCnt(room,'energy') > 120000 ) {
-                let out =  pro.checkNoLevelRes(room,rawType,15000)
+            // 解压（bar → 原矿）：**尽量不做**。
+            // 用户 2026-10-20：「尽可能别解压，解压是耗费能量的，能量价格也不便宜」。
+            // 现在只在「同一房堆了 3 万根 bar、原矿见底、且能量极充裕」时才允许 ——
+            // 正常运行时永远进不来；而真正缺料的生产链由 checkNoLevelRes 的
+            // 「缺料就先压 bar」递归兜住，不需要靠解压。
+            else if (barCnt > 30000 && rawCnt < BASE_COMPRESSION_RESERVE
+                && StationCarry.roomMassStoreCnt(room,'energy') > 300000) {
+                let out = pro.checkNoLevelRes(room,rawType,15000)
                 if (out) return out;
             }
         }
