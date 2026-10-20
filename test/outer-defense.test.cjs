@@ -619,6 +619,86 @@ assert.ok(/if \(cnt\[g\] > least\) g = cnt\.indexOf\(least\);/.test(stationSourc
 assert.ok(!/defenseLairIds === undefined && cnt\[g\] > least/.test(stationSource),
     "不得再用「从未定过岗」作为均衡的前置条件");
 
+{
+    // === 2026-10-20 回归：同组两只爬必须分守不同的窝，且**有 keeper 的窝优先** ===
+    //
+    // 实测 W34N55：keeper 满血站在 (4,16)（紧贴 7,17 窝）一整天没人碰；两只防守爬都在
+    // 30 多格外的 41,14。原因两层：
+    //   · 「有倒计时就守最快要出的那个窝」⇒ 同组两只都去同一个窝，另一个永远没人；
+    //   · keeper 活着的窝 ticksToSpawn 恒为 undefined ⇒ 在「选倒计时最小」里永远垫底，
+    //     **正好是最该打的那个窝没人去**。
+    const ctx = loadStation();
+    const S = ctx.StationSources;
+    const west = { id: "lw", structureType: "keeperLair", pos: makePos(7, 17, "W34N55"), ticksToSpawn: undefined };
+    const east = { id: "le", structureType: "keeperLair", pos: makePos(41, 14, "W34N55"), ticksToSpawn: 100 };
+    const keeper = {
+        id: "k1", owner: { username: "Source Keeper" }, hits: 5000, hitsMax: 5000,
+        body: [{ type: CONSTANTS.ATTACK }], getActiveBodyparts: () => 10,
+        pos: makePos(4, 16, "W34N55"),          // 贴着西边那个窝（range 3）
+    };
+
+    function scene(hostiles, mates, myName, myPos) {
+        const me = makeCreep(ctx, { x: myPos[0], y: myPos[1] });
+        me.name = myName;
+        me.memory.role = "outerHarvestDefenser";
+        me.memory.defenseGroup = 0;
+        const all = [me].concat(mates);
+        me.room = {
+            name: "W34N55",
+            find: c => (c == CONSTANTS.FIND_HOSTILE_CREEPS ? hostiles
+                : c == CONSTANTS.FIND_MY_CREEPS ? all : []),
+        };
+        return me;
+    }
+    const mate = name => {
+        const c = makeCreep(ctx, { x: 42, y: 14 });
+        c.name = name;
+        c.memory.role = "outerHarvestDefenser";
+        c.memory.defenseGroup = 0;
+        return c;
+    };
+
+    // ① 两只同组爬：必须**分到不同的窝**，且名字靠前的那只拿到「有 keeper 的窝」
+    const a = scene([keeper], [mate("shard3_b")], "shard3_a", [42, 13]);
+    const wa = S.outerDefensePatrolTarget(a, [west, east]);
+    const b = scene([keeper], [mate("shard3_a")], "shard3_b", [42, 14]);
+    const wb = S.outerDefensePatrolTarget(b, [west, east]);
+    assert.equal(wa.id, "lw", "名字靠前的那只必须去有 keeper 的窝（旧逻辑会去倒计时小的东窝）");
+    assert.equal(wb.id, "le", "同组另一只必须守住另一个窝，不能两只挤同一个哨位");
+    assert.notEqual(wa.id, wb.id, "同组两只爬不得抢同一个窝");
+
+    // ② 只有一只爬：keeper 活着的窝优先，哪怕另一个窝倒计时更小
+    const solo = scene([keeper], [], "shard3_solo", [42, 14]);
+    assert.equal(S.outerDefensePatrolTarget(solo, [west, east]).id, "lw",
+        "keeper 活着（ticksToSpawn=undefined）的窝必须优先：它才是真正的威胁");
+
+    // ③ 没有 keeper：仍按出怪倒计时提前落位（东窝 100 < 西窝无倒计时）
+    //    爬要站得离两个窝都远（否则会命中「已经到了就待着」的 dwell 分支、返回 null）
+    const calm = scene([], [], "shard3_solo", [30, 40]);
+    assert.equal(S.outerDefensePatrolTarget(calm, [west, east]).id, "le",
+        "没有 keeper 时按最快出怪的窝提前落位");
+
+    // ④ 都没倒计时 → dwell 轮换仍然有效（到了就待着，到点换窝）
+    const noTimers = [
+        { id: "n1", structureType: "keeperLair", pos: makePos(7, 17, "W34N55") },
+        { id: "n2", structureType: "keeperLair", pos: makePos(7, 38, "W34N55") },
+    ];
+    const rot = scene([], [], "shard3_solo", [7, 17]);     // 已经在 n1 窝边
+    assert.equal(S.outerDefensePatrolTarget(rot, noTimers), null, "已经在窝边 → 记到达时间、原地待着");
+    assert.equal(S.outerDefensePatrolTarget(rot, noTimers), null, "dwell 没到 → 继续待着");
+    rot.memory.patrolArrive = ctx.Game.time - 1000;      // 待够了
+    assert.equal(S.outerDefensePatrolTarget(rot, noTimers).id, "n2", "dwell 到点换到另一个窝");
+
+    // ⑤ **在途中目标必须稳定**：原实现在「还没走到」时就前进索引 ⇒ 每 tick 目标在
+    //    两个窝之间翻转，两只爬原地对调、净位移为 0（实测 200+ tick 没走出去）。
+    const trav = scene([], [], "shard3_solo", [30, 40]);
+    const t1 = S.outerDefensePatrolTarget(trav, noTimers);
+    const t2 = S.outerDefensePatrolTarget(trav, noTimers);
+    const t3 = S.outerDefensePatrolTarget(trav, noTimers);
+    assert.equal(t1.id, t2.id, "在途中的目标不能每 tick 翻转（否则净位移为 0）");
+    assert.equal(t2.id, t3.id, "连续多 tick 也必须指向同一个窝");
+}
+
 console.log("outer defense checks passed");
 {
     // === 已接战别的目标的防守爬不参与新目标竞争：次近的空闲者接手 ===

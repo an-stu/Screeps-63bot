@@ -1,3 +1,42 @@
+## v0.78.122 — A defender now covers its own lair, and the lair with a live keeper comes first
+
+Two defects, both visible in W34N55 and both in the "no enemies nearby, hold a lair" branch.
+
+**1. Both creeps of a group picked the same lair.** The rule was "if any lair has a spawn countdown,
+hold the one that spawns soonest". Two consequences:
+
+- with two defenders in a group, both took that lair and the group's **other lair was never visited**;
+- a lair with a **live keeper** has `ticksToSpawn === undefined` (a lair does not schedule the next
+  keeper while its own is alive), so it **always sorted last** - the one lair that needed attention
+  was the one nobody went to.
+
+Measured: a full-health keeper (5000/5000) sat at (4,16), three tiles from lair 7,17, for a whole
+day. Group 0's two defenders held 41,14 - about 30 tiles away - and never moved. Group 1's two
+oscillated around (22,32)/(23,31).
+
+`Strategy`/`StationSources.outerDefensePatrolTarget(creep, posts)` now decides this and is unit
+testable:
+
+- ordering: **a lair with a live Source Keeper first**, then by spawn countdown (smallest first);
+- if the group has at least as many creeps as lairs, each creep takes its own slot by its position
+  in the **sorted member names** - one creep per lair, deterministic, no swapping;
+- otherwise hold the lair with a live keeper (leaving it alone lets the keeper eat our miners),
+  and if none, rotate by dwell as before.
+
+**2. The rotation advanced before arrival.** The old code bumped the index whenever the creep was
+not yet in range 1 of the current post, so the target flipped between the two lairs **every tick**:
+the creeps swapped tiles indefinitely (fatigue 32 every sample, net displacement zero over 200+
+ticks). The index now only advances after the creep has arrived **and** dwelled out.
+
+### Tests
+
+`test/outer-defense.test.cjs` gains five cases against the real module in a VM: two creeps of one
+group get **different** lairs and the name-first one gets the keeper's lair; a lone creep prefers
+the keeper's lair even though the other has a smaller countdown; without keepers the spawn countdown
+still wins; arrival/dwell/switch; and a travelling creep's target is **stable across ticks**.
+Three negative controls (drop keeper priority, advance before arrival, drop slot splitting) each
+fail on their own assertion.
+
 ## v0.78.121 — Defence rebalancing was gated behind "never assigned", so one group went unmanned
 
 Why nobody attacked the last Source Keeper in W34N55: all four defenders carried the **same**

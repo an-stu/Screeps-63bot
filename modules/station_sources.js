@@ -1158,50 +1158,25 @@ Creep.prototype.outerDefense = function () {
 
         // 没有敌人也没有伤员 → 回到自己认领的窝旁边贴守。
         //
-        // 两级策略：
-        //  1) 有窝在倒计时（ticksToSpawn 有值）→ 守**最快要出**的那个，贴到 range 1。
-        //     keeper 出窝那一 tick 就能打到，不会让它先跑去打我们的 keeper。
-        //  2) 都没倒计时（窝还没被激活）→ 按 dwell 在这组窝之间轮换，两个都照看。
-        // 原来是「一只爬把 4 个窝走一圈」，一圈 463 tick，覆盖率只有 ~19%。
-
+        // ★ 2026-10-20 重写（用户：defenser 不干活、没人去打最后那只 keeper）。
+        //
+        // 原策略是「有倒计时就守**最快要出**的那个窝」。它有两个致命后果，实测 W34N55：
+        //   · **同组两只爬都选中同一个窝** ⇒ 同组另一个窝永远没人；
+        //   · keeper **活着**的窝 `ticksToSpawn` 恒为 undefined（窝上还有 keeper 时不会
+        //     再排下一只），于是它在「选倒计时最小」里**永远垫底** ⇒ 最该打的窝排最后。
+        //     实测 keeper 满血 5000/5000 站在 (4,16)（紧贴 7,17 窝）一整天没人碰，而两只
+        //     防守爬都守在 30 多格外的 41,14；另一组两只在 36,29 附近来回对调（净位移为 0）。
+        //
+        // 现在的分工：
+        //   · 先排优先级：**有活体 keeper 的窝优先**，其次出怪倒计时小的；
+        //   · 同组人够（≥ 窝数）→ 按**同伴名字序**取自己的槽位，一人守一个窝，确定性分工；
+        //   · 人比窝少 → 有 keeper 的窝钉住（不清掉它，矿工就会被咬），否则按 dwell 轮换。
         if (posts.length) {
-            // 提前落位：keeperLair.ticksToSpawn 就是「下一只 keeper 还有多久出窝」，
-            // 直接站到**最快要出**的那个窝旁边等着。
-            //
-            // 为什么要提前：keeper 一出窝就扑最近的一只爬。defenser 已经贴着窝，
-            // 那最近的爬就是它自己 —— keeper 会原地跟它打，8 tick 内被 22 ATTACK
-            // （660/发）打掉，**不会**跑到矿工那边去乱杀。反过来如果出窝时
-            // defenser 不在（在另一个窝或路上），keeper 就会一路去找矿工。
-            //
-            // 这个「守最快出怪的窝」天然就实现了「杀完这只就换另一只」：
-            // 清掉之后该窝的倒计时被重置回 ~300，另一个窝立刻成为最小的那个，
-            // defenser 自己就走过去了，不需要额外的轮换状态机。
-            let counting = posts.filter(e => e.ticksToSpawn !== undefined);
-            let wp;
-            if (counting.length) {
-                wp = counting.reduce((a, b) => a.ticksToSpawn <= b.ticksToSpawn ? a : b);
-                delete this.memory.patrolArrive;
-            } else {
-                // 组内两个窝都还没被激活（ticksToSpawn 为 undefined）→ 没有出怪时间
-                // 可依据，按 dwell 在两窝之间轮换，顺便把两个窝都「唤醒」，
-                // 免得附近的矿工一直在无防守的窝边上作业。
-                let idx = this.memory.patrolIdx || 0;
-                if (idx >= posts.length) idx = 0;
-                wp = posts[idx];
-                if (this.pos.inRangeTo(wp.pos, 1)) {
-                    if (this.memory.patrolArrive === undefined) { this.memory.patrolArrive = Game.time; return; }
-                    if (Game.time - this.memory.patrolArrive < pro.outerDefenseDwell(posts)) return;
-                }
-                if (posts.length > 1) {
-                    this.memory.patrolIdx = (idx + 1) % posts.length;
-                    delete this.memory.patrolArrive;
-                    wp = posts[this.memory.patrolIdx];
-                }
-            }
+            let wp = pro.outerDefensePatrolTarget(this, posts);
             // 贴着窝站（range 1）。隔三格是打不到刚出窝的 keeper 的，
             // 而且只有贴着才会成为「最近的爬」，把 keeper 钉在原地。
             // （reusePath 由超级移动优化接管，传了也会被忽略，不传。）
-            if (!this.pos.inRangeTo(wp.pos, 1)) {
+            if (wp && !this.pos.inRangeTo(wp.pos, 1)) {
                 this.moveTo(wp.pos, { range: 1 });
             }
             return;
@@ -3777,6 +3752,77 @@ let pro = {
     defenseStep(creep, target, range) {
         if (Game.time % 2 != 0) return;
         creep.moveTo(target, { range: range });
+    },
+    /**
+     * 没有敌人时该贴哪个窝。
+     *
+     * ★ 2026-10-20 重写（用户：defenser 不干活、没人去打最后那只 keeper）。
+     *
+     * 原策略是「有倒计时就守**最快要出**的那个窝」，有两个致命后果（实测 W34N55）：
+     *   · **同组两只爬都选中同一个窝**（哨位不分摊）⇒ 同组另一个窝永远没人；
+     *   · keeper **活着**的窝 `ticksToSpawn` 恒为 undefined（窝上还有 keeper 时不会再排
+     *     下一只），于是在「选倒计时最小」里**永远垫底** ⇒ 最该打的窝排最后。
+     * 结果：keeper 满血 5000/5000 站在 (4,16)（紧贴 7,17 窝）一整天没人碰，而两只防守爬
+     * 都守在 30 多格外的 41,14；另一组两只在 36,29 附近来回对调、净位移为 0。
+     *
+     * 现在的规则：
+     *   1. 先排优先级：**有活体 keeper 的窝优先**，其次按出怪倒计时（小的先）。
+     *   2. 同组人够（≥ 窝数）→ 按**同伴名字序**取自己的槽位，一人守一个窝，确定性分工
+     *      （名字不变 ⇒ 槽位不变，不会来回抢）。
+     *   3. 人比窝少 → 有 keeper 的窝钉住（不清掉它，矿工就会被咬），否则按 dwell 轮换。
+     *
+     * 返回要贴的窝；返回 null 表示「本 tick 原地不动」（轮换取到 dwell 没到时）。
+     */
+    outerDefensePatrolTarget(creep, posts) {
+        let hot = Object.create(null);
+        pro.defenseHostiles(creep.room).forEach(h => {
+            if (!h.owner || h.owner.username != "Source Keeper") return;
+            for (let l of posts) {
+                if (h.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS) hot[l.id] = true;
+            }
+        });
+        let ordered = posts.slice().sort((a, b) => {
+            let ha = hot[a.id] ? 0 : 1, hb = hot[b.id] ? 0 : 1;
+            if (ha != hb) return ha - hb;
+            let sa = a.ticksToSpawn === undefined ? Infinity : a.ticksToSpawn;
+            let sb = b.ticksToSpawn === undefined ? Infinity : b.ticksToSpawn;
+            return sa - sb;
+        });
+        let mates = pro.defenseAllies(creep.room)
+            .filter(c => c.memory.role == "outerHarvestDefenser"
+                && c.memory.defenseGroup === creep.memory.defenseGroup)
+            .map(c => c.name).sort();
+        let slot = mates.indexOf(creep.name);
+        if (slot >= 0 && mates.length >= ordered.length) {
+            // 人够：一人一个窝
+            delete creep.memory.patrolIdx;
+            delete creep.memory.patrolArrive;
+            return ordered[slot % ordered.length];
+        }
+        let hotPost = ordered.filter(l => hot[l.id])[0];
+        if (hotPost) {
+            delete creep.memory.patrolIdx;
+            delete creep.memory.patrolArrive;
+            return hotPost;
+        }
+        // 都没热窝 → 按 dwell 轮换，两个窝都照看（顺便把没激活的窝「唤醒」）。
+        //
+        // ⚠️ 轮换索引**只能在「已经到达并待够」之后才前进**。
+        // 原写法是「只要不在 range 1 就先 idx+1 再走向新目标」⇒ 每 tick 目标在两个窝之间
+        // 翻转，爬原地来回对调、净位移为 0（实测 W34N55 两只在 (23,31)/(22,32) 之间
+        // 互换了 200+ tick，fatigue 一直 32 却没走出去）。
+        let idx = creep.memory.patrolIdx || 0;
+        if (idx >= ordered.length) idx = 0;
+        let wp = ordered[idx];
+        if (creep.pos.inRangeTo(wp.pos, 1)) {
+            if (creep.memory.patrolArrive === undefined) { creep.memory.patrolArrive = Game.time; return null; }
+            if (Game.time - creep.memory.patrolArrive < pro.outerDefenseDwell(ordered)) return null;
+            idx = (idx + 1) % ordered.length;
+            creep.memory.patrolIdx = idx;
+            delete creep.memory.patrolArrive;
+            wp = ordered[idx];
+        }
+        return wp;
     },
     outerDefensePosts(creep) {
         let room = creep.room;
