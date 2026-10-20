@@ -1,3 +1,39 @@
+## v0.78.124 — Mineral compression could never trigger; it now keeps a lab reserve
+
+Survey on request: the market has plenty of buy orders for the element bars (utrium_bar 290.5,
+keanium_bar 227.7, zynthium_bar 187.8, oxidant 259.5, reductant 701, purifier 1518) while all
+thirteen factories sat at **cooldown 0** and the terminals held **39,000 of every raw mineral**.
+
+`station_factory.noLevel()` already had a compression branch, but it required
+
+    roomMassStoreCnt(room, rawMineral) >= 6000
+
+and our minerals are deliberately spread **evenly at 3,000 per room**. So the branch never ran once.
+The rule is now "compress whatever is above a reserve":
+
+    reserve = 1,000 per room per mineral        (BASE_COMPRESSION_RESERVE)
+    makeable = floor((raw - reserve) / (components/amount))     // per bar, not per batch
+    bars     = min(600, floor(makeable / amount) * amount)
+
+With the real numbers (3,000 raw, 1,000 kept) each room makes **400 bars from 2,000 raw + 800
+energy**. The reserve exists because labs need the raw minerals for boost compounds and the reverse
+branch only decompresses above 9,000 bars - converting everything would have locked the labs out.
+
+Worth doing (market prices vs 5 raw per bar): utrium_bar 290.5 vs 78.6, keanium_bar 227.7 vs 74.8,
+zynthium_bar 187.8 vs 73.8, oxidant 259.5 vs 105.5, reductant 701 vs 720 (flat), purifier 1518 vs
+1292.7. Compressing instead of buying saves 79-445 per bar; selling the bars instead of the raw
+minerals is 1.2x-3x the credits.
+
+Note the factory is still gated on `bucket >= 8000` and on room energy >= 100,000, so nothing runs
+until the bucket recovers - which is exactly why the outer mine was paused in the same pass.
+
+### Tests
+
+New `test/factory-compress.test.cjs` loads the real module in a VM: 3,000 raw makes 400 bars, raw at
+the reserve makes nothing, 9,000 raw caps at 600, 1,500 existing bars stops it, the 100k room energy
+guard still holds, and oxidant maps through the same path. Three negative controls (reserve 0, the
+old >=6000 gate, dropping the "enough bars" stop) each fail on their own assertion.
+
 ## v0.78.123 — A defender's post must not depend on lair countdowns
 
 Follow-up to v0.78.122, caught by watching the live output rather than by reading the code.

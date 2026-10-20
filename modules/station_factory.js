@@ -38,6 +38,9 @@ let STAT_FILL = "fill"
 let STAT_PRODUCE = "produce"
 let FACTORY_SLEEP_TIME = 20
 let BASE_BATCH_SIZE =  30  // 无等级合成的批次
+// 压缩原矿时**每房每种至少留这么多**：实验室做强化化合物要用 U/L/K/Z/O/H/X，
+// 不能全压成 bar —— 反向解压要「bar > 9000」才触发，压光了会长期拿不到原矿。
+let BASE_COMPRESSION_RESERVE = 1000
 let BAR_BATCH_SIZE =  6  // 压缩商品 合成的批次
 
 let minimum_compression_requires_energy_cnt = 7000000 // 压缩电池的阈值 0.7m
@@ -253,13 +256,29 @@ let pro={
             }
         }
         for(let resType of BASE_COMPRESSION_LIST){
-            if (StationCarry.roomMassStoreCnt(room,resType) < 1500&&StationCarry.roomMassStoreCnt(room,BASE_COMPRESSION_MAP[resType]) >= 6000) {
-                let out = pro.checkNoLevelRes(room,resType,600) //3000 原矿对应压缩后的600
-                if(out)return out;
+            let rawType = BASE_COMPRESSION_MAP[resType];
+            let barCnt = StationCarry.roomMassStoreCnt(room,resType);
+            let rawCnt = StationCarry.roomMassStoreCnt(room,rawType);
+            // 压缩：**按「保留量以上的原矿」算批量**，而不是要求原矿 ≥ 6000。
+            //
+            // 2026-10-20 实测：13 个房每种原矿**正好各 3,000**（均匀分布），而旧判据要求
+            // ≥ 6000 ⇒ 这条分支从来没有触发过 —— 13 个工厂 cooldown 全是 0，终端里
+            // 每种原料各 39,000 躺着，同时还在市场上买 oxidant/purifier/reductant。
+            // 改成按可压数量算：3,000 原矿、保留 1,000 ⇒ 可压 400 根（2,000 原矿 + 800 能量）。
+            if (barCnt < 1500) {
+                // components 是「一批（amount 根）」的用量，换算成**每根**才和 bar 数对齐
+                let perBar = COMMODITIES[resType].components[rawType] / COMMODITIES[resType].amount;
+                let makeable = Math.floor((rawCnt - BASE_COMPRESSION_RESERVE) / perBar);
+                let batch = COMMODITIES[resType].amount;
+                let bars = Math.min(600, Math.floor(makeable / batch) * batch);
+                if (bars >= batch) {
+                    let out = pro.checkNoLevelRes(room,resType,bars);
+                    if(out)return out;
+                }
             }
             // by an_w
-            else if (StationCarry.roomMassStoreCnt(room,resType) > 9000 && StationCarry.roomMassStoreCnt(room,BASE_COMPRESSION_MAP[resType]) < 6000 &&StationCarry.roomMassStoreCnt(room,'energy') > 120000 ) {
-                let out =  pro.checkNoLevelRes(room,BASE_COMPRESSION_MAP[resType],15000)
+            else if (barCnt > 9000 && rawCnt < 6000 && StationCarry.roomMassStoreCnt(room,'energy') > 120000 ) {
+                let out =  pro.checkNoLevelRes(room,rawType,15000)
                 if (out) return out;
             }
         }
