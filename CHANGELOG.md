@@ -1,3 +1,45 @@
+## v0.78.127 — Batch power processing (accumulate, then burn down, then accumulate)
+
+User: some rooms have a power spawn worth running, but it burns power and must not run on a thin
+energy budget - accumulate first, burn most of a batch in one go, then accumulate again; try it in
+W32N56 and move surrounding energy/power there.
+
+Nothing called `processPower()` anywhere in the code, which is why 1.29M power sat in the terminals
+and the twelve power spawns held 1-100 each. The real constraint is energy: **1 power costs 50
+energy**, so the whole stock would need 64M energy - far more than we hold. Hence a batch cycle, not
+a trickle.
+
+`StationCarry.tryProcessPower(room)` (called from `generatorFillPowerSpawnTask`, which every room
+reaches each round):
+
+    open  when  power >= powerSpawnHigh(500)  AND  room energy >= powerSpawnEnergy(60k)
+    burn  while power >  powerSpawnLow(100)   AND  room energy >= floor/2
+    then  close and re-accumulate
+
+Hysteresis is kept in `Memory.marketSettings.powerBurning`, so it cannot flicker on and off at the
+low mark. Knobs: `powerSpawnRoom` (default W32N56, set "" to disable), `powerSpawnHigh`,
+`powerSpawnLow`, `powerSpawnEnergy` - all live, no redeploy.
+
+The fill gate in `generatorFillPowerSpawnTask` also recognises the burning state and relaxes from
+"170k energy / 1000 power" to "30k energy / 50 power", otherwise the spawn empties after a few
+processPower calls and the burn stalls.
+
+Measured today: W32N56 holds 5,945 power and ~144k energy, so the first batch (500) needs 25k energy
+and runs 500 ticks; the 12 OPF rooms together hold ~1.29M power, i.e. power will never be the limit -
+energy throughput is.
+
+On the CPU question: `power:OPF` (1.96) is the operator-factory production logic, not the power
+spawn. `processPower` is a single API call per tick (~0.001 CPU), so enabling it does not save CPU;
+the factory chain is already gated on `bucket >= 8000`, which is what actually protects the bucket.
+
+### Tests
+
+`test/power-spawn-burn.test.cjs` (real module in a VM): non-target room does nothing, below the high
+mark does nothing, enough power but thin energy does nothing, a full batch burns and records the
+state, the low mark stops it, energy under half the floor stops it, no flicker at 400 power, and the
+knobs work. Negative controls: dropping the hysteresis, dropping the energy floor, and ignoring the
+low mark each fail.
+
 ## v0.78.126 — Only compress bars with a 40% margin, scanned every 500 ticks
 
 User: ignore anything below 40%; scan profitability periodically.

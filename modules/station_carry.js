@@ -228,14 +228,59 @@ let pro = {
      * @param continuous 是不是持续工作的
      * @return {[]}
      */
+    /**
+     * 集中烧 power：`powerSpawn.processPower()`。
+     *
+     * 用户 2026-10-20：「打开之后烧，要确保能量足够充足；先一直积累，到足够一次烧大部分
+     * 的时候使用，使用完一次又继续积累；可以在 W32N56 尝试。」
+     *
+     * 账：每烧 1 power 吃 **50 能量**。全账号 power 有一百多万，能量才是瓶颈，
+     * 所以必须**攒一批烧一批**（滞回），不能见 power 就烧。
+     *
+     * 旋钮（都在 Memory.marketSettings，改完立刻生效）：
+     *   powerSpawnRoom    试点房，默认 W32N56；设成 "" 即关闭
+     *   powerSpawnHigh    开烧门槛（默认 500 power）
+     *   powerSpawnLow     停烧水位（默认 100 power）
+     *   powerSpawnEnergy  本房能量下限（默认 60000，低于它一律不烧）
+     *   powerBurning      运行时状态（代码自己写，别手改）
+     */
+    tryProcessPower(room) {
+        let ms = Memory.marketSettings || (Memory.marketSettings = {});
+        let target = ms.powerSpawnRoom === undefined ? "W32N56" : ms.powerSpawnRoom;
+        if (!target || room.name != target) return;
+        let s = room.powerSpawn;
+        if (!s || !s.store) return;
+        let high = Number(ms.powerSpawnHigh) > 0 ? Number(ms.powerSpawnHigh) : 500;
+        let low = Number(ms.powerSpawnLow) >= 0 ? Number(ms.powerSpawnLow) : 100;
+        let floor = Number(ms.powerSpawnEnergy) > 0 ? Number(ms.powerSpawnEnergy) : 60000;
+        let power = s.store[RESOURCE_POWER] || 0;
+        let energy = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
+        if (!ms.powerBurning) {
+            // 开闸：本房 power 攒到高水位、且能量够烧一大截
+            if (power < high || energy < floor) return;
+            ms.powerBurning = true;
+        }
+        // 关闸：烧到低水位，或能量掉到下限的一半（不让试点的房子被抽干）
+        if (power <= low || energy < floor * 0.5) { ms.powerBurning = false; return; }
+        // 真正烧：powerSpawn 自己的 store 里必须有 ≥50 能量 + ≥1 power
+        s.processPower();
+    },
     generatorFillPowerSpawnTask(room, continuous = false) {
+        // 集中烧 power 的决策也挂在这里：这是每个房每轮都会走到的位置
+        pro.tryProcessPower(room);
         room.used = room.used || {};
         let tasks = []
         let energyCnt = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
         let powerCnt = pro.roomMassStoreCnt(room, RESOURCE_POWER);
-        if (room.level >= 8 && room.storage && room.terminal && room.powerSpawn && (!room.used[room.powerSpawn.id] || continuous)
-            && (energyCnt > 170000 && powerCnt > 1000 || energyCnt > 100000 && powerCnt > 6000
-                || energyCnt > 100000 && powerCnt > 100 && room.powerSpawn.effects && room.powerSpawn.effects.length)) {
+        // 正在集中烧 power 的时候，门槛要放宽：processPower 每 tick 吃 50 能量 + 1 power，
+        // 原来的 17 万/10 万门槛会让 powerSpawn 长期空着，烧两下就断粮。
+        let burning = !!(Memory.marketSettings && Memory.marketSettings.powerBurning);
+        let fillGate = burning
+            ? (energyCnt > 30000 && powerCnt > 50)
+            : (energyCnt > 170000 && powerCnt > 1000 || energyCnt > 100000 && powerCnt > 6000
+                || energyCnt > 100000 && powerCnt > 100 && room.powerSpawn.effects && room.powerSpawn.effects.length);
+        if (room.level >= 8 && room.storage && room.terminal && room.powerSpawn
+            && (!room.used[room.powerSpawn.id] || continuous) && fillGate) {
             let powerNeed = room.powerSpawn.store.getFreeCapacity(RESOURCE_POWER);
 
             let s = room.powerSpawn;
