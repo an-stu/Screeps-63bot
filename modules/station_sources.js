@@ -3781,46 +3781,45 @@ let pro = {
                 if (h.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS) hot[l.id] = true;
             }
         });
-        let ordered = posts.slice().sort((a, b) => {
-            let ha = hot[a.id] ? 0 : 1, hb = hot[b.id] ? 0 : 1;
-            if (ha != hb) return ha - hb;
-            let sa = a.ticksToSpawn === undefined ? Infinity : a.ticksToSpawn;
-            let sb = b.ticksToSpawn === undefined ? Infinity : b.ticksToSpawn;
-            return sa - sb;
-        });
+        // **稳定序：按 lair id 排，绝不能按 ticksToSpawn。**
+        // 倒计时此消彼长，按它排会让已经站好的两只爬互换岗位（实测 60 tick 内 0485 与 1115
+        // 就互换了，各自要白走 30 多格）。
+        let stable = posts.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        let hotPosts = stable.filter(l => hot[l.id]);
         let mates = pro.defenseAllies(creep.room)
             .filter(c => c.memory.role == "outerHarvestDefenser"
                 && c.memory.defenseGroup === creep.memory.defenseGroup)
             .map(c => c.name).sort();
         let slot = mates.indexOf(creep.name);
-        if (slot >= 0 && mates.length >= ordered.length) {
-            // 人够：一人一个窝
+
+        // 人够（同组爬数 ≥ 窝数）→ **一人一窝**：槽位由「名字在同伴里的序号」定，
+        // 与倒计时无关 ⇒ 确定性、不漂移、不重复。三只爬两个窝时第三人跟第一人同窝。
+        if (slot >= 0 && mates.length >= stable.length) {
             delete creep.memory.patrolIdx;
             delete creep.memory.patrolArrive;
-            return ordered[slot % ordered.length];
+            return stable[slot % stable.length];
         }
-        let hotPost = ordered.filter(l => hot[l.id])[0];
-        if (hotPost) {
+
+        // 人比窝少：有 keeper 的窝优先（不清掉它，矿工就会被咬），否则按 dwell 轮换。
+        if (hotPosts.length) {
             delete creep.memory.patrolIdx;
             delete creep.memory.patrolArrive;
-            return hotPost;
+            return hotPosts[0];
         }
-        // 都没热窝 → 按 dwell 轮换，两个窝都照看（顺便把没激活的窝「唤醒」）。
-        //
-        // ⚠️ 轮换索引**只能在「已经到达并待够」之后才前进**。
+        // 轮换索引**只能在「已经到达并待够」之后才前进**。
         // 原写法是「只要不在 range 1 就先 idx+1 再走向新目标」⇒ 每 tick 目标在两个窝之间
         // 翻转，爬原地来回对调、净位移为 0（实测 W34N55 两只在 (23,31)/(22,32) 之间
         // 互换了 200+ tick，fatigue 一直 32 却没走出去）。
         let idx = creep.memory.patrolIdx || 0;
-        if (idx >= ordered.length) idx = 0;
-        let wp = ordered[idx];
+        if (idx >= stable.length) idx = 0;
+        let wp = stable[idx];
         if (creep.pos.inRangeTo(wp.pos, 1)) {
             if (creep.memory.patrolArrive === undefined) { creep.memory.patrolArrive = Game.time; return null; }
-            if (Game.time - creep.memory.patrolArrive < pro.outerDefenseDwell(ordered)) return null;
-            idx = (idx + 1) % ordered.length;
+            if (Game.time - creep.memory.patrolArrive < pro.outerDefenseDwell(stable)) return null;
+            idx = (idx + 1) % stable.length;
             creep.memory.patrolIdx = idx;
             delete creep.memory.patrolArrive;
-            wp = ordered[idx];
+            wp = stable[idx];
         }
         return wp;
     },

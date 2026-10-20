@@ -1,3 +1,30 @@
+## v0.78.123 — A defender's post must not depend on lair countdowns
+
+Follow-up to v0.78.122, caught by watching the live output rather than by reading the code.
+
+The first cut ordered a group's lairs by "keeper alive first, then smallest spawn countdown" and handed
+out slots by that order. The countdowns advance at different rates, so the order flips over time -
+within 60 ticks of deploying, 0485 and 1115 **swapped posts** and started walking 30+ tiles past each
+other. Two creeps crossing the room is exactly the oscillation the previous release set out to remove.
+
+The ordering is now **by lair id**, which never changes, and the slot is fixed by the creep's position
+among its sorted group-mates. Coverage is deterministic and cannot drift:
+
+- group has at least as many creeps as lairs -> `stable[slot % stable.length]`, one lair each;
+- fewer creeps than lairs -> hold the lair with a live keeper, else rotate by dwell (the dwell timer
+  only advances after arrival, see v0.78.122).
+
+The "keeper alive" preference therefore only applies where it is needed: when a group is too thin to
+cover its lairs at once. With one creep per lair the keeper's lair is already covered by its own
+creep, and that creep is 3 tiles from the keeper - well inside attack range.
+
+### Tests
+
+Case ① now asserts the two creeps get **different** lairs and that repeating the call returns the
+same lair, and case ⑥ asserts the assignment does not change when the two countdowns are reversed.
+Three negative controls: no keeper priority, advancing the rotation before arrival, and sorting by
+`ticksToSpawn` - each fails on its own assertion.
+
 ## v0.78.122 — A defender now covers its own lair, and the lair with a live keeper comes first
 
 Two defects, both visible in W34N55 and both in the "no enemies nearby, hold a lair" branch.

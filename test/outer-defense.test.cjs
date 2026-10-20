@@ -650,22 +650,25 @@ assert.ok(!/defenseLairIds === undefined && cnt\[g\] > least/.test(stationSource
         };
         return me;
     }
-    const mate = name => {
+    // 同伴也带着自己已经认领的窝（真实场景里出生时就写进 memory，接替兵继承）
+    const mate = (name, lairId) => {
         const c = makeCreep(ctx, { x: 42, y: 14 });
         c.name = name;
         c.memory.role = "outerHarvestDefenser";
         c.memory.defenseGroup = 0;
+        if (lairId) c.memory.defenseLairId = lairId;
         return c;
     };
 
-    // ① 两只同组爬：必须**分到不同的窝**，且名字靠前的那只拿到「有 keeper 的窝」
+    // ① 两只同组爬：必须**分到不同的窝**（旧逻辑两只都去「倒计时最小」的那个，另一个永远没人）
     const a = scene([keeper], [mate("shard3_b")], "shard3_a", [42, 13]);
     const wa = S.outerDefensePatrolTarget(a, [west, east]);
     const b = scene([keeper], [mate("shard3_a")], "shard3_b", [42, 14]);
     const wb = S.outerDefensePatrolTarget(b, [west, east]);
-    assert.equal(wa.id, "lw", "名字靠前的那只必须去有 keeper 的窝（旧逻辑会去倒计时小的东窝）");
-    assert.equal(wb.id, "le", "同组另一只必须守住另一个窝，不能两只挤同一个哨位");
     assert.notEqual(wa.id, wb.id, "同组两只爬不得抢同一个窝");
+    assert.deepEqual([wa.id, wb.id].sort(), ["le", "lw"], "两个窝必须各有一只");
+    assert.equal(S.outerDefensePatrolTarget(a, [west, east]).id, wa.id,
+        "槽位由名字序决定，重复调用必须给同一个窝（不能每 tick 漂移）");
 
     // ② 只有一只爬：keeper 活着的窝优先，哪怕另一个窝倒计时更小
     const solo = scene([keeper], [], "shard3_solo", [42, 14]);
@@ -697,6 +700,18 @@ assert.ok(!/defenseLairIds === undefined && cnt\[g\] > least/.test(stationSource
     const t3 = S.outerDefensePatrolTarget(trav, noTimers);
     assert.equal(t1.id, t2.id, "在途中的目标不能每 tick 翻转（否则净位移为 0）");
     assert.equal(t2.id, t3.id, "连续多 tick 也必须指向同一个窝");
+
+    // ⑥ **岗位必须稳定**：倒计时此消彼长时，已站好的两只爬不得互换窝。
+    //    实测 60 tick 内 0485/1115 互换了（各自要走 30 多格），就因为排序键用了 ticksToSpawn。
+    const urgentWest = { id: "lw", structureType: "keeperLair", pos: makePos(7, 17, "W34N55"), ticksToSpawn: 10 };
+    const lateEast = { id: "le", structureType: "keeperLair", pos: makePos(41, 14, "W34N55"), ticksToSpawn: 300 };
+    const held = scene([], [mate("shard3_b")], "shard3_a", [42, 10]);
+    const before = S.outerDefensePatrolTarget(held, [urgentWest, lateEast]);
+    // 倒计时反转（西窝刚出过怪、东窝更近了）—— 岗位不得因此变化
+    const after = S.outerDefensePatrolTarget(held, [{ ...urgentWest, ticksToSpawn: 300 },
+                                                    { ...lateEast, ticksToSpawn: 10 }]);
+    assert.equal(after.id, before.id,
+        "倒计时变化不得让分工漂移（否则两只爬会互换窝、白走 30 多格）");
 }
 
 console.log("outer defense checks passed");
