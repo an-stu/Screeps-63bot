@@ -69,6 +69,9 @@ const managerRooms = {
     },
 
     exec(room) {
+        // 每 tick 推进一次 power 烧制（用户 2026-10-21：一 tick 一次，别等 8 tick 的批量循环）。
+        // tryProcessPower 内部会先判断「是不是试点房」，别的房零成本返回。
+        if (global.StationCarry && global.StationCarry.tryProcessPower) global.StationCarry.tryProcessPower(room);
         if (!MIN_CPU && global.StationObserver && isCpuFeatureEnabled("observer")) {
             StationObserver.update(room);
         }

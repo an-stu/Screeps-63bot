@@ -1,3 +1,24 @@
+## v0.78.134 — Process power every tick, inside one OPERATE_POWER window
+
+User: call it every tick, but keep the energy topped up - burn one OPERATE_POWER through completely,
+then rest until the next one.
+
+Measured first with the effect active: one `processPower()` burns **5 power** (1 + level 4) and 250
+energy, but it was only invoked by the factory loop every ~8 ticks, so a batch crawled at ~0.6
+power/tick.
+
+- The call now sits in `ManagerRooms.exec(room)`, which runs for every room **every tick**
+  (`tryProcessPower` returns immediately for non-target rooms).
+- The burn window is the **`PWR_OPERATE_POWER` effect itself**: `tryProcessPower` looks for
+  `spawn.effects.find(e => e.power == PWR_OPERATE_POWER)` and does nothing when it is absent, so the
+  spawn rests between operations instead of trickling.
+- The energy floor still applies (`powerSpawnEnergy`, 60k, and the room's power must stay above
+  `powerSpawnLow`), which is what stops the burn from draining the room if a refill falls behind.
+
+The fill gate still stocks the spawn while `wantBurn` is true, and since the spawn holds 5,000 energy
+that is only ~20 ticks of burning at the new rate - the next measurement will show whether the energy
+logistics keep up or whether the spawn needs a dedicated feeder.
+
 ## v0.78.133 — OPERATE_POWER was blocked by an account-wide energy check
 
 User: with the operator's OPERATE_POWER one tick burns three or four units instead of one, which is

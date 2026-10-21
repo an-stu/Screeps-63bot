@@ -250,23 +250,21 @@ let pro = {
         if (!target || room.name != target) return;
         let s = room.powerSpawn;
         if (!s || !s.store) return;
-        let high = Number(ms.powerSpawnHigh) > 0 ? Number(ms.powerSpawnHigh) : 500;
         let low = Number(ms.powerSpawnLow) >= 0 ? Number(ms.powerSpawnLow) : 100;
         let floor = Number(ms.powerSpawnEnergy) > 0 ? Number(ms.powerSpawnEnergy) : 60000;
-        // **必须用全房存量做判据**：`POWER_SPAWN_POWER_CAPACITY = 100`，
-        // spawn 里永远装不下 500 power。第一版拿 `s.store.power` 比 high(500) ⇒
-        // 永远开不了闸，GPL 进度一直是 0（实测 +0 / 14 tick）。
-        // 正确模型：能量和 power 都存在房里，powerSpawn 只是「喷嘴」（每 tick 烧 1 power + 50 能量）。
+        // **烧制窗口 = OPERATE_POWER 生效期间**（用户 2026-10-21：
+        // 「每 tick 调用，确保一个 OPERATE_POWER 完整烧完，然后休息攒到下一个」）。
+        // 有 op power 时一次 processPower = 1+level 个 power（实测 4 级 = 5 个），
+        // 所以「烧完一个效果」= 效果 duration × (1+level) 个 power。
+        let fx = s.effects && s.effects.find(e => e.power == PWR_OPERATE_POWER);
+        if (!fx) { ms.powerBurning = false; return; }          // 没效果 ⇒ 休息，等下一个 OPERATE_POWER
+        // **必须用全房存量做判据**：`POWER_SPAWN_POWER_CAPACITY = 100`，spawn 装不下 500。
         let power = pro.roomMassStoreCnt(room, RESOURCE_POWER);
         let energy = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
-        if (!ms.powerBurning) {
-            // 开闸：全房 power 攒到高水位、且能量够烧一大截
-            if (power < high || energy < floor) return;
-            ms.powerBurning = true;
-        }
-        // 关闸：烧到低水位，或能量掉到下限的一半（不让试点的房子被抽干）
-        if (power <= low || energy < floor * 0.5) { ms.powerBurning = false; return; }
-        // 真正烧：powerSpawn 自己的 store 里必须有 ≥50 能量 + ≥1 power
+        // 能量不足就停烧（别把试点房抽干），效果期间烧到哪算哪
+        if (energy < floor || power <= low) { ms.powerBurning = false; return; }
+        ms.powerBurning = true;
+        // powerSpawn 自己的 store 里必须有 ≥50 能量 + ≥1 power；不够时返回 ERR，不影响主循环
         s.processPower();
     },
     generatorFillPowerSpawnTask(room, continuous = false) {
