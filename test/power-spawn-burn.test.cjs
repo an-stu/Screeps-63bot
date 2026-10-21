@@ -53,20 +53,29 @@ function makeRoom(power, energy, effects) {
 }
 
 {
+    // 用户 2026-10-21：「其余房间如果没有这个 op power 的 pc 就正常烧」
     const room = makeRoom(10000, 500000);
     room.name = "E53S21";
     const ctx = load({}, room);
     ctx.StationCarry.tryProcessPower(room);
-    assert.equal(ctx.__burn, 0, "非试点房不烧");
+    assert.equal(ctx.__burn, 1, "没有 op power 的房 ⇒ 正常烧（1 power + 50 能量）");
 }
 
 {
+    const room = makeRoom(10000, 500000, []);   // 没有 op power 效果
+    room.name = "E53S21";
+    const ctx = load({ powerSpawnOtherRooms: false }, room);
+    ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ctx.__burn, 0, "powerSpawnOtherRooms=false 可关掉其他房");
+}
+
+{
+    // 试点房但效果已过期 ⇒ 回落到「正常烧」（1 个/tick），不再空转
     const room = makeRoom(5000, 500000, []);
     const ms = { powerBurning: true };
     const ctx = load(ms, room);
     ctx.StationCarry.tryProcessPower(room);
-    assert.equal(ctx.__burn, 0, "没有 op power 效果就不烧（等下一个 OPERATE_POWER）");
-    assert.equal(ms.powerBurning, false, "窗口关闭");
+    assert.equal(ctx.__burn, 1, "效果过期后按普通速率烧");
 }
 
 {
@@ -99,7 +108,7 @@ function makeRoom(power, energy, effects) {
     const room = makeRoom(5000, 120000, [{ power: 2, effect: 2, level: 3, ticksRemaining: 500 }]);
     const ctx = load({}, room);
     ctx.StationCarry.tryProcessPower(room);
-    assert.equal(ctx.__burn, 0, "只认 PWR_OPERATE_POWER（id 16）");
+    assert.equal(ctx.__burn, 1, "只把 PWR_OPERATE_POWER 当加速窗口，其他效果按普通速率烧");
 }
 
 {

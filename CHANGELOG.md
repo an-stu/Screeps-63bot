@@ -1,3 +1,28 @@
+## v0.78.137 — Rooms without an OPERATE_POWER creep burn at the normal rate
+
+User: the other rooms, if they have no operator creep with OPERATE_POWER, should just burn normally.
+
+`tryProcessPower` no longer starts by demanding the target room. It now branches on the effect:
+
+- `PWR_OPERATE_POWER` present -> the paced window described in v0.78.136 (1+level per call, spread
+  over the remaining effect duration so none of it is wasted);
+- **absent** -> a plain `processPower()` per tick (1 power + 50 energy) whenever that room has power
+  above `powerSpawnLow` (100) and energy above `powerSpawnEnergy` (60k). A room that never got an
+  operator creep therefore keeps converting its own surplus instead of sitting idle.
+
+`Memory.marketSettings.powerSpawnOtherRooms = false` switches the second branch off if the energy cost
+turns out to be unwelcome.
+
+Note this has a real energy price: each such room burns 50 energy/tick while above its floor, so a
+dozen rooms can pull down to their floors. The floors are per room, so nothing starves; the conversion
+is simply energy -> GPL.
+
+### Tests
+
+`test/power-spawn-burn.test.cjs` now expects a burn (not a skip) for a foreign room with no effect, a
+skip when `powerSpawnOtherRooms` is false, a normal-rate burn once the effect expires, and a
+normal-rate burn when the only effect present is a different power.
+
 ## v0.78.136 — Pace the burn so a whole OPERATE_POWER window is used up
 
 User: don't waste the rest of the current operation - raise the energy threshold later, and try to burn

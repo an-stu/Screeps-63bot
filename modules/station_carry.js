@@ -246,21 +246,28 @@ let pro = {
      */
     tryProcessPower(room) {
         let ms = Memory.marketSettings || (Memory.marketSettings = {});
-        let target = ms.powerSpawnRoom === undefined ? "W32N56" : ms.powerSpawnRoom;
-        if (!target || room.name != target) return;
         let s = room.powerSpawn;
         if (!s || !s.store) return;
         let low = Number(ms.powerSpawnLow) >= 0 ? Number(ms.powerSpawnLow) : 100;
         let floor = Number(ms.powerSpawnEnergy) > 0 ? Number(ms.powerSpawnEnergy) : 60000;
-        // **烧制窗口 = OPERATE_POWER 生效期间**（用户 2026-10-21：
-        // 「每 tick 调用，确保一个 OPERATE_POWER 完整烧完，然后休息攒到下一个」）。
-        // 有 op power 时一次 processPower = 1+level 个 power（实测 4 级 = 5 个），
-        // 所以「烧完一个效果」= 效果 duration × (1+level) 个 power。
-        let fx = s.effects && s.effects.find(e => e.power == PWR_OPERATE_POWER);
-        if (!fx) { ms.powerBurning = false; return; }          // 没效果 ⇒ 休息，等下一个 OPERATE_POWER
-        // **必须用全房存量做判据**：`POWER_SPAWN_POWER_CAPACITY = 100`，spawn 装不下 500。
         let power = pro.roomMassStoreCnt(room, RESOURCE_POWER);
         let energy = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
+        let target = ms.powerSpawnRoom === undefined ? "W32N56" : ms.powerSpawnRoom;
+        let isTarget = !!target && room.name == target;
+        // **没有 OPERATE_POWER 效果的房间：正常烧**（用户 2026-10-21：
+        // 「其余房间如果没有这个 op power 的 pc 就正常烧」）—— 一次 1 power + 50 能量。
+        // 只受本房 power/能量下限约束，避免把房抽干；可用 powerSpawnOtherRooms=false 关掉。
+        let fx0 = s.effects && s.effects.find(e => e.power == PWR_OPERATE_POWER);
+        if (!fx0) {
+            if (!isTarget && ms.powerSpawnOtherRooms === false) return;
+            if (power <= low || energy < floor) return;
+            s.processPower();
+            return;
+        }
+        // **烧制窗口 = OPERATE_POWER 生效期间**（用户 2026-10-21）：
+        // 有 op power 时一次 processPower = 1+level 个 power（实测 4 级 = 5 个），
+        // 所以「烧完一个效果」= 效果 duration × (1+level) 个 power。
+        let fx = fx0;
         if (power <= low || energy <= floor) { ms.powerBurning = false; ms.powerBurnCredit = 0; return; }
         ms.powerBurning = true;
 
