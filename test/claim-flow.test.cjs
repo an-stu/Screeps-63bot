@@ -78,24 +78,7 @@ assert.deepEqual(plannerCalls, [], "secondary sites must wait until an owned spa
 context.StrategyClaim.ensureConstructionSites(roomWith([{my: true}]));
 assert.deepEqual(plannerCalls, ["extension", "container"], "secondary sites must follow the completed owned spawn");
 
-let cleanupFilter;
-const creep = new MockCreep();
-creep.memory = {};
-creep.room = {name: "E53S21", my: false, memory: {structMap: {road: "roadPlan"}}};
-creep.lastTask = () => ({roomName: "E53S21"});
-creep.pos = {findClosestByRange(type, options) { cleanupFilter = options.filter; }};
-creep.clearClaimRoom();
-assert.equal(cleanupFilter({hits: 5000, my: false, owner: {username: "other"}, structureType: "spawn", pos: {x: 9, y: 22}}), true,
-    "another player's spawn must always be dismantled");
-// 用户 2026-10-21：「别拆中立的建筑比如墙」—— 无主结构（墙/路/容器）一律不碰，
-// 只有**别人的有主结构**才是清理目标（它们占格子、让 createConstructionSite 失败）。
-assert.equal(cleanupFilter({hits: 5000, my: false, structureType: "container", pos: {x: 9, y: 22}}), false,
-    "an ownerless container must be left alone (neutral buildings are not targets)");
-assert.equal(cleanupFilter({hits: 5000, my: false, structureType: "road", pos: {x: 10, y: 10}}), false,
-    "an ownerless road must be left alone");
-assert.equal(cleanupFilter({hits: 5000, my: false, structureType: "constructedWall", pos: {x: 10, y: 11}}), false,
-    "an ownerless wall must never be dismantled");
-assert.equal(cleanupFilter({hits: 5000, my: true, structureType: "spawn", pos: {x: 10, y: 10}}), false,
-    "our own finished spawn must never become a cleanup target");
+// 清理不再靠爬（用户 2026-10-21）：已占领的房里直接 `structure.destroy()`。
+// 判据与执行都在 StrategyClaim.destroyForeignStructures 里，见 test/claim-cleanup.test.cjs。
 
 console.log("claim flow checks passed");

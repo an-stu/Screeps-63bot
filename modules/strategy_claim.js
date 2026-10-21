@@ -2,13 +2,6 @@
  * claim 房间 策略
  */
 
-let isPlannedClaimStructure = function (room, structure) {
-    let encodedPositions = room.memory.structMap && room.memory.structMap[structure.structureType];
-    if (!encodedPositions) return false;
-    return Utils.decodePosArray(encodedPositions)
-        .some(pos => pos.x == structure.pos.x && pos.y == structure.pos.y);
-};
-
 let isClaimCleanupTarget = function (room, structure) {
     if (!structure.hits || structure.structureType == STRUCTURE_CONTROLLER || structure.my) return false;
     // 别人的**存储类建筑先留着**（用户 2026-10-21）：
@@ -30,41 +23,6 @@ let isClaimCleanupTarget = function (room, structure) {
     // constructedWall，白耗 WORK 和寿命，还把房间原有的地形防护拆了。
     // 无主的墙 / 路 / 容器一律不碰；挡路的格子交给规划器绕开，真要清再人工处理。
     return !!structure.owner;
-};
-
-Creep.prototype.clearClaimRoom = function () {
-    let task = this.lastTask();
-    if (this.room.name != task.roomName) {
-        this.goTo(new RoomPosition(task.x || 25, task.y || 25, task.roomName));
-        return;
-    }
-
-    let target = this.memory.claimCleanupTarget && Game.getObjectById(this.memory.claimCleanupTarget);
-    // 缓存的目标必须**重新过一遍判据**：判据改了（例如不再拆无主墙）之后，
-    // memory 里那个旧目标可能已经不是合法目标，否则它会一直啃下去。
-    if (target && !isClaimCleanupTarget(this.room, target)) {
-        delete this.memory.claimCleanupTarget;
-        target = undefined;
-    }
-    if (!target || !target.hits || target.room.name != this.room.name) {
-        target = this.pos.findClosestByRange(FIND_STRUCTURES, {
-            filter: structure => isClaimCleanupTarget(this.room, structure),
-        });
-        if (target) this.memory.claimCleanupTarget = target.id;
-        else delete this.memory.claimCleanupTarget;
-    }
-    if (target) {
-        if (this.dismantle(target) == ERR_NOT_IN_RANGE) this.moveTo(target);
-        return;
-    }
-
-    if (this.room.my) {
-        this.memory.role = "worker";
-        this.memory.roomName = this.room.name;
-        this.memory.tasks = [];
-        this.memory.dontPullMe = false;
-        delete this.memory.claimCleanupTarget;
-    }
 };
 
 let pro = {
@@ -118,18 +76,6 @@ let pro = {
             if (structure.destroy() == OK) n++;
         });
         return n;
-    },
-    spawnCleaner(flag, spawnRoom) {
-        let targetRoom = Game.rooms[flag.pos.roomName];
-        if (!targetRoom) return;
-        if (targetRoom.creeps("claimCleaner", false).length) return;
-        // 体型必须按**出兵房的能量容量**缩：新占的房 RCL3 只有 650 容量，
-        // 而 5W/5C/5M 要 1000 能量 ⇒ 一只都孵不出来，cleaner 永远不会出现。
-        let affordable = Math.floor((spawnRoom.energyCapacityAvailable || 300) / 200); // 一组 W+C+M = 200
-        let sets = Math.max(1, Math.min(5, affordable));
-        let body = ManagerCreeps.calcBodyPart({[WORK]: sets, [CARRY]: sets, [MOVE]: sets});
-        let tasks = [UtilsTask.taskOutView(undefined, flag.pos.roomName, 25, 25, "clearClaimRoom")];
-        StationHive.trySpawn(spawnRoom, flag.pos.roomName, body, "claimCleaner", tasks);
     },
     ensureConstructionSites(room) {
         if (!room || !room.my || !room.memory.structMap || !global.ManagerAutoPlanner) return {};
@@ -251,7 +197,6 @@ let pro = {
                         let task = [UtilsTask.taskFlag(flag,"claimRoom")]
                         StationHive.trySpawn(spawnRoom,spawnRoom.name,[CLAIM,MOVE,MOVE],"claimer",task)
                     }
-                    pro.spawnCleaner(flag, spawnRoom);
                     pro.recordOperation(flag, "CLAIMING", {
                         visible: !!targetRoom,
                         claimer: !!claimer,

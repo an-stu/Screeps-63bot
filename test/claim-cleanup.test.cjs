@@ -110,10 +110,10 @@ assert.equal(F(roll(3), struct("container", { owner: null })), false, "无主容
         "清理必须走 destroy()（用户 2026-10-21：本房内可直接删别人的结构），不派 cleaner");
     // 只剩**未占领时**那一次 spawnCleaner（那时房还不是我们的，destroy 无效）；
     // 「本房是我的」分支里不能再派 cleaner。
-    assert.equal((codeOnly.match(/pro\.spawnCleaner\(/g) || []).length, 1,
-        "自己房间的清理必须用 destroy()，不能再派 cleaner（只剩未占领时那一次）");
-    assert.ok(/Math\.floor\(\(spawnRoom\.energyCapacityAvailable \|\| 300\) \/ 200\)/.test(codeOnly),
-        "cleaner 体型必须按出兵房能量容量缩");
+    assert.equal((codeOnly.match(/spawnCleaner|claimCleaner|clearClaimRoom/g) || []).length, 0,
+        "cleaner 那条链路必须整条删掉（用户 2026-10-21：都打算 claim 了，就别 cleaner 了）");
+    assert.ok(/room\.find\(FIND_STRUCTURES\)\.forEach\(structure => \{/.test(codeOnly),
+        "destroy 逻辑必须逐结构遍历房间（一次 API 调用删一个）");
 }
 
 // ⑧ destroyForeignStructures：只删「别人的有主结构」，中立/自己的/该留的 storage 都不动

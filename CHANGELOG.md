@@ -1,3 +1,27 @@
+## v0.78.131 — The claim cleaner is gone entirely
+
+User: if we are going to claim the room anyway, drop the cleaner - delete that logic.
+
+Since `structure.destroy()` deletes other players' structures inside our own room in a single call
+(v0.78.130), the whole cleaner path was dead weight: a spawn, a body, a cross-room walk, and up to 600
+ticks of a claim-clock life. Removed:
+
+- `Creep.prototype.clearClaimRoom` (the dismantle loop, its cached `claimCleanupTarget`, and the
+  "become a worker when finished" hand-off)
+- `StrategyClaim.spawnCleaner` and its remaining call site in the pre-claim branch
+- `isPlannedClaimStructure`, which nothing reads any more (`isClaimCleanupTarget` only looks at
+  ownership now)
+
+What remains is a single rule: `destroyForeignStructures(room)` walks an owned room and calls
+`destroy()` on other players' structures, honouring the storage/terminal keep rules.
+
+### Tests
+
+`claim-flow`, `core-profile` and `claim-cleanup` were updated: the cleaner-body, cached-target and
+`clearClaimRoom` assertions are replaced by assertions that the machinery is **gone**
+(`!strategyClaim.includes("claimCleaner")`, no `claimCleanupTarget`, zero `spawnCleaner` matches) and
+that `destroyForeignStructures` iterates the room calling `struct.destroy()`.
+
 ## v0.78.130 — Destroy foreign structures directly instead of sending a cleaner
 
 User: `structure.destroy()` can delete other players' buildings inside your own room - use that

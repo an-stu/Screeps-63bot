@@ -239,12 +239,15 @@ assert.ok(!managerCreeps.includes("_.keys(creeps)"), "creep grouping must avoid 
 assert.ok(main.includes('ManagerFlags.hasPrefix("moveto")'), "scouter strategy must not run without a matching flag");
 assert.ok(main.includes('ManagerFlags.hasPrefix("claim")'), "claim strategy must not run without a matching flag");
 assert.ok(strategyClaim.includes("flag.memory.spawnRoom"), "claim operations must support a pinned safe spawn room");
-assert.ok(strategyClaim.includes("Creep.prototype.clearClaimRoom") && strategyClaim.includes('this.memory.role = "worker"'), "claim cleanup must automatically become a bootstrap worker");
+// 用户 2026-10-21：已占领的房里直接 destroy 别人的结构，不再派 cleaner 爬过去拆
+assert.ok(strategyClaim.includes("destroyForeignStructures") && strategyClaim.includes("structure.destroy()"),
+    "claim cleanup must destroy foreign structures directly (no cleaner creep)");
 // 体型改成「按出兵房容量缩、上限 5 组」——新占的房 RCL3 只有 650 容量，
 // 写死的 5W/5C/5M（1000 能量）根本孵不出来，cleaner 永远不出现（2026-10-21 实测）。
-assert.ok(strategyClaim.includes("[WORK]: sets") && strategyClaim.includes("[CARRY]: sets") && strategyClaim.includes("[MOVE]: sets")
-    && /Math\.min\(5, affordable\)/.test(strategyClaim), "claim cleanup must use a capacity-scaled, bounded reusable body");
-assert.ok(strategyClaim.includes("claimCleanupTarget") && strategyClaim.includes("findClosestByRange(FIND_STRUCTURES"), "claim cleanup must cache targets instead of path-searching every tick");
+assert.ok(!strategyClaim.includes("claimCleaner") && !strategyClaim.includes("clearClaimRoom"),
+    "the cleaner creep path must be gone entirely");
+// 不再有「缓存目标 + 寻路」那套：已占领的房里 destroy() 直接删（用户 2026-10-21）
+assert.ok(!strategyClaim.includes("claimCleanupTarget"), "no cached cleanup target / path-searching machinery is needed");
 assert.ok(strategyClaim.includes("ensureConstructionSites") && strategyClaim.includes("createConstructionSite(STRUCTURE_SPAWN)") && strategyClaim.includes("[STRUCTURE_EXTENSION, STRUCTURE_CONTAINER]"), "claim operations must create blueprint bootstrap sites automatically");
 assert.ok(!strategyLowLevel.includes("room.level > 1 && StationWork.constructionNeedBuild"), "RCL1 workers must be allowed to build the first spawn");
 assert.ok(strategyLowLevel.includes("if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel0(room)"), "saved low-RCL blueprints must build without the optional planner gate");
