@@ -288,8 +288,12 @@ PowerCreep.prototype.roomPowerEnable = function () {
 PowerCreep.prototype.needOpPowerSpawn = function () {
     let room = this.mainRoom();
     if (!room || !room.my || !room.storage) return false;
-    // ops 很贵：只在能量充裕且 power/ops 有富余时处理 power。
-    if (!StationHive.isEnergyAbundant()) return false;
+    // **不要用账号级 `isEnergyAbundant()` 当闸门**（用户 2026-10-21：
+    // 「op power 之后 1t 可以烧三四点，省掉其他 tick 的 CPU 和时间」）。
+    // 实测 W32N56：storage 18.1 万能量、power 6,000、ops 820、PC 的 OPERATE_POWER 4 级、
+    // 冷却 0、powerSpawn 无效果 —— 全部就绪，唯独账号级能量标志是 false，
+    // 于是这条永远返回 false，op power 一次都没开过。
+    // 下面几行已经是**本房级**判据（能量/power/ops），足够保护能量。
     if (this.store[RESOURCE_OPS] < 400 || (room.storage.store[RESOURCE_POWER] || 0) < 3000 || room.storage.store[RESOURCE_ENERGY] < (90000)) return false;
     if (StationCarry.roomMassStoreCnt(room, RESOURCE_OPS) < 600) return false;
     let pcPower = this.powers[PWR_OPERATE_POWER]//

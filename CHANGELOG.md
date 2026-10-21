@@ -1,3 +1,26 @@
+## v0.78.133 — OPERATE_POWER was blocked by an account-wide energy check
+
+User: with the operator's OPERATE_POWER one tick burns three or four units instead of one, which is
+exactly what saves the ticks (and CPU) spent burning.
+
+The skill was wired all along - `needOpPowerSpawn()` returns the spawn and `OpPowerSpawn` calls
+`usePower(PWR_OPERATE_POWER, spawn)` - but the very first line was
+
+    if (!StationHive.isEnergyAbundant()) return false;
+
+and the account-wide flag is false, while W32N56 was otherwise completely ready: storage power 6,000,
+storage energy 181,512, room ops 8,820, the creep holds 820 ops, `OPERATE_POWER` level **4**, cooldown
+0, and the spawn had no effect. So it never fired once.
+
+The account-wide check is gone; the room-level preconditions right below it (storage power >= 3,000,
+storage energy >= 90,000, creep ops >= 400, room ops >= 600) are the ones that actually protect the
+energy, and they already bound the operation to a room that can afford it. This is the same lesson we
+already recorded for factories: an account-wide "plenty of energy" flag cannot stand in for "this room
+can afford it".
+
+With level 4 the spawn should process several units per tick, so a 500-power batch finishes in ~100
+ticks instead of ~500 - the same total energy (50 per power), just fewer tick calls.
+
 ## v0.78.132 — Power processing was locked out by the spawn's own 100-unit capacity
 
 User: use the power spawn to save CPU, concentrate the power, burn more per run.
