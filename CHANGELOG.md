@@ -1,3 +1,30 @@
+## v0.78.136 — Pace the burn so a whole OPERATE_POWER window is used up
+
+User: don't waste the rest of the current operation - raise the energy threshold later, and try to burn
+a full cycle.
+
+Burning flat out at 5 power/tick empties the room down to the energy floor in a few hundred ticks and
+leaves the remaining ~400 ticks of the effect unused - the ops were paid for nothing.
+
+`tryProcessPower` now keeps a per-tick credit:
+
+    budgetPerTick = max(0, roomEnergy - floor) / ticksLeftOfEffect
+    credit += budgetPerTick;  burn only when credit >= (1+level)*50
+
+When the room can afford full speed the credit is always positive and it burns every tick exactly as
+before; when it cannot, the burn is spread over the remaining window instead of stopping early. The
+effect is therefore consumed along its whole duration.
+
+The threshold for *applying* a new OPERATE_POWER stays at one full window
+(`50 * (1+level) * 1000`, i.e. 250k for level 4, overridable with `powerBatchEnergy`) - that is the
+"raise the threshold" part: it was a flat 90k before.
+
+### Tests
+
+`test/power-spawn-burn.test.cjs`: with a tight budget (100k energy, 500 ticks left) four ticks produce
+exactly one burn and the credit stays under one burn's cost; with a rich budget three ticks produce
+three burns (pacing must not slow the full-speed case).
+
 ## v0.78.135 — Only open OPERATE_POWER when the whole window is affordable
 
 Follow-up to v0.78.134: the burn now runs 5 power per tick, so one operation consumes

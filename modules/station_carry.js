@@ -261,9 +261,21 @@ let pro = {
         // **必须用全房存量做判据**：`POWER_SPAWN_POWER_CAPACITY = 100`，spawn 装不下 500。
         let power = pro.roomMassStoreCnt(room, RESOURCE_POWER);
         let energy = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
-        // 能量不足就停烧（别把试点房抽干），效果期间烧到哪算哪
-        if (energy < floor || power <= low) { ms.powerBurning = false; return; }
+        if (power <= low || energy <= floor) { ms.powerBurning = false; ms.powerBurnCredit = 0; return; }
         ms.powerBurning = true;
+
+        // ★ 配速（用户 2026-10-21：「剩下的部分不要作废，尽可能烧完整一个周期」）：
+        // 一次 processPower = (1+等级) 个 power = need 能量。若剩余能量不足以把这个效果
+        // 按满速烧完，就按「剩余能量 / 剩余 tick」摊薄 —— 隔几个 tick 烧一次，
+        // 把整段效果期均匀用掉，而不是满速烧到能量下限就停、让效果剩下的时间作废。
+        let perCall = 1 + (fx.level || 0);
+        let need = perCall * 50;
+        let remain = Math.max(1, fx.ticksRemaining || 1);
+        let budgetPerTick = Math.max(0, energy - floor) / remain;
+        // 预算足（≥ 一次的量）时 credit 会一直为正 ⇒ 每 tick 都烧，与旧行为一致
+        ms.powerBurnCredit = (ms.powerBurnCredit || 0) + budgetPerTick;
+        if (ms.powerBurnCredit < need) return;
+        ms.powerBurnCredit -= need;
         // powerSpawn 自己的 store 里必须有 ≥50 能量 + ≥1 power；不够时返回 ERR，不影响主循环
         s.processPower();
     },

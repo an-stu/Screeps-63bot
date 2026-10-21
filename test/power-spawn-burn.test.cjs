@@ -70,7 +70,7 @@ function makeRoom(power, energy, effects) {
 }
 
 {
-    const room = makeRoom(5000, 120000);
+    const room = makeRoom(5000, 300000);   // 预算 (300k-60k)/500 = 480 ≥ 250 ⇒ 满速
     const ms = {};
     const ctx = load(ms, room);
     ctx.StationCarry.tryProcessPower(room);
@@ -103,7 +103,7 @@ function makeRoom(power, energy, effects) {
 }
 
 {
-    const room = makeRoom(5000, 120000);
+    const room = makeRoom(5000, 300000);
     room.name = "E53S21";
     const ctx = load({ powerSpawnRoom: "E53S21" }, room);
     ctx.StationCarry.tryProcessPower(room);
@@ -115,6 +115,26 @@ function makeRoom(power, energy, effects) {
     const codeOnly = roomsSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(/StationCarry\.tryProcessPower\(room\)/.test(codeOnly),
         "ManagerRooms.exec 每 tick 要推进一次 power 烧制");
+}
+
+// ⑨ 配速：能量不够烧满整个窗口时，把 5/tick 摊薄，而不是烧到下限就停、让效果作废
+{
+    // floor 60k，剩 500 tick，可用 40k ⇒ 80 能量/tick 的预算；一次要 250 ⇒ 约 4 tick 烧一次
+    const room = makeRoom(5000, 100000);
+    const ms = {};
+    const ctx = load(ms, room);
+    for (let i = 0; i < 4; i++) ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ctx.__burn, 1, "预算不足时把燃烧摊薄到整个效果期（4 tick 烧一次）");
+    assert.ok(ms.powerBurnCredit >= 0 && ms.powerBurnCredit < 250, "credit 记账在 0~250 之间");
+}
+
+// ⑩ 能量充裕时仍然是每 tick 烧（配速不拖慢满速）
+{
+    const room = makeRoom(5000, 500000);
+    const ms = {};
+    const ctx = load(ms, room);
+    for (let i = 0; i < 3; i++) ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ctx.__burn, 3, "预算充足 ⇒ 每 tick 都烧");
 }
 
 console.log("power spawn burn checks passed");
