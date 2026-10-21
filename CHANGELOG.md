@@ -1,3 +1,28 @@
+## v0.78.130 — Destroy foreign structures directly instead of sending a cleaner
+
+User: `structure.destroy()` can delete other players' buildings inside your own room - use that
+instead of a cleaner.
+
+Verified live: calling `destroy()` on Rutt's extension at (26,34) in W26N58 returned **OK (0)** and the
+structure vanished the same tick. So the whole cleaner path was unnecessary for owned rooms: it cost a
+spawn, a body, a walk across the room and up to 600 ticks of life for something one API call does.
+
+`StrategyClaim.destroyForeignStructures(room)` walks the room and calls `destroy()` on everything
+`isClaimCleanupTarget` accepts (i.e. other players' structures, with the storage/terminal keep rules),
+and `exec()` calls it in the "room is ours" branch. The operation log now records how many structures
+were destroyed that tick.
+
+The cleaner is only spawned while the room is **not yet ours** (destroy is not permitted there); that
+single remaining call site is asserted by the tests.
+
+### Tests
+
+`test/claim-cleanup.test.cjs` gains a behavioural case: a room with a foreign tower/extension/spawn,
+a foreign storage at RCL3, a neutral container, a neutral wall and our own extension - exactly the
+three foreign ones are destroyed. Source assertions require `destroyForeignStructures(targetRoom)` in
+the owned branch and exactly one remaining `spawnCleaner` call site. Negative control (destroy not
+actually called) fails.
+
 ## v0.78.129 — Claim cleanup touches only other players' structures, never neutral ones
 
 User: do not dismantle neutral buildings such as walls - and pointed at why it matters: claim creeps

@@ -100,6 +100,25 @@ let pro = {
         if (configuredRoom && configuredRoom.my && pro.mySpawns(configuredRoom).length) return configuredRoom;
         return StationHive.getClosestSpawnRoom(flag.pos.roomName, 7, 3, 15);
     },
+    /**
+     * 直接删掉本房里**别人的**结构：`Structure.destroy()`。
+     *
+     * 用户 2026-10-21：在自己房间里 `structure.destroy()` 可以直接删除别人的建筑，
+     * **不用派 cleaner 爬过去拆**。实测（W26N58 的 Rutt 留下的 extension）返回 OK(0)，
+     * 结构当场消失。成本 = 每结构一次 API 调用，没有爬、没有寻路、
+     * 也不会浪费「带 CLAIM 的爬只有 600 tick」那种寿命。
+     *
+     * 保留规则仍由 `isClaimCleanupTarget` 决定（别人的 storage/terminal 按存量与 RCL 判断）。
+     */
+    destroyForeignStructures(room) {
+        if (!room || !room.my) return 0;
+        let n = 0;
+        room.find(FIND_STRUCTURES).forEach(structure => {
+            if (!isClaimCleanupTarget(room, structure)) return;
+            if (structure.destroy() == OK) n++;
+        });
+        return n;
+    },
     spawnCleaner(flag, spawnRoom) {
         let targetRoom = Game.rooms[flag.pos.roomName];
         if (!targetRoom) return;
@@ -173,12 +192,13 @@ let pro = {
                 return;
             }
             if (targetRoom && targetRoom.my) {
-                // 本房已经有自己的 spawn ⇒ cleaner 就地出土，不要再从 8 个房外走过来
-                let spawnRoom = ownedSpawns.length ? targetRoom : pro.getSpawnRoom(flag);
-                if (spawnRoom) pro.spawnCleaner(flag, spawnRoom);
+                // 别人的结构**直接 destroy**（用户 2026-10-21），不派 cleaner 爬过去拆。
+                // 实测 destroy() 在本房内对别人的结构返回 OK；一次调用即删，零 CPU、零寿命浪费。
+                let destroyed = pro.destroyForeignStructures(targetRoom);
                 pro.recordOperation(flag, cleanupTargets ? "CLEANING" : "BUILDING_SPAWN", {
                     level: targetRoom.controller.level,
                     cleanupTargets: cleanupTargets,
+                    destroyed: destroyed,
                     constructionSites: targetRoom.find(FIND_MY_CONSTRUCTION_SITES).length,
                     spawnSite: constructionStatus.spawnSite,
                     createResult: constructionStatus.createResult,

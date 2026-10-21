@@ -106,10 +106,44 @@ assert.equal(F(roll(3), struct("container", { owner: null })), false, "无主容
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(/ownedSpawns\.length && !cleanupTargets/.test(codeOnly),
         "COMPLETE 必须等清理目标清空（否则旗被删、残留结构永远留着）");
-    assert.ok(/ownedSpawns\.length \? targetRoom : pro\.getSpawnRoom\(flag\)/.test(codeOnly),
-        "本房有 spawn ⇒ cleaner 就地出土，不要跨房走 400 格");
+    assert.ok(/pro\.destroyForeignStructures\(targetRoom\)/.test(codeOnly),
+        "清理必须走 destroy()（用户 2026-10-21：本房内可直接删别人的结构），不派 cleaner");
+    // 只剩**未占领时**那一次 spawnCleaner（那时房还不是我们的，destroy 无效）；
+    // 「本房是我的」分支里不能再派 cleaner。
+    assert.equal((codeOnly.match(/pro\.spawnCleaner\(/g) || []).length, 1,
+        "自己房间的清理必须用 destroy()，不能再派 cleaner（只剩未占领时那一次）");
     assert.ok(/Math\.floor\(\(spawnRoom\.energyCapacityAvailable \|\| 300\) \/ 200\)/.test(codeOnly),
         "cleaner 体型必须按出兵房能量容量缩");
+}
+
+// ⑧ destroyForeignStructures：只删「别人的有主结构」，中立/自己的/该留的 storage 都不动
+{
+    const ctx2 = load();
+    const destroyed = [];
+    const mk = (type, owner, extra = {}) => Object.assign({
+        structureType: type, hits: 1000, my: false,
+        owner: owner ? { username: owner } : null,
+        store: { getUsedCapacity: () => 0 },
+        destroy() { destroyed.push(type + "@" + owner); return 0; },
+    }, extra);
+    const room = {
+        name: "W26N58", my: true,
+        controller: { level: 3 },
+        memory: {},
+        find: () => [
+            mk("tower", "Rutt"),                                   // 别人的塔 → 删
+            mk("extension", "Rutt"),                               // 别人的 extension → 删
+            mk("spawn", "Rutt"),                                   // 别人的 spawn → 删
+            mk("storage", "Rutt", { hits: 10000 }),                // RCL3 ⇒ 留
+            mk("extension", null),                                 // 中立 → 不删
+            mk("constructedWall", null),                           // 中立墙 → 不删
+            mk("extension", "me", { my: true }),                   // 自己的 → 不删
+        ],
+    };
+    const n = ctx2.StrategyClaim.destroyForeignStructures(room);
+    assert.equal(n, 3, "只删 3 个别人的有主结构");
+    assert.deepEqual(destroyed.sort(), ["extension@Rutt", "spawn@Rutt", "tower@Rutt"],
+        "删的正好是 tower / extension / spawn，中立与自己的都没动");
 }
 
 console.log("claim cleanup checks passed");
