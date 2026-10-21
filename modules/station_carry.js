@@ -241,7 +241,7 @@ let pro = {
      *   powerSpawnRoom    试点房，默认 W32N56；设成 "" 即关闭
      *   powerSpawnHigh    开烧门槛（默认 500 power）
      *   powerSpawnLow     停烧水位（默认 100 power）
-     *   powerSpawnEnergy  本房能量下限（默认 60000，低于它一律不烧）
+     *   powerSpawnEnergy  本房能量下限（默认 100000，低于它一律不烧；用户 2026-10-21 要求抬高）
      *   powerBurning      运行时状态（代码自己写，别手改）
      */
     tryProcessPower(room) {
@@ -249,7 +249,7 @@ let pro = {
         let s = room.powerSpawn;
         if (!s || !s.store) return;
         let low = Number(ms.powerSpawnLow) >= 0 ? Number(ms.powerSpawnLow) : 100;
-        let floor = Number(ms.powerSpawnEnergy) > 0 ? Number(ms.powerSpawnEnergy) : 60000;
+        let floor = Number(ms.powerSpawnEnergy) > 0 ? Number(ms.powerSpawnEnergy) : 100000;
         let power = pro.roomMassStoreCnt(room, RESOURCE_POWER);
         let energy = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
         let target = ms.powerSpawnRoom === undefined ? "W32N56" : ms.powerSpawnRoom;
@@ -299,7 +299,7 @@ let pro = {
         let msC = Memory.marketSettings || {};
         let burnRoom = (msC.powerSpawnRoom === undefined ? "W32N56" : msC.powerSpawnRoom) == room.name;
         let highC = Number(msC.powerSpawnHigh) > 0 ? Number(msC.powerSpawnHigh) : 500;
-        let floorC = Number(msC.powerSpawnEnergy) > 0 ? Number(msC.powerSpawnEnergy) : 60000;
+        let floorC = Number(msC.powerSpawnEnergy) > 0 ? Number(msC.powerSpawnEnergy) : 100000;
         let wantBurn = burnRoom && (!!msC.powerBurning || (powerCnt >= highC && energyCnt >= floorC));
         let fillGate = wantBurn
             ? (energyCnt > 30000 && powerCnt > 0)

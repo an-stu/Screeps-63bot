@@ -128,8 +128,8 @@ function makeRoom(power, energy, effects) {
 
 // ⑨ 配速：能量不够烧满整个窗口时，把 5/tick 摊薄，而不是烧到下限就停、让效果作废
 {
-    // floor 60k，剩 500 tick，可用 40k ⇒ 80 能量/tick 的预算；一次要 250 ⇒ 约 4 tick 烧一次
-    const room = makeRoom(5000, 100000);
+    // floor 100k，剩 500 tick，可用 40k ⇒ 80 能量/tick 的预算；一次要 250 ⇒ 约 4 tick 烧一次
+    const room = makeRoom(5000, 140000);
     const ms = {};
     const ctx = load(ms, room);
     for (let i = 0; i < 4; i++) ctx.StationCarry.tryProcessPower(room);

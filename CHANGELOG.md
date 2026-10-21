@@ -1,3 +1,13 @@
+## v0.78.138 — Power burning keeps a 100k energy floor per room
+
+User: raise the floor, without disturbing anything else.
+
+The default `powerSpawnEnergy` goes 60k -> **100k** (both the burn decision and the fill gate). That is
+the only change: rooms stop burning while they are still holding a healthy reserve, and the twelve
+rooms that just started normal-rate burning stop sooner.
+
+Overridable as always with `Memory.marketSettings.powerSpawnEnergy`.
+
 ## v0.78.137 — Rooms without an OPERATE_POWER creep burn at the normal rate
 
 User: the other rooms, if they have no operator creep with OPERATE_POWER, should just burn normally.
