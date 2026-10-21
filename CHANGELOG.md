@@ -1,3 +1,33 @@
+## v0.78.132 — Power processing was locked out by the spawn's own 100-unit capacity
+
+User: use the power spawn to save CPU, concentrate the power, burn more per run.
+
+Measured first: `Game.gpl.progress` had not moved (**+0 over 14 ticks**) and `powerBurning` was
+false. Two defects in v0.78.127:
+
+**1. The threshold read the wrong store.** `tryProcessPower` compared `powerSpawn.store.power` with
+`powerSpawnHigh = 500`, but `POWER_SPAWN_POWER_CAPACITY` is **100** - the spawn can never hold 500,
+so the gate could never open. The judgement now uses the **room** stock
+(`roomMassStoreCnt(room, RESOURCE_POWER)`), which is the thing we deliberately concentrated
+(W32N56 holds 5,945).
+
+**2. The fill gate refused to feed it.** `generatorFillPowerSpawnTask` only moved power in when the
+room had 170k energy/1000 power or 100k/6000 - W32N56 sits at 5,945 power, just under, so the spawn
+stayed at 65 power and nothing could burn. The gate now follows the burn policy: in the configured
+`powerSpawnRoom`, once the room is at/above the high-water mark (or already burning) and has energy
+above the floor, the spawn gets stocked.
+
+Model that matches the API: **the power spawn is a nozzle, not a tank** - 100 power / 5,000 energy,
+one `processPower()` per tick consuming 1 power + 50 energy (`POWER_SPAWN_ENERGY_RATIO`). So "burn a
+batch" means keep it fed continuously while the batch is open, which is what the hysteresis now does;
+the CPU cost is a single API call per tick.
+
+### Tests
+
+`test/power-spawn-burn.test.cjs` now stubs room-level power/energy and adds a case proving the gate
+opens from room stock even when the spawn itself is empty. The fill-gate source assertion follows the
+new `wantBurn` expression.
+
 ## v0.78.131 — The claim cleaner is gone entirely
 
 User: if we are going to claim the room anyway, drop the cleaner - delete that logic.

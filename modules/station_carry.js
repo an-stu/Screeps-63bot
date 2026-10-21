@@ -253,10 +253,14 @@ let pro = {
         let high = Number(ms.powerSpawnHigh) > 0 ? Number(ms.powerSpawnHigh) : 500;
         let low = Number(ms.powerSpawnLow) >= 0 ? Number(ms.powerSpawnLow) : 100;
         let floor = Number(ms.powerSpawnEnergy) > 0 ? Number(ms.powerSpawnEnergy) : 60000;
-        let power = s.store[RESOURCE_POWER] || 0;
+        // **必须用全房存量做判据**：`POWER_SPAWN_POWER_CAPACITY = 100`，
+        // spawn 里永远装不下 500 power。第一版拿 `s.store.power` 比 high(500) ⇒
+        // 永远开不了闸，GPL 进度一直是 0（实测 +0 / 14 tick）。
+        // 正确模型：能量和 power 都存在房里，powerSpawn 只是「喷嘴」（每 tick 烧 1 power + 50 能量）。
+        let power = pro.roomMassStoreCnt(room, RESOURCE_POWER);
         let energy = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
         if (!ms.powerBurning) {
-            // 开闸：本房 power 攒到高水位、且能量够烧一大截
+            // 开闸：全房 power 攒到高水位、且能量够烧一大截
             if (power < high || energy < floor) return;
             ms.powerBurning = true;
         }
@@ -272,11 +276,16 @@ let pro = {
         let tasks = []
         let energyCnt = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
         let powerCnt = pro.roomMassStoreCnt(room, RESOURCE_POWER);
-        // 正在集中烧 power 的时候，门槛要放宽：processPower 每 tick 吃 50 能量 + 1 power，
-        // 原来的 17 万/10 万门槛会让 powerSpawn 长期空着，烧两下就断粮。
-        let burning = !!(Memory.marketSettings && Memory.marketSettings.powerBurning);
-        let fillGate = burning
-            ? (energyCnt > 30000 && powerCnt > 50)
+        // powerSpawn 只是喷嘴：power 容量 100、能量 5000，**每 tick 吃 1 power + 50 能量**。
+        // 所以只要「本房是烧 power 的试点房」且存量够开闸，就要往里送料，
+        // 否则它空着、processPower 每 tick 都白调（实测 W26N58 之前一直 +0 GPL）。
+        let msC = Memory.marketSettings || {};
+        let burnRoom = (msC.powerSpawnRoom === undefined ? "W32N56" : msC.powerSpawnRoom) == room.name;
+        let highC = Number(msC.powerSpawnHigh) > 0 ? Number(msC.powerSpawnHigh) : 500;
+        let floorC = Number(msC.powerSpawnEnergy) > 0 ? Number(msC.powerSpawnEnergy) : 60000;
+        let wantBurn = burnRoom && (!!msC.powerBurning || (powerCnt >= highC && energyCnt >= floorC));
+        let fillGate = wantBurn
+            ? (energyCnt > 30000 && powerCnt > 0)
             : (energyCnt > 170000 && powerCnt > 1000 || energyCnt > 100000 && powerCnt > 6000
                 || energyCnt > 100000 && powerCnt > 100 && room.powerSpawn.effects && room.powerSpawn.effects.length);
         if (room.level >= 8 && room.storage && room.terminal && room.powerSpawn

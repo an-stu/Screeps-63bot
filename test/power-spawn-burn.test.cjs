@@ -31,16 +31,20 @@ function load(settings, room) {
     vm.runInNewContext(src, ctx, { filename: "station_carry.js" });
     ctx.__burn = 0;
     room.powerSpawn.processPower = () => { ctx.__burn++; return ctx.OK; };
-    // 本房能量总量：用房间字段直接给出，不依赖模块内部的 mass store 统计
-    ctx.StationCarry.roomMassStoreCnt = (r, res) => (res == "energy" ? room.__energy : 0);
+    // 本房的能量 / power 总量：用房间字段直接给出，不依赖模块内部的 mass store 统计。
+    // 注意判据用的是**全房存量**（powerSpawn 的 power 容量只有 100，装不下 high=500）。
+    ctx.StationCarry.roomMassStoreCnt = (r, res) =>
+        res == "energy" ? room.__energy : (res == "power" ? room.__power : 0);
     return ctx;
 }
 
 function makeRoom(power, energy) {
     return {
         name: "W32N56",
+        __power: power,          // 全房 power 存量（判据用这个）
         __energy: energy,
-        powerSpawn: { store: { power: power, energy: 200 } },
+        // spawn 自己只有 100 power / 5000 能量容量，够烧一单位即可
+        powerSpawn: { store: { power: 100, energy: 500 } },
     };
 }
 
@@ -124,11 +128,21 @@ function makeRoom(power, energy) {
 // ⑨ 填充闸门必须认出「正在烧」：源码里 fillGate 用了 burning 分支
 {
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
-    assert.ok(/let burning = !!\(Memory\.marketSettings && Memory\.marketSettings\.powerBurning\)/.test(codeOnly),
-        "填充闸门必须读 powerBurning");
-    assert.ok(/energyCnt > 30000 && powerCnt > 50/.test(codeOnly),
-        "开烧时填充门槛要放宽到 3 万能量/50 power，否则烧两下断粮");
+    assert.ok(/let wantBurn = burnRoom && \(!!msC\.powerBurning \|\| \(powerCnt >= highC && energyCnt >= floorC\)\)/.test(codeOnly),
+        "填充闸门必须跟着烧 power 的政策走（burning 或够开闸就送料）");
+    assert.ok(/energyCnt > 30000 && powerCnt > 0/.test(codeOnly),
+        "开烧时填充门槛要放宽，否则烧两下断粮");
     assert.ok(/pro\.tryProcessPower\(room\)/.test(codeOnly), "决策必须被调用");
+}
+
+// ⑩ 判据必须是**全房存量**：spawn 里只有 100 容量，拿它比 high 永远开不了闸
+{
+    const room = makeRoom(800, 120000);
+    room.powerSpawn.store.power = 0;      // spawn 空着
+    const ms = {};
+    const ctx = load(ms, room);
+    ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ms.powerBurning, true, "房里有 800 power 就该开闸（与 spawn 里有没有无关）");
 }
 
 console.log("power spawn burn checks passed");
