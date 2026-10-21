@@ -1,3 +1,17 @@
+## v0.78.135 — Only open OPERATE_POWER when the whole window is affordable
+
+Follow-up to v0.78.134: the burn now runs 5 power per tick, so one operation consumes
+`(1+level) x duration x 50` energy - 5 x 1000 x 50 = **250,000** for level 4. Applying the effect with
+less than that in storage means it expires half-burned and the ops are wasted.
+
+`needOpPowerSpawn` now requires `room.storage.energy >= 50 * (1 + level) * 1000` (override with
+`Memory.marketSettings.powerBatchEnergy`), instead of the flat 90,000 that only guaranteed a few
+hundred ticks.
+
+Measured right after v0.78.134 deployed: GPL progress +30 over 6 ticks and +45 over 9 ticks - a steady
+**5 power/tick** - while the spawn's own energy went 3,050 -> 3,145 -> 4,145, i.e. the haulers keep the
+nozzle fed.
+
 ## v0.78.134 — Process power every tick, inside one OPERATE_POWER window
 
 User: call it every tick, but keep the energy topped up - burn one OPERATE_POWER through completely,

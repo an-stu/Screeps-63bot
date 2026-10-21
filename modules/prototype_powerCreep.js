@@ -294,7 +294,17 @@ PowerCreep.prototype.needOpPowerSpawn = function () {
     // 冷却 0、powerSpawn 无效果 —— 全部就绪，唯独账号级能量标志是 false，
     // 于是这条永远返回 false，op power 一次都没开过。
     // 下面几行已经是**本房级**判据（能量/power/ops），足够保护能量。
-    if (this.store[RESOURCE_OPS] < 400 || (room.storage.store[RESOURCE_POWER] || 0) < 3000 || room.storage.store[RESOURCE_ENERGY] < (90000)) return false;
+    // 一个 OPERATE_POWER 周期能烧掉多少 energy，就要求仓里先有那么多 ——
+    // 用户 2026-10-21：「确保一个 OPERATE_POWER 完整烧完，然后休息攒到下一个」。
+    // 一次 processPower = (1 + 等级) 个 power，每 power 50 energy，效果约 1000 tick：
+    //   4 级 ⇒ 5 个/tick × 1000 tick × 50 = 250,000 energy
+    // 不够就不开效果（否则烧到一半效果过期，等于白花 ops）。
+    let pcLevel = (this.powers[PWR_OPERATE_POWER] || {}).level || 0;
+    let batchEnergy = Number((Memory.marketSettings || {}).powerBatchEnergy) > 0
+        ? Number(Memory.marketSettings.powerBatchEnergy)
+        : 50 * (1 + pcLevel) * 1000;
+    if (this.store[RESOURCE_OPS] < 400 || (room.storage.store[RESOURCE_POWER] || 0) < 3000
+        || room.storage.store[RESOURCE_ENERGY] < batchEnergy) return false;
     if (StationCarry.roomMassStoreCnt(room, RESOURCE_OPS) < 600) return false;
     let pcPower = this.powers[PWR_OPERATE_POWER]//
     if (pcPower && pcPower.cooldown < OP_SOURCE_WAIT_TIME) {
