@@ -1,3 +1,29 @@
+## v0.78.129 — Claim cleanup touches only other players' structures, never neutral ones
+
+User: do not dismantle neutral buildings such as walls - and pointed at why it matters: claim creeps
+only live 600 ticks, so a cleaner chewing on a neutral wall wastes its entire life.
+
+`isClaimCleanupTarget` now returns true **only for structures with a foreign owner**. Ownerless walls,
+roads and containers are never targets; the planner routes around them and they can be removed by
+hand if a specific tile is needed. (The old rule also removed "ownerless structures the blueprint does
+not use", which is exactly how the cleaner ended up dismantling `constructedWall@19,2`.)
+
+The cached `claimCleanupTarget` is also re-validated every tick, so a target that stops matching the
+predicate (rule change, ownership change) is dropped instead of being chewed forever.
+
+Storage rule unchanged: a foreign storage is kept while it holds goods or while our controller is
+below RCL4, and destroyed once we can build our own.
+
+### Note on the earlier 574 ttl
+
+Not a bug: creeps with CLAIM parts have **600 ticks** of life (`CREEP_CLAIM_LIFE_TIME`), which is why
+the claimer looked "pre-aged". Long-distance claims must be planned around 600 ticks, not 1500.
+
+### Tests
+
+`test/claim-cleanup.test.cjs` and `test/claim-flow.test.cjs` now assert that ownerless containers,
+roads and walls are **not** targets, alongside the previous foreign-structure and storage cases.
+
 ## v0.78.128 — Claim cleanup actually runs (and keeps the foreign storage for now)
 
 User: the claimed room still had another player's spawn/extensions - those were dismantled by hand.

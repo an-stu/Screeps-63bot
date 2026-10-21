@@ -90,12 +90,14 @@ assert.equal(F(roll(3), struct("extension", { my: true })), false, "自己的结
 assert.equal(F(roll(3), struct("controller", { owner: null })), false, "控制器不拆");
 assert.equal(F(roll(3), struct("container", { hits: 0 })), false, "没有 hits 的不算目标");
 
-// ⑥ 无主结构：蓝图上有同类型同位置就保留，否则拆
+// ⑥ **无主结构一律不拆**（用户 2026-10-21：别拆中立的建筑比如墙）
 const blueprint = { container: JSON.stringify([{ x: 10, y: 10 }]) };
-const neutralInMap = struct("container", { owner: null, pos: { x: 10, y: 10 } });
-const neutralOther = struct("container", { owner: null, pos: { x: 20, y: 20 } });
-assert.equal(F(roll(3, blueprint), neutralInMap), false, "蓝图在用的无主容器要留");
-assert.equal(F(roll(3, blueprint), neutralOther), true, "蓝图外的无主容器要拆");
+assert.equal(F(roll(3, blueprint), struct("container", { owner: null, pos: { x: 20, y: 20 } })), false,
+    "蓝图外的无主容器也不拆（中立建筑不碰）");
+assert.equal(F(roll(3), struct("constructedWall", { owner: null })), false,
+    "无主的墙绝对不能拆");
+assert.equal(F(roll(3), struct("road", { owner: null, hits: 5000 })), false, "无主的路不拆");
+assert.equal(F(roll(3), struct("container", { owner: null })), false, "无主容器不拆");
 
 // ⑦ 执行链必须真的会跑（用户 2026-10-21：「spawn 和 Extension 也没拆除」）：
 //    COMPLETE 不能只看「有自己的 spawn 了」，不然残留结构再也没人管；

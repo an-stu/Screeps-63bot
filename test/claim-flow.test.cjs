@@ -87,10 +87,14 @@ creep.pos = {findClosestByRange(type, options) { cleanupFilter = options.filter;
 creep.clearClaimRoom();
 assert.equal(cleanupFilter({hits: 5000, my: false, owner: {username: "other"}, structureType: "spawn", pos: {x: 9, y: 22}}), true,
     "another player's spawn must always be dismantled");
-assert.equal(cleanupFilter({hits: 5000, my: false, structureType: "container", pos: {x: 9, y: 22}}), true,
-    "an unplanned ownerless blocker must be dismantled");
+// 用户 2026-10-21：「别拆中立的建筑比如墙」—— 无主结构（墙/路/容器）一律不碰，
+// 只有**别人的有主结构**才是清理目标（它们占格子、让 createConstructionSite 失败）。
+assert.equal(cleanupFilter({hits: 5000, my: false, structureType: "container", pos: {x: 9, y: 22}}), false,
+    "an ownerless container must be left alone (neutral buildings are not targets)");
 assert.equal(cleanupFilter({hits: 5000, my: false, structureType: "road", pos: {x: 10, y: 10}}), false,
-    "an ownerless structure already used by the blueprint should be retained");
+    "an ownerless road must be left alone");
+assert.equal(cleanupFilter({hits: 5000, my: false, structureType: "constructedWall", pos: {x: 10, y: 11}}), false,
+    "an ownerless wall must never be dismantled");
 assert.equal(cleanupFilter({hits: 5000, my: true, structureType: "spawn", pos: {x: 10, y: 10}}), false,
     "our own finished spawn must never become a cleanup target");
 

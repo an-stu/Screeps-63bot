@@ -252,7 +252,8 @@ assert.ok(strategyLowLevel.includes("if (global.ManagerAutoPlanner) ManagerAutoP
 assert.ok(strategyClaim.includes("StationObserver.requestRoom") && strategyClaim.includes("Memory.observerWatch") && strategyClaim.includes("watch.p == Game.time"), "claim operations must consume scheduled Observer vision automatically");
 assert.ok(stationObserver.includes("PriorityObserveRoomQueue") && stationObserver.includes("getRoomLinearDistance"), "claim observations must use a range-checked priority queue");
 assert.ok(strategyClaim.includes("room.find(FIND_MY_SPAWNS)") && !strategyClaim.includes("targetRoom.spawn.length>0"), "hostile spawns must never complete a claim operation");
-assert.ok(strategyClaim.includes("isClaimCleanupTarget") && strategyClaim.includes("!isPlannedClaimStructure"), "claim cleanup must remove non-blueprint neutral blockers as well as hostile structures");
+// 只拆别人的有主结构；无主的中立建筑（墙/路/容器）不碰（用户 2026-10-21）
+assert.ok(strategyClaim.includes("isClaimCleanupTarget") && strategyClaim.includes("return !!structure.owner"), "claim cleanup must target only foreign-owned structures, never neutral ones");
 assert.ok(strategyClaim.includes("global.claimLog") && strategyClaim.includes("Memory.claimOperations"), "claim operations must retain bounded diagnostics for later inspection");
 assert.ok(strategyClaim.includes("operation.history.length > 40"), "claim diagnostics must not grow Memory without a bound");
 assert.ok(strategyCleanBuild.includes("FIND_HOSTILE_STRUCTURES") && strategyCleanBuild.includes("!structure.my"), "claim cleanup must remove hostile structures that block a new spawn");

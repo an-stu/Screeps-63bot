@@ -24,10 +24,12 @@ let isClaimCleanupTarget = function (room, structure) {
         let hasGoods = structure.store && structure.store.getUsedCapacity() > 0;
         if (hasGoods) return false;
     }
-    // Structures with another owner can never become ours.  Ownerless roads,
-    // containers, and walls are retained only when the generated blueprint
-    // explicitly uses the same type at the same position.
-    return !!structure.owner || !isPlannedClaimStructure(room, structure);
+    // **只拆「有主的、别人的」结构**（用户 2026-10-21：「别拆中立的建筑比如墙」）。
+    //
+    // 原来还会把「蓝图里没有的无主建筑」一起拆 —— 结果 cleaner 去啃中立的
+    // constructedWall，白耗 WORK 和寿命，还把房间原有的地形防护拆了。
+    // 无主的墙 / 路 / 容器一律不碰；挡路的格子交给规划器绕开，真要清再人工处理。
+    return !!structure.owner;
 };
 
 Creep.prototype.clearClaimRoom = function () {
@@ -38,6 +40,12 @@ Creep.prototype.clearClaimRoom = function () {
     }
 
     let target = this.memory.claimCleanupTarget && Game.getObjectById(this.memory.claimCleanupTarget);
+    // 缓存的目标必须**重新过一遍判据**：判据改了（例如不再拆无主墙）之后，
+    // memory 里那个旧目标可能已经不是合法目标，否则它会一直啃下去。
+    if (target && !isClaimCleanupTarget(this.room, target)) {
+        delete this.memory.claimCleanupTarget;
+        target = undefined;
+    }
     if (!target || !target.hits || target.room.name != this.room.name) {
         target = this.pos.findClosestByRange(FIND_STRUCTURES, {
             filter: structure => isClaimCleanupTarget(this.room, structure),
