@@ -1,3 +1,31 @@
+## v0.78.139 — The upgrade container must be fed before the tower
+
+Found while checking the newly claimed W26N58 (RCL3, no storage): `controller.progress` was frozen at
+**12,336 for dozens of ticks** while `ticksToDowngrade` fell by 1 per tick, the upgrade container sat at
+**0/2000**, and the upgrader stood on it with **0 energy**. Meanwhile 1-4 carriers were idle on the same
+tiles holding 500 energy each, and the tower's free capacity kept growing (it repairs the old walls and
+drains itself continuously).
+
+Cause: in `strategy_lowLevel` (the branch used by rooms with no storage / RCL < 4), the tower fill loop
+runs **before** the upgrade-container assignment, and it hands a task to *every* free loaded carrier.
+Because the tower in a young room is a bottomless sink, `fillTowerTasks` is never empty, so the
+upgrade-container block at the end (`head()` of the *still free* carriers) never found anyone. Energy
+existed; nobody carried it the last 20 tiles.
+
+Changes:
+
+- the upgrade-container assignment now runs **first**, taking a single carrier (the container holds only
+  2,000, so this cannot crowd out the tower);
+- when the hive and the tower are both satisfied and the room has no storage, the remaining loaded
+  carriers now **deliver to the upgrade container** instead of idling with a full load.
+
+### Tests
+
+New `test/upgrade-fill-priority.test.cjs` asserts, on the comment-stripped source, that the upgrade fill
+call appears **before** `fillTowerTasks`, that the no-storage fallback exists, and that no empty `else`
+branch swallows the task. Negative controls: moving the block after the tower loop, and deleting the
+fallback, each fail on their own assertion.
+
 ## v0.78.138 — Power burning keeps a 100k energy floor per room
 
 User: raise the floor, without disturbing anything else.

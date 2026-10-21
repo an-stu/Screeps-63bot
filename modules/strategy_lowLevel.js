@@ -189,6 +189,21 @@ let pro = {
                 }
             })
 
+            // 分配升级的运送 —— **必须排在塔之前**。
+            //
+            // 2026-10-21 实测 W26N58（RCL3，无 storage）：塔被修理动作持续抽干，
+            // `fillTowerTasks` 永远非空，于是「先塔、后升级容器」让每一只空闲搬运
+            // 都被塔吃掉 ⇒ 控制器旁容器长期 0/2000、upgrader 抱着 0 能量站着、
+            // 控制器进度冻结在 12,336 达数十 tick，而降级计时器 1/tick 往下走。
+            // 升级容器上限只有 2000，先给它一只搬运不会挤占别的需求。
+            let upgCreep = room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).head();
+            if (upgCreep) {
+                let task = StationUpgrade.generatorFillEnergyTask(room.name, upgCreep.getPartCnt(CARRY) * 50);
+                if (task.length > 0) {
+                    upgCreep.addTask(task);
+                }
+            }
+
             // 填充任务
             let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
             room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).forEach(creep => {
@@ -202,17 +217,14 @@ let pro = {
                     creep.addTask(UtilsTask.task(room.storage, "fillRes", undefined, {
                         resType: RESOURCE_ENERGY,
                     }))
+                } else {
+                    // 没有 storage 且塔已满：富余能量送去升级容器。
+                    // 否则这些搬运会抱着 500 能量原地待机（实测同房常态 1~4 只），
+                    // 而控制器容器空着、upgrader 在挨饿 —— 能量有、只是没人送。
+                    let rest = StationUpgrade.generatorFillEnergyTask(room.name, creep.getPartCnt(CARRY) * 50);
+                    if (rest.length > 0) creep.addTask(rest);
                 }
             })
-
-            // 分配升级的运送
-            let creep = room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).head();
-            if (creep) {
-                let task = StationUpgrade.generatorFillEnergyTask(room.name, creep.getPartCnt(CARRY) * 50);
-                if (task.length > 0) {
-                    creep.addTask(task);
-                }
-            }
 
             let lowEnergyCarry = StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 300)
             room.creeps("worker").filter(e => e.isFree()).forEach(creep => {
