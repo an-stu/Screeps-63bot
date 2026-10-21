@@ -11,6 +11,19 @@ let isPlannedClaimStructure = function (room, structure) {
 
 let isClaimCleanupTarget = function (room, structure) {
     if (!structure.hits || structure.structureType == STRUCTURE_CONTROLLER || structure.my) return false;
+    // 别人的**存储类建筑先留着**（用户 2026-10-21）：
+    //   「storage 有资源可以先保留，但是需要建自己的 storage 的时候必须摧毁别人的」
+    // 判据：本房还建不了 storage（RCL < 4）或里面还有东西 ⇒ 留着；否则才拆。
+    // terminal 同理（有货就留）。
+    if (structure.structureType == STRUCTURE_STORAGE) {
+        let hasGoods = structure.store && structure.store.getUsedCapacity() > 0;
+        let canBuildOwn = room.controller && room.controller.level >= 4;
+        if (hasGoods || !canBuildOwn) return false;
+    }
+    if (structure.structureType == STRUCTURE_TERMINAL) {
+        let hasGoods = structure.store && structure.store.getUsedCapacity() > 0;
+        if (hasGoods) return false;
+    }
     // Structures with another owner can never become ours.  Ownerless roads,
     // containers, and walls are retained only when the generated blueprint
     // explicitly uses the same type at the same position.
@@ -83,7 +96,11 @@ let pro = {
         let targetRoom = Game.rooms[flag.pos.roomName];
         if (!targetRoom) return;
         if (targetRoom.creeps("claimCleaner", false).length) return;
-        let body = ManagerCreeps.calcBodyPart({[WORK]: 5, [CARRY]: 5, [MOVE]: 5});
+        // 体型必须按**出兵房的能量容量**缩：新占的房 RCL3 只有 650 容量，
+        // 而 5W/5C/5M 要 1000 能量 ⇒ 一只都孵不出来，cleaner 永远不会出现。
+        let affordable = Math.floor((spawnRoom.energyCapacityAvailable || 300) / 200); // 一组 W+C+M = 200
+        let sets = Math.max(1, Math.min(5, affordable));
+        let body = ManagerCreeps.calcBodyPart({[WORK]: sets, [CARRY]: sets, [MOVE]: sets});
         let tasks = [UtilsTask.taskOutView(undefined, flag.pos.roomName, 25, 25, "clearClaimRoom")];
         StationHive.trySpawn(spawnRoom, flag.pos.roomName, body, "claimCleaner", tasks);
     },
@@ -130,7 +147,15 @@ let pro = {
             let constructionStatus = targetRoom && targetRoom.my
                 ? pro.ensureConstructionSites(targetRoom) : undefined;
             let ownedSpawns = pro.mySpawns(targetRoom);
-            if (targetRoom && targetRoom.my && ownedSpawns.length) {
+            // 残留结构必须先拆干净才能立工地（用户 2026-10-21）：
+            // 别人的 spawn / extension 会占住位置，`createConstructionSite` 直接失败。
+            // 原来 COMPLETE 只看「有自己的 spawn 了」就删旗 ⇒ 房间里的 tower/extension
+            // 再也没人管（实测 W26N58：Rutt 的塔和 2 个 extension 一直留着）。
+            let cleanupTargets = targetRoom && targetRoom.my
+                ? targetRoom.find(FIND_STRUCTURES)
+                    .filter(structure => isClaimCleanupTarget(targetRoom, structure)).length
+                : 0;
+            if (targetRoom && targetRoom.my && ownedSpawns.length && !cleanupTargets) {
                 pro.recordOperation(flag, "COMPLETE", {
                     level: targetRoom.controller.level,
                     mySpawns: ownedSpawns.length,
@@ -140,10 +165,9 @@ let pro = {
                 return;
             }
             if (targetRoom && targetRoom.my) {
-                let spawnRoom = pro.getSpawnRoom(flag);
+                // 本房已经有自己的 spawn ⇒ cleaner 就地出土，不要再从 8 个房外走过来
+                let spawnRoom = ownedSpawns.length ? targetRoom : pro.getSpawnRoom(flag);
                 if (spawnRoom) pro.spawnCleaner(flag, spawnRoom);
-                let cleanupTargets = targetRoom.find(FIND_STRUCTURES)
-                    .filter(structure => isClaimCleanupTarget(targetRoom, structure)).length;
                 pro.recordOperation(flag, cleanupTargets ? "CLEANING" : "BUILDING_SPAWN", {
                     level: targetRoom.controller.level,
                     cleanupTargets: cleanupTargets,
@@ -213,6 +237,7 @@ let pro = {
 }
 
 
+pro.isClaimCleanupTarget = isClaimCleanupTarget;
 global.StrategyClaim=pro;
 global.claimLog = function (roomName) {
     let operation = Memory.claimOperations && Memory.claimOperations[roomName];

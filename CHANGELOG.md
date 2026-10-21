@@ -1,3 +1,37 @@
+## v0.78.128 — Claim cleanup actually runs (and keeps the foreign storage for now)
+
+User: the claimed room still had another player's spawn/extensions - those were dismantled by hand.
+Check whether the automation runs at all.
+
+It did not, for two independent reasons:
+
+**1. The pipeline declared COMPLETE as soon as our own spawn existed.** `exec()` removed the
+`claim_*` flag on `room.my && mySpawns.length`, before the cleanup branch ever ran, so a room with
+leftover hostile structures lost its cleanup permanently (W26N58 still holds `tower` 3000 hits, two
+extensions 1000 each and a storage - the flag was already gone).
+
+COMPLETE now also requires `cleanupTargets === 0`.
+
+**2. The cleaner could never be spawned in a young room.** The body was hard-coded to 5 WORK + 5
+CARRY + 5 MOVE = **1000 energy**, but a freshly claimed RCL3 room only has 650 capacity, so
+`trySpawn` always failed. The body now scales to the spawning room's capacity (one W+C+M set per 200
+energy, capped at 5), and when the target room already has its own spawn the cleaner is spawned
+**there** instead of walking 8 rooms from W31N55.
+
+**3. Storage rule (as instructed).** `isClaimCleanupTarget` now keeps a foreign `storage` while it
+holds goods **or** while our controller is below RCL4 (we cannot build our own yet); a foreign
+terminal is kept while it holds goods. Everything else of another owner - spawn, extension, tower -
+is still dismantled, because it occupies tiles and blocks `createConstructionSite`.
+
+### Tests
+
+New `test/claim-cleanup.test.cjs`: spawn/extension/tower are targets, storage is kept at RCL3 and
+when non-empty but dismantled when empty at RCL4, terminal kept while stocked, our own structures and
+the controller never targeted, ownerless structures only when the blueprint does not use them, plus
+source assertions that COMPLETE waits for cleanup, that the cleaner spawns locally and that the body
+scales. Negative controls: dropping the storage guard, forcing `canBuildOwn = false`, and dropping
+`!cleanupTargets` each fail. `core-profile` was updated for the new capacity-scaled body.
+
 ## v0.78.127 — Batch power processing (accumulate, then burn down, then accumulate)
 
 User: some rooms have a power spawn worth running, but it burns power and must not run on a thin

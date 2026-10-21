@@ -23,6 +23,8 @@ const context = {
     Utils: {decodePosArray(value) { return value ? [{x: 10, y: 10}] : []; }},
     Logger: {info() {}, warning() {}},
     STRUCTURE_CONTROLLER: "controller",
+    STRUCTURE_STORAGE: "storage",
+    STRUCTURE_TERMINAL: "terminal",
     STRUCTURE_SPAWN: "spawn",
     STRUCTURE_EXTENSION: "extension",
     STRUCTURE_CONTAINER: "container",
