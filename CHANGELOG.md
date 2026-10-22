@@ -1,3 +1,26 @@
+## v0.78.141 — Bound the upgrader count as well
+
+Follow-up to v0.78.140, observed live within a minute of deploying it.
+
+With the carrier spam stopped, the room finally had 800 energy free, so an upgrader could be spawned -
+and then another, and another. The low-level branch used "free carriers carrying energy, minus one" as
+the upgrader target. That reads as 1-2 in a healthy room, but with 19 surplus carriers it is always
+true, so the room would have kept spawning 800-energy upgraders it cannot feed.
+
+`strategy_lowLevel` now caps upgraders at **3** (`upgCnt < 3`), counted with `spawned=false` so a creep
+still hatching is included (otherwise the condition fires again the next pass). Three of them are
+6 WORK each = 18 energy/tick, which matches the room's ~20 energy/tick income; a fourth would only take
+spawn slots and CPU.
+
+Measured right after v0.78.140: upgrade rate went **6/tick -> 12/tick** as the second upgrader came
+online (progress 114,221 -> 114,737 in 53 ticks), and the upgrade container stayed at ~1,900/2,000,
+i.e. supply now keeps up with two upgraders.
+
+### Tests
+
+`test/lowlevel-carrier-cap.test.cjs` gained the upgrader assertions (count with `spawned=false`, the
+`upgCnt < 3` bound). Negative control: dropping the `< 3` bound fails on its own assertion.
+
 ## v0.78.140 — Cap carriers in low-level rooms (they were spawned without a limit)
 
 Health check on the claimed W26N58, 22 hours after v0.78.139:

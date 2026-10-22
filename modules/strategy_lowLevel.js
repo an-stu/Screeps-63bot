@@ -135,12 +135,20 @@ let pro = {
             }
 
 
-            // 生 升级的
-            if (Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER]))
-                if (room.creeps("upgrader").length == 0 || room.creeps("upgrader").length < room.creeps("carrier")
-                    .filter(e => e.isFree() && e.store[RESOURCE_ENERGY] > 0).length - 1) {
+            // 生 升级的 —— **上限 3 只**。
+            //
+            // 原条件把「空闲且有货的搬运数 - 1」当目标，正常房（2~3 只搬运）等于 1~2 只；
+            // 但搬运一旦超编（2026-10-22 实测 W26N58 有 19 只）它就恒真，
+            // 会一路派到十几只 upgrader，每只要 800 能量，而本房收入只有 ~20 能量/tick。
+            // 3 只 × 6 WORK = 18/tick 正好吃满收入，再多为纯浪费（占 spawn 槽 + CPU）。
+            // 计数用 `spawned=false`（**含孵化中**），否则连派。
+            if (Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER])) {
+                let upgCnt = room.creeps("upgrader", false).length;
+                let loadedFree = room.creeps("carrier").filter(e => e.isFree() && e.store[RESOURCE_ENERGY] > 0).length;
+                if (upgCnt == 0 || (upgCnt < 3 && upgCnt < loadedFree - 1)) {
                     StationUpgrade.spawnUpgrader(room)
                 }
+            }
 
             // 内矿的能量搬运 和掉落资源
             let pickTasks = StationCarry.generatorPickTask(room, true)

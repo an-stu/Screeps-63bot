@@ -39,4 +39,13 @@ const high = fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js")
 assert.ok(/carrierTarget = Math\.max\(2, Math\.min\(3, Math\.ceil\(\(sourceCnt \+ keeperCnt\) \/ 2\)\)\)/.test(high),
     "highLevel 的低等级口径应保持一致（2~3 只），改一侧不改另一侧迟早漂移");
 
+// ── ⑤ 升级爬也要有上限（同一个连锁问题的另一半） ──────────────────────────
+//
+// 原条件把「空闲且有货的搬运数 - 1」当 upgrader 目标：搬运正常（2~3 只）时等于 1~2 只，
+// 一旦搬运超编（实测 19 只）就恒真 ⇒ 会一路派到十几只，每只 800 能量，纯浪费。
+assert.ok(/let upgCnt = room\.creeps\("upgrader", false\)\.length/.test(code),
+    "升级爬计数必须含孵化中（spawned=false），否则会连派");
+assert.ok(/upgCnt < 3 && upgCnt < loadedFree - 1/.test(code),
+    "升级爬必须夹在 3 只以内（3 × 6 WORK 吃满 ~20/tick 收入）");
+
 console.log("low-level carrier cap checks passed");
