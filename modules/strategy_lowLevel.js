@@ -177,8 +177,20 @@ let pro = {
                 }
             }
 
-            // 如果内矿搬不动了生一个
-            if (room.creeps("carrier", false).length < 1 || carryTasks.length) {
+            // 搬运编制：与 highLevel 同一口径（源数 + keeper 数折半，2~3 只），**必须有上限**。
+            //
+            // 2026-10-22 实测 W26N58：原判断是 `carrier 数 < 1 || carryTasks.length`，而源容器
+            // 只要有能量 `carryTasks` 就非空 ⇒ 每 3 tick 派一只，22 小时攒到 **20 只搬运**，
+            // 其中 16 只空闲、19 只身上各抱着 500 能量（约 9,500 能量躺在爬身上没法用），
+            // 而 spawn 被这堆 400 能量的搬运长期占着 ⇒ **800 能量的 upgrader 永远排不上**，
+            // 升级速率卡在 6/tick（一只 upgrader 的 WORK 数）。
+            let sourceCnt = room.source ? room.source.length : 2;
+            let keeperCnt = room.creeps("harvestEnergyKeeper", false).length;
+            let carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
+            if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
+            let carrierCnt = room.creeps("carrier", false).length;
+            // 一只都没有时无条件补（死房自救）；否则只在没到编制且真有货要搬时才补
+            if (carrierCnt < 1 || (carryTasks.length && carrierCnt < carrierTarget)) {
                 StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
             }
 

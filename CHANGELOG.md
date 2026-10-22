@@ -1,3 +1,38 @@
+## v0.78.140 — Cap carriers in low-level rooms (they were spawned without a limit)
+
+Health check on the claimed W26N58, 22 hours after v0.78.139:
+
+    RCL3, progress 12,336 -> 113,507 / 135,000   (+5.97/tick, 6 WORK worth)
+    ticksToDowngrade back to 20,000 (the max)    - downgrade risk gone
+    bucket 10,000 (full), errorCount 0, used 13.8/20
+
+But the room had **20 carriers**, 16 of them idle, 19 holding 500 energy each - roughly 9,500
+energy parked on creeps that had nothing to do, while the upgrade container sat at 1,946/2,000 and the
+single upgrader could only burn 6 energy/tick.
+
+Cause: the low-level branch spawned a carrier whenever `carrier count < 1 || carryTasks.length`, and
+`carryTasks` is non-empty as long as the source containers hold anything. That is a spawn every 3 ticks,
+forever. Worse, each carrier costs 400 energy and occupies the spawn, so the 800-energy upgrader could
+never get a slot - the room was paying for carriers it could not use instead of upgrading.
+
+The carrier count is now bounded exactly like the high-level branch already did:
+
+    carrierTarget = clamp(ceil((sources + keepers) / 2), 2, 3)
+    +1 when the hive needs filling, still capped at 3
+    spawn only when carrierCnt < 1, or (carryTasks and carrierCnt < carrierTarget)
+
+For W26N58 that is 3 carriers for a 20 energy/tick income (3 x 500 per ~60 tick round trip = 25/tick),
+which frees the spawn and the energy for a second upgrader (`getBodyLowLevel()` gives 6 WORK per 800
+energy, so two of them double the upgrade rate). Surplus carriers are not recycled - they die naturally,
+as the codebase already does elsewhere.
+
+### Tests
+
+New `test/lowlevel-carrier-cap.test.cjs` (comment-stripped source): the bounded target formula, the spawn
+condition requiring `carrierCnt < carrierTarget`, no RCL8-style target of 7 in the low-level branch, the
+"no carrier at all" self-rescue path, and that `strategy_highLevel` keeps the same 2-3 formula.
+Negative controls: reverting to the unbounded condition, and raising the target to 7, each fail.
+
 ## v0.78.139 — The upgrade container must be fed before the tower
 
 Found while checking the newly claimed W26N58 (RCL3, no storage): `controller.progress` was frozen at
