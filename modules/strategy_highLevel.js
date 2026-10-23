@@ -352,22 +352,27 @@ let pro = {
         pro.pickTasksMap[room.name] = pickTasks;
 
 
+        // 分配升级的运送 —— **必须放在 StorageCarryEnergyTasks 门之外**。
+        //
+        // 2026-10-23 实测 W26N58（RCL4、刚建好 storage、还没有 link）：
+        // hive 已满（1300/1300）而房内无 link ⇒ `generatorCarryStorageEnergyTask`
+        // 返回空 ⇒ 下面整段 `if (StorageCarryEnergyTasks.length)` 被跳过 ⇒
+        // 升级容器长期 0/2000、upgrader 站在上面抱着 0 能量（ttl 只剩 220）、
+        // 控制器进度冻结在 115,043 二十多个 tick。这已经是同一类问题第三次出现
+        // （前两次在 strategy_lowLevel：塔抢走搬运、填充排在后面）。
+        //
+        // `fillRes` 自带「空手先去 storage 取货」的分支（prototype_creep.js:626），
+        // 所以这里给空手搬运也有效。
+        if (freeCarries.length) {
+            let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, freeCarries.head().getPartCnt(CARRY) * 50);
+            if (upgFill.length) freeCarries.pop().addTask(upgFill);
+        }
+
         if (StorageCarryEnergyTasks.length) {
             if (!freeCarries.length) return;
 
-            // 分配升级的运送
-            let task = StationUpgrade.generatorFillEnergyTask(room.name, freeCarries.head().getPartCnt(CARRY) * 50);
-            if (freeCarries.length && task.length)
-                freeCarries.pop().addTask(task);
-            if (!freeCarries.length) return;
-
-            //填权力巢
-            if (freeCarries.length && task.length)
-                freeCarries.pop().addTask(task);
-            if (!freeCarries.length) return;
-
             //填核弹人
-            task = StationCarry.generatorFillNukerTask(room);
+            let task = StationCarry.generatorFillNukerTask(room);
             if (freeCarries.length && task.length)
                 freeCarries.pop().addTask(task);
             if (!freeCarries.length) return;

@@ -39,4 +39,23 @@ assert.ok(/else\s*\{\s*let rest = StationUpgrade\.generatorFillEnergyTask\(/.tes
 // 反向保险：这段代码里空集合分支不能再出现 `else { }`（空分支）而吞掉任务。
 assert.ok(!/else\s*\{\s*\}/.test(code), "不能留空分支吞掉搬运任务");
 
+// ── ④ 高等级路径（strategy_highLevel）：升级补给不能挂在「storage 搬运任务」门后面 ──
+//
+// 2026-10-23 实测 W26N58（RCL4、刚建好 storage、还没有 link）：hive 已满 + 无 link
+// ⇒ `generatorCarryStorageEnergyTask` 返回空 ⇒ 整段 `if (StorageCarryEnergyTasks.length)`
+// 被跳过 ⇒ 升级容器 0/2000、upgrader 抱 0 能量、进度冻结 20+ tick。
+{
+    const highRaw = fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8");
+    const high = highRaw
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^[ \t]*\/\/.*$/gm, "");
+    const fillIdx = high.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, freeCarries.head()");
+    const gateIdx = high.indexOf("if (StorageCarryEnergyTasks.length) {");
+    assert.ok(fillIdx >= 0, "高等级路径必须给升级容器派补给");
+    assert.ok(gateIdx >= 0, "storage 搬运门应仍然存在（不能为了修这个把门删掉）");
+    assert.ok(fillIdx < gateIdx,
+        "升级补给必须在 `if (StorageCarryEnergyTasks.length)` **之前**：hive 满 + 无 link 时那个列表是空的，"
+        + "挂在里面就永远不会派（实测进度冻结）");
+}
+
 console.log("upgrade fill priority checks passed");

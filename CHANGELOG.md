@@ -1,3 +1,32 @@
+## v0.78.143 — Feeding the upgrade container must not hide behind the storage-carry gate
+
+Same failure shape as v0.78.139 and v0.78.140, now in the *high-level* economy path that W26N58 switched
+to once it finished its storage.
+
+Measured: `controller.progress` frozen at 115,043 for 20+ ticks, the upgrade container at 0/2000, the
+upgrader standing on it with 0 energy and 220 ticks to live, while two carriers walked around with 800
+energy each.
+
+Cause: `workerManagerAfterCarrier` assigns the upgrade-container fill inside
+`if (StorageCarryEnergyTasks.length)`. That list comes from `generatorCarryStorageEnergyTask`, and in a
+room whose hive is already full (1300/1300) **and which has no link yet** (RCL4-5) it is empty - so the
+whole block is skipped and nobody ever feeds the controller container. The low-level path had the same
+bug in a different place (v0.78.139: tower first; v0.78.140: spawn spam).
+
+The upgrade fill is now assigned **before** that gate, to the first free carrier. `fillRes` already
+handles an empty carrier by sending it to the storage first (`prototype_creep.js:626`), so no extra
+plumbing is needed. Rooms that have a link are unaffected: `generatorFillEnergyTask` returns nothing
+when an upgrade link exists, so this only adds work in linkless rooms.
+
+The duplicated assignment that used to hand the same task to two carriers inside the block went away with
+the move (one carrier per pass is enough: 800 energy lasts an upgrader ~130 ticks at 6 WORK).
+
+### Tests
+
+`test/upgrade-fill-priority.test.cjs` gained a case on `strategy_highLevel`: the
+`generatorFillEnergyTask` call must appear before `if (StorageCarryEnergyTasks.length)`, and that gate
+must still exist. Negative control: moving the block back inside the gate fails the assertion.
+
 ## v0.78.142 — The power switch now covers every burn call site
 
 Health check 19 hours later, and one thing did not add up: `Memory.marketSettings.powerSpawnOtherRooms`
