@@ -30,7 +30,7 @@ PowerCreep.prototype.renewMainRoom = function () {
     let room = this.mainRoom()
     if (room && room.my && room.powerSpawn) {
         if (!this.pos.isNearTo(room.powerSpawn)) {
-            this.moveTo(room.powerSpawn)
+            this.moveTo(room.powerSpawn, { reusePath: 25 })
         } else {
             if (OK == this.renew(room.powerSpawn)) {
                 this.popTask().execLastTask();
@@ -93,7 +93,7 @@ PowerCreep.prototype.OpStorage = function () {
         return;
     }
     if (!this.pos.inRangeTo(storage, 3)) {
-        this.moveTo(storage, { range: 3 });
+        this.moveTo(storage, { range: 3, reusePath: 25 });
         return;
     }
     let code = this.usePower(PWR_OPERATE_STORAGE, storage);
@@ -136,7 +136,7 @@ PowerCreep.prototype.OpSource = function () {
         return true;
     };
     if (!this.pos.inRangeTo(source, 3)) {
-        this.moveTo(source, { range: 3 });
+        this.moveTo(source, { range: 3, reusePath: 25 });
         stuck();
         return;
     }
@@ -200,7 +200,7 @@ PowerCreep.prototype.OpSpawn = function () {
         return;
     }
     if (!this.pos.inRangeTo(spawn, 3)) {
-        this.moveTo(spawn, { range: 3 });
+        this.moveTo(spawn, { range: 3, reusePath: 25 });
         return;
     }
     let code = this.usePower(PWR_OPERATE_SPAWN, spawn);
@@ -229,7 +229,7 @@ PowerCreep.prototype.OpTower = function () {
         return;
     }
     if (!this.pos.inRangeTo(tower, 3)) {
-        this.moveTo(tower, { range: 3 });
+        this.moveTo(tower, { range: 3, reusePath: 25 });
         return;
     }
     let code = this.usePower(PWR_OPERATE_TOWER, tower);
@@ -325,7 +325,7 @@ PowerCreep.prototype.OpPowerSpawn = function () {
         return;
     }
     if (!this.pos.inRangeTo(powerSpawn, 3)) {
-        this.moveTo(powerSpawn);
+        this.moveTo(powerSpawn, { reusePath: 25 });
     }
     this.usePower(PWR_OPERATE_POWER, powerSpawn);
 }
@@ -338,7 +338,7 @@ PowerCreep.prototype.OpFactory = function () {
         return;
     }
     if (!this.pos.inRangeTo(factory, 3)) {
-        this.moveTo(factory);
+        this.moveTo(factory, { reusePath: 25 });
     }
     this.usePower(PWR_OPERATE_FACTORY, factory);
 }
@@ -373,7 +373,7 @@ PowerCreep.prototype.OpExt = function () {
         return;
     }
     if (!this.pos.inRangeTo(container, 3)) {
-        this.moveTo(container, { range: 3 });
+        this.moveTo(container, { range: 3, reusePath: 25 });
         return;
     }
     let room = this.mainRoom();
@@ -411,7 +411,7 @@ PowerCreep.prototype.OpLab = function () {
         this.popTask().execLastTask();
     }
     if (!this.pos.inRangeTo(lab, 3)) {
-        this.moveTo(lab, { range: 3 });
+        this.moveTo(lab, { range: 3, reusePath: 25 });
         return;
     }
     this.usePower(PWR_OPERATE_LAB, lab);
@@ -441,7 +441,7 @@ PowerCreep.prototype.OpMineral = function () {
         return;
     }
     if (!this.pos.inRangeTo(mineral, 3)) {
-        this.moveTo(mineral, { range: 3 });
+        this.moveTo(mineral, { range: 3, reusePath: 25 });
     }
     this.usePower(PWR_REGEN_MINERAL, mineral);
 }

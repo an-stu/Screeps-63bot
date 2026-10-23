@@ -1,3 +1,32 @@
+## v0.78.146 — Moving creeps finally cache their paths (measured ~1 CPU/tick)
+
+CPU audit at average 18.2/20 with `unitRoles` showing `power:OPF` at 2.56 - the largest single line.
+Tracing it: twelve power creeps, eight of them parked on `goToNearPop`, five actually still walking
+(distances 6/10/24/25/30 to their target).
+
+`Creep.prototype.goToNearPop` ended with
+
+    else this.moveTo(position, { visualizePathStyle: ... })
+
+with **no `reusePath`**, so every one of them ran a fresh path search every tick. Measured directly in
+the console, same five creeps:
+
+    moveTo(position)                   1.105 CPU
+    moveTo(position, {reusePath: 30})  0.109 CPU
+
+Ten times cheaper for a target that never moves (storage / terminal / power spawn).
+
+Fixed in the same spirit:
+
+- `goToNearPop` and all ten `PowerCreep` operation handlers (`OpStorage`, `OpSource`, `OpSpawn`,
+  `OpTower`, `OpFactory`, `OpPowerSpawn`, `OpLab`, `OpMineral`, ...) get `reusePath: 25` - their targets
+  are all static structures;
+- the generic resource handlers (`fillRes`, the `carryRes`-style mover) and `build` get
+  `reusePath: 20`.
+
+Deliberately **not** changed: `goTo(obj)`, `pickup`, `recycle` and the border-escape helper - their
+targets can be moving or one-shot, where a cached path is wasted or wrong.
+
 ## v0.78.145 — Linkless rooms keep one spare carrier
 
 v0.78.144 restored the upgrade feed, but only while the room had two carriers. Sampling showed the room
