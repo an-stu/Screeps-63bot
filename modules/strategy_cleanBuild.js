@@ -49,8 +49,10 @@ Creep.prototype.cleanBuild=function () {
         //
         // 判据复用 StationSources.blueprintWalkableSet（蓝图内 road/container 的坐标集），
         // 与防御塔修路的过滤口径**同一份**，避免两处各写一套「什么算蓝图路」。
-        let plannedRoad = (room && room.memory && room.memory.structMap && room.memory.structMap[STRUCTURE_ROAD])
-            ? StationSources.blueprintWalkableSet(room)
+        // 原来写的是裸 `room`——本作用域里只有 flag/mainRoom，没有 room，
+        // 清理收尾阶段每 tick ReferenceError，修路/回填/升级全部失效。
+        let plannedRoad = (this.room && this.room.memory && this.room.memory.structMap && this.room.memory.structMap[STRUCTURE_ROAD])
+            ? StationSources.blueprintWalkableSet(this.room)
             : null;
         let struct = this.pos.findClosestByPath(FIND_STRUCTURES, {
             filter: e => e.structureType == STRUCTURE_ROAD && e.hits / e.hitsMax < 0.5

@@ -556,7 +556,9 @@ let pro = {
                     type: ORDER_BUY,
                     resourceType: RESOURCE_ENERGY,
                     price: price * (energyCnt > 150000 ? 0.90 : 0.94),
-                    totalAmount: 240000 - energyCnt,
+                    // energyCnt 在 [240k,250k) 区间时 240000-energyCnt ≤ 0：
+                    // createOrder 返回 ERR_INVALID_ARGS 每 100 tick 白调一次
+                    totalAmount: Math.max(30000, 240000 - energyCnt),
                     roomName: room.name,
                 })
             }
@@ -863,6 +865,8 @@ let pro = {
         let maxPrice = Game.market.credits / 100000
         if (marketMax && marketMax.price > maxPrice) return;// 如果价格太高不买
         if (myMax && !marketMax) return;// 如果只剩下自己的订单不做操作
+        if (!marketMax) return;// 市场完全没有 pixel 买单时（当前为死代码，
+        // 一旦重新启用：myMax 与 marketMax 同空会在下行 marketMax.price 抛错）
         let gap = Math.min(Math.max(0, (marketMax.price || 0) - (pro.lastPixelPrice || marketMax.price)) * 1.414, 100)
         if (!myMax || myMax.price <= (marketMax.price || 0) + gap + 0.01) {// 如果自己是最高价不改价格
             let price = (marketMax ? marketMax.price : 0) + gap + Math.random() * gap + 0.001

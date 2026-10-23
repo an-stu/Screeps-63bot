@@ -29,11 +29,19 @@ let pro = {
     },
     execRoom(flag) {
         // Game.powerCreeps.OPF1.memory = {role: "OPF",roomName:flag.pos.roomName,tasks:[]}
+        // 提示日志按旗节流（每 300 tick 一条）：房间失视野/RCL<8 期间
+        // 这些分支每 3 tick 刷一条，无限刷屏烧 CPU
+        let hint = msg => {
+            if (Game.time - (flag.memory.lastHintTick || 0) > 300) {
+                flag.memory.lastHintTick = Game.time;
+                console.log(flag.name + ": " + msg)
+            }
+        };
         let room = flag.room;
-        if (!room || !room.my) return console.log(flag.name + ":不是自己的房间")
-        if (!room.powerSpawn) return console.log(flag.name + ":没有 PowerSpawn")
+        if (!room || !room.my) return hint("不是自己的房间")
+        if (!room.powerSpawn) return hint("没有 PowerSpawn")
         let pc = Game.powerCreeps[flag.getNameSplit()[1]]//pro.getPowerCreep(room,flag);
-        if (!pc) return console.log(flag.name + ":没有创建 PowerCreep")
+        if (!pc) return hint("没有创建 PowerCreep")
         // spawnCooldownTime is the timestamp when spawning becomes available.
         if (!pc.ticksToLive && (!pc.spawnCooldownTime || pc.spawnCooldownTime <= Date.now())) {
             pc.spawnPowerCreep(room.powerSpawn, "OPF", flag.pos.roomName)

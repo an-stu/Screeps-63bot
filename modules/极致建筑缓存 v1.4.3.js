@@ -319,6 +319,9 @@ for (let type of RESOURCES_ALL) {
     Object.defineProperty(Room.prototype, type, {
         get () {
             if (last_fetch_time < Game.time) {
+                // 原来读完从不更新 last_fetch_time：条件恒真，每 tick 每次访问
+                // 都重算 reduce，per-tick 缓存形同虚设（set 写入的值下一次读即被冲掉）
+                last_fetch_time = Game.time;
                 return sum = this.mass_stores.reduce(reduce_f, 0);
             } else {
                 return sum;

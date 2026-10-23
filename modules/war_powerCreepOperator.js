@@ -103,6 +103,9 @@ Creep.prototype.registerHealerPowerCreep=function () {
 Creep.prototype.healerPowerCreep=function () {
     let task= this.headTask();
     let flag = Game.flags[task.id];
+    // PCAtk 旗被删后 healer 任务仍在：无守卫每 tick TypeError，
+    // 治疗 PC 完全瘫痪且任务永远弹不掉
+    if(!flag) return this.popTask().execLastTask();
     if(flag.powerCreep)flag=flag.powerCreep// 直接变成pc
     this.heal(this);
     this.moveTo(flag);

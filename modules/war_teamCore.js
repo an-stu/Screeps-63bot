@@ -200,7 +200,11 @@ let action = {
         flag._creeps.forEach(e=>{
             let pos = e.pos.crossRoomSubPos(originPos)
             // HelperVisual.showText(e,pos.x+" "+pos.y)// 如果出现 2 和 -1的情况说明在边界并且下一tick不会重合
-            flag._directCreeps[MASK_POS_MAP[pos.x][pos.y]] = e
+            // 小队跨房门 / 非标准队形时差值会出现 -1/2，MASK_POS_MAP 只有 0/1：
+            // 裸查表 undefined 下标抛 TypeError，该旗当 tick 全队停摆。越界爬
+            // 本 tick 不参与队形标记。
+            const mark = MASK_POS_MAP[pos.x] && MASK_POS_MAP[pos.x][pos.y];
+            if (mark) flag._directCreeps[mark] = e
         })
     },
     /**

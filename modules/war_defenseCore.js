@@ -33,7 +33,9 @@ Creep.prototype.defenseAttacker=function () {
     if(target&&this.room.my){
         this.room.tower.forEach(e=>e.attack(target))
         this.moveTo(target);
-        let healer = Game.getObjectById(flag.memory.healer)
+        // 旗可能已被 exec 删除（房间不可见/敌情消失 200 tick），41 行有
+        // flag 守卫而这里没有——补上，否则敌爬路过即抛 TypeError
+        let healer = flag && Game.getObjectById(flag.memory.healer)
         if(healer)healer.moveTo(this)
     }
     // flag.memory.changeTime= 0

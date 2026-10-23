@@ -1522,8 +1522,11 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         //     carrier 会在主房与矿区之间来回搬 10 能量的碎货（实测一只
         //     shard3_83402075_3 一直往返挂机）。
         // 两个上限都只为「绝不楔死」：keeper 活着但被打跑/卡住时到点就撤。
-        if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-            let cont = sm && Game.getObjectById(sm[STRUCTURE_CONTAINER]);
+    // 只在**已到矿区**后才计等待：出库途中身上带着顺路捡的能量时
+    // carryWait 也会累积，到上限就在半路掉头回家送几十能量、再重新出库，
+    // 白跑一个往返（OUTER_CARRY_*_WAIT 的语义是"在容器边等"）。
+    if (task.roomName == this.room.name && this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+        let cont = sm && Game.getObjectById(sm[STRUCTURE_CONTAINER]);
             let dry = !cont || !(cont.store[RESOURCE_ENERGY] > 0);
             this.memory.carryWait = (this.memory.carryWait || 0) + 1;
             let limit = (keeperAlive || !dry) ? OUTER_CARRY_FILL_WAIT : OUTER_CARRY_DRY_WAIT;
@@ -3544,7 +3547,12 @@ let pro = {
                     ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
                 let bodyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(),
                     Math.max(spawnAvail, 550));
-                let isNearToAny = carrierCreeps.filter(e => e.pos.isNearTo(container)).head()
+                // container 被拆/衰减消失时 getObjectById 返回 null，
+                // isNearTo(null) 走 target.pos 解引用直接抛 TypeError——
+                // 异常会打断本轮 exec 的旗子循环，该矿点之后的矿点维护/
+                // 补员以及后续旗子的防守生产全部跳过。null 时语义即
+                // "没有车在容器边"，应放行补员。
+                let isNearToAny = container ? carrierCreeps.filter(e => e.pos.isNearTo(container)).head() : undefined
                 if (CarryPartCnt > 0 && !isNearToAny) {
                     let carrierBody = carrierBuildCreep ?
                         pro.getOuterHarCarrierBodyConfig(bodyBudget, maxPart)

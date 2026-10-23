@@ -44,7 +44,9 @@ let BASE_BATCH_SIZE =  30  // 无等级合成的批次
 let BASE_COMPRESSION_RESERVE = 2000
 let BAR_BATCH_SIZE =  6  // 压缩商品 合成的批次
 
-let minimum_compression_requires_energy_cnt = 7000000 // 压缩电池的阈值 0.7m
+// 原来写成 7000000（注释 0.7m）：roomMassStoreCnt 上限 = storage 100 万 +
+// terminal 30 万 = 130 万，700 万永远不可达 ⇒ 压缩电池分支是死代码。
+let minimum_compression_requires_energy_cnt = 700000 // 压缩电池的阈值 0.7m
 let minimum_decompression_requires_energy_cnt = 130000 // 解压的阈值 0.13m
 let maximum_battery_cnt = 100000
 // 压缩资源的列表
@@ -188,7 +190,9 @@ let pro={
         let energyCnt = StationCarry.roomMassStoreCnt(room,RESOURCE_ENERGY);
         let batteryCnt = StationCarry.roomMassStoreCnt(room,RESOURCE_BATTERY);
         if(energyCnt>minimum_compression_requires_energy_cnt && batteryCnt < maximum_battery_cnt)
-            return {produceResType:RESOURCE_BATTERY,needs:[[RESOURCE_ENERGY,6000]]}
+            // factory 的能量容量是 FACTORY_CAPACITY=5000：需求 6000 会让 STAT_FILL
+            // 的完成判定（factoryCnt>=needs）永不满足，状态机永久卡死。
+            return {produceResType:RESOURCE_BATTERY,needs:[[RESOURCE_ENERGY,4800]]}
         if(energyCnt<minimum_decompression_requires_energy_cnt&&batteryCnt>=300)
             return {produceResType:RESOURCE_ENERGY,needs:[[RESOURCE_BATTERY,300]]}
         return undefined;

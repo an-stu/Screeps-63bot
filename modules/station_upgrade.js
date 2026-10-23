@@ -102,7 +102,9 @@ Creep.prototype.unregisterStationUpgrade = function () {
 
 Creep.prototype.concatStationUpgrade = function () {
     let rm = Memory.rooms[this.headTask().roomName];
-    if (rm) {
+    // 记忆被清/房间刚易主时 station 记忆不存在；data["spawnTime"] 缺失会让
+    // pathTime 为 NaN 并写回污染后续判据。三重守卫后才动数据。
+    if (rm && rm[pro.stationName] && rm[pro.stationName]["spawnTime"]) {
         let data = rm[pro.stationName];
         let pathTime = Game.time - data["spawnTime"];//（出生时间 - 接触时间 = 移动时间）
         data["spawnTime"] -= pathTime + this.body.length * 3;// （移动时间）+ 生的时间  无缝衔接
@@ -155,10 +157,12 @@ Creep.prototype.upgrade = function () {
     if (this.store[RESOURCE_ENERGY] == 0 || this.mainRoom().controller.upgradeBlocked) {
         this.popTask();
         this.execLastTask();
+        return; // 弹栈后必须返回：继续执行会让 ttl 分支再弹一次，误删刚压入的下一个任务
     }
     if (this.ticksToLive % 300 == 0 && this.room.find(FIND_CONSTRUCTION_SITES).length > 0) {// 如果有工地则不升级
         this.popTask();
         this.execLastTask();
+        return;
     }
     if (this.ticksToLive % 3 == 0)
         this.memory.dontPullMe = false;
@@ -171,6 +175,13 @@ Creep.prototype.upgradeKeeper = function () {
     let obj = this.lastTaskObj();
     let mainRoom = this.mainRoom();
     let ms = mainRoom.memory[pro.stationName];
+    // 记忆被清/房间易主瞬间 ms 为 undefined：196 行裸取 ms["link"] 抛
+    // TypeError 让整只 upgrader 每 tick 中断。无记忆时只做升级本体。
+    if (!ms) {
+        let code0 = this.upgradeController(obj);
+        if (code0 == ERR_NOT_IN_RANGE) this.moveTo(obj, { range: 3 });
+        return;
+    }
     if (ms && this.ticksToLive < (ms.pathTime || 0) * 1.5) {// 如果寿命将近
         if (!this.memory.unboostCheck && this.memory.needUnboost) {
             let tasks = StationLab.generatorUnboostTask(mainRoom);

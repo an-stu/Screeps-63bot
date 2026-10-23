@@ -25,7 +25,11 @@ Creep.prototype.concatStationMineral = function () {
     if (rm && !this.concated) {
         this.concated = true
         let data = rm[pro.stationName];
-        data["spawnTime"] -= Game.time - data["spawnTime"] - 10;// 出生时间 - 接触时间 这样下次走到那边就可以刚刚好前面那只死掉,再缓冲 10tick
+        // update() 会在 extractor 消失时整条删除 stationMineral 记忆，
+        // data 缺失时跳过记账（concated 已置位不会重复进入）
+        if (data && data["spawnTime"]) {
+            data["spawnTime"] -= Game.time - data["spawnTime"] - 10;// 出生时间 - 接触时间 这样下次走到那边就可以刚刚好前面那只死掉,再缓冲 10tick
+        }
     }
     this.popTask();
     this.execLastTask();
@@ -39,6 +43,14 @@ Creep.prototype.harvestMineralKeeper = function () {
     } else {
         let mineral = Game.getObjectById(task["id"]);
         let station = this.room.memory[pro.stationName];
+        // update() 删除 stationMineral 后仍存活的 keeper 会在这里拿不到
+        // station：弹任务回家回收，否则每 tick TypeError、爬原地站到老死
+        if (!station || !station["container"]) {
+            this.popTask()
+                .addTask([UtilsTask.taskData("recycleCreep")])
+                .execLastTask();
+            return;
+        }
         let container = Game.getObjectById(station["container"]);
         if (container && !container.pos.isEqualTo(this)) {
             this.addTask(UtilsTask.task(container, "concatStationMineral"));
@@ -49,7 +61,9 @@ Creep.prototype.harvestMineralKeeper = function () {
         let stock = pro.getMineralStock(this.room, station);
         if (this.ticksToLive % 6 == 0) {
             if (container && container.store.getFreeCapacity(station.resType) > 80) {
-                if (mineral && mineral.amount == 0) {
+                // Mineral 的属性是 mineralAmount（amount 是 Deposit 的，
+                // 原写法永为 undefined，采尽后的回收/自杀分支是死代码）
+                if (mineral && mineral.mineralAmount == 0) {
                     if (this.ticksToLive > 600) {
                         this.popTask()
                             .addTask([UtilsTask.taskData("recycleCreep")])

@@ -6,8 +6,11 @@
 Creep.prototype.registerDefenseHighWay=function () {
     if(this.spawning){
         let flag = this.headTaskFlag();
-        if(flag)flag.memory.spawnTime = Game.time
-        flag.memory.creep = this.id
+        // 旗被删后 headTaskFlag 无 head：裸取 flag.memory 每 tick 抛 TypeError
+        if(flag){
+            flag.memory.spawnTime = Game.time
+            flag.memory.creep = this.id
+        }
     }
 };
 
@@ -105,7 +108,9 @@ let pro = {
         if(!room.storage)return;
         room.flags("defenserHighWay").forEach(flag=>{
             if(flag.memory.spawnData){
-                if(StationHive.trySpawn(room, room.name,flag.memory.spawnData.body , "raL1", flag.memory.task)){
+                // 任务存在 spawnData.task 里（checkDefense 写入的 {task, body}），
+                // 原来读 flag.memory.task（从未赋值）⇒ 出生即无任务、站到死
+                if(StationHive.trySpawn(room, room.name,flag.memory.spawnData.body , "raL1", flag.memory.spawnData.task)){
                     delete flag.memory.spawnData
                     flag.memory.spawnDefenseTime=Game.time+1200
                 }

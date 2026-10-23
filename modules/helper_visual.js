@@ -71,6 +71,9 @@ let pro = {
         if (structMap["road"])
             Utils.decodePosArray(structMap["road"]).forEach(e => roomStructs.set(e.x, e.y, "road"))
         _.keys(CONTROLLER_STRUCTURES).forEach(struct => {
+            // 低等级蓝图只保存了实际存在的结构类型键（saveStructMap 按需写入），
+            // link/lab/nuker 等键缺失时 decodePosArray(undefined) 直接抛 TypeError
+            if (!structMap[struct]) return;
             if (struct == "road") {
                 Utils.decodePosArray(structMap[struct]).forEach(e => {
                     roomStructs.forNear((x, y, val) => {

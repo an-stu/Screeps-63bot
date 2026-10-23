@@ -36,7 +36,9 @@ Creep.prototype.minRoomUpgrade=function () {
     this.minRoomAutoPick()
     let spawn = this.room.spawn.filter(e=>e.pos.isNearTo(flag)).head();
     let renew = "ERR"
-    if(this.ticksToLive<1480&&((this.lastTask().lastRenewTimes||0)<=3)){//&&((this.lastTask().lastSpawnTime||0)<Game.time)
+    // 旗旁 spawn 未建成/被拆而别处有 spawn 时 head() 为 undefined，裸调
+    // renewCreep 抛 TypeError 中断整个 minSizeRoom pass（43 行已有同款守卫）
+    if(this.ticksToLive<1480&&spawn&&((this.lastTask().lastRenewTimes||0)<=3)){//&&((this.lastTask().lastSpawnTime||0)<Game.time)
         renew = spawn.renewCreep(this)
     }
     // this.say(renew)

@@ -54,7 +54,10 @@ let pro={
         pro.getAllAlivePowerCreeps().forEach(pc=>{
             let pcPower = pc.powers[PWR_GENERATE_OPS]//
             if(pcPower&&!pcPower.cooldown){
-                let opsCnt = POWER_INFO[PWR_GENERATE_OPS].effect[pcPower.level-1]
+                // effect 数组与 level 平行（0~4），level 0 也要能产 ops：
+                // 原来用 level-1，level 0 取 effect[-1] 为 undefined，
+                // `freeCap >= undefined` 恒 false —— 该 PC 永远不产 ops。
+                let opsCnt = POWER_INFO[PWR_GENERATE_OPS].effect[pcPower.level]
                 let freeCap = pc.store.getFreeCapacity(RESOURCE_OPS)
                 if(freeCap>=opsCnt){
                     pc.usePower(PWR_GENERATE_OPS)

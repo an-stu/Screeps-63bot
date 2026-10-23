@@ -287,6 +287,8 @@ let pro = {
             // 再堵再熔断。已在矿区里干活的爬不受影响。
             let stuckCnt = 0;
             room.find(FIND_MY_CREEPS).forEach(c => {
+                if (c.spawning) return; // 孵化中的爬 pos 不动是正常的：50 部件要 150 tick，
+                // 计入 stuckCnt 会凭空堆数、误触发 600 tick 全矿熔断
                 let t = c.headTask && c.headTask();
                 if (!t || t.roomName != targetRoomName) return;
                 let m = c.memory.outerStuck;

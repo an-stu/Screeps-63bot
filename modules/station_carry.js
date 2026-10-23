@@ -304,7 +304,10 @@ let pro = {
         let fillGate = wantBurn
             ? (energyCnt > 30000 && powerCnt > 0)
             : (energyCnt > 170000 && powerCnt > 1000 || energyCnt > 100000 && powerCnt > 6000
-                || energyCnt > 100000 && powerCnt > 100 && room.powerSpawn.effects && room.powerSpawn.effects.length);
+                // fillGate 在下面 powerSpawn 存在性检查**之前**求值：RCL<8 或
+                // powerSpawn 被拆时 room.powerSpawn 为 undefined，裸取 .effects
+                // 会抛 TypeError 打断整个派发 pass。
+                || energyCnt > 100000 && powerCnt > 100 && room.powerSpawn && room.powerSpawn.effects && room.powerSpawn.effects.length);
         if (room.level >= 8 && room.storage && room.terminal && room.powerSpawn
             && (!room.used[room.powerSpawn.id] || continuous) && fillGate) {
             let powerNeed = room.powerSpawn.store.getFreeCapacity(RESOURCE_POWER);

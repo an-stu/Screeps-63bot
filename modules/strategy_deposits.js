@@ -144,6 +144,10 @@ Creep.prototype.carryDeposit = function () {
             if (flag.memory.harvesters.length == 0 && deposit && deposit.lastCooldown >= maxCoolDown()) {
                 flag.memory.waitTime = (flag.memory.waitTime || 0) + 1
             }
+            // 有 harvester 在册（新任务重建/换班到位）时清零：waitTime 只增不清
+            // 会让收尾期的 carrier 一到场就被 >100 门槛赶回家，最后一批
+            // 已采矿物没人搬、随 harvester 老死丢失。
+            else if (flag.memory.harvesters.length) flag.memory.waitTime = 0
         }
         if (this.ticksToLive < (flag.memory.pathTime || 600) * 1.2 || this.storeFull() || flag.memory.waitTime > 100) {// 回家
             flag.memory.carriers = flag.memory.carriers || []
@@ -154,6 +158,9 @@ Creep.prototype.carryDeposit = function () {
             this.addTask([UtilsTask.taskData("recycleCreep")])
             this.fillAllMainRoomStorage();
             this.execLastTask();
+            // 回家决定必须立即生效：继续执行会捡墓碑/掉落物压栈、
+            // moveTo 覆盖 recycle 当 tick 的移动意图，多绕路推迟回收
+            return;
         }
 
         if (this.ticksToLive % 20 == 0) {
@@ -260,8 +267,10 @@ let pro = {
             if (!flag.memory.walkableAroundCnt) {
                 flag.memory.walkableAroundCnt = Math.min(flag.pos.walkableAroundCnt(), 3)
             }
+            // MIST 价值低要"减半少挖"：原来第三个析取支与外层条件重复恒真，
+            // 减半意图从未生效 —— MIST 用一半的冷却窗口。
             if (Game.time < flag.memory.disappearTime && flag.memory.lastCooldown < maxCoolDown()
-                && (flag.memory.depositType != RESOURCE_MIST || flag.memory.lastCooldown < maxCoolDown())) {// 如果是mist减半，少挖点，没啥用
+                && (flag.memory.depositType != RESOURCE_MIST || flag.memory.lastCooldown < maxCoolDown() / 2)) {// 如果是mist减半，少挖点，没啥用
                 // ⚠️ 挨打后的「停 1200 tick」**只能挡住还没派人的任务**，不能停一个
                 // 已经在干的任务（用户 10-10 明确要求：任务要么不做，要么做完，
                 // 不许中途暂停 —— 停了就永远完不成）。

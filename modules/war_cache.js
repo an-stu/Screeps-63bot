@@ -31,7 +31,13 @@ let pro={
         else if(Game.rooms[roomName]){ // 如果房间看得见就刷新缓存
             cacheTowerRoomArray[roomName+'_time']=Game.time
             let towers = Game.rooms[roomName].getStructures().filter(e=>e.structureType==STRUCTURE_TOWER)
-            if(towers.length==0)return emptyRoomArray;
+            if(towers.length==0){
+                // 塔全灭后清掉记忆与缓存：否则旧 list 永不清洗，房间失明后
+                // 寻路继续按"满编塔"回避，直到 TTL 或新塔出现才恢复
+                if(Memory.rooms[roomName])delete Memory.rooms[roomName].tower
+                delete cacheTowerRoomArray[roomName]
+                return emptyRoomArray;
+            }
             let processed = towers.map(e=>{
                 let effect = 1;
                 if(e.effects){
@@ -47,9 +53,12 @@ let pro={
             Memory.rooms[roomName] = Memory.rooms[roomName]||{}
             if(!Memory.rooms[roomName].tower)Memory.rooms[roomName].tower = towers.map(e=>e.id)
             if(Memory.rooms[roomName].tower&&Memory.rooms[roomName].tower.list){
-                let ids = processed.map(e=>e.id+e.work+e.effects)
-                let oldIds = Memory.rooms[roomName].tower.list.map(e=>e.id+e.work+e.effects)
-                if (ids.length!=oldIds.length||!ids.contains(...oldIds)) { // 如果id改了,或者数量不对
+                // 变更键用 effect（processed 的字段名）；比较改为逐元素：
+                // contains 只收单参，spread 只传第一个 —— 数量不变但替换
+                // （拆一建一）时漏报，塔伤图不重建
+                let ids = processed.map(e=>e.id+e.work+e.effect)
+                let oldIds = Memory.rooms[roomName].tower.list.map(e=>e.id+e.work+e.effect)
+                if (ids.length!=oldIds.length||oldIds.some(o=>!ids.includes(o))) { // 如果id改了,或者数量不对
                     cacheTowerRoomArray[roomName] = pro.createTowerDamageMap(processed)
                 }
             }

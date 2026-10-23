@@ -325,6 +325,8 @@ let main = function () {
     else {
         let objects = getTickObjects();
         if (!MIN_CPU && shouldRunPowerCreeps()) HelperError.runEach(objects.powerCreeps, e => e.spawning || (e.ticksToLive && e.execLastTask()));
+        // 桶见底（bucket<=40）极限分支刻意保留严格白名单（见测试钉子）：
+        // 此时只保战斗与核心搬运，未列出角色让位——与 MIN_CPU 的白名单语义不同。
         HelperError.runEach(objects.creeps.filter(e => ROLE_PRIORITY[e.memory.role] > 0), e => e.spawning || e.execLastTask());
     }
     let afterWorkStart = Game._coreCpuProfile ? Game.cpu.getUsed() : 0;

@@ -86,7 +86,9 @@ Creep.prototype.raL1=function () {
         if(!em)em = flag.room&&flag.pos.lookFor(LOOK_STRUCTURES).find(e=>!e.my && e.structureType !== STRUCTURE_CONTAINER)
         if(!em) em=this.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES,{range:3,filter:e=>e.hits&&e.structureType!=STRUCTURE_WALL&&e.structureType!=STRUCTURE_POWER_BANK&&!e.pos.coverRampart()});
         if(!em){
-            em=this.pos.findClosestByPath(FIND_HOSTILE_CREEPS,{filter:e=>e.body.length>2&&e.body.find(e=>e.type==RANGED_ATTACK)&&!e.pos.coverRampart()&&e.owner.name !== 'lp136'});//
+            // owner 是 {username} 对象：原写法 e.owner.name 恒 undefined，
+            // 白名单豁免（lp136）完全无效，raL1 会照打白名单玩家
+            em=this.pos.findClosestByPath(FIND_HOSTILE_CREEPS,{filter:e=>e.body.length>2&&e.body.find(e=>e.type==RANGED_ATTACK)&&!e.pos.coverRampart()&&e.owner.username !== 'lp136'});//
             if(em)isHostileCreep = true;
         }
         if(!em){

@@ -104,10 +104,15 @@ Creep.prototype.balanceTerminalResource = function () {
 
 
 Creep.prototype.roomStorageEmpty = function () {
+    // 终止决定（清空/寿命/旗撤/无 terminal）必须立即 return：
+    // 原来弹完任务没有 return，下面立刻又把搬运任务加回栈里，
+    // "清空 storage"的停止水位和 ttl 保护当场被推翻。
     if (pro.checkEmptyStorage(this.room) || this.ticksToLive < 30
+        || !this.room.terminal
         || !this.room.find(FIND_FLAGS).filter(e => e.getPrefix() == "storageEmpty").head()) {
         this.popTask();
         this.execLastTask();
+        return;
     }
     if (this.room.terminal.store.getUsedCapacity(RESOURCE_ENERGY) < 50000) {
         let ops = {
@@ -396,7 +401,9 @@ let pro = {
                 if (!resType) resType = RESOURCE_ENERGY
                 let energyCnt = room.terminal.store[RESOURCE_ENERGY];
                 if (!energyCnt) return;
-                let amount = Math.min(energyCnt / 2, room.terminal.store[resType])
+                // send 不接受非整数 amount（奇数能量 /2 出 x.5 时 ERR_INVALID_ARGS
+                // 每 10 tick 白试一次），取整。
+                let amount = Math.floor(Math.min(energyCnt / 2, room.terminal.store[resType]))
                 if (roomName == "random") amount = Math.min(amount, 10000)
 
                 let code = room.terminal.send(resType, amount, targetRoom.name)

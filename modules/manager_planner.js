@@ -997,6 +997,8 @@ let pro={
         oriStruct.forEach(struct=>{
             let e = spawnPos.shift()
             if(!e) e = extensionPos.shift()
+            // 畸形地形（中心可放位置极少）时两个队列可能同时耗尽
+            if(!e) return;
             structMap[struct].push([e[0],e[1]])
             putList.push([e[0],e[1],struct])
         })

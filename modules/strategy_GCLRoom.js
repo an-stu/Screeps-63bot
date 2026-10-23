@@ -288,7 +288,11 @@ let pro = {
 
     },
     getUpgraderCntNeed(flag,room){
-        if(room._upgraderCntNeed!==undefined){
+        // room 对象每 tick 重建，_upgraderCntNeed 是 per-tick 缓存：首次调用时
+        // 必然不存在，应在此**计算**；原判据写成 !==undefined，导致永远跳过、
+        // 返回 undefined，execSpawn 里 `upgraderCnt < undefined` 恒 false ——
+        // GCL 房的 upgrader 一只都生不出来。
+        if(room._upgraderCntNeed===undefined){
             let upgraderCntNeed = room.storage?(room.storage.store[RESOURCE_ENERGY]/70000):2
             if(room.level>=8)upgraderCntNeed = 0
             // else if(room.level>=7&&flag.centerCarrier)upgraderCntNeed = Math.min(upgraderCntNeed,12)

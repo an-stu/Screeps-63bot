@@ -39,7 +39,9 @@ let pro = {
         if ((Game.time + room.hashCode()) % 3 != 0) {
             return
         }
-        if (room.spawn.length && room.find(FIND_HOSTILE_CREEPS).filter(e => e.body.filter(e => e != MOVE).length).length) {// 如果有敌人的爬且不是侦察兵
+        // 内层变量原来遮蔽外层：部件对象与字符串 MOVE 比较恒不等，
+        // 过滤器形同虚设——纯 MOVE 侦察兵也会触发防御生产。
+        if (room.spawn.length && room.find(FIND_HOSTILE_CREEPS).filter(e => e.body.filter(p => p.type != MOVE).length).length) {// 如果有敌人的爬且不是侦察兵
             if (room.creeps("lowLevelDefense").length < 3 && room.tower.length == 0) pro.trySpawnLowLevelDefense(room)
         }
         // if ((room.getEnergyCapacityAvailable(room) < 800 || (room.storage && !room.storage.my))) {
@@ -142,7 +144,10 @@ let pro = {
             // 会一路派到十几只 upgrader，每只要 800 能量，而本房收入只有 ~20 能量/tick。
             // 3 只 × 6 WORK = 18/tick 正好吃满收入，再多为纯浪费（占 spawn 槽 + CPU）。
             // 计数用 `spawned=false`（**含孵化中**），否则连派。
-            if (Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER])) {
+            // station 记忆由 refreshRoom（每 61 tick 错峰）首次写入：新占房在
+            // 首次 refresh 前该键不存在，裸取 [STRUCTURE_CONTAINER] 抛 TypeError
+            // 让整个 lowLevel pass 中断到多 61 tick。
+            if (room.memory[StationUpgrade.stationName] && Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER])) {
                 let upgCnt = room.creeps("upgrader", false).length;
                 let loadedFree = room.creeps("carrier").filter(e => e.isFree() && e.store[RESOURCE_ENERGY] > 0).length;
                 if (upgCnt == 0 || (upgCnt < 3 && upgCnt < loadedFree - 1)) {

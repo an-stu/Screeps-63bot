@@ -115,10 +115,15 @@ Creep.prototype.registerBoostCreep=function () {
 
 Creep.prototype.boostCreepBodyPart = function () {
     let task = this.lastTask();
-    // 缺 boost 资源时不能无限等待：超过期限就放弃 boost，恢复普通工作
-    // （W33N53/W34N52 的 worker 曾被永久卡在 boostCreepBodyPart，路没人修）。
-    // 旧任务没有 boostExpire 时在此补上期限，避免历史卡死无法自愈。
-    if (!task.boostExpire) task.boostExpire = Game.time + 50;
+    // 期限锚定在**首次执行**：任务创建时写入的 boostExpire 会被排队等待吃掉
+    // ——单 spawn 房 PB 团队的第二只（healer）要等第一只出生完才开始造，
+    // 200 tick 窗口经常在执行前就耗尽，一进场就被判过期、裸奔出门送死。
+    // 首次执行时重锚到完整 200 tick（防卡死的兜底语义不变）；旧任务没有
+    // boostStart 字段，同样走这里补锚，历史卡死仍能自愈。
+    if (!task.boostStart) {
+        task.boostStart = Game.time;
+        task.boostExpire = Game.time + 200;
+    }
     if (Game.time > task.boostExpire) {
         this.memory.isBoost = false;
         this.popTask().execLastTask();
@@ -206,6 +211,10 @@ let pro={
         if(!obj["centerLabs"]||!obj["centerLabs"].length)return false;
         let fillingRes = {}
         if(obj["stat"]=='fill'){ // 填充的时候要
+            // 手工复位（delete memory.stationLab.reacting）会留下
+            // stat=='fill' 而 reacting 为空的组合：裸查 LAB_REACTIONS[undefined]
+            // 抛 TypeError，之后每次 spawn 规划调 boostAble 都炸
+            if(!obj["reacting"])return false;
             let a = LAB_REACTIONS[obj["reacting"]][0]
             let aCnt = (Game.getObjectById(obj["centerLabs"][0]).store[a]||0)
             fillingRes[a] = 3000 - aCnt

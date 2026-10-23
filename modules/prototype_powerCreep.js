@@ -339,8 +339,14 @@ PowerCreep.prototype.OpFactory = function () {
     }
     if (!this.pos.inRangeTo(factory, 3)) {
         this.moveTo(factory, { reusePath: 25 });
+        return;
     }
-    this.usePower(PWR_OPERATE_FACTORY, factory);
+    // ops 不足（ERR_NOT_ENOUGH_RESOURCES）时冷却不变、任务不弹 ⇒ 原写法
+    // 下一 tick 原样重试，PC 在任务栈上永久卡死（isFree 恒 false，
+    // needGetOps 再也轮不到）。非 OK 且非 NOT_IN_RANGE 一律弹栈，
+    // 与 OpSpawn/OpTower 的处理保持一致。
+    let code = this.usePower(PWR_OPERATE_FACTORY, factory);
+    if (code != OK && code != ERR_NOT_IN_RANGE) this.popTask().execLastTask();
 }
 
 PowerCreep.prototype.needOpExt = function () {
@@ -409,6 +415,7 @@ PowerCreep.prototype.OpLab = function () {
     let lab = this.lastTaskObj();
     if (pcPower.cooldown > 0 || !lab) {
         this.popTask().execLastTask();
+        return; // 原来缺 return：弹栈后继续用已失效的 lab 走 move/usePower
     }
     if (!this.pos.inRangeTo(lab, 3)) {
         this.moveTo(lab, { range: 3, reusePath: 25 });
@@ -442,6 +449,10 @@ PowerCreep.prototype.OpMineral = function () {
     }
     if (!this.pos.inRangeTo(mineral, 3)) {
         this.moveTo(mineral, { range: 3, reusePath: 25 });
+        return;
     }
-    this.usePower(PWR_REGEN_MINERAL, mineral);
+    // 与 OpFactory 同理：ops 耗尽返回 ERR_NOT_ENOUGH_RESOURCES 时必须弹栈，
+    // 否则 PC 永久卡死在本任务上（needGetOps 永远轮不到）。
+    let code = this.usePower(PWR_REGEN_MINERAL, mineral);
+    if (code != OK && code != ERR_NOT_IN_RANGE) this.popTask().execLastTask();
 }

@@ -271,6 +271,14 @@ let pro={
         })
 
         let roomManor = pro.updateWall(room,structMap)
+        // updateWall 在墙体圈不完整（WallError）时返回 undefined：继续跑
+        // createRoads 会对 undefined.forEach 抛错，跳过末尾的 s.remove()，
+        // saveBlueprint 旗子卡死、每 tick 重复报错。此时直接弃旗退出。
+        if(!roomManor){
+            console.log("saveBlueprint: 围墙不完整，放弃保存并移除旗标")
+            s.remove();
+            return;
+        }
         pro.createRoads(room,roomManor,structMap)
 
         // pro.showRoomStructures(room.name,structMap)
@@ -430,7 +438,9 @@ let pro={
     showRoom (){
         let show = Game.flags.showBlueprint;
         if(show){
-            if(Memory.rooms[show.pos.roomName].structMap)
+            // showBlueprint 可以插在无视野房间；TTL 清扫会删掉不可见房间的
+            // Memory.rooms 条目，之后裸取 .structMap 每 tick 抛 TypeError
+            if(Memory.rooms[show.pos.roomName] && Memory.rooms[show.pos.roomName].structMap)
                 HelperVisual.showRoomStructures(show.pos.roomName,Memory.rooms[show.pos.roomName].structMap)
         }
     },
@@ -446,7 +456,10 @@ let pro={
                 },f.pos.x,f.pos.y,size)
             })
             roomArray.forEach((x,y,val)=>{
-                if(val) HelperVisual.showText(Game.flags.pa.pos.roomName,"*",{x:x,y:y})
+                // pa 是可选的布局锚点：只放了 block_ 旗而没有 pa 旗时
+                // Game.flags.pa 为 undefined，裸取 .pos 每 tick 抛 TypeError
+                // 并让整次蓝图计算失效（getBlocked 在存在性检查之前执行）。
+                if(val && Game.flags.pa) HelperVisual.showText(Game.flags.pa.pos.roomName,"*",{x:x,y:y})
             })
         }
         return roomArray;
