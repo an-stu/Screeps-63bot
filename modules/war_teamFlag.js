@@ -60,7 +60,9 @@ let spawn_pro = {
     },
     rangeAttackKeeper(){
         let r4 = Game.flags.r4;
-        if(r4&&Game.flags.targetRoom){
+        // r4.room 需要有视野：旗在失明房间里 r4.room 为 undefined，
+        // 下面 r4.room.name 裸取每 300 tick 抛一次 TypeError
+        if(r4&&r4.room&&Game.flags.targetRoom){
             // r4 is intentionally persistent. Do not enqueue another squad
             // while its prior spawn request is still waiting.
             if(Game.time%300 == 0 && !pro.hasPendingSpawnTeam(r4.room.name)){

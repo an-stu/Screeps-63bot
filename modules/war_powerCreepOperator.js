@@ -36,7 +36,9 @@ PowerCreep.prototype.getRoomFullOps = function () {
 PowerCreep.prototype.registerPowerCreepAttacker = function () {
     let task= this.headTask();
     let flag = Game.flags[task.id];
-    flag.powerCreep = this
+    // 旗被删（或尚未创建）时 Game.flags[id] 为 undefined：裸写 .powerCreep
+    // 每次注册都抛 TypeError
+    if(flag)flag.powerCreep = this
 }
 PowerCreep.prototype.powerCreepAttacker = function (){
     this.usePower(PWR_GENERATE_OPS)

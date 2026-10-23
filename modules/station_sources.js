@@ -4304,6 +4304,9 @@ let pro = {
             /** todo 更新寻找的算法 */
             let container = Game.getObjectById(tmp[e.id]["container"])
             if (!container) container = room[STRUCTURE_CONTAINER].filter(c => c.pos.isNearTo(e) && !usedContainer[c.id]).head();
+            // "一容器只归一个源"的去重：原来 usedContainer 只读从不写，
+            // 恒为空对象，两个源共享容器时会被同时登记
+            if (container) usedContainer[container.id] = true;
             let links = [];
             if (container) {
                 links = room[STRUCTURE_LINK].filter(e => container.pos.isNearTo(e) && !usedContainer[container.id]);

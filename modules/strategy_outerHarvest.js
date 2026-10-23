@@ -76,16 +76,17 @@ let pro = {
     coreBusterPlan(coreLevel) {
         let lv = Math.max(0, coreLevel || 0);
         if (lv <= 1) return { attackCnt: 15, healCnt: 0, moveCnt: 15, perCreep: 1 };
-        // 二级 core 有塔（150~300/tick 随距离）。破核爬的生存判据：
-        //   · TOUGH 强化**先结算减伤**（XGHO2：伤害×0.3），塔伤 300 → 实际 90；
-        //   · HEAL T3（XLHO2）每部件 48/tick：3 部件 144 > 90，塔永远打不穿；
-        //   · RANGED T3（XUHO2 ×4）20 部件 = 800 dps，10 万血 core 125 tick，
+        // 二级 core 有塔（TOWER_POWER_ATTACK=600，range≤5 满伤，range 20 衰减到
+        // 600×(1-TOWER_FALLOFF)=150）。破核爬的生存判据：
+        //   · TOUGH 强化**先结算减伤**（XGHO2：伤害×0.3），塔伤 600 → 实际 180；
+        //   · HEAL T3（XLHO2）每部件 48/tick：4 部件 192 > 180，塔永远打不穿；
+        //   · RANGED T3（XKHO2 ×4）19 部件 = 760 dps，10 万血 core 132 tick，
         //     且在 range 3 就能输出（近战爬贴脸 1 格才会挨塔最狠的那档）；
         //   · MOVE 25 = 部件一半，铺好的外矿道路上全程 1 格/tick。
-        // 无 T3 强化时奶量 36 远低于塔伤 —— needsT3：派不出强化就不派，
+        // 无 T3 强化时奶量 48 远低于塔伤 180 —— needsT3：派不出强化就不派，
         // 宁可等 lab 攒够化合物也不送死（死亡循环既丢爬又拆不动）。
         return {
-            toughCnt: 2, healCnt: 3, rangedCnt: 20, moveCnt: 25, perCreep: 1,
+            toughCnt: 2, healCnt: 4, rangedCnt: 19, moveCnt: 25, perCreep: 1,
             needsT3: true,
         };
     },

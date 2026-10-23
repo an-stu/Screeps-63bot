@@ -206,6 +206,8 @@ let pro = {
 
         /** todo 更新寻找的算法 */
         let container = room[STRUCTURE_CONTAINER].filter(c => c.pos.isNearTo(mineral) && !usedContainer[c.id]).head();
+        // 单矿房只有一个矿，去重写不写无实际差别；写入保持与 station_sources 一致
+        if (container) usedContainer[container.id] = true;
         tmp["roomName"] = room.name;
         tmp["id"] = mineral.id;
         tmp["resType"] = mineral.mineralType;

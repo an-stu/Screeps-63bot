@@ -29,7 +29,8 @@ Creep.prototype.defenseAttacker=function () {
         flag.setPosition(this.pos)
         flag.memory.changeTime=Game.time
     }
-    let target = this.pos.findInRange(FIND_HOSTILE_CREEPS,1).sort(e=>e.hits).head()
+    // 单参比较器恒返回正数：排序结果由引擎实现决定。按血量升序才是意图。
+    let target = this.pos.findInRange(FIND_HOSTILE_CREEPS,1).sort((a,b)=>a.hits-b.hits).head()
     if(target&&this.room.my){
         this.room.tower.forEach(e=>e.attack(target))
         this.moveTo(target);

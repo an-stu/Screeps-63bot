@@ -146,7 +146,6 @@ let pro = {
     },
     workerManagerAfterCarrier(room) {
         // worker 核心工作
-        let isCarryFree = room.creeps("carrier").filter(e => e.isFree()).length
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
         let lowEnergyCarry = !room.creeps("carrier").length && StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 500)
         room.creeps("worker").filter(e => e.memory.tasks.length <= 1).forEach(creep => { // 优先 unboost 回收t2

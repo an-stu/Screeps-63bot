@@ -186,7 +186,8 @@ let action = {
     // neutralStructures: new Set(['road','keeperLair','container','controller','extractor']), //,'terminal','storage'
     /** 根据爬的伤害先排个序 */
     sortTeamByDamage: creeps => creeps.map(e=>[e,e.possibleDamage()])
-        .sort((a,b)=>a[1]==b[1]?a[0].id.localeCompare(b[0].id):a[1]<b[1])
+        // 原比较器返回布尔（coerce 成 0/1 且 > 分支返回 0 视为相等），排序不一致
+        .sort((a,b)=>a[1]==b[1]?a[0].id.localeCompare(b[0].id):b[1]-a[1])
         .map(a=>a[0]),
     // checkCreeps  (flag) {
     //     if(!flag._creeps) return;

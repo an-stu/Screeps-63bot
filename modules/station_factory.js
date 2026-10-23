@@ -190,9 +190,9 @@ let pro={
         let energyCnt = StationCarry.roomMassStoreCnt(room,RESOURCE_ENERGY);
         let batteryCnt = StationCarry.roomMassStoreCnt(room,RESOURCE_BATTERY);
         if(energyCnt>minimum_compression_requires_energy_cnt && batteryCnt < maximum_battery_cnt)
-            // factory 的能量容量是 FACTORY_CAPACITY=5000：需求 6000 会让 STAT_FILL
-            // 的完成判定（factoryCnt>=needs）永不满足，状态机永久卡死。
-            return {produceResType:RESOURCE_BATTERY,needs:[[RESOURCE_ENERGY,4800]]}
+            // FACTORY_CAPACITY=50000（官方文档）：6000 的进料需求远在容量内，
+            // 无需压缩批次大小
+            return {produceResType:RESOURCE_BATTERY,needs:[[RESOURCE_ENERGY,6000]]}
         if(energyCnt<minimum_decompression_requires_energy_cnt&&batteryCnt>=300)
             return {produceResType:RESOURCE_ENERGY,needs:[[RESOURCE_BATTERY,300]]}
         return undefined;

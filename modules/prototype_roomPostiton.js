@@ -233,7 +233,9 @@ RoomPosition.prototype.getDirectPos = function (direction) {
 
 RoomPosition.prototype.$createFlag=RoomPosition.prototype.createFlag;
 RoomPosition.prototype.createFlag = function (name,color1,color2) {
-    ({name:this.roomName,createFlag:Room.prototype.createFlag}).createFlag(this.x,this.y,name,color1?color1:Utils.randomInt(1,11),color2?color2:Utils.randomInt(1,11))
+    // 原覆写丢弃返回值（官方语义：返回旗名或错误码）。透传原生结果，
+    // 新调用方按官方语义消费返回值才不会踩坑（随机色保留原有行为）。
+    return ({name:this.roomName,createFlag:Room.prototype.createFlag}).createFlag(this.x,this.y,name,color1?color1:Utils.randomInt(1,11),color2?color2:Utils.randomInt(1,11))
 }
 
 

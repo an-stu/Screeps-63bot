@@ -98,11 +98,12 @@ function loadHarvest(memory) {
     // VM realm 的对象原型与宿主不同，deepEqual 要先摊平成宿主对象
     assert.deepEqual({ ...lv1 }, { attackCnt: 15, healCnt: 0, moveCnt: 15, perCreep: 1 },
         "level-1 core: one [A15,M15] creep, 450 DPS kills 100k hits in ~222 ticks");
-    // lv2 起有塔（150~300/tick 随距离）：远程体型在 range 3 输出，TOUGH 先结算
-    // 减伤、3 HEAL（T3 ×48）= 144 > 90 塔打不穿。无 T3 化合物就不派（needsT3）。
+    // lv2 起有塔（TOWER_POWER_ATTACK=600，range≤5 满伤，range 20 衰减到 150）：
+    // 远程体型在 range 3 输出，TOUGH 先结算减伤（600×0.3=180），4 HEAL
+    // （T3 ×48）= 192 > 180 塔打不穿。无 T3 化合物就不派（needsT3）。
     const lv2 = ctx.StrategyOuterHarvest.coreBusterPlan(2);
     assert.deepEqual({ ...lv2 }, {
-        toughCnt: 2, healCnt: 3, rangedCnt: 20, moveCnt: 25, perCreep: 1, needsT3: true,
+        toughCnt: 2, healCnt: 4, rangedCnt: 19, moveCnt: 25, perCreep: 1, needsT3: true,
     }, "level-2+ core: ranged T3 plan that out-sustains the tower");
 }
 

@@ -76,8 +76,9 @@ global.missionFunc = { //被crossShard引用 ，相当于交叉依赖了
             let terminal = from.terminal;
             // let resType = data.resType;
             if(terminal){
-                terminal._need_hold = terminal._need_hold||{}
-                terminal._need_hold[data.resType] = (terminal._need_hold[data.resType]||0) + data.amount
+                // 原来这里维护 terminal._need_hold "预留"：只写不读且挂在每 tick
+                // 重建的 terminal 对象上（跨 tick 无效），从未生效——已删除。
+                // 真正的在途量管控应由消费方读 Memory 实现（待需要时再做）。
             }
             if(terminal&&from.terminal.cooldown==0){
                 let want = Math.min(from.terminal.store[data.resType],data.amount);

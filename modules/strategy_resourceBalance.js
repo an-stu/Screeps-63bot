@@ -401,9 +401,10 @@ let pro = {
                 if (!resType) resType = RESOURCE_ENERGY
                 let energyCnt = room.terminal.store[RESOURCE_ENERGY];
                 if (!energyCnt) return;
-                // send 不接受非整数 amount（奇数能量 /2 出 x.5 时 ERR_INVALID_ARGS
-                // 每 10 tick 白试一次），取整。
+                // send 不接受非整数 amount（奇数能量 /2 出 x.5 时 ERR_INVALID_ARGS），
+                // 且 TERMINAL_MIN_SEND=100 以下无法发送 —— 不足 100 就留着
                 let amount = Math.floor(Math.min(energyCnt / 2, room.terminal.store[resType]))
+                if (amount < TERMINAL_MIN_SEND) return
                 if (roomName == "random") amount = Math.min(amount, 10000)
 
                 let code = room.terminal.send(resType, amount, targetRoom.name)
