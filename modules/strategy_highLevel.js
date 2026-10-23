@@ -550,6 +550,20 @@ let pro = {
         return (room.storage.store[RESOURCE_ENERGY] || 0) >= floor;
     },
     processPowerSpawn(room) {
+        // **烧 power 的唯一权威开关是 `Memory.marketSettings.powerSpawnOtherRooms`。**
+        //
+        // 2026-10-23 实测：这个函数（每房每 tick 都跑）完全无视那开关，
+        // 所以 10-21 把它设成 false 之后，13 个 RCL8 房**仍在各烧 1/tick**
+        // （GPL +13/tick、能量 -650/tick，2.6 小时掉 77 万），
+        // 而 station_carry.tryProcessPower（我加的那条）那边是关着的。
+        // 同一决策有多个调用点 ⇒ 必须逐个查，这是我第 4/7 条设计错误的重演。
+        //
+        // 试点房由 tryProcessPower 负责（它带 OPERATE_POWER 配速与批量滞回），
+        // 这里**跳过试点房**，避免同一个 powerSpawn 一 tick 烧两遍。
+        let ms = Memory.marketSettings || {};
+        let target = ms.powerSpawnRoom === undefined ? "W32N56" : ms.powerSpawnRoom;
+        if (target && room.name == target) return;
+        if (ms.powerSpawnOtherRooms === false) return;
         // 50 energy/tick 换 ops 的优先级低于保能量，所以两道闸都要过：
         //   1. 账号级充裕（StationHive.isEnergyAbundant，自带滞回）
         //   2. **本房**有余力（roomEnergyAbundant）

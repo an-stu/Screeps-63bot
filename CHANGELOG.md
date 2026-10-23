@@ -1,3 +1,34 @@
+## v0.78.142 — The power switch now covers every burn call site
+
+Health check 19 hours later, and one thing did not add up: `Memory.marketSettings.powerSpawnOtherRooms`
+has been `false` since 2026-10-21, yet `Game.gpl.progress` was rising **13 per tick** and the fourteen
+storages lost 770k energy in 2.6 hours.
+
+There are **two** places that call `processPower()`:
+
+- `station_carry.tryProcessPower` - the pilot room, with the OPERATE_POWER pacing (this one honoured the
+  switch);
+- `strategy_highLevel.processPowerSpawn` - pre-existing, runs for **every room every tick**, and it only
+  checked the account-level energy flag plus the room's own 30k floor. It never looked at the switch.
+
+So the switch was effectively cosmetic: thirteen RCL8 rooms kept burning 1 power/tick each (50 energy
+each), while the room I thought I had limited kept burning on its own path. This is the same class of
+mistake already recorded twice - "a decision with several call sites must be checked at every one".
+
+`processPowerSpawn` now:
+
+- returns for the **pilot room** (that one belongs to `tryProcessPower`, otherwise a single power spawn
+  burns twice a tick);
+- returns when `powerSpawnOtherRooms === false`;
+- keeps both original gates (account-level abundance, and the room's own storage floor).
+
+### Tests
+
+New `test/process-power-switch.test.cjs` loads the real module in a VM: switch off means a non-pilot
+room does not burn, switch on still burns exactly once, the pilot room never burns here, and both
+original gates (account level, 30k room floor) still block. Negative controls: removing the switch check
+and removing the pilot-room skip each fail on their own assertion.
+
 ## v0.78.141 — Bound the upgrader count as well
 
 Follow-up to v0.78.140, observed live within a minute of deploying it.
