@@ -1,3 +1,28 @@
+## v0.78.144 — The upgrade container outranks hive and storage in carrierManager
+
+v0.78.143 moved the upgrade-container assignment in front of the storage-carry gate, but the room stayed
+frozen: the container was still 0/2000. Tracing the single remaining carrier showed it walking to
+**the storage at (38,9) with 800 energy** - the controller container never entered the pipeline at all.
+
+The pipeline lives in `carrierManager`, which runs earlier: loaded carriers go to the hive, empty ones to
+hive + `carryEnergyAuto`, then towers, and only after that does `workerManagerAfterCarrier` hand out
+anything else. With a hive that is always "full" and a storage that is 1,000,000 capacity - i.e. never
+full - the controller container (2,000 capacity) never wins a carrier.
+
+That is the recorded design error "serve the capped consumer before the bottomless one", so the
+assignment now happens at the **top of `carrierManager`**, before the hive branch, and it takes the first
+free carrier. Rooms with an upgrade link are unaffected (`generatorFillEnergyTask` returns nothing when
+the link exists), so only linkless RCL4-5 rooms change.
+
+Measured before the fix: progress frozen at 115,043 for 20+ ticks, container 0, upgrader 0 energy with
+220 ticks to live, single carrier loaded with 800 energy bound for the storage.
+
+### Tests
+
+`test/upgrade-fill-priority.test.cjs` gains the ordering assertion inside `carrierManager` (the fill call
+must precede that function's own `if (StationHive.HiveNeedToFill(room))` branch). Negative control:
+moving the block after the hive branch fails.
+
 ## v0.78.143 — Feeding the upgrade container must not hide behind the storage-carry gate
 
 Same failure shape as v0.78.139 and v0.78.140, now in the *high-level* economy path that W26N58 switched

@@ -58,4 +58,26 @@ assert.ok(!/else\s*\{\s*\}/.test(code), "不能留空分支吞掉搬运任务");
         + "挂在里面就永远不会派（实测进度冻结）");
 }
 
+// ── ⑤ 高等级路径：升级容器必须排在 hive / storage 之前 ─────────────────────
+//
+// hive 和 storage 都是无限下沉（storage 容量 100 万，永远填不满）。排在前面
+// 就会把空闲运力全吃掉 —— 2026-10-23 实测：唯一一只 carrier 去填 storage(38,9)，
+// 控制器容器(8,6) 一直是 0，upgrader 抱 0 能量、进度冻结。
+{
+    const highRaw2 = fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8");
+    const high2 = highRaw2
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^[ \t]*\/\/.*$/gm, "");
+    const fill2 = high2.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, freeCarries[0].getPartCnt(CARRY) * 50)");
+    // 只能看 carrierManager **内部**的那个 hive 分支：文件里别处也有 HiveNeedToFill 调用。
+    const cmStart = high2.indexOf("carrierManager(room) {");
+    const hiveGate = high2.indexOf("if (StationHive.HiveNeedToFill(room)) {", cmStart);
+    assert.ok(cmStart >= 0 && hiveGate > cmStart, "应能找到 carrierManager 与它内部的 hive 分支");
+    assert.ok(fill2 >= 0, "carrierManager 顶部必须给升级容器发任务");
+    assert.ok(hiveGate >= 0, "hive 填充分支应仍然存在");
+    assert.ok(fill2 < hiveGate,
+        "升级容器必须排在 `if (StationHive.HiveNeedToFill(room))` 之前：hive/storage 是无限下沉，"
+        + "排前面会把运力吃光（实测控制器容器饿死到 0）");
+}
+
 console.log("upgrade fill priority checks passed");
