@@ -1,3 +1,19 @@
+## v0.78.147 — Same path caching for keeper movement
+
+Follow-up to v0.78.146, applied to the largest remaining role: `harvestEnergyKeeper` at 4.4 CPU for 30
+creeps (~0.15 each).
+
+Five `moveTo` calls in `station_sources.js` had no `reusePath`, and all five target static map objects:
+
+- walking onto the source container (`range: 0`), the source itself (`range: 1`, two call sites),
+- returning to the container, and returning to the storage.
+
+They get `reusePath: 15` (shorter than the 25 used for power creeps: keeper movement is short-range and
+happens around congested source tiles, so a stale path should expire sooner).
+
+Left alone: the ranged-attack movement (`moveTo(target, {range: ...})` in the combat helper) and the
+border/centre-room helpers - their targets move or change every tick.
+
 ## v0.78.146 — Moving creeps finally cache their paths (measured ~1 CPU/tick)
 
 CPU audit at average 18.2/20 with `unitRoles` showing `power:OPF` at 2.56 - the largest single line.

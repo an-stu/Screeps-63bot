@@ -634,20 +634,20 @@ Creep.prototype.harvestEnergyKeeper = function () {
             if (!occupied) {
                 // 站到容器上：creep 站在 container 上挖矿时，store 满后的溢出
                 // 能量自动进入脚下的容器（Screeps 机制），无需每 tick transfer。
-                this.moveTo(container, { range: 0, visualizePathStyle: { stroke: '#67ffed' } });
+                this.moveTo(container, { range: 0, reusePath: 15, visualizePathStyle: { stroke: '#67ffed' } });
                 return;
             }
             // 容器被占（worker 顶替挖矿/carrier 站脚）时不能只满足"挨着容器"——
             // 那可能离 source 太远挖不到（(10,5) 卡死事件）。改为直接站到
             // source 相邻格，保证能挖矿。
             if (source && !source.pos.isNearTo(this)) {
-                this.moveTo(source, { range: 1, visualizePathStyle: { stroke: '#67ffed' } });
+                this.moveTo(source, { range: 1, reusePath: 15, visualizePathStyle: { stroke: '#67ffed' } });
                 return;
             }
         } else if (source && !source.pos.isNearTo(this)) {
             // keeper 必须站到 source 相邻格才能挖矿+transfer。用 range:1 的
             // moveTo 直接找 source 周边空格，避免 goToNearPop 反复压栈任务
-            this.moveTo(source, { range: 1, visualizePathStyle: { stroke: '#67ffed' } });
+            this.moveTo(source, { range: 1, reusePath: 15, visualizePathStyle: { stroke: '#67ffed' } });
             return;
         }
         if ((source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
@@ -730,7 +730,7 @@ Creep.prototype.harvestEnergy = function () {
                     this.popTask();
                 }
             } else {
-                this.moveTo(container);
+                this.moveTo(container, { reusePath: 15 });
             }
             return;
         }
@@ -742,7 +742,7 @@ Creep.prototype.harvestEnergy = function () {
                     this.popTask();
                 }
             } else {
-                this.moveTo(storage);
+                this.moveTo(storage, { reusePath: 15 });
             }
             return;
         }
