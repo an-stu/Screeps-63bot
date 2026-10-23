@@ -80,4 +80,16 @@ assert.ok(!/else\s*\{\s*\}/.test(code), "不能留空分支吞掉搬运任务");
         + "排前面会把运力吃光（实测控制器容器饿死到 0）");
 }
 
+// ── ⑥ 没有升级 link 的房：搬运编制要 +1（冗余） ──────────────────────────
+//
+// 2026-10-23 实测：只剩 1 只 carrier 的那段时间控制器容器一直是 0、进度冻结 40+ tick，
+// 补到 2 只立刻恢复 10/tick。这类房（RCL4~5）需要一只冗余。
+{
+    const highRaw3 = fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/if \(!upgLink\) carrierTarget = Math\.min\(4, carrierTarget \+ 1\)/.test(highRaw3),
+        "无升级 link 的房必须 +1 搬运编制（否则单 carrier 死亡窗口里控制器容器会饿死）");
+}
+
 console.log("upgrade fill priority checks passed");

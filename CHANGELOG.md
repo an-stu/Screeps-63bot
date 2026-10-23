@@ -1,3 +1,20 @@
+## v0.78.145 — Linkless rooms keep one spare carrier
+
+v0.78.144 restored the upgrade feed, but only while the room had two carriers. Sampling showed the room
+oscillating between one and two: `carrierTarget` is `clamp(ceil((sources + keepers) / 2), 2, 3)` = 2, and
+whenever the second carrier died the controller container sat at 0 again (progress frozen at 115,043 for
+40+ ticks, `empty & free carriers = 0` in every sample). The moment the replacement hatched, the rate
+jumped straight back to 10/tick.
+
+A linkless room (RCL4-5) has one extra standing consumer - the controller container - that link rooms
+feed through the upgrade link instead, so it gets `carrierTarget + 1` (capped at 4). Cost: one 800-energy
+carrier; benefit: the upgrade feed stops depending on a single creep's lifetime.
+
+### Tests
+
+`test/upgrade-fill-priority.test.cjs` asserts the `+1` for rooms without an upgrade link. Negative
+control: removing that line fails.
+
 ## v0.78.144 — The upgrade container outranks hive and storage in carrierManager
 
 v0.78.143 moved the upgrade-container assignment in front of the storage-carry gate, but the room stayed

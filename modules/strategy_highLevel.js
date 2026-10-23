@@ -465,6 +465,14 @@ let pro = {
             // 不主动 recycle 超编 carrier，让多余的爬自然老死，避免浪费。
             carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
             if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
+            // **没有升级 link 的房（RCL4~5）编制 +1。**
+            // 这类房的控制器容器只能靠 carrier 一趟趟送，而 hive/storage 都是
+            // 无限下沉；实测 2026-10-23 W26N58：只剩 1 只 carrier 的那段时间
+            // （另一只刚死、替补还在孵）控制器容器一直是 0，进度冻结 40+ tick，
+            // 补到 2 只立刻恢复到 10/tick。留一只冗余，避免运力被单点卡死。
+            let upgLink = room.memory[StationUpgrade.stationName]
+                && Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_LINK]);
+            if (!upgLink) carrierTarget = Math.min(4, carrierTarget + 1);
         }
         else {
             // RCL8 大多通过 link 转运，固定 7 只只会让空闲 carrier 占着 spawn、
