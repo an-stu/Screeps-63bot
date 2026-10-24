@@ -215,11 +215,16 @@ let pro={
             // stat=='fill' 而 reacting 为空的组合：裸查 LAB_REACTIONS[undefined]
             // 抛 TypeError，之后每次 spawn 规划调 boostAble 都炸
             if(!obj["reacting"])return false;
+            // centerLabs 里的 id 可能已死（lab 被拆后 30 tick 缓存窗口）：
+            // 裸取 .store 抛 TypeError 会让**所有** spawn 规划失败
+            let labA = Game.getObjectById(obj["centerLabs"][0])
+            let labB = Game.getObjectById(obj["centerLabs"][1])
+            if(!labA || !labB) return false;
             let a = LAB_REACTIONS[obj["reacting"]][0]
-            let aCnt = (Game.getObjectById(obj["centerLabs"][0]).store[a]||0)
+            let aCnt = (labA.store[a]||0)
             fillingRes[a] = 3000 - aCnt
             let b = LAB_REACTIONS[obj["reacting"]][1]
-            let bCnt = (Game.getObjectById(obj["centerLabs"][1]).store[b]||0)
+            let bCnt = (labB.store[b]||0)
             fillingRes[b] = 3000 - bCnt
             if(room._Lab_reaction_carrier){
                 fillingRes[a] -= room._Lab_reaction_carrier.store[a] || 0
@@ -232,7 +237,8 @@ let pro={
             let storeCnt = room.storage?room.storage.store[resType]||0:0;
             storeCnt += room.terminal&&room.terminal.store[resType]||0;
             room.memory[pro.stationName].boostLabMap = room.memory[pro.stationName].boostLabMap || {}
-            let labCnt = (room.memory[pro.stationName].boostLabMap[resType]||[]).map(id=>Game.getObjectById(id)).reduce((all,lab)=>all+(lab.store[resType]||0),0)
+            // boostLabMap 里的死 id（lab 被拆）在这里同样要滤掉
+            let labCnt = (room.memory[pro.stationName].boostLabMap[resType]||[]).map(id=>Game.getObjectById(id)).filter(Boolean).reduce((all,lab)=>all+(lab.store[resType]||0),0)
             // log(resType,storeCnt,carryCnt,labCnt,boostResMap[resType])
             if((storeCnt+carryCnt+labCnt - (fillingRes[resType]||0)) - (registerMap[resType] ||0)<boostResMap[resType] && boostResMap[resType]>0) return false;
         }
@@ -277,13 +283,17 @@ let pro={
     getBoostLab(room,resType){
         let obj =  room.memory[pro.stationName] || (room.memory[pro.stationName] = {})
         let boostLabMap = (obj.boostLabMap = obj.boostLabMap||{} ); // 使用中的lab
-        let labs = (boostLabMap[resType]||[]).map(id=>Game.getObjectById(id)).sort((a,b)=>b.getLabReactionCnt()-a.getLabReactionCnt())
+        // boostLabMap 里的 id 可能已死（lab 被拆）：滤掉后再取，否则
+        // b.getLabReactionCnt() 对 null 抛 TypeError
+        let labs = (boostLabMap[resType]||[]).map(id=>Game.getObjectById(id)).filter(Boolean)
+            .sort((a,b)=>b.getLabReactionCnt()-a.getLabReactionCnt())
         return labs.head();
     },
     getNoBoostLab(room){
         let obj =  room.memory[pro.stationName] || (room.memory[pro.stationName] = {})
         let boostLabMap = (obj.boostLabMap = obj.boostLabMap||{} ); // 使用中的lab
-        let labs = (obj["otherLabs"].concat(obj["centerLabs"])).map(id=>Game.getObjectById(id));
+        // 同 getBoostLab：死 id（lab 被拆）过滤后再参与排序/取用
+        let labs = (obj["otherLabs"].concat(obj["centerLabs"])).map(id=>Game.getObjectById(id)).filter(Boolean);
         let allUsed_= _.values(boostLabMap).flat()
         let out = labs.filter(e=>!allUsed_.contains(e.id)).head()
         if(!obj["centerLabs"]||!out) return undefined;
@@ -619,6 +629,13 @@ let pro={
             if ((Game.time + room.hashCode()) % 2 != 0) return;
             let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
             let centerLabs = obj.centerLabs.map(id => Game.getObjectById(id))
+            // lab 被拆后 centerLabs 里有死 id（30 tick 缓存窗口内）：null 裸取
+            // .store 抛 TypeError，reacting 状态机整段失效。有死 id 时先回 clear，
+            // 等 checkLabs 重扫（30 tick）清理。
+            if(centerLabs.some(e => !e)){
+                obj["stat"] = 'clear'
+                return;
+            }
             if(obj["stat"]=='clear'||obj["stat"]==undefined){
                 if(otherLabs.concat(centerLabs).filter(e => e && e.store.getLabReactionCnt()).length == 0) {
                     obj["stat"] = 'fill'

@@ -355,7 +355,18 @@ let pro = {
         if (!name) return false;
         if (flag.name.indexOf("_keeper") >= 0) return false;
         if (flag.memory.taskId) return false;
-        if (Game.creeps[name] || !flag.memory.spawnTime || Game.time - flag.memory.spawnTime < 10) {
+        // 孵化中（Game.spawns 的 spawning 队列能查到占位名）按存活算：
+        // 否则 150 tick 孵化期一过 10 tick 宽限就 3 连 miss 误删旗。
+        // 原生 JS 遍历 Game.spawns（测试 VM 没有 lodash 的 _）。
+        let spawningSomewhere = false;
+        for (let sn in Game.spawns) {
+            if (Game.spawns[sn].spawning && Game.spawns[sn].spawning.name == name) {
+                spawningSomewhere = true;
+                break;
+            }
+        }
+        if (Game.creeps[name] || spawningSomewhere
+            || !flag.memory.spawnTime || Game.time - flag.memory.spawnTime < 10) {
             flag.memory.missingCnt = 0;
             return false;
         }
@@ -383,7 +394,11 @@ let pro = {
                 UtilsTask.taskFlag(flag,"raL1","registerRaL1")
             ]
             if(raBoost)task.push(StationLab.generatorBoostResTask(raBoost).head())
-            StationHive.trySpawn(room,"global",raBody,"raL1",task)
+            // 占位：trySpawn 返回爬名后立即写入 creepName——孵化约 150 tick，
+            // 期间 Game.creeps 还没有这只爬，没有占位会每 3 tick 重复排队
+            // （多 spawn 房能把 3 个 spawn 全排满）。registerRaL1 写同名。
+            let name = StationHive.trySpawn(room,"global",raBody,"raL1",task)
+            if(name) flag.memory.creepName = name
         }
         // if(!Game.creeps[flag.memory.creepName]){
             // if(flag.name.indexOf("_keeper")>=0){

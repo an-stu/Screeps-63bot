@@ -23,34 +23,47 @@ Creep.prototype.heal2=function () {
     let attacker=flag&&Game.creeps[flag.memory.attackerName];
     // if(attacker)this.pull(attacker)
     if(!attacker || attacker.spawning){
-        if(this.hitsMax-this.hits>0)this.heal(this);
-        let needHeal=this.pos.findClosestByPath(FIND_MY_CREEPS,{
-            filter(creep) {
-                return creep.hitsMax-creep.hits>100;
+        // 一个 tick 只有一个 heal 意图生效（后调用的覆盖先调用的）：
+        // 原来自奶+奶伤员连调，实际生效的只有最后一个。按优先级单次调用。
+        if(this.hitsMax-this.hits>0){
+            this.heal(this);
+        } else {
+            let needHeal=this.pos.findClosestByPath(FIND_MY_CREEPS,{
+                filter(creep) {
+                    return creep.hitsMax-creep.hits>100;
+                }
+            });
+            if(needHeal && this.heal(needHeal)==ERR_NOT_IN_RANGE){
+                this.moveTo(needHeal);
             }
-        });
-        if(this.heal(needHeal)==ERR_NOT_IN_RANGE){
-            this.moveTo(needHeal);
         }
     }
     else if(!attacker.spawning){
         if(attacker)
             this.$moveTo(attacker.pos);
-        if(attacker){
-            this.heal(attacker);
-        }
-        if(this.hitsMax-this.hits>0){
-            this.heal(this);
-        }
-        let needHeal=this.pos.findClosestByPath(FIND_MY_CREEPS,{
-            filter(creep) {
-                return creep.hitsMax-creep.hits>100;
+        // 优先级：奶攻击手 → 自奶 → 奶其他伤员。原来三连 heal 让"优先奶
+        // 攻击手"被后面的调用覆盖，实际几乎永远轮不到攻击手。
+        let healed = false;
+        if(attacker && attacker.hits < attacker.hitsMax){
+            if(this.heal(attacker)==ERR_NOT_IN_RANGE){
+                this.moveTo(attacker);
             }
-        });
-        if(this.heal(needHeal)==ERR_NOT_IN_RANGE){
-            this.moveTo(needHeal);
+            healed = true;
         }
-        if(needHeal)this.moveTo(needHeal);
+        if(!healed && this.hitsMax-this.hits>0){
+            this.heal(this);
+            healed = true;
+        }
+        if(!healed){
+            let needHeal=this.pos.findClosestByPath(FIND_MY_CREEPS,{
+                filter(creep) {
+                    return creep.hitsMax-creep.hits>100;
+                }
+            });
+            if(needHeal && this.heal(needHeal)==ERR_NOT_IN_RANGE){
+                this.moveTo(needHeal);
+            }
+        }
     }
     this.memory.dontPullMe = false;
 };
@@ -155,9 +168,22 @@ let pro = {
         // 死亡清理：原实现只读不删。某一只阵亡后 `!flag.memory.xxxName`
         // 仍为 false，函数会一直走 t==1 的分支直接 return —— 缺员永远补不回来，
         // flag 也永远删不掉（t 到不了 2）。
-        if(flag.memory.attackerName && !Game.creeps[flag.memory.attackerName]) delete flag.memory.attackerName;
-        if(flag.memory.healerName && !Game.creeps[flag.memory.healerName]) delete flag.memory.healerName;
-        // 刚出生、还没跑到 register 的爬会有一小段空窗期，用冷却窗口杜绝重复补员
+        // 清名检查必须把**孵化中**算作存活：Game.spawns 的 spawning 队列里
+        // 能查到占位名，否则 150 tick 孵化期内占位被删、重复排队。
+        // 原生 JS 遍历 Game.spawns（测试 VM 没有 lodash 的 _）。
+        let aliveOrSpawning = n => {
+            if (Game.creeps[n]) return true;
+            for (let sn in Game.spawns) {
+                let s = Game.spawns[sn];
+                if (s.spawning && s.spawning.name == n) return true;
+            }
+            return false;
+        };
+        if(flag.memory.attackerName && !aliveOrSpawning(flag.memory.attackerName)) delete flag.memory.attackerName;
+        if(flag.memory.healerName && !aliveOrSpawning(flag.memory.healerName)) delete flag.memory.healerName;
+        // 占位：trySpawn 返回爬名后立即记入 flag.memory——孵化中的爬不在
+        // Game.creeps 里，没有占位会在 150 tick 孵化期内重复排队多份小队。
+        // 孵化结束 register 覆盖同名（trySpawn 生成的名字就是最终爬名）。
         if((flag.memory.lastSpawnTime||0)+10>Game.time) return;
         let wasFull = !!flag.memory.wasFull;
         if(wasFull && !flag.memory.attackerName && !flag.memory.healerName){
@@ -182,14 +208,18 @@ let pro = {
                 UtilsTask.taskFlag(flag,"heal2","registerHeal2"),
                 StationLab.generatorBoostResTask(pro.healBoostRes).head()
             ]
-            spawned = !!StationHive.trySpawn(spawnRoom,"global",pro.getHealBody(spawnRoom),"heal2",task) || spawned
+            let name = StationHive.trySpawn(spawnRoom,"global",pro.getHealBody(spawnRoom),"heal2",task);
+            if(name) flag.memory.healerName = name;   // 占位（孵化中也算已存在）
+            spawned = !!name || spawned
         }
         if(!flag.memory.attackerName){//生一个 近战（boost 版）
             let task =  [
                 UtilsTask.taskFlag(flag,"attack2","registerAtk2"),
                 StationLab.generatorBoostResTask(pro.attackBoostRes).head()
             ]
-            spawned = !!StationHive.trySpawn(spawnRoom,"global",pro.getAttackBody(spawnRoom),"atk2",task) || spawned
+            let name = StationHive.trySpawn(spawnRoom,"global",pro.getAttackBody(spawnRoom),"atk2",task);
+            if(name) flag.memory.attackerName = name;
+            spawned = !!name || spawned
         }
         if(spawned){
             flag.memory.lastSpawnTime = Game.time;

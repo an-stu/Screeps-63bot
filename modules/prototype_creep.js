@@ -432,6 +432,29 @@ Creep.prototype.storeContainsEnergyOtherResType = function () {
 };
 
 
+/**
+ * 任务：UtilsTask.taskOutView(可空 id, roomName, x, y, "dismantleAtPos")
+ * 拆掉指定坐标上的结构（打通路径用）。进房后拆该坐标 1 格内的第一个
+ * 非己方可损结构；目标消失（拆完/被拆）即弹任务回家回收。
+ */
+Creep.prototype.dismantleAtPos = function () {
+    let task = this.headTask();
+    if (task.roomName != this.room.name) {
+        this.moveTo(new RoomPosition(task.x, task.y, task.roomName), { range: 1 });
+        return;
+    }
+    let target = new RoomPosition(task.x, task.y, task.roomName).lookFor(LOOK_STRUCTURES)
+        .filter(e => e.hits && !e.my && e.structureType != STRUCTURE_CONTROLLER).head();
+    if (!target) {
+        return this.popTask()
+            .addTask([UtilsTask.taskData("recycleCreep")])
+            .execLastTask();
+    }
+    if (this.dismantle(target) == ERR_NOT_IN_RANGE) {
+        this.moveTo(target, { range: 1 });
+    }
+};
+
 Creep.prototype.storeUsed = function () {
     // return _.sum(_.values(this.store)) ==  this.store.getCapacity(RESOURCE_ENERGY);
     return this.store.getUsedCapacity();

@@ -138,8 +138,12 @@ let pro={
             // 「存过的 id」而不是「活着的爬」，于是死掉的那一半永远补不回来；而删除
             // flag 只在两人同时阵亡时发生，只死一个就留下一个僵死 flag，占住
             // room.flags("defenseAH").length<2 的位置，后续防御队再也生不出来。
-            if(flag.memory.attacker && !Game.getObjectById(flag.memory.attacker)) delete flag.memory.attacker;
-            if(flag.memory.healer && !Game.getObjectById(flag.memory.healer)) delete flag.memory.healer;
+            // 孵化中的爬按"存活"算（Game.spawns 的 spawning 队列里有名字），
+            // 否则 150 tick 孵化期内会重复排队。
+            let aliveOrSpawning = n => Game.getObjectById(n)
+                || _.values(Game.spawns).some(s => s.spawning && s.spawning.name == n);
+            if(flag.memory.attacker && !aliveOrSpawning(flag.memory.attacker)) delete flag.memory.attacker;
+            if(flag.memory.healer && !aliveOrSpawning(flag.memory.healer)) delete flag.memory.healer;
 
             let room = flag.room;
             if(!room){ flag.remove(); return; }
@@ -153,7 +157,11 @@ let pro={
 
             // 刚出生、register 还没跑到的空窗期：冷却窗口防止重复补员。
             // 注意不能 return，否则下面的伤害/目标计算会被一起跳过。
-            let canSpawn = (flag.memory.lastSpawnTime||0)+10 <= Game.time;
+            // 冷却必须覆盖孵化时长（50 部件 ≈ 150 tick）：原 10 tick 冷却
+            // 过期后孵化中的爬仍不在 Game.creeps/ObjectById 里，
+            // `!flag.memory.attacker` 会再次排队 —— 3 个 spawn 各排一只，
+            // 每旗多烧 2 份全额小队能量。
+            let canSpawn = (flag.memory.lastSpawnTime||0)+200 <= Game.time;
             let spawned = false;
             if(canSpawn && !flag.memory.attacker){
                 let body = pro.getFullBoostAttack ();
