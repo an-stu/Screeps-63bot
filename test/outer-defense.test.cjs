@@ -100,10 +100,11 @@ function loadHarvest(memory) {
         "level-1 core: one [A15,M15] creep, 450 DPS kills 100k hits in ~222 ticks");
     // lv2 起有塔（TOWER_POWER_ATTACK=600，range≤5 满伤，range 20 衰减到 150）：
     // 远程体型在 range 3 输出，TOUGH 先结算减伤（600×0.3=180），4 HEAL
-    // （T3 ×48）= 192 > 180 塔打不穿。无 T3 化合物就不派（needsT3）。
+    // （T3 ×48）= 192 > 180 塔打不穿。MOVE 15：T3 移动强化把疲劳 ÷4，
+    // 平原全速只需 MOVE ≥ 非MOVE/4。无 T3 化合物就不派（needsT3）。
     const lv2 = ctx.StrategyOuterHarvest.coreBusterPlan(2);
     assert.deepEqual({ ...lv2 }, {
-        toughCnt: 2, healCnt: 4, rangedCnt: 19, moveCnt: 25, perCreep: 1, needsT3: true,
+        toughCnt: 2, healCnt: 4, rangedCnt: 29, moveCnt: 15, perCreep: 1, needsT3: true,
     }, "level-2+ core: ranged T3 plan that out-sustains the tower");
 }
 
