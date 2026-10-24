@@ -439,11 +439,15 @@ Creep.prototype.storeContainsEnergyOtherResType = function () {
  */
 Creep.prototype.dismantleAtPos = function () {
     let task = this.headTask();
+    // 带 HEAL 部件的拆墙爬：自奶与拆墙是两类意图可同 tick 并行——
+    // 在塔的射程内作业时，自奶是续航的关键（T3 tough 先减伤 + T3 heal 续）。
+    if (this.hits < this.hitsMax && this.getActiveBodyparts(HEAL) > 0) this.heal(this);
     if (task.roomName != this.room.name) {
         this.moveTo(new RoomPosition(task.x, task.y, task.roomName), { range: 1 });
         return;
     }
-    let target = new RoomPosition(task.x, task.y, task.roomName).lookFor(LOOK_STRUCTURES)
+    let goal = new RoomPosition(task.x, task.y, task.roomName);
+    let target = goal.lookFor(LOOK_STRUCTURES)
         .filter(e => e.hits && !e.my && e.structureType != STRUCTURE_CONTROLLER).head();
     if (!target) {
         return this.popTask()
@@ -451,7 +455,12 @@ Creep.prototype.dismantleAtPos = function () {
             .execLastTask();
     }
     if (this.dismantle(target) == ERR_NOT_IN_RANGE) {
-        this.moveTo(target, { range: 1 });
+        // 目标格被结构本体占着（不可走）：以它为终点的寻路会失败，
+        // 爬原地站桩（实测 DIS2 在 14,48 卡 6+ tick 不动）。改走目标格
+        // 旁边**可走**的相邻格里离自己最近的那格，到位后隔格拆。
+        let adj = goal.nearPos(1).filter(p => p.walkable())
+            .sort((a, b) => a.getRangeTo(this.pos) - b.getRangeTo(this.pos)).head();
+        if (adj) this.moveTo(adj, { range: 0, reusePath: 10 });
     }
 };
 
