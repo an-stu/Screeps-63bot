@@ -49,7 +49,8 @@ assert.ok(!/else\s*\{\s*\}/.test(code), "不能留空分支吞掉搬运任务");
     const high = highRaw
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^[ \t]*\/\/.*$/gm, "");
-    const fillIdx = high.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, freeCarries.head()");
+    // 接线已改为「先 pop 承运爬、再按它的容量预订」（原 head 算量/pop 派活错配）
+    const fillIdx = high.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY)");
     const gateIdx = high.indexOf("if (StorageCarryEnergyTasks.length) {");
     assert.ok(fillIdx >= 0, "高等级路径必须给升级容器派补给");
     assert.ok(gateIdx >= 0, "storage 搬运门应仍然存在（不能为了修这个把门删掉）");
@@ -68,7 +69,7 @@ assert.ok(!/else\s*\{\s*\}/.test(code), "不能留空分支吞掉搬运任务");
     const high2 = highRaw2
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^[ \t]*\/\/.*$/gm, "");
-    const fill2 = high2.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, freeCarries[0].getPartCnt(CARRY) * 50)");
+    const fill2 = high2.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50)");
     // 只能看 carrierManager **内部**的那个 hive 分支：文件里别处也有 HiveNeedToFill 调用。
     const cmStart = high2.indexOf("carrierManager(room) {");
     const hiveGate = high2.indexOf("if (StationHive.HiveNeedToFill(room)) {", cmStart);

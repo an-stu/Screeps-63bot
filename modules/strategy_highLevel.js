@@ -263,8 +263,11 @@ let pro = {
         // 所以派空手 carrier 也有效。有 link 的房（RCL5+）不会命中：
         // `generatorFillEnergyTask` 在存在升级 link 时返回空数组。
         if (freeCarries.length) {
-            let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, freeCarries[0].getPartCnt(CARRY) * 50);
-            if (upgFill.length) freeCarries.pop().addTask(upgFill);
+            // 先取承运爬再按**它的**容量预订：原来按 head 的容量算、任务却派给
+            // pop 的另一只，混编体型时预订量与实际承运不符
+            let carrier = freeCarries.pop();
+            let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50);
+            if (upgFill.length) carrier.addTask(upgFill);
         }
 
         if (StationHive.HiveNeedToFill(room)) {
@@ -380,8 +383,10 @@ let pro = {
         // `fillRes` 自带「空手先去 storage 取货」的分支（prototype_creep.js:626），
         // 所以这里给空手搬运也有效。
         if (freeCarries.length) {
-            let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, freeCarries.head().getPartCnt(CARRY) * 50);
-            if (upgFill.length) freeCarries.pop().addTask(upgFill);
+            // 同上：先取承运爬再按它的容量预订
+            let carrier = freeCarries.pop();
+            let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50);
+            if (upgFill.length) carrier.addTask(upgFill);
         }
 
         if (StorageCarryEnergyTasks.length) {

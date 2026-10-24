@@ -1030,10 +1030,12 @@ function defenceGateFixture(defenders) {
     let spawned = 0;
     ctx.StationHive.trySpawn = () => { spawned++; return "c"; };
 
-    ctx.Game.rooms.W34N55 = {
-        name: "W34N55",
-        memory: { stationSources: { s1: { id: "s1", roomName: "W34N55", x: 3, y: 17, pathTime: 90, container: "c1" } } },
+    // trySpawnOuterHarCarrier 现在从 Memory.rooms 取矿房记忆（room.memory 在
+    // 真实游戏里就是它的 getter）：矿房**失视野**时维护也照跑（B14 修复）。
+    ctx.Memory.rooms.W34N55 = {
+        stationSources: { s1: { id: "s1", roomName: "W34N55", x: 3, y: 17, pathTime: 90, container: "c1" } },
     };
+    ctx.Game.rooms.W34N55 = undefined;   // 模拟矿房失视野：不看 Game.rooms 也能维护
     const spawnRoom = {
         name: "W33N55", my: true, spawnFailure: true, level: 8,
         creeps: () => new Array(9).fill({}),       // 9 只 carrier，已经超过上限 8

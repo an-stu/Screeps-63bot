@@ -64,56 +64,12 @@ let pro = {
         else return 150;
     },
 
-    /**
-     * 计算在一个房间内一个点的tower伤害总值
-     * @param {Room} room tower所在房间
-     * @param {RoomPosition} pos 要计算伤害的点
-     */
-    possibleTowerDamage(room, pos) {
-        return _.sum(room.towers, tower => {
-            if (tower.store.energy < 10) return 0;
-            let ratio = 1;
-            if (tower.effects && tower.effects.length) tower.effects.forEach(effect => {
-                if (effect.effect == PWR_OPERATE_TOWER) ratio = POWER_INFO[effect.effect].effect[effect.level];
-            });
-            return calTowerDamage(tower.pos.getRangeTo(pos)) * ratio;
-        });
-    },
-
-    /**
-     * 计算一个creep在某个位置可能受到的伤害
-     * @param {BodyPartDefinition[]} body 该creep的body
-     * @param {RoomPosition} pos 要计算伤害的位置
-     * @param {string} username 用户名
-     * @param {boolean} heal 是否计算治疗值，默认为true
-     * @param {number} towerDamage tower在该位置的伤害，默认为0
-     * @param {boolean} risk 计不计算威胁值（攻击范围之外的creep），默认为false
-     */
-    possibleDamage(body, pos, username, heal = true, towerDamage = 0, risk = false) {
-        let attackers = pos.findInRange(FIND_CREEPS, risk ? 50 : 3,
-            { filter: creep => creep.owner.username != username && (creep.bodyCounts[ATTACK] || creep.bodyCounts[RANGED_ATTACK]) });
-
-        let possibleDamage = _.sum(attackers, attacker => possibleCreepDamage(attacker.body, pos.getRangeTo(attacker), risk)) + (towerDamage || 0);
-        possibleDamage = hitsOnTough(body, possibleDamage);
-        let possibleHeal = 0;
-        if (heal) {
-            let healers = pos.findInRange(FIND_CREEPS, 3, { filter: creep => creep.owner.username == username && creep.bodyCounts[HEAL] });
-            possibleHeal = possibleHealHits(pos, healers);
-        }
-        return possibleDamage - possibleHeal;
-    },
-
-    /**
-     * 计算一个creep在某个位置是否会被破防
-     * @param {BodyPartDefinition[]} body 该creep的body
-     * @param {RoomPosition} pos 要计算的位置
-     * @param {string} username 用户名
-     * @param {number} towerDamage tower在该位置的伤害，默认为0
-     * @param {boolean} risk 计不计算威胁值（攻击范围之外的creep），默认为false
-     */
-    wouldBreakDefend(body, pos, username, towerDamage = 0, risk = false) {
-        return possibleDamage(body, pos, username, true, towerDamage, risk) > 0;
-    }
+    // 已删除三个死方法（2026-10 全量审查）：possibleTowerDamage /
+    // possibleDamage / wouldBreakDefend —— 全仓库零调用，且内部引用悬空
+    // （room.towers 不存在、裸全局 possibleCreepDamage/possibleHealHits
+    // 未定义、creep.bodyCounts 无守卫），谁调用谁炸。塔伤害计算走
+    // calTowerDamage（station_tower/war_cache 在用），creep 维度的
+    // 攻防计算走 Creep.prototype.possibleDamage 系（prototype_creep）。
 }
 
 global.WarDamageCal = pro;

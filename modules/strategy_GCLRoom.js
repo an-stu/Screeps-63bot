@@ -145,7 +145,11 @@ Creep.prototype.GCLUpgraderNoStorage = function(){
                 }
             }else delete this.memory.gclPos;
         }
-        else if(!this.pos.isNearTo(this.room.storage)||!this.pos.isNearTo(this.room.terminal))this.moveTo(flag)
+        // GCL 房可能还没建 storage/terminal（本 handler 恰恰服务无 storage 的房）：
+        // 对 undefined 调 isNearTo 会抛 TypeError。有哪个就贴哪个，都没有贴旗。
+        else if(this.room.storage && !this.pos.isNearTo(this.room.storage)) this.moveTo(this.room.storage)
+        else if(!this.room.storage && this.room.terminal && !this.pos.isNearTo(this.room.terminal)) this.moveTo(this.room.terminal)
+        else if(!this.room.storage && !this.room.terminal) this.moveTo(flag)
 
         if(this.room.level>=8)return this.memory.dontPullMe = false;
 
@@ -455,7 +459,7 @@ let pro = {
     autoBuyGCLEnergyBoost(flag) {
         let room = flag.room
         if(!room||(flag.memory.lastVis||0)>Game.time-30)return;
-        if(!room.terminal||room.level<6)return;
+        if(!room.terminal||!room.storage||room.level<6)return;
         flag.memory.lastVis = Game.time;
         let avg = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)
         // let energyCnt = StationCarry.roomMassStoreCnt(Game.rooms[e.roomName],RESOURCE_ENERGY)

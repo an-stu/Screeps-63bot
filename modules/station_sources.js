@@ -3411,9 +3411,15 @@ let pro = {
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
         let targetName = roomName.name || roomName;
-        let harRoom = Game.rooms[targetName];
-        if (!harRoom) return;
-        let sm = harRoom.memory[pro.stationName];
+        // 记忆直接从 Memory 取（room.memory 本就是 Memory.rooms[name] 的
+        // getter，两者同一对象）。原来 `Game.rooms[targetName]` 为空（矿房
+        // 失视野）就整体早退：路线维护（只需主房）与「按缓存 ID/坐标孵化」
+        // 的补员一起停摆 —— 与下面"container 不可见时仍可孵化"的注释矛盾，
+        // keeper 全灭失明后外矿被锁死到有新爬走完全程为止。
+        let roomMem = Memory.rooms[targetName];
+        if (!roomMem) return;
+        let sm = roomMem[pro.stationName];
+        if (!sm) return;
         // ── 维护（路线缓存 / 路上工地 / 主房边缘 link）必须先于任何「补员闸」──
         //
         // 这一段原来写在下面的补员循环里，被上面 `outerMineStarvesSpawnRoom` 与
