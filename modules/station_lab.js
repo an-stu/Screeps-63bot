@@ -246,7 +246,11 @@ let pro={
         return true;
     },
     getFightBodyResMap(bodys,level){
-        return bodys.reduce((a,e)=>{let t= BOOST_RES[FIGHT_BOOST_RES_MAP[e]][level];a[t]=(a[t]||0)+30;return a},{})
+        // calcBodyPart 产出的是**大写**部位名（"WORK"/"MOVE"），而
+        // FIGHT_BOOST_RES_MAP 的键是**小写**（由 [MOVE]="move" 等常量构造）。
+        // 不归一的话查表恒 undefined，boost 清单变成 {undefined:N}，
+        // boostAble 恒 false —— 所有战争强化静默空转。
+        return bodys.reduce((a,e)=>{let t= BOOST_RES[FIGHT_BOOST_RES_MAP[e.toLowerCase()]][level];a[t]=(a[t]||0)+30;return a},{})
     },
     boostAbleLevel(room,action,partCnt,maxLevel = 2,minLevel = 0){
         for(let i=maxLevel;i>=minLevel;i--){
