@@ -25,7 +25,10 @@ let pro = {
     init() {
         // Preserve the manual switch while entering low-CPU mode early enough
         // to protect the 20 CPU baseline from a draining bucket.
-        MIN_CPU = !!Memory.mincpu || Game.cpu.bucket < 2000;
+        // MIN_CPU 滞回：进入 <2000、退出 ≥2400。原来无滞回时 bucket 在 2000
+        // 线上逐 tick 翻转（实测 1997↔2005），角色过滤/经济间隔随 tick 抖动。
+        // global 跨 tick 持久（重载才清零），天然可做粘滞位。
+        MIN_CPU = !!Memory.mincpu || (MIN_CPU ? Game.cpu.bucket < 2400 : Game.cpu.bucket < 2000);
         if (MIN_CPU && Game.time % 100 == 0) console.log("warning : min cpu on")
         let objects = getTickObjects();
         objects.rooms.forEach(room => room.used = {});

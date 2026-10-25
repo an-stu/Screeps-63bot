@@ -139,7 +139,9 @@ let pro = {
             return dist;
         }
         while (!room && level >= minLevel) {
-            room = _.values(Game.rooms).filter(e => e.my && e.find(FIND_MY_SPAWNS).length && e.level >= level)
+            // e.spawn 是极致建筑缓存的类型 getter（命中缓存）；
+            // e.find(FIND_MY_SPAWNS) 是原生全量扫描，15 房每档 level 扫一遍
+            room = _.values(Game.rooms).filter(e => e.my && e.spawn.length && e.level >= level)
                 .map(e => [e, getDistinct(roomName, e.name)]).filter(e => e[1].length < minRoomDistinct)
                 .sort((a, b) => a[1].length - b[1].length).map(e => e[0]).head();
             level -= 1;

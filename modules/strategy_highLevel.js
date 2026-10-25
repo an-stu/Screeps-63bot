@@ -628,7 +628,11 @@ let pro = {
         // Task assignment and spawn planning tolerate a short delay. Spreading
         // this expensive economy pass across rooms keeps ordinary ticks below
         // the shard's 20 CPU allowance without delaying tower defense.
-        let economyInterval = MIN_CPU ? 10 : 7;
+        // 中压带（bucket<5000）加密到 14：经济 pass 是每 tick 最大的单个可变
+        // 成本（1~3 CPU/房），15 房在 %7 下平均 2.1 房/tick ≈ 4-6 CPU；降到
+        // %14 后减半，bucket 回升到 5000+ 自动回到 7。生爬/派任务对 7→14 tick
+        // 的延迟不敏感（爬寿命 1500 tick 量级）。
+        let economyInterval = MIN_CPU ? 10 : (Game.cpu.bucket < 5000 ? 14 : 7);
         // 经济 pass 按**房间序号**错峰，而不是按随机 hashCode。
         //
         // 原来 `(Game.time + room.hashCode()) % 7/10`：13 个房的随机哈希会互相撞车
