@@ -458,9 +458,14 @@ Creep.prototype.dismantleAtPos = function () {
         // 目标格被结构本体占着（不可走）：以它为终点的寻路会失败，
         // 爬原地站桩（实测 DIS2 在 14,48 卡 6+ tick 不动）。改走目标格
         // 旁边**可走**的相邻格里离自己最近的那格，到位后隔格拆。
-        let adj = goal.nearPos(1).filter(p => p.walkable())
+        // 相邻格还要**排除已被其它爬占用的**：多只拆墙爬同点作业时，
+        // 大家算出的"最近格"是同一格，后来者 moveTo 到被占格每 tick
+        // 静默失败 → 站在 range 2 上看戏（实测 DIS1 卡 14,48）。
+        let adj = goal.nearPos(1)
+            .filter(p => p.walkable() && !p.lookFor(LOOK_CREEPS).length)
             .sort((a, b) => a.getRangeTo(this.pos) - b.getRangeTo(this.pos)).head();
         if (adj) this.moveTo(adj, { range: 0, reusePath: 10 });
+        else this.moveTo(goal, { range: 1, reusePath: 10 });
     }
 };
 
