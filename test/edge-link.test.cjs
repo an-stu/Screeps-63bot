@@ -1310,48 +1310,34 @@ function defenceGateFixture(defenders) {
     assert.equal(frontCreep.memory.hasSendSpawn, true, "老兵只派一次接替（原有语义不变）");
 }
 
-// ── 15) 主房挖掘节流：storage 充裕就暂停本房矿点补员（带滞回） ──
+// ── 15) 主房挖掘永不暂停（用户指令 2026-10-25：keeper 永远生成） ──
+//
+// 原机制（storage ≥ 20 万暂停补员 + 滞回）实测把 6 个房卡在 15-20 万
+// 滞回带里长期无 keeper（W31N55 等），挖矿收入归零。用户指令改为：
+// keeper 永远补员；富余能量交给烧 power（per-room energy ≥ 10 万闸门）
+// 和市场售卖消化。homeMiningPaused 现在恒 false，并顺带清历史滞回标记。
 {
     const ctx = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx);
     const S = ctx.StationSources;
-    const mkRoom = (energy, opts) => {
-        opts = opts || {};
-        return {
-            name: "W33N55",
-            memory: {},
-            storage: { store: { energy: energy } },
-            find: type => (type === CONSTANTS.FIND_MY_CONSTRUCTION_SITES ? new Array(opts.sites || 0).fill({}) : []),
-            creeps: () => (opts.noCarrier ? [] : [{}]),
-        };
-    };
-    assert.equal(S.homeMiningPaused(mkRoom(500000)), true,
-        "storage 充裕 → 暂停本房矿点补员（实测 26 只 keeper ≈3.6 CPU/tick）");
-    assert.equal(S.homeMiningPaused(mkRoom(199999)), false, "storage 低于阈值 → 照常挖");
-    assert.equal(S.homeMiningPaused(mkRoom(500000, { sites: 3 })), true,
-        "有工地也照样暂停：storage 里 20 万+，工地用料由 carrier 从 storage 搬过去");
-    assert.equal(S.homeMiningPaused(mkRoom(500000, { noCarrier: true })), false,
-        "没有 carrier 的死房不暂停（hive 只能靠本房 keeper 挖的矿救）");
-    // 滞回：暂停后要掉到阈值 75% 以下才恢复。第一版拿 HiveNeedToFill 当条件，
-    // 它每次 spawn 一忙就翻真 → 翻一次就把 20 个矿点的 keeper 同时塞进 spawn 队列
-    // （每只 150 tick = 3000 tick 的 spawn 时间），外矿 carrier 补员全被挡死。
-    const h = mkRoom(500000);
-    assert.equal(S.homeMiningPaused(h), true);
-    assert.equal(h.memory.miningPaused, 1, "暂停状态记在 room.memory 里，瞬时条件不能再翻转它");
-    h.storage.store.energy = 160000;                  // 仍高于 0.75 * 200000
-    assert.equal(S.homeMiningPaused(h), true, "滞回：略低于阈值仍保持暂停");
-    h.storage.store.energy = 140000;                  // 低于 150000
-    assert.equal(S.homeMiningPaused(h), false, "掉到滞回下限以下 → 恢复补员");
-    assert.equal(h.memory.miningPaused, undefined, "恢复时清掉标记");
-    // 开关与阈值
-    ctx.Memory.marketSettings = { homeMiningPauseEnergy: 0 };
-    assert.equal(S.homeMiningPaused(mkRoom(500000)), false, "开关设 0 → 整个节流关闭");
-    ctx.Memory.marketSettings = { homeMiningPauseEnergy: 1000 };
-    assert.equal(S.homeMiningPaused(mkRoom(500000)), true, "阈值可用 Memory 调");
-    delete ctx.Memory.marketSettings;
-    assert.equal(S.homeMiningPaused({ name: "x", find: () => [] }), false, "没有 storage → 不暂停");
+    const mkRoom = energy => ({
+        name: "W33N55",
+        memory: { miningPaused: 1 },
+        storage: { store: { energy: energy } },
+        find: () => [],
+        creeps: () => [{}],
+    });
+    for (const e of [500000, 250000, 199999, 5000]) {
+        const r = mkRoom(e);
+        assert.equal(S.homeMiningPaused(r), false,
+            `storage=${e} → 照常补员（永不暂停）`);
+        assert.equal(r.memory.miningPaused, undefined,
+            `storage=${e} → 历史滞回标记被清掉`);
+    }
+    assert.equal(S.homeMiningPaused({ name: "x", find: () => [] }), false,
+        "没有 storage 的房也恒 false（keeper 永远生成）");
 
-    // 接线：暂停时不给本房矿点补 keeper；storage 掉到滞回下限以下立刻恢复
+    // 接线：永不暂停 → 任何存量下都给本房矿点补 keeper
     const ctx2 = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx2);
     const S2 = ctx2.StationSources;
@@ -1374,10 +1360,10 @@ function defenceGateFixture(defenders) {
     };
     ctx2.Game.rooms.W33N55 = home;
     S2.trySpawnOuterHarKeeper("W33N55", home);
-    assert.equal(spawned.length, 0, "满足节流条件 → 本房矿点一只 keeper 都不补");
+    assert.equal(spawned.length, 1, "storage 50 万（原节流条件）→ 照样补 keeper（永不暂停）");
     home.storage.store.energy = 1000;
     S2.trySpawnOuterHarKeeper("W33N55", home);
-    assert.equal(spawned.length, 1, "storage 掉到滞回下限以下 → 下一次评估立刻恢复补员");
+    assert.equal(spawned.length, 2, "storage 1000 → 继续照常补员");
 }
 
 // ────── 10) 外矿补员闸门不能自锁：车全没了 + 外矿有货 = 必须放行 ──────
