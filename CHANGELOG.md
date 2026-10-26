@@ -31,6 +31,22 @@ does not spawn, a small hive deficit does not spawn (this is what used to ratche
 carriers still spawns (rooms must not stall), and above the emergency ceiling of 4 nothing spawns.
 Negative controls: reverting to the plain `HiveNeedToFill` bump, and dropping the busy check, each fail.
 
+### Same version, deployed on top: power creep cadence + structure-cache getter fix
+
+A second pass over the post-0.78.147 telemetry (avg 18.8 CPU/tick, 20.5% of ticks over the 20 CPU
+allowance) found no fat left in the working creeps - 30 carriers and 30 keepers run at 0.13-0.15 CPU
+each, and the rooms pass is fully cadenced. Two changes shipped under this version number:
+
+- `POWER_CREEP_TICK_INTERVAL` 2 → 3. `power:OPF` still cost ~1.0 CPU/tick at every-2nd-tick. The
+  shortest skill cooldown is 50 ticks (`GENERATE_OPS`), the rest are 300-800+, so firing up to 2 ticks
+  late is invisible; the power-burn credit pacing self-corrects over the effect window. Saves ~0.3
+  CPU/tick.
+- 极致建筑缓存's `room.<resource>` getters (例5/例6) cached `last_fetch_time`/`sum` in a per-type
+  prototype closure: reading `roomA.energy` then `roomB.energy` in the same tick returned roomA's sums
+  for roomB. No business code uses these getters (everything goes through `roomMassStoreCnt`), but the
+  library documents them - the cache is now keyed per room, pinned by
+  `test/structure-cache-resources.test.cjs`.
+
 ## v0.78.147 — Same path caching for keeper movement
 
 Follow-up to v0.78.146, applied to the largest remaining role: `harvestEnergyKeeper` at 4.4 CPU for 30
