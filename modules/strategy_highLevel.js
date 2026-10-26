@@ -487,9 +487,24 @@ let pro = {
             // CPU（每只 ~0.1 CPU/tick，而这正是 tick 超 20 的主因之一）。
             // 压到 2 只；link 少于 4 的房多留一只；hive 真的缺能时 +2
             //（下面几条紧急补员分支都按 carrierTarget 判，所以不会饿死主房）。
+            // 用户 2026-10-26：「允许收到 2，但注意房间运营不要出问题」。
             carrierTarget = 2;
             if (room.link.length < 4) carrierTarget += 1;
-            if (StationHive.HiveNeedToFill(room)) carrierTarget += 2;
+            // hive 缺能才加编，而且要**真的缺**（缺口 > 容量 30%）**并且**现有搬运
+            // 基本都在忙，才 +2。
+            //
+            // 原来的写法只看 `HiveNeedToFill`（= 没满）就 +2，而活跃房里 hive
+            // 几乎总是「没满」（spawn/upgrader 一直在抽），于是目标常年 4；
+            // 加上没有回收机制（多余爬只能自然老死），形成
+            // 「加编 → 老死 → 再加编」的棘轮 —— 实测 2026-10-26：44 只搬运里
+            // **17 只空闲且空手**，而 13 个 L8 房的 carrierTarget 常态只有 2。
+            // 收紧后：常态 2；hive 真被抽干且运力打满时才临时 4，缺口一平就回落。
+            if (StationHive.HiveNeedToFill(room)) {
+                let cap = room.energyCapacityAvailable || 0;
+                let deficit = Math.max(0, cap - room.getEnergyAvailable());
+                let busyCnt = carrierList.filter(e => !e.spawning && !e.isFree()).length;
+                if (deficit > cap * 0.3 && busyCnt >= carrierCnt - 1) carrierTarget += 2;
+            }
         }
         // 死房自救：没有 carrier、hive 缺能、可用能量 ≤750 时每个 economy
         // pass 立即评估，不再受 %10 与 %7 对齐的偶发限制。

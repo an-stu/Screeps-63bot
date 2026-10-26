@@ -1,3 +1,36 @@
+## v0.78.148 — RCL8 keeps two carriers, and only adds more when the hive is really drained
+
+User: two carriers per room is fine, as long as room operations do not suffer.
+
+Measured on 2026-10-26: 44 carriers at 6.25 CPU (60% of `unitTasks`), 17 of them **idle and empty**,
+while `carrierTarget` for the thirteen RCL8 rooms was 2. So the carriers were not needed - they were
+accumulated by the target itself flapping:
+
+    carrierTarget = 2; if (link < 4) +1; if (HiveNeedToFill) +2;
+
+`HiveNeedToFill` only means "not full", and in an active room the hive is almost never full
+(spawns and upgraders draw from it constantly), so the target sat at 4 most of the time. Since there is
+no recycle path, the extras only leave by dying -「加编 → 老死 → 再加编」, a ratchet.
+
+The hive bump now requires **both** a real deficit (> 30% of capacity) **and** that the existing carriers
+are actually busy (`busyCnt >= carrierCnt - 1`, ignoring ones still hatching):
+
+- steady state: 2 per room;
+- hive drained (e.g. 3000/12900) with both carriers busy: temporary 4, collapsing back as soon as the
+  deficit closes;
+- hive merely "not full" or carriers idling: no bump.
+
+Surplus carriers are not recycled - they die naturally, as everywhere else in this codebase, so the count
+decays to 2/room within one creep lifetime (~1500 ticks) without touching spawn queues.
+
+### Tests
+
+New `test/carrier-target-tighten.test.cjs` drives the real `trySpawnCarrier` in a VM: steady state at 2
+does not spawn, a small hive deficit does not spawn (this is what used to ratchet), a big deficit with
+**idle** carriers does not spawn (stale busy history must not fool it), a big deficit with **busy**
+carriers still spawns (rooms must not stall), and above the emergency ceiling of 4 nothing spawns.
+Negative controls: reverting to the plain `HiveNeedToFill` bump, and dropping the busy check, each fail.
+
 ## v0.78.147 — Same path caching for keeper movement
 
 Follow-up to v0.78.146, applied to the largest remaining role: `harvestEnergyKeeper` at 4.4 CPU for 30
