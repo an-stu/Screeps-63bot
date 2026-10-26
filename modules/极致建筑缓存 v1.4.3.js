@@ -311,24 +311,22 @@ Object.defineProperty(Room.prototype, 'level', {
 })
 
 for (let type of RESOURCES_ALL) {
-    let last_fetch_time = 0;
-    let sum;
+    // 缓存必须**按房间**存放：闭包里只存一份 last_fetch_time/sum 时，同一 tick
+    // 先读 A 房再读 B 房，B 会直接拿到 A 的数值（mass_stores 完全不同）。
     let reduce_f = function (temp_sum, s) {
         return temp_sum + s.store[type];
     };
+    let room_sum_cache = {};
     Object.defineProperty(Room.prototype, type, {
         get () {
-            if (last_fetch_time < Game.time) {
-                // 原来读完从不更新 last_fetch_time：条件恒真，每 tick 每次访问
-                // 都重算 reduce，per-tick 缓存形同虚设（set 写入的值下一次读即被冲掉）
-                last_fetch_time = Game.time;
-                return sum = this.mass_stores.reduce(reduce_f, 0);
-            } else {
-                return sum;
+            let entry = room_sum_cache[this.name];
+            if (!entry || entry.time != Game.time) {
+                entry = room_sum_cache[this.name] = {time: Game.time, sum: this.mass_stores.reduce(reduce_f, 0)};
             }
+            return entry.sum;
         },
         set (amount) {
-            sum = amount;
+            room_sum_cache[this.name] = {time: Game.time, sum: amount};
         },
         enumerable: false,
         configurable: true

@@ -14,8 +14,12 @@ const OPTIONAL_CPU_OFFSETS = {marketAutoBuy:19, autoPlanner:7, visual:3};
  * 隔 tick 执行：技能最多晚 1 tick 触发（冷却期内本来就无事可做），
  * power creep 移动速度减半（它们不赶时间），省下约 0.5 CPU/tick。
  * `ROLE_PRIORITY` 那套只过滤普通爬，power creep 不在其中，所以必须单独判。
+ *
+ * 0.78.148：间隔 2 → 3。线上 power:OPF 仍有 ~1.0 CPU/tick，技能最短冷却
+ * （GENERATE_OPS ~50、其余 300~800+）都远大于 3 tick，晚 2 tick 触发无感；
+ * 烧 power 的 credit 配速按效果窗口剩余 tick 摊薄，本身会自校正。
  */
-const POWER_CREEP_TICK_INTERVAL = 2;
+const POWER_CREEP_TICK_INTERVAL = 3;
 function shouldRunPowerCreeps() {
     return Game.time % POWER_CREEP_TICK_INTERVAL == 0;
 }

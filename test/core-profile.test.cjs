@@ -203,8 +203,8 @@ assert.ok(stationUpgrade.includes("room.creeps(\"upgrader\", false).length == 0"
     "the spawn gate must still spawn when a room has no upgrader at all");
 assert.ok(main.includes("Game.cpu.bucket >= 6000") && !main.includes("plannerAverage <"), "auto planner must stay enabled above the bucket safety floor");
 assert.ok(main.includes("health.autoPlanner"), "auto planner CPU must be measured online");
-assert.ok(main.includes("POWER_CREEP_TICK_INTERVAL = 2") && main.includes("function shouldRunPowerCreeps()"),
-    "power creeps must be throttled to every other tick: 12 of them measured 1.04 CPU/tick while their tasks only wait on skill cooldowns, and the bucket<=40 emergency path used to run them unthrottled");
+assert.ok(main.includes("POWER_CREEP_TICK_INTERVAL = 3") && main.includes("function shouldRunPowerCreeps()"),
+    "power creeps must be throttled to every 3rd tick: 12 of them measured 1.04 CPU/tick while their tasks only wait on skill cooldowns (all >= 50, most 300-800), and even every-2nd-tick still cost ~1.0 CPU/tick online; the bucket<=40 emergency path used to run them unthrottled");
 {
     const powerExec = (main.match(/HelperError\.runEach(?:Profiled)?\(objects\.powerCreeps/g) || []).length;
     const guarded = (main.match(/shouldRunPowerCreeps\(\)\) HelperError\.runEach(?:Profiled)?\(objects\.powerCreeps/g) || []).length;
