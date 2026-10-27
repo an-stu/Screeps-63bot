@@ -3494,6 +3494,17 @@ let pro = {
             let t = c.headTask && c.headTask();
             return t && t.roomName == targetName;
         }).length;
+        // **出兵房自己的 keeper 没满员就一律不补外矿搬运。**
+        //
+        // 2026-10-27 现场：把外矿搬运提前到本房孵化之前（v0.78.154）之后，W26N58 的
+        // 1,800 hive 被 1,250 的外矿车反复抽干，本房 keeper 永远付不起孵化费 →
+        // keeper 老死、收入归零 → hive 停在 300、连 worker 都生不出来。
+        // 这是 E53S21 的同一形态（外矿抢主房能量导致崩盘），只是从 keeper 换成了 carrier。
+        // 判据：本房矿点数 > 在岗 keeper 数 ⇒ 本房自己都在挨饿，先别抽它的能量。
+        // 主房自身的经济链（keeper 补员）排在外矿之前，这一点不能被优化掉。
+        let ownSourceCnt = spawnRoom.source ? spawnRoom.source.length : 2;
+        if (targetName != spawnRoom.name
+            && spawnRoom.creeps("harvestEnergyKeeper", false).length < ownSourceCnt) return null;
         if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)
             && onThisMine >= pro.outerCarrierBacklogQuota(spawnRoom, targetName)) return null;
         if (roomCarriers.length >= carrierMax) return null;

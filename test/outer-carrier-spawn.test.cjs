@@ -106,28 +106,16 @@ assert.ok(/if \(site\.structureType != STRUCTURE_ROAD\) return;/.test(code),
 assert.ok(/cm\.set\(site\.pos\.x, site\.pos\.y, 1\);/.test(code),
     "road 工地按「已修好的路」给最低代价 1");
 
-// ── ⑩ 外矿搬运必须排在本房孵化之前（否则永远只吃剩饭）─────────────────────
+// ── ⑩ 本房 keeper 没满员时绝不补外矿搬运 ─────────────────────────────────
 //
-// 一只外矿搬运要 ~1,250 能量，RCL5 的 hive 只有 1,800。排在 keeper/worker/carrier/
-// upgrader 之后时，它看到的永远是「被本房孵化啃剩」的 450~1,000 ⇒ 几乎永远付不起。
-// 实测 2026-10-27 W26N58：spawn 空闲、hive 满 1800，pass 里 curAvail=450，
-// 80+ tick 一辆车都补不出来。
-// 只提前**搬运**；keeper/worker 仍在原位之后（E53S21 崩盘教训是外矿 keeper 抢能量）。
-{
-    const highRaw = fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8");
-    const high = highRaw
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^[ \t]*\/\/.*$/gm, "");
-    const early = high.indexOf("StationSources.trySpawnOuterHarCarrier(flag.pos.roomName, room);");
-    const homeKeeper = high.indexOf("StationSources.trySpawnHarKeeper(room);");
-    const fullChain = high.indexOf("StrategyOuterHarvest.exec(room)");
-    assert.ok(early > 0, "pass 里必须有「提前补外矿搬运」的调用");
-    assert.ok(homeKeeper > 0, "本房 keeper 补员应仍然存在");
-    assert.ok(early < homeKeeper,
-        "外矿搬运必须在 `trySpawnHarKeeper(room)` **之前**（否则只能拿到孵化后的残值）");
-    // 整条外矿链（含 keeper/reserver）仍然留在本房孵化之后 —— E53S21 的教训
-    assert.ok(fullChain > 0 && fullChain > homeKeeper,
-        "完整的 StrategyOuterHarvest.exec 必须仍排在本房 keeper 之后（E53S21 教训）");
-}
+// 2026-10-27 现场事故：把外矿搬运提前到本房孵化之前（v0.78.154 试过）之后，
+// W26N58 的 1,800 hive 被 1,250 的外矿车反复抽干 → 本房 keeper 付不起孵化费、
+// 老死 → 收入归零 → hive 停在 300，连 worker 都生不出来（E53S21 同形态）。
+// 硬闸：出兵房矿点数 > 在岗 keeper 数 ⇒ 本房自己在挨饿，不抽它的能量。
+assert.ok(/spawnRoom\.creeps\("harvestEnergyKeeper", false\)\.length < ownSourceCnt\) return null;/.test(code),
+    "出兵房 keeper 没满员时必须直接放弃外矿补员");
+assert.ok(!/trySpawnOuterHarCarrier\(flag\.pos\.roomName, room\)/.test(
+    fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8")),
+    "外矿搬运不得再被提前到本房孵化之前（会抢 keeper 的孵化能量）");
 
 console.log("outer carrier spawn checks passed");

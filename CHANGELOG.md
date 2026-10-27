@@ -1,3 +1,29 @@
+## v0.78.155 — Revert the carrier priority; a room must be healthy before it feeds the mine
+
+v0.78.154 moved the outer-carrier top-up in front of the room's own hatches so it would see a full hive.
+Two and a half hours later W26N58 was dead: **no keepers, no upgrader, one carrier, hive at 300/1800**
+while sitting on 58k in storage - the room's own mining had stopped completely.
+
+That is the E53S21 failure mode with a different cast: the 1,250-energy outer carrier (70% of a RCL5
+hive) took the energy first every time, so the room's own keepers could never pay for their 1,250-1,700
+respawn, died of old age, and the income went to zero. My earlier reasoning ("only the carrier, and the
+carrier does not produce energy") missed that the carrier still spends the *keeper's* spawn budget.
+
+Reverted: the outer-carrier call is back behind the room's own spawning, and
+`trySpawnOuterHarCarrier` now refuses to run at all when the spawn room does not have a keeper on every
+own source:
+
+    if (targetName != spawnRoom.name
+        && spawnRoom.creeps("harvestEnergyKeeper", false).length < ownSourceCnt) return null;
+
+A spawn room feeding an outer mine must be healthy first; the outer mine is a surplus consumer, never a
+priority consumer.
+
+### Tests
+
+Case ⑩ rewritten: the hard gate must exist, and `strategy_highLevel` must not contain the early
+carrier call any more.
+
 ## v0.78.154 — Outer carriers now spawn before the room's own hatches
 
 Follow-up to the W26N59 investigation: carriers were replenished only sporadically.
