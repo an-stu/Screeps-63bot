@@ -663,6 +663,28 @@ let pro = {
 
 
         StationCarry.transformLink(room);
+        // **外矿搬运单独提前到本房孵化之前。**
+        //
+        // 一只外矿搬运要 ~1,250 能量，而 RCL5 房的 hive 只有 1,800：排在
+        // keeper/worker/carrier/upgrader 之后时，它看到的永远是「被本房孵化啃剩」的
+        // 450~1,000，于是**几乎永远付不起**。实测 2026-10-27 W26N58：
+        // spawn 空闲、hive 满 1800/1800，而 pass 里 curAvail=450 ⇒ 连续 80+ tick
+        // 一辆车都补不出来，容器 2000/2000 满、地面堆 6,000。
+        //
+        // 只提前**搬运**这一项：它不产能量，而且总量被 outerCarrierBacklogQuota /
+        // carryPart 缺口 / 车队长上限三重限定（2~4 只）。
+        // keeper / worker / carrier 等仍然按原顺序排在本房之后 ——
+        // E53S21 的崩盘教训是「外矿 keeper 抢走主房孵化能量」，那条没有被改。
+        if (global.StationSources && isCpuFeatureEnabled("outerHarvest")
+            && global.ManagerFlags && !room.flags("stopRemote").length) {
+            HelperError.catchError(() => {
+                ManagerFlags.getFlagsByPrefix("har").forEach(flag => {
+                    let flagSpawn = flag.memory && flag.memory.spawnRoom && Game.rooms[flag.memory.spawnRoom];
+                    if (!flagSpawn || flagSpawn.name != room.name) return;
+                    StationSources.trySpawnOuterHarCarrier(flag.pos.roomName, room);
+                });
+            }, room.name);
+        }
         // 能量生产者最优先：先补 keeper（缺矿点/死光时），否则 carrier/worker
         // 会先把空 hive 的 spawn 能量吃光，keeper 永远 spawn 失败（E53S21）。
         StationSources.trySpawnHarKeeper(room);

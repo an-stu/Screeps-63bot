@@ -1,3 +1,28 @@
+## v0.78.154 — Outer carriers now spawn before the room's own hatches
+
+Follow-up to the W26N59 investigation: carriers were replenished only sporadically.
+
+Measured at tick 83899291 with **everything else green**: `CarryPartCnt = 22` (needs 38 CARRY, one car
+supplies 14), `outerMineStarvesSpawnRoom = false`, quota 2, spawn **idle**, hive **1800/1800** - and yet
+no carrier for 80+ ticks while the containers sat at 2000/2000 and 6,000 energy rotted on the ground.
+
+The reason was ordering, not gates. A hand call showed `room.currentEnergyAvailable = 450` at pass time:
+the room's own keeper/worker/carrier/upgrader spawning (lines just above) had already eaten 1,350 of the
+1,800 hive, so the 1,250-energy outer carrier could never pay. End-of-tick probes read 1800 because the
+home carriers refill the hive during creep execution, after the pass.
+
+The outer **carrier** top-up now runs right after `transformLink`, before the room's own hatches, so it
+sees the fresh hive. Only the carrier is moved: keepers/workers/carriers stay behind the home spawns, and
+the whole `StrategyOuterHarvest.exec` chain stays where it was - the E53S21 crash came from outer *keepers*
+taking the home spawn energy, and that ordering is untouched. The carrier is bounded anyway by
+`outerCarrierBacklogQuota` (2), the CARRY deficit and the fleet cap.
+
+### Tests
+
+`test/outer-carrier-spawn.test.cjs` case ⑩: the early call must exist, must precede
+`trySpawnHarKeeper(room)`, and the full outer chain must still come after it. Negative control: removing
+the early call fails.
+
 ## v0.78.153 — Route planning treats road construction sites as finished road
 
 User: containers do not need roads; just plan the path as if the road were already there.
