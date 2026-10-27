@@ -59,38 +59,23 @@ assert.ok(!/else\s*\{\s*\}/.test(code), "不能留空分支吞掉搬运任务");
         + "挂在里面就永远不会派（实测进度冻结）");
 }
 
-// ── ⑤ 高等级路径：升级容器必须排在 hive / storage 之前 ─────────────────────
+// ── ⑤ 高等级路径：升级容器的补给**不能**抢走本房唯一一只搬运 ───────────────
 //
-// hive 和 storage 都是无限下沉（storage 容量 100 万，永远填不满）。排在前面
-// 就会把空闲运力全吃掉 —— 2026-10-23 实测：唯一一只 carrier 去填 storage(38,9)，
-// 控制器容器(8,6) 一直是 0，upgrader 抱 0 能量、进度冻结。
+// 2026-10-27 现场事故：v0.78.144 把「升级容器补给」插到 carrierManager 的最前面，
+// 结果 W26N58（只有 1 只搬运）的那只车被派去填控制器容器，**spawn/extension 永远填不满**
+// → hive 停在 300 → 本房 keeper 付不起 1,250 的孵化费 → keeper 老死、收入归零 → 全房停摆。
+// 结论：hive 是孵化能量的唯一来源，优先级必须高于控制器容器。
+// 现在升级容器只在 workerManagerAfterCarrier（hive/tower 之后）补，且需要 hive 不缺能。
 {
     const highRaw2 = fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8");
     const high2 = highRaw2
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/^[ \t]*\/\/.*$/gm, "");
-    const fill2 = high2.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50)");
-    // 只能看 carrierManager **内部**的那个 hive 分支：文件里别处也有 HiveNeedToFill 调用。
-    const cmStart = high2.indexOf("carrierManager(room) {");
-    const hiveGate = high2.indexOf("if (StationHive.HiveNeedToFill(room)) {", cmStart);
-    assert.ok(cmStart >= 0 && hiveGate > cmStart, "应能找到 carrierManager 与它内部的 hive 分支");
-    assert.ok(fill2 >= 0, "carrierManager 顶部必须给升级容器发任务");
-    assert.ok(hiveGate >= 0, "hive 填充分支应仍然存在");
-    assert.ok(fill2 < hiveGate,
-        "升级容器必须排在 `if (StationHive.HiveNeedToFill(room))` 之前：hive/storage 是无限下沉，"
-        + "排前面会把运力吃光（实测控制器容器饿死到 0）");
-}
-
-// ── ⑥ 没有升级 link 的房：搬运编制要 +1（冗余） ──────────────────────────
-//
-// 2026-10-23 实测：只剩 1 只 carrier 的那段时间控制器容器一直是 0、进度冻结 40+ tick，
-// 补到 2 只立刻恢复 10/tick。这类房（RCL4~5）需要一只冗余。
-{
-    const highRaw3 = fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^[ \t]*\/\/.*$/gm, "");
-    assert.ok(/if \(!upgLink\) carrierTarget = Math\.min\(4, carrierTarget \+ 1\)/.test(highRaw3),
-        "无升级 link 的房必须 +1 搬运编制（否则单 carrier 死亡窗口里控制器容器会饿死）");
+    const early = high2.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, freeCarries[0].getPartCnt(CARRY) * 50)");
+    const hiveGate = high2.indexOf("if (StationHive.HiveNeedToFill(room)) {");
+    assert.ok(early < 0,
+        "carrierManager 里不得再抢在本房 hive 之前派升级容器任务（会把唯一一只车抽走）");
+    assert.ok(hiveGate > 0, "hive 填充分支应仍然存在");
 }
 
 console.log("upgrade fill priority checks passed");

@@ -250,26 +250,6 @@ let pro = {
         let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
 
-        // 升级容器（上限 2000）**必须排在 hive / storage 之前**发任务。
-        //
-        // hive 和 storage 都是「无限下沉」：storage 容量 100 万，永远填不满，
-        // 排在前面就会把所有空闲运力吃掉，控制器容器饿死到 0 ⇒ 控制器进度冻结。
-        // 2026-10-23 实测 W26N58：唯一一只 carrier 抱着 800 能量去填 storage(38,9)，
-        // 而控制器容器(8,6) 是 0、upgrader 站在上面抱 0 能量（ttl 只剩 220），
-        // 进度卡在 115,043 二十多个 tick。这是本项目第 10 条设计错误
-        //（「先满足有限上限的消费者，再给无限下沉的」）在高级经济路径上的重演。
-        //
-        // `fillRes` 自带「空手先回 storage 取货」的分支（prototype_creep.js:626），
-        // 所以派空手 carrier 也有效。有 link 的房（RCL5+）不会命中：
-        // `generatorFillEnergyTask` 在存在升级 link 时返回空数组。
-        if (freeCarries.length) {
-            // 先取承运爬再按**它的**容量预订：原来按 head 的容量算、任务却派给
-            // pop 的另一只，混编体型时预订量与实际承运不符
-            let carrier = freeCarries.pop();
-            let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50);
-            if (upgFill.length) carrier.addTask(upgFill);
-        }
-
         if (StationHive.HiveNeedToFill(room)) {
             // 已带能量的 carrier 直接填 hive
             room.creeps("carrier").filter(e => e.isFree() && !e.storeEmpty() && !e.storeContainsEnergyOtherResType()).forEach(creep => {

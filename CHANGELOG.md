@@ -1,3 +1,26 @@
+## v0.78.156 — The upgrade-container priority was starving the hive (root cause of the collapse)
+
+The W26N58 collapse was not caused by the outer mine alone. v0.78.144 moved the upgrade-container
+assignment to the **top of `carrierManager`**, in front of the hive branch. In a room with one carrier
+(which is exactly what a starved room has), that single carrier was sent to fill the controller container:
+
+- `spawn`/`extension` never got filled (hive sat at 300/1800),
+- so the room's own keepers could never pay the ~1,250 respawn and died of old age,
+- income went to zero and nothing in the room could recover - not even a worker (needs 300 in the hive).
+
+Measured: hive 300/1800 for minutes, the single carrier `isFree() && storeEmpty()` yet with **0 tasks**,
+`HiveNeedToFill = true`, and a manual `addTask(generatorFillHiveTask(...))` worked fine - the task simply
+never got assigned because the upgrade-container block had already popped the carrier.
+
+Removed that block. The hive branch is back to first place in `carrierManager`; the upgrade container is
+only fed later, in `workerManagerAfterCarrier` (the v0.78.143 placement, which runs after hive and tower,
+when a carrier is still free).
+
+### Tests
+
+`upgrade-fill-priority` case ⑤ inverted: `carrierManager` must **not** contain the early upgrade-container
+call, and the hive branch must still exist.
+
 ## v0.78.155 — Revert the carrier priority; a room must be healthy before it feeds the mine
 
 v0.78.154 moved the outer-carrier top-up in front of the room's own hatches so it would see a full hive.
