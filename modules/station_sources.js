@@ -2062,6 +2062,22 @@ let pro = {
             }
             cm.set(s.pos.x, s.pos.y, 1);
         });
+        // **修路工地按「已经修好的路」算代价（1）** —— 用户 2026-10-27：
+        // 「container 上不需要修路，直接考虑 road 修好的路径就行」。
+        //
+        // 原来是只看**已建成**的路。于是路线算出来之后 placeOuterRoadSites 沿它铺工地，
+        // 但下一次重算（OUTER_ROAD_PATH_TTL）时代价矩阵里那些工地还是空地 2、沼泽 5，
+        // 寻路会漂到旁边的草地/沼泽上 → 再铺一条新路 → 工地与路线互相打架，
+        // 路永远修不完，爬也一直按「没路」的速度跑。
+        // 把 road 工地直接当 1 之后：路线稳定、按「有路」计时，铺好即兑现。
+        //
+        // 容器格不需要路（容器本身可走，placeOuterRoadSites 也会因为「已有建筑」跳过），
+        // 这里只对 road 类型的工地打折，不会给容器格额外铺路。
+        (room.constructionSite || []).forEach(site => {
+            if (site.structureType != STRUCTURE_ROAD) return;
+            if (cm.get(site.pos.x, site.pos.y) >= 254) return;   // 该格有不可走建筑，保持封死
+            cm.set(site.pos.x, site.pos.y, 1);
+        });
         // 最后再把「我方矿工工作位」（矿点及其相邻一圈）抬高，
         // 免得外矿路线从 keeper 的岗位上穿过去挤占它。见 OUTER_ROAD_WORK_TILE_COST。
         room.find(FIND_SOURCES).forEach(src => {

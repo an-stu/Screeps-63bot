@@ -1,3 +1,26 @@
+## v0.78.153 — Route planning treats road construction sites as finished road
+
+User: containers do not need roads; just plan the path as if the road were already there.
+
+The outer-route cost matrix only discounted **built** roads (cost 1) and left everything else at terrain
+cost (plain 2, swamp 5). Consequences:
+
+- a route is computed, `placeOuterRoadSites` lays sites along it, but on the next recompute
+  (`OUTER_ROAD_PATH_TTL`) those sites still look like plain ground, so PathFinder drifts onto the grass
+  beside them and a *second* line of sites gets laid - the two fight each other and the road never
+  finishes;
+- the cached travel time therefore always reflects the unbuilt terrain, which is also what fed the carrier
+  requirement.
+
+`outerRoadRoomCallback` now sets cost 1 for every `STRUCTURE_ROAD` construction site (skipping tiles that
+hold a blocking structure). Only road sites are discounted - container tiles need no road and
+`placeOuterRoadSites` already skips any tile that has a structure, so nothing is laid on top of them.
+
+### Tests
+
+`test/outer-carrier-spawn.test.cjs` case ⑨: the callback must iterate construction sites, only discount
+`STRUCTURE_ROAD`, and set cost 1. Negative control: removing the discount fails.
+
 ## v0.78.152 — Carrier quota divided by the wrong number, and the path cap halved the need
 
 User: keep building the outer road, but do not treat "road unfinished" as a reason to size the fleet down.

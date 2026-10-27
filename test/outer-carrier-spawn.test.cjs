@@ -94,4 +94,16 @@ assert.ok(!/Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/
 assert.ok(!/builderCnt < OUTER_ROAD_BUILDER_CNT && !spawnRoom\.spawnFailure/.test(code),
     "修路爬补员同样不能用 spawnFailure 当闸门");
 
+// ── ⑨ 路线代价必须把「修路工地」当成已修好的路 ────────────────────────────
+//
+// 用户 2026-10-27：「container 上不需要修路，直接考虑 road 修好的路径就行」。
+// 只看已建成的路时：路线铺出工地 → 下次重算时代价矩阵里那些工地还是空地 2/沼泽 5
+// → 寻路漂到旁边草地 → 再铺一条新路，工地与路线互相打架，路永远修不完。
+assert.ok(/\(room\.constructionSite \|\| \[\]\)\.forEach\(site => \{/.test(code),
+    "代价矩阵必须遍历修路工地");
+assert.ok(/if \(site\.structureType != STRUCTURE_ROAD\) return;/.test(code),
+    "只对 road 类型工地打折（容器格不需要路）");
+assert.ok(/cm\.set\(site\.pos\.x, site\.pos\.y, 1\);/.test(code),
+    "road 工地按「已修好的路」给最低代价 1");
+
 console.log("outer carrier spawn checks passed");
