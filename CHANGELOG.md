@@ -1,3 +1,37 @@
+## v0.78.149 — Outer carriers were being starved by `spawnFailure` and an oversized body
+
+W26N59 was added as an outer mine yesterday. Twelve hours later: **both containers at 2000/2000**,
+**6,700 energy lying on the ground** next to them, two keepers happily mining, and **zero
+`outerHarvestEnergyCarrier`** - nothing was hauling.
+
+Diagnosis (all numbers measured live):
+
+- both mine points had `pathTime` 94 / 64, containers assigned, road paths cached, `carryCreeps` **0**;
+- `outerMineStarvesSpawnRoom` = false, fleet cap 15, quota 1 - none of those gates blocked it;
+- calling `trySpawnOuterHarCarrier` by hand returned `undefined` and set `spawnFailure = true`, i.e. the
+  spawn attempt itself failed while the hive was momentarily drained (`energy 109/1800`, spawn busy).
+
+Two causes, both in `trySpawnOuterHarCarrier`:
+
+**1. `if (spawnRoom.spawnFailure) return;`** - that flag means "some spawn attempt failed this tick",
+and the room's *own* keeper/carrier/upgrader attempts set it too whenever the single spawn is busy. The
+outer pass runs every 6 ticks, so it was blocked almost every time. Replaced with the accurate check
+"is there a free, active spawn right now?" (the route refresh still runs before it, as the core-profile
+test demands).
+
+**2. Body budget ignored the hive ceiling.** The body is sized from `getEnergyCapacityAvailable()`, so on
+RCL5 (1800) it asked for the full 1800. Hatching a 1800-energy carrier takes ~56 ticks and drains the hive
+to ~100, during which the room cannot spawn anything else and the outer carrier itself competes with home
+creeps. The budget is now additionally capped at **75% of the hive**, which trades a slightly smaller
+carrier for actually getting one.
+
+### Tests
+
+New `test/outer-carrier-spawn.test.cjs`: no `spawnFailure` early return, the free-spawn check is present,
+the budget is capped at 75% of the hive **and** still scaled by currently available energy. Negative
+controls: restoring the `spawnFailure` gate, and dropping the 75% cap, each fail. `core-profile` was
+updated in two places (route-refresh ordering, body-budget intent).
+
 ## v0.78.148 — RCL8 keeps two carriers, and only adds more when the hive is really drained
 
 User: two carriers per room is fine, as long as room operations do not suffer.

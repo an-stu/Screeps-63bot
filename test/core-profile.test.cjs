@@ -84,7 +84,9 @@ assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.inc
 // storage 旁边（实测 last=W33N55:(20,34)，紧邻 storage(21,34)）。改成断言以
 // `reachesDestination`（终点必须在目标 1 格内）为唯一判据 —— 更精确，也不漏合法路线。
 assert.ok(stationSources.includes("reachesDestination") && stationSources.includes("ret.path.length > 1"), "external-road paths must be cached only when the endpoint actually reaches storage");
-assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < stationSources.indexOf("if (spawnRoom.spawnFailure) return;"), "external-road route refresh must not be blocked by local spawn pressure");
+// 2026-10-27：外矿补员的闸门从 `spawnFailure` 改成了「有没有空闲 spawn」——
+// 路线维护仍然必须排在这道闸之前（它只更新缓存路线，不需要 spawn）。
+assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < stationSources.indexOf("if (spawnRoom.spawn && !spawnRoom.spawn.some("), "external-road route refresh must not be blocked by local spawn pressure");
 // 原来的预算是 maxRooms:4 / maxOps:8000。外矿房可能隔好几房（W35N55 要走
 // W35N55 → W34N55 → W33N55 三房。maxRooms=4 余量太小，搜索空间被截断 → incomplete=true
 // 直接缓存不了路线（实测 W35N55 的两个源就是这么变成 NOPATH 的）。预算放宽到 maxRooms:8 / maxOps:20000。
@@ -117,8 +119,12 @@ assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     assert.ok(hlText.includes("economySlot(room, interval)"),
         "the ordinal-based slot helper must exist with a hashCode fallback for special/offline rooms");
 }
-assert.ok(stationSources.includes("let bodyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(),"),
-    "outer carrier bodies must be sized from the energy actually available, not the hive's full capacity: a 2500-energy 50-part body queued against a hive holding 2000-5000 energy simply fails to spawn, the spawn idles, and the fleet collapses from 15 to 1-2 for thousands of ticks (the keeper spawner already scales its body this way)");
+// 2026-10-27：预算在「按可用能量」之上再夹一层「hive 容量的 75%」——RCL5 出兵房
+// 只有 1800 容量，满配 1800 的爬一孵就把整只 hive 抽干（掉到 109），本房与外矿补员
+// 互相饿死。两条都要在：按可用能量收缩 + 不超过 hive 的 75%。
+assert.ok(stationSources.includes("let bodyBudget = Math.min(Math.floor(hiveCap * 0.75),")
+    && stationSources.includes("Math.max(spawnAvail, 550)"),
+    "outer carrier bodies must be sized from the energy actually available AND capped at 75% of the hive: a 2500-energy 50-part body queued against a hive holding 2000-5000 energy simply fails to spawn, and on a 1800-capacity RCL5 spawn room even a full-size body drains the hive so far that both the room and the outer mine starve");
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
     "the road builder turn-around must use taskOutView when getOuterMineTarget falls back to a RoomPosition: UtilsTask.task requires .pos and a RoomPosition has none, so the no-vision case threw every tick");
 assert.ok(/if \(!target \|\| this\.pos\.isNearTo\(target\)/.test(stationSources),

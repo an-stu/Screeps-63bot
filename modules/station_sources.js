@@ -3474,7 +3474,13 @@ let pro = {
             let container = Game.getObjectById(data["container"]);
             // 补员才需要空闲 Spawn：单 Spawn 房若先尝试本地补员，spawnFailure
             // 不能阻止已有外矿 carrier 修正其过期路径。
-            if (spawnRoom.spawnFailure) return;
+            // `spawnFailure` 是「本 tick 有一次孵化尝试失败」的粘滞标记：**本房自己的**
+            // 补员失败（spawn 正忙 / 能量不够）也会把它置真，用它挡外矿补员会大面积误伤
+            // —— MEMORY 里记过「spawnFailure 为真不代表没有空闲 spawn」。
+            // 2026-10-27 实测 W26N58：容器 2000 满 + 地面堆 6,700，12 小时一只外矿搬运
+            // 都没孵出来，就是这个标记把补员几乎每次都挡掉了。改成直接看有没有空闲 spawn。
+            // 真机上 room.spawn 一定有；VM 桩里可能没定义，缺失时不做这层判断。
+            if (spawnRoom.spawn && !spawnRoom.spawn.some(e => !e.spawning && e.isActive())) return;
             // container 不可见时仍可按缓存 ID / 坐标孵化；carrier 抵达矿区后
             // 再解析对象即可。否则 keeper 死后失去视野会再次把外矿锁死。
             if (pathTime && data["container"]) {
@@ -3529,7 +3535,13 @@ let pro = {
                 // 能量收缩体型的写法，见 trySpawnOuterHarKeeper 的 energyBudget，这里漏了）。
                 let spawnAvail = spawnRoom.getEnergyAvailable
                     ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
-                let bodyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(),
+                // **体型预算再夹一层「hive 容量的 75%」。** 满配 50 部件要 2,500：RCL8 房
+                // （12,900）无所谓，但出兵房 RCL5 只有 1,800 —— 满配爬一孵就是 56+ tick，
+                // 把整只 hive 抽干，本房 spawn/extension 补员与外矿补员互相饿死
+                // （实测 W26N58：孵一只 1,800 的爬期间 hive 掉到 109，期间所有补员全部失败）。
+                // 夹到 75% 之后同样是「大爬少只」，但留出余量给本房。
+                let hiveCap = spawnRoom.getEnergyCapacityAvailable();
+                let bodyBudget = Math.min(Math.floor(hiveCap * 0.75),
                     Math.max(spawnAvail, 550));
                 // container 被拆/衰减消失时 getObjectById 返回 null，
                 // isNearTo(null) 走 target.pos 解引用直接抛 TypeError——
