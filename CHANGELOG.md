@@ -1,3 +1,28 @@
+## v0.78.152 — Carrier quota divided by the wrong number, and the path cap halved the need
+
+User: keep building the outer road, but do not treat "road unfinished" as a reason to size the fleet down.
+
+Two arithmetic defects kept W26N59 at exactly one carrier (containers 2000/2000, 6,800 energy on the
+ground, spawn idle, hive 1800/1800):
+
+**1. `outerCarrierBacklogQuota` divided the backlog by the car's *price*.** `floor(4000 / 2500)` = 1,
+where 2,500 is `OUTER_CARRIER_COST` (what a carrier costs to build), not what it can carry. One carrier
+moves ~1,000-1,700 per trip, so a 2-source mine (20 energy/tick) can never be cleared by one. New
+`OUTER_CARRIER_TRIP = 1700` (matching the existing "一趟运 1700" comments): 4,000 backlog -> 2 carriers,
+6,000 -> 3. Empty backlog still yields 0, so the gate cannot be permanently bypassed.
+
+**2. The requirement was capped at `roadTiles * 1.2`.** That factor assumes a finished road (1 tile ~ 1
+tick); with the road unbuilt, plain terrain is 2 ticks/tile and swamp 5, so the real round trip is 94
+ticks while the cap said 36 - `needCarry` came out 13 and the existing 20-CARRY carrier satisfied it. As
+instructed, the cap no longer depends on road state: the requirement uses the measured `pathTime`
+directly, with only an absolute sanity clamp of 10..400 ticks (still guards against the historical corrupt
+values such as 843).
+
+### Tests
+
+`test/outer-carrier-spawn.test.cjs` cases ⑥/⑦ cover both; `edge-link`'s quota expectations were updated
+to the trip-based numbers (6,000 -> 3) and its "fleet at quota" scene now uses three cars.
+
 ## v0.78.151 — The carrier requirement was underestimated while the road is unbuilt
 
 v0.78.150 removed the wrong guard, but W26N59 still kept exactly one carrier. The arithmetic was the

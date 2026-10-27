@@ -1414,15 +1414,17 @@ function defenceGateFixture(defenders) {
     const live = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
                              containerEnergies: [2000, 2000, 2000], fleet: [] });
     assert.equal(live.S.outerMineEnergyWaiting(live.spawnRoom), 6000, "外矿存货 = 三个容器之和");
-    assert.equal(live.S.outerCarrierBacklogQuota(live.spawnRoom), 2,
-        "6000 存货 / 一只满编车 2500 = 该有 2 只");
+    // 2026-10-27：配额的分母从「造车价 2500」改成「一趟运力 1700」—— 前者是**成本**、
+    // 不是运力，会把 4000 存货算成 1 只车（实际要 2~4 只才清得完）。
+    assert.equal(live.S.outerCarrierBacklogQuota(live.spawnRoom), 3,
+        "6000 存货 / 一趟 1700 = 该有 3 只");
     assert.equal(live.S.outerMineStarvesSpawnRoom(live.spawnRoom, true), true,
         "按主房口径仍然算穷（storage + terminal 超额 只有 22592 < 3 万）");
     // 这就是补员闸的最终判据：闸门判真 && 车队 >= 配额 才挡
     const blocked = live.S.outerMineStarvesSpawnRoom(live.spawnRoom, true)
         && live.spawnRoom.creeps("outerHarvestEnergyCarrier", false).length
             >= live.S.outerCarrierBacklogQuota(live.spawnRoom);
-    assert.equal(blocked, false, "车队 0 < 配额 2 → 必须放行补员（旧代码在这里死锁）");
+    assert.equal(blocked, false, "车队 0 < 配额 3 → 必须放行补员（旧代码在这里死锁）");
 
     // 负对照 ①：外矿真的没货 → 配额 0 → 闸门照旧挡住，不许凭空出车
     const empty = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
@@ -1434,12 +1436,13 @@ function defenceGateFixture(defenders) {
         "没货就老老实实被闸门挡住");
 
     // 负对照 ②：车队已经到配额 → 不再多出，豁免不会把闸门永久架空
+    // （配额按「一趟运力 1700」算，6000 存货 ⇒ 3 只）
     const stocked = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
-                                containerEnergies: [2000, 2000, 2000], fleet: [{}, {}] });
+                                containerEnergies: [2000, 2000, 2000], fleet: [{}, {}, {}] });
     assert.equal(stocked.S.outerMineStarvesSpawnRoom(stocked.spawnRoom, true)
         && stocked.spawnRoom.creeps("outerHarvestEnergyCarrier", false).length
             >= stocked.S.outerCarrierBacklogQuota(stocked.spawnRoom), true,
-        "车队 2 ≥ 配额 2 → 不再补员");
+        "车队 3 ≥ 配额 3 → 不再补员");
 
     // 负对照 ③：主房能量足 → 闸门本来就假，跟豁免无关
     const rich = gateScene({ storageEnergy: 60000, terminalEnergy: 0,
@@ -1511,7 +1514,8 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerMineEnergyWaiting(spawnRoom, "W35N55"), 6000, "按房取 W35N55 的存货");
     assert.equal(S.outerMineEnergyWaiting(spawnRoom), 9070, "不传房名 = 全部外矿房之和");
     assert.equal(S.outerCarrierBacklogQuota(spawnRoom, "W34N55"), 1, "W34N55 只喂得起 1 只");
-    assert.equal(S.outerCarrierBacklogQuota(spawnRoom, "W35N55"), 2, "W35N55 喂得起 2 只");
+    // 2026-10-27：分母从「造车价 2500」改成「一趟运力 1700」—— 6000/1700 = 3 只
+    assert.equal(S.outerCarrierBacklogQuota(spawnRoom, "W35N55"), 3, "W35N55 喂得起 3 只");
 
     // 关键：全局车数（这里模拟 5 只）已经超过全局配额，但 W35N55 只有 1 只
     // → 对 W35N55 必须仍然放行。

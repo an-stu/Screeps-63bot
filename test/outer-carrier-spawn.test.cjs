@@ -67,17 +67,30 @@ assert.ok(!/CarryPartCnt > 0 && !isNearToAny/.test(code),
 assert.ok(/if \(CarryPartCnt > 0\) \{/.test(code),
     "补员条件应只剩容量缺口");
 
-// ── ⑥ 运力上界必须区分「路铺好了没有」 ──────────────────────────────────
+// ── ⑥ 运力需求按实测 pathTime，不能被「路点长度 × 1.2」砍半 ──────────────
 //
 // 2026-10-27 实测 W26N59（路还没修）：pathTime 94、路点约 30 ⇒ 旧上界 30×1.2=36
 // ⇒ 算出只需要 13 CARRY，而 1 只 20 CARRY 的爬实际只有 5.3 能量/tick（产出 20/tick）
-// ⇒ 公式认为够了，永远不再补员。路未完成时用 3 倍上界。
-assert.ok(/let roadDone = pro\.outerRoadComplete\(data\);/.test(code),
-    "运力上界必须知道路是否已铺好");
-assert.ok(/capPath\.length \* \(roadDone \? 1\.2 : 3\)/.test(code),
-    "路未完成时上界不能再用 1.2 倍（会把运力需求低估一半以上）");
+// ⇒ 公式认为够了，永远不再补员。
+// 用户 2026-10-27：「路照常修，没修完也当有路走，这无所谓」—— 路只影响速度，
+// 不该拿来当需求上限。改成绝对夹（10~400 tick，只挡历史脏值）。
+assert.ok(/let effPathTime = Math\.max\(10, Math\.min\(pathTime \|\| 300, 400\)\);/.test(code),
+    "运力需求必须直接用实测 pathTime（只做防畸形的 10~400 夹）");
+assert.ok(!/capPath\.length \* \(roadDone \? 1\.2 : 3\)/.test(code),
+    "不能再按「路点长度 × 系数」当需求上界");
 
-// ── ⑦ 修路爬补员也不该被 spawnFailure 挡 ────────────────────────────────
+// ── ⑦ 配额必须按「一趟运力」折算，不能用造车价当分母 ──────────────────────
+//
+// OUTER_CARRIER_COST(2500) 是**造一只车**的价格，被当成了「一只车能清多少货」：
+// 容器 4,000 ⇒ floor(4000/2500) = 1 只，而实际要 4 只（每趟约 1,000）。
+assert.ok(/OUTER_CARRIER_TRIP = 1700/.test(code),
+    "必须有「一趟运力」常量（满编一趟 1,700）");
+assert.ok(/let quota = Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/ OUTER_CARRIER_TRIP\);/.test(code),
+    "配额 = 存货 / 一趟运力（无货仍为 0，不会把闸门永久架空）");
+assert.ok(!/Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/ OUTER_CARRIER_COST\)/.test(code),
+    "不能再用造的价钱当分母");
+
+// ── ⑧ 修路爬补员也不该被 spawnFailure 挡 ────────────────────────────────
 assert.ok(!/builderCnt < OUTER_ROAD_BUILDER_CNT && !spawnRoom\.spawnFailure/.test(code),
     "修路爬补员同样不能用 spawnFailure 当闸门");
 

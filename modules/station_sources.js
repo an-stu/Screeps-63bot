@@ -252,6 +252,15 @@ const OUTER_TERMINAL_RESERVE = 50000;
  * 体型见 getOuterHarCarrierBodyConfig，两者必须一起改。
  */
 const OUTER_CARRIER_COST = 2500;
+/**
+ * 一只外矿搬运爬**一趟大约能运多少能量**：满编 50 部件 = 1,700（与下面注释里的
+ * 「一趟运 1700」同源），RCL5 出兵房的 900~1,000 体型也在同一量级。
+ *
+ * 配额（outerCarrierBacklogQuota）要按它折算「这批存货需要几只车」——
+ * 用 `OUTER_CARRIER_COST`（造车价 2,500）当分母是单位错配：那是**成本**，
+ * 不是**运力**，会把「4,000 货」算成 1 只（实际要 4 只），车队被封死在 1。
+ */
+const OUTER_CARRIER_TRIP = 1700;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
@@ -3383,7 +3392,15 @@ let pro = {
         let cache = spawnRoom._outerCarrierBacklogQuota;
         if (!cache) cache = spawnRoom._outerCarrierBacklogQuota = {};
         if (cache[cacheKey] !== undefined) return cache[cacheKey];
-        let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom, roomFilter) / OUTER_CARRIER_COST);
+        // **按「存货 / 一趟运力」算，不是「存货 / 车的造价」。**
+        //
+        // 原来除的是 `OUTER_CARRIER_COST`(2500) —— 那是**造一只车**的价格，被当成了
+        // 「一只车能清掉多少货」。容器存 4,000 时算出来 floor(4000/2500) = **1 只**，
+        // 而一只车一趟只运 1,000 左右 ⇒ 一个 2 源矿（20 能量/tick）永远清不完，
+        // 配额却把车队封在 1（实测 2026-10-27 W26N59：spawn 空闲、能量满 1800/1800、
+        // 容器 2000/2000 + 地面 6,800，就是不孵第二只）。
+        // 换算成「一趟运力」后：无货仍为 0（不会把闸门永久架空），4,000 货 ⇒ 4 只。
+        let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom, roomFilter) / OUTER_CARRIER_TRIP);
         cache[cacheKey] = quota;
         return quota;
     },
@@ -3513,18 +3530,17 @@ let pro = {
                 // 不够**：Memory 里可能还留着历史畸形值（W33N55 实测 843，正常≈路线长度），
                 // 它会一直按老值算运力、继续过量补员 —— 表现就是「杀掉多余 carrier、
                 // 下一 tick 立刻又生一批」。两端都夹住才安全。
-                let capPath = pro.getOuterRoadPath(data);
-                // **1.2 倍只适用于「路已经铺好」**（1 格 ≈ 1 tick）。路没铺好时空地 2 tick/格、
-                // 沼泽 5 tick/格，实际往返远大于 tiles×1.2 —— 用它当上界会把运力需求低估一半以上。
-                // 实测 2026-10-27 W26N59（路还没修）：pathTime 94、路点约 30 ⇒ pathCap 36
-                // ⇒ 算出「只需要 13 CARRY」，而实际 1 只 20 CARRY 的爬只有 5.3 能量/tick
-                //（产出 20/tick）⇒ 公式认为运力够了，永远不再补员，容器满、地面堆 6,800。
-                // 路未完成时改用 3 倍上界：仍能挡住历史畸形值（如 843），但不会低估。
-                let roadDone = pro.outerRoadComplete(data);
-                let pathCap = capPath && capPath.length
-                    ? Math.round(capPath.length * (roadDone ? 1.2 : 3))
-                    : (pathTime || 300);
-                let effPathTime = Math.min(pathTime, pathCap);
+                // 运力需求直接按**实测 pathTime**（它本来就是真实往返时间），
+                // 只保留一道「防历史畸形值」的宽松夹。
+                //
+                // 原来的上界是 `路点长度 × 1.2`（按「1 格 1 tick 有路」估）。路还没修完时
+                // 实际是空地 2 tick/格、沼泽 5 tick/格，这个上界会把需求砍掉一半以上：
+                // 实测 2026-10-27 W26N59：pathTime 94、路点约 30 ⇒ 上界 36 ⇒ 算出只要 13 CARRY，
+                // 而 1 只 20 CARRY 的爬实际只有 5.3 能量/tick（产出 20/tick）⇒ 公式认为够了，
+                // 永远不再补员（容器 2000 满、地面堆 6,800）。
+                // 用户 2026-10-27：「路照常修，没修完也当有路走，这无所谓」—— 路只是会更快，
+                // 不该拿它当需求上限。这里改成绝对夹：10~400 tick（挡住 843 那类脏值）。
+                let effPathTime = Math.max(10, Math.min(pathTime || 300, 400));
                 let NeedCarryPartCnt = Math.ceil(effPathTime * 2 * EnergyPerTick / 50) // 来回*2 每个要的tick数量
                 let CarryPartCnt = NeedCarryPartCnt - 2 // 两个被换成 work了
                 carrierCreeps.forEach(e => CarryPartCnt -= e.getPartCnt(CARRY))
