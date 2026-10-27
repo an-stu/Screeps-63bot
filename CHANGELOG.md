@@ -1,3 +1,32 @@
+## v0.78.150 — Outer carriers: stop gating top-up on "is a carrier already at the container"
+
+Follow-up to v0.78.149, which got the first carrier hatched in W26N59 but not the second.
+
+State after that fix: **one** `outerHarvestEnergyCarrier` (capacity 1000), containers at 2000/2000 with
+6,800 energy on the ground, spawn idle, hive full at 1800/1800. Throughput of one carrier on a 94-tick
+route is ~5.3 energy/tick against 20/tick of production, so three or four are needed - and none came.
+
+`trySpawnOuterHarCarrier` had a second guard:
+
+    let isNearToAny = container ? carrierCreeps.filter(e => e.pos.isNearTo(container)).head() : undefined
+    if (CarryPartCnt > 0 && !isNearToAny) { spawn }
+
+`CarryPartCnt` already subtracts the CARRY capacity of every existing carrier, so it *is* the remaining
+deficit. Gating on "no carrier is adjacent to the container" makes a loading carrier look like enough
+capacity, and the pass (every 6 ticks) usually runs while the single carrier is at the container - so the
+deficit never caused a spawn. The guard is gone; top-up is driven purely by the capacity deficit.
+
+**Answering the size question**: the carrier built was 32 parts - 2 WORK + 20 CARRY + 10 MOVE, 1,700
+energy, capacity 1000 - i.e. the "road builder" variant (`carrierBuildCreep` = false because no carrier
+has WORK yet). The pure-carry template tops out at 50 parts / 2,500 energy, and since v0.78.149 the budget
+is additionally capped at 75% of the hive (1,350 on a RCL5 spawn room), so later ones will be ~18 CARRY
+(900 capacity) unless the hive grows.
+
+### Tests
+
+`test/outer-carrier-spawn.test.cjs` case ⑤ asserts the `isNearToAny` guard is gone and the condition is
+just the capacity deficit. Negative control: restoring the guard fails.
+
 ## v0.78.149 — Outer carriers were being starved by `spawnFailure` and an oversized body
 
 W26N59 was added as an outer mine yesterday. Twelve hours later: **both containers at 2000/2000**,

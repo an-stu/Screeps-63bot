@@ -55,4 +55,16 @@ const vm = require("node:vm");
     assert.ok(/budget|energy/i.test(m[0]), "体型配置函数必须按 budget 收缩");
 }
 
+// ── ⑤ 补员只看容量缺口，不能被「有车贴着容器」挡住 ────────────────────────
+//
+// 2026-10-27 实测 W26N59：只有 1 只 1000 容量的搬运在跑（吞吐 5.3/tick，产出 20/tick），
+// 容器 2000 满 + 地面堆 6,800，spawn 空闲且能量满 1800/1800 —— 就是不孵第二只。
+// 因为原条件是 `CarryPartCnt > 0 && !isNearToAny`，而 CarryPartCnt 已经扣掉了现有车队的
+// CARRY，剩下的正缺口才是要补的量；再用「有没有车贴着容器」挡一次，等于把「车在装卸」
+// 误判成「运力够了」。
+assert.ok(!/CarryPartCnt > 0 && !isNearToAny/.test(code),
+    "补员不得再用 isNearToAny 挡（现有车队的 CARRY 已经在 CarryPartCnt 里扣过了）");
+assert.ok(/if \(CarryPartCnt > 0\) \{/.test(code),
+    "补员条件应只剩容量缺口");
+
 console.log("outer carrier spawn checks passed");

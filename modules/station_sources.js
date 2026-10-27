@@ -3471,7 +3471,6 @@ let pro = {
         // （路线维护已经挪到上面的早返回之前，这里只保留补员。）
         _.values(sm).forEach(data => {
             let pathTime = data["pathTime"];
-            let container = Game.getObjectById(data["container"]);
             // 补员才需要空闲 Spawn：单 Spawn 房若先尝试本地补员，spawnFailure
             // 不能阻止已有外矿 carrier 修正其过期路径。
             // `spawnFailure` 是「本 tick 有一次孵化尝试失败」的粘滞标记：**本房自己的**
@@ -3543,13 +3542,13 @@ let pro = {
                 let hiveCap = spawnRoom.getEnergyCapacityAvailable();
                 let bodyBudget = Math.min(Math.floor(hiveCap * 0.75),
                     Math.max(spawnAvail, 550));
-                // container 被拆/衰减消失时 getObjectById 返回 null，
-                // isNearTo(null) 走 target.pos 解引用直接抛 TypeError——
-                // 异常会打断本轮 exec 的旗子循环，该矿点之后的矿点维护/
-                // 补员以及后续旗子的防守生产全部跳过。null 时语义即
-                // "没有车在容器边"，应放行补员。
-                let isNearToAny = container ? carrierCreeps.filter(e => e.pos.isNearTo(container)).head() : undefined
-                if (CarryPartCnt > 0 && !isNearToAny) {
+                // ⚠️ 这里原先是 `CarryPartCnt > 0 && !isNearToAny`：只要**有一只搬运贴在容器边上**
+                // 就不再补员。而 `CarryPartCnt` 本身已经把现有车队的 CARRY 减掉了，剩下的正缺口
+                // 才是要补的量 —— 用「有没有车贴着容器」再挡一次，等于把「车在装卸」误判成
+                // 「运力够了」。实测 2026-10-27 W26N59：只有 1 只 1000 容量的搬运在跑（吞吐
+                // 5.3/tick，产出 20/tick），容器 2000 满 + 地面堆 6,800，spawn 空闲且能量满
+                // (1800/1800) —— 就是不孵第二只。去掉这个多余的守卫，补员只按容量缺口走。
+                if (CarryPartCnt > 0) {
                     let carrierBody = carrierBuildCreep ?
                         pro.getOuterHarCarrierBodyConfig(bodyBudget, maxPart)
                         : pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart) // 如果没修路的造一个
