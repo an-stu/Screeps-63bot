@@ -67,4 +67,18 @@ assert.ok(!/CarryPartCnt > 0 && !isNearToAny/.test(code),
 assert.ok(/if \(CarryPartCnt > 0\) \{/.test(code),
     "补员条件应只剩容量缺口");
 
+// ── ⑥ 运力上界必须区分「路铺好了没有」 ──────────────────────────────────
+//
+// 2026-10-27 实测 W26N59（路还没修）：pathTime 94、路点约 30 ⇒ 旧上界 30×1.2=36
+// ⇒ 算出只需要 13 CARRY，而 1 只 20 CARRY 的爬实际只有 5.3 能量/tick（产出 20/tick）
+// ⇒ 公式认为够了，永远不再补员。路未完成时用 3 倍上界。
+assert.ok(/let roadDone = pro\.outerRoadComplete\(data\);/.test(code),
+    "运力上界必须知道路是否已铺好");
+assert.ok(/capPath\.length \* \(roadDone \? 1\.2 : 3\)/.test(code),
+    "路未完成时上界不能再用 1.2 倍（会把运力需求低估一半以上）");
+
+// ── ⑦ 修路爬补员也不该被 spawnFailure 挡 ────────────────────────────────
+assert.ok(!/builderCnt < OUTER_ROAD_BUILDER_CNT && !spawnRoom\.spawnFailure/.test(code),
+    "修路爬补员同样不能用 spawnFailure 当闸门");
+
 console.log("outer carrier spawn checks passed");

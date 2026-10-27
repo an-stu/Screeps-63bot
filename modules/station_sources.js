@@ -3514,7 +3514,16 @@ let pro = {
                 // 它会一直按老值算运力、继续过量补员 —— 表现就是「杀掉多余 carrier、
                 // 下一 tick 立刻又生一批」。两端都夹住才安全。
                 let capPath = pro.getOuterRoadPath(data);
-                let pathCap = capPath && capPath.length ? Math.round(capPath.length * 1.2) : (pathTime || 300);
+                // **1.2 倍只适用于「路已经铺好」**（1 格 ≈ 1 tick）。路没铺好时空地 2 tick/格、
+                // 沼泽 5 tick/格，实际往返远大于 tiles×1.2 —— 用它当上界会把运力需求低估一半以上。
+                // 实测 2026-10-27 W26N59（路还没修）：pathTime 94、路点约 30 ⇒ pathCap 36
+                // ⇒ 算出「只需要 13 CARRY」，而实际 1 只 20 CARRY 的爬只有 5.3 能量/tick
+                //（产出 20/tick）⇒ 公式认为运力够了，永远不再补员，容器满、地面堆 6,800。
+                // 路未完成时改用 3 倍上界：仍能挡住历史畸形值（如 843），但不会低估。
+                let roadDone = pro.outerRoadComplete(data);
+                let pathCap = capPath && capPath.length
+                    ? Math.round(capPath.length * (roadDone ? 1.2 : 3))
+                    : (pathTime || 300);
                 let effPathTime = Math.min(pathTime, pathCap);
                 let NeedCarryPartCnt = Math.ceil(effPathTime * 2 * EnergyPerTick / 50) // 来回*2 每个要的tick数量
                 let CarryPartCnt = NeedCarryPartCnt - 2 // 两个被换成 work了
@@ -3565,7 +3574,10 @@ let pro = {
                 // 路修完后 outerRoadComplete 为真，这里自然就不再补了。
                 if (!pro.outerRoadComplete(data)) {
                     let builderCnt = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).length;
-                    if (builderCnt < OUTER_ROAD_BUILDER_CNT && !spawnRoom.spawnFailure) {
+                    // 同主补员路径：spawnFailure 是本房任何一次孵化失败都会置位的粘滞标记，
+                    // 用它挡修路爬会误伤（真机 room.spawn 一定有）。
+                    if (builderCnt < OUTER_ROAD_BUILDER_CNT
+                        && (!spawnRoom.spawn || spawnRoom.spawn.some(e => !e.spawning && e.isActive()))) {
                         let body = pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart)
                         let tasks = pro.generatorOuterHarCarryTask(data)
                         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "outerHarvestEnergyCarrier", tasks)

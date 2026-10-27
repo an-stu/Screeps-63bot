@@ -1,3 +1,29 @@
+## v0.78.151 — The carrier requirement was underestimated while the road is unbuilt
+
+v0.78.150 removed the wrong guard, but W26N59 still kept exactly one carrier. The arithmetic was the
+problem:
+
+    capPath    = cached road path (about 30 waypoints)
+    pathCap    = round(30 * 1.2) = 36        // assumes a road: 1 tile ~ 1 tick
+    effPathTime= min(94, 36) = 36
+    needCarry  = ceil(36 * 2 * 8.62 / 50) = 13
+    CarryPartCnt = 13 - 2 - 20 (the existing carrier) = -9  -> "enough", never spawn
+
+But the road is **not built** (15 sites queued): plain terrain costs 2 ticks per tile and swamp 5, so the
+real round trip is ~94 ticks. One 1000-capacity carrier therefore moves ~5.3 energy/tick against 20/tick
+of production - containers at 2000/2000, 6,800 energy on the ground.
+
+`pathCap` now uses the 1.2 factor **only when `outerRoadComplete(data)`** is true; otherwise 3x, which is
+still an upper bound (it keeps guarding against the historical corrupt values like 843) but no longer
+halves the requirement. The road-builder top-up path also stopped using `spawnFailure` as a gate, for the
+same reason as the main path.
+
+### Tests
+
+`test/outer-carrier-spawn.test.cjs` cases ⑥/⑦: the requirement cap must branch on `outerRoadComplete`, and
+the builder top-up must not be gated on `spawnFailure`. Negative control: reverting the cap to a flat 1.2
+fails.
+
 ## v0.78.150 — Outer carriers: stop gating top-up on "is a carrier already at the container"
 
 Follow-up to v0.78.149, which got the first carrier hatched in W26N59 but not the second.
