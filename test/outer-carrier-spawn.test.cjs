@@ -18,7 +18,7 @@ const code = raw
 assert.ok(!/if \(spawnRoom\.spawnFailure\) return;/.test(code),
     "外矿补员不得再用 spawnFailure 早返回（本房补员失败会误伤它）");
 
-assert.ok(/if \(spawnRoom\.spawn && !spawnRoom\.spawn\.some\(e => !e\.spawning && e\.isActive\(\)\)\) return;/.test(code),
+assert.ok(/if \(spawnRoom\.spawn && !spawnRoom\.spawn\.some\(e => !e\.spawning && e\.isActive\(\)\)\) \{ why\("noFreeSpawn"\); return; \}/.test(code),
     "应该改成直接检查「有没有空闲且可用的 spawn」");
 
 // ── ② 体型预算必须夹住，别让一只外矿搬运抽干整只 hive ──────────────────────
@@ -27,8 +27,10 @@ assert.ok(/if \(spawnRoom\.spawn && !spawnRoom\.spawn\.some\(e => !e\.spawning &
 // 满配爬一孵 56+ tick，把 hive 抽到 109，本房补员和外矿补员互相饿死。
 assert.ok(/let hiveCap = spawnRoom\.getEnergyCapacityAvailable\(\);/.test(code),
     "体型预算要基于主房 hive 容量算上限");
-assert.ok(/Math\.min\(Math\.floor\(hiveCap \* 0\.75\),/.test(code),
-    "体型预算必须夹在 hive 容量的 75% 以内");
+// 2026-10-29：75% 仍然太大（1,350 要求 hive 满 + spawn 空闲同时成立，两天只成功几次），
+// 降到 50%（RCL5 下 900）—— keeper 孵完后 hive 从 0 回填 45 tick 就够。
+assert.ok(/Math\.min\(Math\.floor\(hiveCap \* 0\.5\),/.test(code),
+    "体型预算必须夹在 hive 容量的 50% 以内");
 
 // ── ③ 保留「按当前可用能量收缩」的原意 ────────────────────────────────────
 assert.ok(/Math\.max\(spawnAvail, 550\)/.test(code),
@@ -112,7 +114,7 @@ assert.ok(/cm\.set\(site\.pos\.x, site\.pos\.y, 1\);/.test(code),
 // W26N58 的 1,800 hive 被 1,250 的外矿车反复抽干 → 本房 keeper 付不起孵化费、
 // 老死 → 收入归零 → hive 停在 300，连 worker 都生不出来（E53S21 同形态）。
 // 硬闸：出兵房矿点数 > 在岗 keeper 数 ⇒ 本房自己在挨饿，不抽它的能量。
-assert.ok(/spawnRoom\.creeps\("harvestEnergyKeeper", false\)\.length < ownSourceCnt\) return null;/.test(code),
+assert.ok(/spawnRoom\.creeps\("harvestEnergyKeeper", false\)\.length < ownSourceCnt\) \{/.test(code),
     "出兵房 keeper 没满员时必须直接放弃外矿补员");
 assert.ok(!/trySpawnOuterHarCarrier\(flag\.pos\.roomName, room\)/.test(
     fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8")),

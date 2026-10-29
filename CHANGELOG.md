@@ -1,3 +1,35 @@
+## v0.78.158 — Outer carriers sized at half the hive so the spawn window actually opens
+
+The diagnostic from v0.78.157 answered it on the first pass:
+
+    __outerWhy = try:carry11,avail1800,budget1350@83938814
+
+so every gate was open and the attempt really was made - it just needed `hive 1800/1800` **and** a free
+spawn in the same tick. That window is rare on a RCL5 spawn room: four keepers are replaced every 1,500
+ticks at 1,250 energy each, so the hive spends most of its life refilling from near zero (measured 2/1800,
+7/1800, 750/1800 across samples). Result: two days, containers 4000/4000 and 3,161 energy on the ground,
+zero carriers.
+
+The body budget is now capped at **50% of the hive** (900 on RCL5) instead of 75% (1,350). A 900-energy
+carrier fits as soon as the hive passes 900, which happens ~45 ticks after any keeper hatch - an order of
+magnitude more windows. Smaller carriers mean more trips, but "a small carrier hauling" beats "no carrier
+at all", and the CARRY-deficit / fleet-cap / quota limits still bound the fleet size.
+
+The `__outerWhy` diagnostic stays (short idempotent string in `Memory.rooms[<mine>]`).
+
+## v0.78.157 — Diagnostic: record which gate stopped the outer-carrier top-up
+
+W26N58 recovered (RCL5, 841k/1.215M, hive 1650/1800, 3 carriers, storage 78k) and the outer mine has
+been sitting with **both containers full (4000) and 3,161 energy on the ground for two days with zero
+`outerHarvestEnergyCarrier`** - while every gate checked from the outside was green: keepers 4 >= 2 sources,
+`outerMineStarvesSpawnRoom` false, quota 2, fleet cap 15, pathTime 94, container recorded, flag present and
+route maintenance still running (site build 28 ticks ago).
+
+Rather than keep guessing, `trySpawnOuterHarCarrier` now records the last early-return reason in
+`Memory.rooms[<mine>].__outerWhy`, e.g. `noFreeSpawn`, `keeper<src3<2`, `starves+quota1>=2`,
+`noCarryNeed-3,need38,path94`, `try:carry22,avail750,budget900`. It is a short idempotent string, no
+behaviour change, kept permanently for debugging.
+
 ## v0.78.156 — The upgrade-container priority was starving the hive (root cause of the collapse)
 
 The W26N58 collapse was not caused by the outer mine alone. v0.78.144 moved the upgrade-container

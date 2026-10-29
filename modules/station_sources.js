@@ -3431,6 +3431,10 @@ let pro = {
         if (!roomMem) return;
         let sm = roomMem[pro.stationName];
         if (!sm) return;
+        // **诊断埋点**：把「本次补员卡在哪道闸」写进 Memory.rooms[矿房].__outerWhy。
+        // 用户 2026-10-29 排查「外矿车迟迟没有」时，从外面逐条验闸全是通的，
+        // 只能靠这个定位真实早退点。只写一个短字符串，幂等、无副作用，长期留着。
+        let why = (tag) => { roomMem.__outerWhy = tag + "@" + Game.time; };
         // ── 维护（路线缓存 / 路上工地 / 主房边缘 link）必须先于任何「补员闸」──
         //
         // 这一段原来写在下面的补员循环里，被上面 `outerMineStarvesSpawnRoom` 与
@@ -3504,10 +3508,16 @@ let pro = {
         // 主房自身的经济链（keeper 补员）排在外矿之前，这一点不能被优化掉。
         let ownSourceCnt = spawnRoom.source ? spawnRoom.source.length : 2;
         if (targetName != spawnRoom.name
-            && spawnRoom.creeps("harvestEnergyKeeper", false).length < ownSourceCnt) return null;
+            && spawnRoom.creeps("harvestEnergyKeeper", false).length < ownSourceCnt) {
+            why("keeper<src" + spawnRoom.creeps("harvestEnergyKeeper", false).length + "<" + ownSourceCnt);
+            return null;
+        }
         if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)
-            && onThisMine >= pro.outerCarrierBacklogQuota(spawnRoom, targetName)) return null;
-        if (roomCarriers.length >= carrierMax) return null;
+            && onThisMine >= pro.outerCarrierBacklogQuota(spawnRoom, targetName)) {
+            why("starves+quota" + onThisMine + ">=" + pro.outerCarrierBacklogQuota(spawnRoom, targetName));
+            return null;
+        }
+        if (roomCarriers.length >= carrierMax) { why("fleetCap" + roomCarriers.length + ">=" + carrierMax); return null; }
         // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
         // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
         // 主房 spawn 常年是忙的（spawnFailure 常真），把路线维护挡在后面等于
@@ -3523,7 +3533,7 @@ let pro = {
             // 2026-10-27 实测 W26N58：容器 2000 满 + 地面堆 6,700，12 小时一只外矿搬运
             // 都没孵出来，就是这个标记把补员几乎每次都挡掉了。改成直接看有没有空闲 spawn。
             // 真机上 room.spawn 一定有；VM 桩里可能没定义，缺失时不做这层判断。
-            if (spawnRoom.spawn && !spawnRoom.spawn.some(e => !e.spawning && e.isActive())) return;
+            if (spawnRoom.spawn && !spawnRoom.spawn.some(e => !e.spawning && e.isActive())) { why("noFreeSpawn"); return; }
             // container 不可见时仍可按缓存 ID / 坐标孵化；carrier 抵达矿区后
             // 再解析对象即可。否则 keeper 死后失去视野会再次把外矿锁死。
             if (pathTime && data["container"]) {
@@ -3592,7 +3602,13 @@ let pro = {
                 // （实测 W26N58：孵一只 1,800 的爬期间 hive 掉到 109，期间所有补员全部失败）。
                 // 夹到 75% 之后同样是「大爬少只」，但留出余量给本房。
                 let hiveCap = spawnRoom.getEnergyCapacityAvailable();
-                let bodyBudget = Math.min(Math.floor(hiveCap * 0.75),
+                // **体型再降到 hive 的 50%**（2026-10-29 实测）：1,350 的爬要求
+                // 「hive 满 1,800 + spawn 空闲」同时成立，而 RCL5 房每 1,500 tick 要换
+                // 4 只 keeper（每只 1,250）—— 这个窗口两天只出现几次，
+                // 结果外矿双容器 4,000 满 + 地面 3,161 堆着没人搬。
+                // 夹到 50% 后 900 就能孵：keeper 孵完 hive 从 0 按 20/tick 回填，
+                // 45 tick 就够，窗口密度高一个量级。体型小→多跑几趟，比「根本不出车」强。
+                let bodyBudget = Math.min(Math.floor(hiveCap * 0.5),
                     Math.max(spawnAvail, 550));
                 // ⚠️ 这里原先是 `CarryPartCnt > 0 && !isNearToAny`：只要**有一只搬运贴在容器边上**
                 // 就不再补员。而 `CarryPartCnt` 本身已经把现有车队的 CARRY 减掉了，剩下的正缺口
@@ -3600,7 +3616,9 @@ let pro = {
                 // 「运力够了」。实测 2026-10-27 W26N59：只有 1 只 1000 容量的搬运在跑（吞吐
                 // 5.3/tick，产出 20/tick），容器 2000 满 + 地面堆 6,800，spawn 空闲且能量满
                 // (1800/1800) —— 就是不孵第二只。去掉这个多余的守卫，补员只按容量缺口走。
+                if (CarryPartCnt <= 0) why("noCarryNeed" + CarryPartCnt + ",need" + NeedCarryPartCnt + ",path" + effPathTime);
                 if (CarryPartCnt > 0) {
+                    why("try:carry" + CarryPartCnt + ",avail" + spawnAvail + ",budget" + bodyBudget);
                     let carrierBody = carrierBuildCreep ?
                         pro.getOuterHarCarrierBodyConfig(bodyBudget, maxPart)
                         : pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart) // 如果没修路的造一个
