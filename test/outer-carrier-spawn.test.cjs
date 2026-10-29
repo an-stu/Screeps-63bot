@@ -120,4 +120,13 @@ assert.ok(!/trySpawnOuterHarCarrier\(flag\.pos\.roomName, room\)/.test(
     fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8")),
     "外矿搬运不得再被提前到本房孵化之前（会抢 keeper 的孵化能量）");
 
+// ── ⑪ 孵化前必须清掉本房遗留的 spawnFailure ──────────────────────────────
+//
+// `StationHive.trySpawn` 开头就有 `if (room.spawnFailure) return null`，而这个标记只是
+// 「本 tick 有过一次孵化失败」（本房 keeper 付不起 / spawn 正忙都会置真）。不清掉的话，
+// 我们这只更便宜的外矿车连试都不试就被吞（2026-10-29 实测：why 记到 try:carry11,avail1800
+// 但车数不变，两天零辆车）。strategy_highLevel 的 spawnCarrierNow 一直这么干。
+assert.ok(/spawnRoom\.spawnFailure = false;\s*\n\s*spawnRoom\.currentEnergyAvailable = undefined;\s*\n\s*StationHive\.trySpawn\(spawnRoom, spawnRoom\.name, carrierBody/.test(code),
+    "外矿车孵化前必须重置 spawnFailure / currentEnergyAvailable");
+
 console.log("outer carrier spawn checks passed");

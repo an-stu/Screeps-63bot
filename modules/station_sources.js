@@ -3623,6 +3623,15 @@ let pro = {
                         pro.getOuterHarCarrierBodyConfig(bodyBudget, maxPart)
                         : pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart) // 如果没修路的造一个
                     let tasks = pro.generatorOuterHarCarryTask(data)
+                    // `StationHive.trySpawn` 开头就是 `if (room.spawnFailure) return null`，
+                    // 而这个标记的含义只是「本 tick 有过一次孵化尝试失败」——本房 keeper 付不起、
+                    // spawn 正忙都会把它置真，于是我们这只**更便宜**的车连试都不试就被吞掉。
+                    // 2026-10-29 实测：__outerWhy 记到 `try:carry11,avail1800,budget1350`，
+                    // 但调用后车数不变 ⇒ 就被这个标记挡了（两天零辆车、容器 4000 满）。
+                    // strategy_highLevel 的 spawnCarrierNow 一直在用同样的重置写法，这里照做。
+                    // 安全性：本房 keeper 已满员（上面的硬闸），不会抢走主房的救命能量。
+                    spawnRoom.spawnFailure = false;
+                    spawnRoom.currentEnergyAvailable = undefined;
                     StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestEnergyCarrier", tasks)
                 }
                 // 路没修完时再补专职修路的 carrier。

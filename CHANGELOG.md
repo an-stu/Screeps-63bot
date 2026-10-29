@@ -1,3 +1,28 @@
+## v0.78.159 — Clear the room's stale `spawnFailure` before the outer carrier attempt
+
+The real blocker, finally: `StationHive.trySpawn` starts with
+
+    if (room.spawnFailure) return null;
+
+and `spawnFailure` only means "some spawn attempt failed in this tick" - a home keeper that could not
+afford its 1,800 body, or the spawn being busy, sets it. Our outer carrier is far cheaper (900), but it
+never even got to try: the v0.78.157 diagnostic recorded `try:carry11,avail1800,budget1350` while the
+carrier count stayed at zero across two days.
+
+`strategy_highLevel.spawnCarrierNow` has always reset those two fields before calling `trySpawn` for
+exactly this reason; the outer path never did. It now does:
+
+    spawnRoom.spawnFailure = false;
+    spawnRoom.currentEnergyAvailable = undefined;
+    StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, ...)
+
+Safe because the hard gate above already requires every own source of the spawn room to have a keeper, so
+the room is not starving when this runs.
+
+### Tests
+
+New case ⑪ asserts the reset immediately precedes the outer-carrier `trySpawn`.
+
 ## v0.78.158 — Outer carriers sized at half the hive so the spawn window actually opens
 
 The diagnostic from v0.78.157 answered it on the first pass:
