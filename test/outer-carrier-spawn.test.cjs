@@ -149,4 +149,22 @@ assert.ok(/carrierCreeps\.forEach\(e => CarryPartCnt -= e\.getPartCnt\(CARRY\)\)
 assert.ok(/let mineCarCap = Math\.max\(2, Math\.ceil\(NeedCarryPartCnt \/ 12\)\);/.test(code),
     "必须有单矿点车队硬上限（CPU 最后一道闸）");
 
+// ── ⑭ 缺口与车队的计数键必须是**矿点**，不能是房间 ────────────────────────
+//
+// 2026-10-30 实测 W26N59（同一外矿房 2 个矿点）：
+//   · (29,4) 容器 0/2000、源 1,500 不动，却登记着 **5 只**搬运（carryCreeps 5 只）；
+//   · (27,29) 容器 2000/2000 满 + 地面掉落 2,381，carryCreeps **0 只**。
+// 因为「已派车数」按 `t.roomName == targetName`（房间）数、而缺口按单个矿点算：
+// (27,29) 的差额被另外 5 只车扣成负数 ⇒ 补员永远不再给它派车 ⇒ 货一直堆着，
+// 另一侧 5 只空车在干涸的容器边排队（还堵住了 keeper 的上车位）。
+// 这正是 MEMORY 里「岗位超编的统计键必须是被服务的对象」那条规则。
+assert.ok(/if \(!t \|\| t\.roomName != targetName \|\| t\.id != data\["id"\]\) return;/.test(code),
+    "在途车的缺口抵扣必须按矿点（t.id）分组，不能按房间");
+assert.ok(/return t && t\.roomName == targetName && t\.id == data\["id"\];/.test(code),
+    "单矿点车队硬上限的计数必须按矿点（t.id）分组，不能按房间");
+// 仍然保留一处**按矿房**计数：`onThisMine` 是拿去跟 `outerCarrierBacklogQuota(spawnRoom, 矿房)`
+// 比对的，两端口径同为「矿房」，不能改成矿点（否则配额永远对不上）。
+assert.ok(/outerCarrierBacklogQuota\(spawnRoom, targetName\)/.test(code),
+    "存货配额闸仍按矿房比对，与 onThisMine 同源");
+
 console.log("outer carrier spawn checks passed");

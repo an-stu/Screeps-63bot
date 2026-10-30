@@ -3596,21 +3596,29 @@ let pro = {
                 // 孵化要 60+ tick —— 这段时间里公式看不到那只新车，于是**每一轮都再派一只**。
                 // 实测 2026-10-30：一个 2 源矿（需求 17 CARRY ≈ 850 容量）被派到 **9 只**
                 // （≈4,000 容量），白烧 1.93 CPU/tick，把 bucket 从 9,300 压到 5,200。
-                // 这里按「headTask 目标房 == 本矿房」把在途/在岗的车全部折算进缺口。
+                // 这里按「headTask 目标**矿点** == 本矿点」把在途/在岗的车全部折算进缺口。
+                //
+                // ⚠️ 分组键必须是被服务的对象（矿点 = `t.id`），**不能是房间**：
+                // 一个外矿房常有 2 个矿点，按 `t.roomName` 数会把 A 矿点的车算到 B 矿点头上。
+                // 实测 2026-10-30 W26N59：5 只车全登记在 (29,4)（容器 0/2000、源没人挖），
+                // 而真正有货的 (27,29)（容器 2000 满 + 地面 2,381）carryCreeps 为空 ——
+                // 差额被「别的矿点的车」扣成负数，补员从此永远不再给它派车，货就一直堆着。
+                // 与 MEMORY 里「岗位超编的统计键必须是被服务的对象」是同一条规则。
                 let countedIds = {};
                 carrierCreeps.forEach(e => countedIds[e.id] = true);
                 roomCarriers.forEach(c => {
                     if (countedIds[c.id]) return;
                     let t = c.headTask && c.headTask();
-                    if (!t || t.roomName != targetName) return;
+                    if (!t || t.roomName != targetName || t.id != data["id"]) return;
                     CarryPartCnt -= c.getPartCnt(CARRY);
                 });
                 // 兜底硬上限：单矿点的车队不超过「缺口能喂饱的数量」（至少 2 只）。
                 // 上面那条修好后理论上到不了这里，但它是 CPU 的最后一道闸（外矿爬纯消耗）。
+                // 同理按矿点（`t.id`）计数，否则一个矿点超编会把同房另一个矿点的补员整个掐死。
                 let mineCarCap = Math.max(2, Math.ceil(NeedCarryPartCnt / 12));
                 let mineCarCnt = roomCarriers.filter(c => {
                     let t = c.headTask && c.headTask();
-                    return t && t.roomName == targetName;
+                    return t && t.roomName == targetName && t.id == data["id"];
                 }).length;
                 if (mineCarCnt >= mineCarCap) CarryPartCnt = 0;
                 // 体型拉满：每只都按 50 部件上限（33 CARRY + 17 MOVE）生成，

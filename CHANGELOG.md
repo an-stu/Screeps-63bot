@@ -1,3 +1,21 @@
+## v0.78.162 — Carrier top-up counted the whole room, so one mine point starved
+
+W26N59 has two source-keeping points. The room's five carriers were all registered on (29,4), whose
+container read 0/2000 and whose source sat untouched at 1,500 energy - while (27,29) had its container
+**full** (2,000) plus 2,381 on the ground and `carryCreeps` **empty**. Nothing was hauling that backlog
+and nothing was being sent to.
+
+Cause: two numbers in `trySpawnOuterHarCarrier` were keyed on the **room** while their counterparts were
+keyed on the **mine point**. `CarryPartCnt` is the deficit of one station, but the in-flight deduction
+loop (`t.roomName == targetName`) subtracted the CARRY of carriers serving the *other* station in the same
+room, and `mineCarCnt` (compared against the per-station `mineCarCap`) likewise counted every carrier in
+the room. With five carriers on the dry point, the loaded point's deficit went negative forever, so
+top-up never fired for it - the "a statistic must be grouped by the object being served" rule.
+
+Both now key on `t.id`, the task's source id (same convention as the keeper succession guard). The
+room-level `onThisMine` / `outerCarrierBacklogQuota(spawnRoom, room)` pair is left alone: those two are
+consistently room-scoped and are compared against each other.
+
 ## v0.78.161 — Outer fleet was over-spawned because in-flight carriers were invisible
 
 After the keeper fix the mine finally had staff: keeper 2, carriers **9**. But the requirement for that
