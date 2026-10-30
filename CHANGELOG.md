@@ -1,3 +1,30 @@
+## v0.78.163 — Empty carriers parked on the loading dock and deadlocked the keeper
+
+The (29,4) mine point in W26N59 stayed dead after v0.78.162 fixed its top-up: container 0/2000 and the
+source frozen at exactly 1,500 energy. Position sampling showed the real shape of it - two empty carriers
+did not **stand** on (28,6)/(27,7), they **swapped tiles with each other every single tick**: whoever was
+at range 2 stepped into range 1 and pulled the other one back. Because `lastPos` resets on every swap,
+none of the existing "creep is not moving" detectors could see it, and the pair permanently occupied both
+tiles of the single-file road. The keeper, queued behind them at (27,8) with a free 4-step path, had been
+alive for **561 ticks** and had never once stood on the container - so the container never filled, so the
+carriers never had a reason to leave. A closed loop: dry dock -> no mining -> drier dock.
+
+Cause: a carrier that arrives with nothing to load and finds nothing in the container simply `return`s
+from `harvestEnergyOuterCarry` - it has no move intent, but the movement layer still pulls it out of its
+tile whenever another creep wants that tile. Two such waiters adjacent to one dock trade tiles forever.
+
+Fix: an empty-handed carrier must not queue at the dock when the dock is dry. `harvestEnergyOuterCarry`
+now checks this **before** the "walk to the container" branch: if the container has no energy and the
+creep carries none, it is moved to a standoff tile 2-4 tiles from the container that is **off the cached
+mine road** (`outerCarryHoldTile` / `outerCarryHoldOffRoad`), leaving the dock and the approach corridor
+to the keeper. As soon as the container holds any energy the condition goes false and the carrier walks
+back in to load. The standoff is capped by `OUTER_CARRY_FILL_WAIT` (it keeps counting `carryWait`), so a
+genuinely dead mine point still recycles its carriers through the existing return-trip path instead of
+inventing a new permanent state.
+
+The tile is cached in `creep.memory.holdPos` for 60 ticks (picking one needs an area scan) and occupied
+tiles are collected with one `lookForAtArea` per kind rather than one `lookFor` per candidate.
+
 ## v0.78.162 — Carrier top-up counted the whole room, so one mine point starved
 
 W26N59 has two source-keeping points. The room's five carriers were all registered on (29,4), whose

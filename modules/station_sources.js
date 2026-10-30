@@ -1435,6 +1435,27 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
             let sm = rm[pro.stationName][this.headTask().id];
             let container = Game.getObjectById(sm[STRUCTURE_CONTAINER]);
             if (container) {
+                // ── 干涸的矿点：空手搬运爬不许守在卸货口 / 矿区路线上 ──────────
+                //
+                // 实测 2026-10-31 W26N59 矿点 (29,4)：容器 0/2000、源卡在 1,500
+                // 一动不动；两只空车在 (28,6)/(27,7) **每 tick 互相对穿**（不是站着
+                // 不动，是来回换位，lastPos 一直复位所以任何「不动」判据都看不见），
+                // 把 keeper 钉在 (27,8) 三格之外 —— 它已经活了 561 tick 还没上过容器。
+                // 结果就是「容器空 ⇒ 没人采 ⇒ 容器更空」的自锁。
+                //
+                // 规则：**容器里没货、自己也没货** 时不要往卸货口凑，退到路线外
+                // 2~4 格的待命位等货；容器一有能量，下一 tick 自然回来装。
+                // 只挡「凑到卸货口」这一步，不影响装货 / 回程 / 修路（修路在回程任务里）。
+                //
+                // 上限用 FILL_WAIT：超时后照原来的路径回主房，不会变成永久驻留
+                // （矿点真的死了要靠补员闸收队，这里不能自己发明一条永久状态）。
+                if (!(container.store[RESOURCE_ENERGY] > 0) && !(this.store[RESOURCE_ENERGY] > 0)
+                    && (this.memory.carryWait || 0) < OUTER_CARRY_FILL_WAIT
+                    && pro.outerCarryHoldOffRoad(this, sm, container)) {
+                    this.memory.carryWait = (this.memory.carryWait || 0) + 1;
+                    return;
+                }
+                if (this.memory.holdPos) delete this.memory.holdPos;
                 if (!this.pos.isNearTo(container)) {
                     // 矿区内部也沿缓存路径反向走到 container，避免 BetterMove
                     // 走出与缓存路径不同的新路线（如 18,40 vs 路径 18,39）
@@ -2632,6 +2653,97 @@ let pro = {
         return creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
             filter: e => e.resourceType == RESOURCE_ENERGY && e.amount > 0
         }).maxBy(e => e.amount);
+    },
+    /**
+     * 干涸矿点上「空手等货」的待命格：离容器 2~4 格、**不在矿区路线上**、没人占。
+     *
+     * 为什么要有这个：外矿的卸货口只有容器的相邻格，而 keeper 必须站**容器那一格**
+     * 才能把溢出的能量吃进容器。空车要是堵在卸货口和进门那条单格路上，keeper 就
+     * 上不了容器 —— 2026-10-31 W26N59 (29,4) 实测：两只空车在 (28,6)/(27,7) 每 tick
+     * 互相对穿（各自的下一格就是对方），keeper 被钉在 (27,8) 561 tick，矿点整条链停摆。
+     *
+     * 所以等货必须退出「进门路线 + 卸货口」，退到路线外 2~4 格去。容器一旦有货，
+     * 调用点（harvestEnergyOuterCarry）下一 tick 就不再判待命，车自然回来装。
+     *
+     * `roadSet` / `isFree` 由调用方给，函数本身只做几何挑选 —— 便于单测（不需要
+     * 造整个房间），也避免在这里每格调一次 walkable（40 格 = 40 次地形+建筑扫描，
+     * 这笔开销只该在**重算待命格**时付一次，见 outerCarryHoldOffRoad 的缓存）。
+     *
+     * @param {RoomPosition} creepPos 当前爬位置（用来挑最近的待命格）
+     * @param {RoomPosition} containerPos 卸货容器位置
+     * @param {Object} roadSet 形如 {"x,y": true} 的路线格集合，命中即跳过
+     * @param {function(number,number):boolean} isFree 该格是否可站（地形/建筑/别的爬）
+     * @return {{x:number,y:number,roomName:string}|undefined}
+     */
+    outerCarryHoldTile(creepPos, containerPos, roadSet, isFree) {
+        if (!creepPos || !containerPos) return undefined;
+        let best, bestScore = Infinity;
+        for (let dx = -4; dx <= 4; dx++) {
+            for (let dy = -4; dy <= 4; dy++) {
+                let d = Math.max(Math.abs(dx), Math.abs(dy));
+                // 1 格内是卸货口，5 格外太远（回来装货要多走一段）
+                if (d < 2 || d > 4) continue;
+                let x = containerPos.x + dx, y = containerPos.y + dy;
+                if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                if (roadSet && roadSet[x + "," + y]) continue;
+                if (isFree && !isFree(x, y)) continue;
+                // 优先离自己近（少走路），其次偏向 3 格（既不挡门也不至于太远）
+                let score = creepPos.getRangeTo(x, y) + Math.abs(d - 3) * 2;
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = { x: x, y: y, roomName: containerPos.roomName };
+                }
+            }
+        }
+        return best;
+    },
+    /**
+     * 把「等货的空车」挪到 `outerCarryHoldTile` 选出的待命格；已经在待命格就不动。
+     *
+     * 待命格缓存在 `creep.memory.holdPos`（60 tick 有效）：选格要扫一片区域，
+     * 不该每 tick 重算；而 60 tick 刷新一次又能跟上「别人先占了这格」的变化。
+     * 返回 false 表示连一格都挑不出来（整片被堵），调用方按原逻辑处理即可。
+     *
+     * @return {boolean} 是否已经把这只爬安置在路线外
+     */
+    outerCarryHoldOffRoad(creep, data, container) {
+        if (!creep || !creep.pos || !creep.room || !container) return false;
+        let here = creep.pos;
+        let mem = creep.memory.holdPos;
+        if (mem && mem.room == here.roomName && Game.time - mem.t < 60) {
+            if (mem.x == here.x && mem.y == here.y) return true;   // 已经站好了：不再寻路
+            creep.moveTo(new RoomPosition(mem.x, mem.y, mem.room), { reusePath: 20 });
+            return true;
+        }
+        // 路线格：keeper 与进出的车都走这一条，待命位必须让开
+        let roadSet = {};
+        let path = data && pro.getOuterRoadPath(data);
+        if (path) {
+            for (let i = 0; i < path.length; i++) {
+                let q = path[i];
+                if (q.roomName == container.pos.roomName) roadSet[q.x + "," + q.y] = true;
+            }
+        }
+        // 占用格：一次区域扫描建集合（别对每个候选格各调一次 lookFor）
+        let taken = {};
+        let top = Math.max(0, container.pos.y - 4), left = Math.max(0, container.pos.x - 4);
+        let bottom = Math.min(49, container.pos.y + 4), right = Math.min(49, container.pos.x + 4);
+        creep.room.lookForAtArea(LOOK_CREEPS, top, left, bottom, right, true).forEach(o => {
+            if (o.creep && o.creep.name == creep.name) return;      // 自己脚下算空的
+            taken[o.x + "," + o.y] = true;
+        });
+        creep.room.lookForAtArea(LOOK_STRUCTURES, top, left, bottom, right, true).forEach(o => {
+            let st = o.structure && o.structure.structureType;
+            if (st && OBSTACLE_OBJECT_TYPES.indexOf(st) >= 0) taken[o.x + "," + o.y + "#wall"] = true;
+        });
+        let terrain = creep.room.getTerrain();
+        let tile = pro.outerCarryHoldTile(here, container.pos, roadSet, (x, y) =>
+            terrain.get(x, y) != TERRAIN_MASK_WALL && !taken[x + "," + y] && !taken[x + "," + y + "#wall"]);
+        if (!tile) return false;
+        creep.memory.holdPos = { x: tile.x, y: tile.y, room: tile.roomName, t: Game.time };
+        if (here.x == tile.x && here.y == tile.y) return true;
+        creep.moveTo(new RoomPosition(tile.x, tile.y, tile.roomName), { reusePath: 20 });
+        return true;
     },
     /**
      * 以本房为主房的外矿路线，在**主房内**那一段的路点并集。
