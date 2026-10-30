@@ -129,4 +129,13 @@ assert.ok(!/trySpawnOuterHarCarrier\(flag\.pos\.roomName, room\)/.test(
 assert.ok(/spawnRoom\.spawnFailure = false;\s*\n\s*spawnRoom\.currentEnergyAvailable = undefined;\s*\n\s*StationHive\.trySpawn\(spawnRoom, spawnRoom\.name, carrierBody/.test(code),
     "外矿车孵化前必须重置 spawnFailure / currentEnergyAvailable");
 
+// ── ⑫ 外矿 keeper 补员同样不能用 spawnFailure 当闸门 ──────────────────────
+//
+// 2026-10-30 实测 W26N59：5 只搬运、0 只 keeper（矿房没人挖、容器清零）。
+// keeper 是外矿**唯一的能量输入**，用「本 tick 有过一次孵化失败」当闸门就是闸门自锁。
+assert.ok(!/cleanupDuplicateKeepers\(roomName\);\s*\n\s*if \(spawnRoom\.spawnFailure\) return null;/.test(code),
+    "keeper 补员入口不得再用 spawnFailure 早返回");
+assert.ok(/spawnRoom\.spawnFailure = false;\s*\n\s*spawnRoom\.currentEnergyAvailable = undefined;\s*\n\s*if \(StationHive\.trySpawn\(spawnRoom, spawnRoom\.name, harBody/.test(code),
+    "keeper 孵化前必须重置 spawnFailure / currentEnergyAvailable");
+
 console.log("outer carrier spawn checks passed");

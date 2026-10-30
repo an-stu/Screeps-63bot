@@ -3017,7 +3017,11 @@ let pro = {
         // `shard3_83651808_1` 老死后无人接班。豁免口径与 carrier 那条（3466 行的
         // `onThisMine >= outerCarrierBacklogQuota`）同源：**已有覆盖就不补，一个都没有就必须补**。
         pro.cleanupDuplicateKeepers(roomName);
-        if (spawnRoom.spawnFailure) return null;
+        // **不再用 `spawnRoom.spawnFailure` 早返回**（2026-10-30 实测 W26N59：5 只搬运、
+        // 0 只 keeper —— 矿房没人挖、容器清零）。这个标记只是「本 tick 有过一次孵化尝试
+        // 失败」，本房 keeper 付不起体型 / spawn 正忙都会置真，而 keeper 是外矿**唯一的
+        // 能量输入**，用它当闸门就是 10-08 记过的闸门自锁。
+        // 真正该判的是「有没有空闲 spawn」，交给下面的 trySpawn 去判（它自己会置位这个标记）。
         // log(roomName,spawnRoom.name)
         if (roomName == spawnRoom.name
             && spawnRoom.creeps("harvestEnergyKeeper").filter(e => e.ticksToLive > 300).length
@@ -3099,6 +3103,11 @@ let pro = {
                 let energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(spawnRoom.energyAvailable, 550));
                 let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
+                // `trySpawn` 第一行就是 `if (room.spawnFailure) return null`，而那个标记只是
+                // 「本 tick 有过一次失败尝试」—— 本房 keeper 付不起 1,800 的体型也会置真，
+                // 于是外矿这只更便宜的 keeper 连试都不试（与 carrier 同一处病根，见 2026-10-29）。
+                spawnRoom.spawnFailure = false;
+                spawnRoom.currentEnergyAvailable = undefined;
                 if (StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)) {
                     // 派成功了才打标记：接班人在路上，其余的在岗爬不用再补
                     mine.forEach(e => { if (e.memory && !e.spawning) e.memory.successorSpawned = true; });

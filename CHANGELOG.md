@@ -1,3 +1,24 @@
+## v0.78.160 — Outer keepers were blocked by the same `spawnFailure` poison
+
+A day after the carriers were fixed: W26N59 has **5 outer carriers and 0 keepers**, containers at 0 and
+sources at 1,500 - the haulers were driving an empty mine. `trySpawnOuterHarKeeper` opens with
+
+    pro.cleanupDuplicateKeepers(roomName);
+    if (spawnRoom.spawnFailure) return null;
+
+and `spawnFailure` only means "some spawn attempt failed in this tick" - the spawn room's own keeper
+failing to afford its 1,800 body sets it, and it blocks the outer keeper before it can even try. That is
+the 10-08 "gate self-lock" pattern again: the keeper is the outer mine's **only** energy input, so gating
+it on a flag that means "the room is busy" turns the mine off permanently.
+
+Same treatment as the carrier path: the `spawnFailure` early return is gone, and the two cached fields are
+cleared immediately before `trySpawn` (`spawnFailure = false; currentEnergyAvailable = undefined;`).
+
+### Tests
+
+Case ⑫: no `spawnFailure` early return after `cleanupDuplicateKeepers`, and the reset must immediately
+precede the keeper `trySpawn`.
+
 ## v0.78.159 — Clear the room's stale `spawnFailure` before the outer carrier attempt
 
 The real blocker, finally: `StationHive.trySpawn` starts with
