@@ -3590,6 +3590,29 @@ let pro = {
                 let NeedCarryPartCnt = Math.ceil(effPathTime * 2 * EnergyPerTick / 50) // 来回*2 每个要的tick数量
                 let CarryPartCnt = NeedCarryPartCnt - 2 // 两个被换成 work了
                 carrierCreeps.forEach(e => CarryPartCnt -= e.getPartCnt(CARRY))
+                // **把「已派出但还没登记进 carryCreeps」的车也扣掉。**
+                //
+                // `carryCreeps` 是爬跑到矿房执行任务时才登记的，而补员每 6 tick 跑一次、
+                // 孵化要 60+ tick —— 这段时间里公式看不到那只新车，于是**每一轮都再派一只**。
+                // 实测 2026-10-30：一个 2 源矿（需求 17 CARRY ≈ 850 容量）被派到 **9 只**
+                // （≈4,000 容量），白烧 1.93 CPU/tick，把 bucket 从 9,300 压到 5,200。
+                // 这里按「headTask 目标房 == 本矿房」把在途/在岗的车全部折算进缺口。
+                let countedIds = {};
+                carrierCreeps.forEach(e => countedIds[e.id] = true);
+                roomCarriers.forEach(c => {
+                    if (countedIds[c.id]) return;
+                    let t = c.headTask && c.headTask();
+                    if (!t || t.roomName != targetName) return;
+                    CarryPartCnt -= c.getPartCnt(CARRY);
+                });
+                // 兜底硬上限：单矿点的车队不超过「缺口能喂饱的数量」（至少 2 只）。
+                // 上面那条修好后理论上到不了这里，但它是 CPU 的最后一道闸（外矿爬纯消耗）。
+                let mineCarCap = Math.max(2, Math.ceil(NeedCarryPartCnt / 12));
+                let mineCarCnt = roomCarriers.filter(c => {
+                    let t = c.headTask && c.headTask();
+                    return t && t.roomName == targetName;
+                }).length;
+                if (mineCarCnt >= mineCarCap) CarryPartCnt = 0;
                 // 体型拉满：每只都按 50 部件上限（33 CARRY + 17 MOVE）生成，
                 // 运力缺口只决定**补几只**，不再把需求摊薄成多只小爬。
                 // 小爬多 = 在路上的 creep 多 = CPU 和单格外矿道拥堵都更差；

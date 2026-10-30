@@ -138,4 +138,15 @@ assert.ok(!/cleanupDuplicateKeepers\(roomName\);\s*\n\s*if \(spawnRoom\.spawnFai
 assert.ok(/spawnRoom\.spawnFailure = false;\s*\n\s*spawnRoom\.currentEnergyAvailable = undefined;\s*\n\s*if \(StationHive\.trySpawn\(spawnRoom, spawnRoom\.name, harBody/.test(code),
     "keeper 孵化前必须重置 spawnFailure / currentEnergyAvailable");
 
+// ── ⑬ 在途/在岗未登记的车必须折算进缺口，且单矿点有硬上限 ────────────────
+//
+// 2026-10-30 实测：2 源矿（需求 17 CARRY ≈ 850 容量）被派到 **9 只**（≈4,000 容量），
+// 白烧 1.93 CPU/tick。原因：carryCreeps 要等爬抵达矿房才登记，而补员每 6 tick 跑、
+// 孵化 60+ tick ⇒ 每轮都看不到新车、每轮都再派一只。
+// 注释已在 `code` 里剥掉，所以只比对代码行本身。
+assert.ok(/carrierCreeps\.forEach\(e => CarryPartCnt -= e\.getPartCnt\(CARRY\)\)\s*\n\s*let countedIds = \{\};/.test(code),
+    "必须把未登记的在途车也算进 CarryPartCnt");
+assert.ok(/let mineCarCap = Math\.max\(2, Math\.ceil\(NeedCarryPartCnt \/ 12\)\);/.test(code),
+    "必须有单矿点车队硬上限（CPU 最后一道闸）");
+
 console.log("outer carrier spawn checks passed");

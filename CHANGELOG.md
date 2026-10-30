@@ -1,3 +1,29 @@
+## v0.78.161 — Outer fleet was over-spawned because in-flight carriers were invisible
+
+After the keeper fix the mine finally had staff: keeper 2, carriers **9**. But the requirement for that
+mine is 17 CARRY (~850 capacity, `__outerWhy = noCarryNeed-29`), so nine carriers of 400-600 capacity
+meant ~4,000 capacity - 4-5x over - costing **1.93 CPU/tick** and dragging the bucket from 9,300 to
+5,200 (used 19.7-21.8 against a 20 budget).
+
+Cause: `CarryPartCnt` subtracts the CARRY of `data.carryCreeps`, and that list is only filled when a
+carrier **reaches the mine and registers**. Top-up runs every 6 ticks while hatching takes 60+, so during
+that window the formula cannot see the new creep and spawns another one - every pass.
+
+Two guards:
+
+1. every spawn-room carrier whose `headTask.roomName` is this mine (hatching, travelling, or working) is
+   now subtracted too, deduplicated against `carryCreeps`;
+2. a hard per-mine ceiling `max(2, ceil(NeedCarryPartCnt / 12))` zeroes the deficit, as the last line of
+   defence against an over-provisioned pure-consumer fleet.
+
+The nine existing carriers are not recycled (the codebase convention is to let them die naturally); they
+age out within one creep lifetime and the ceiling prevents a repeat.
+
+### Tests
+
+Case ⑬: the in-flight deduction must follow the `carryCreeps` subtraction, and the per-mine ceiling must
+exist.
+
 ## v0.78.160 — Outer keepers were blocked by the same `spawnFailure` poison
 
 A day after the carriers were fixed: W26N59 has **5 outer carriers and 0 keepers**, containers at 0 and
