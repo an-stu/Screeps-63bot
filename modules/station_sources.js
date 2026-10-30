@@ -1447,15 +1447,28 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 // 2~4 格的待命位等货；容器一有能量，下一 tick 自然回来装。
                 // 只挡「凑到卸货口」这一步，不影响装货 / 回程 / 修路（修路在回程任务里）。
                 //
-                // 上限用 FILL_WAIT：超时后照原来的路径回主房，不会变成永久驻留
-                // （矿点真的死了要靠补员闸收队，这里不能自己发明一条永久状态）。
-                if (!(container.store[RESOURCE_ENERGY] > 0) && !(this.store[RESOURCE_ENERGY] > 0)
-                    && (this.memory.carryWait || 0) < OUTER_CARRY_FILL_WAIT
+                // **不要给这里加时长上限**（0.78.163 加过，0.78.164 拆掉）：空车身上
+                // 没有货，「到点回主房」那条路对它根本不成立 —— 回程任务只挂在
+                // `if (this.store[RESOURCE_ENERGY] > 0)` 分支下面，空车走到那儿什么也
+                // 不做。于是上限一到，车只是从「路线外的待命格」被赶回**卸货口**，
+                // 正好把上面那个死锁原样装回去；而且 carryWait 只在**有货回程**时才
+                // 清零（见下面的 `this.memory.carryWait = 0`），空车一旦累到 150 就
+                // 永久失效 —— 闸门自锁。实测 2026-10-31 05:4x W26N59 (29,4) 又是
+                // 容器 0 / 源卡 1,500 / 两只 cw=150 的空车停在 (28,6)/(27,7) /
+                // keeper 钉在 (26,8) 53 tick 没动。
+                //
+                // 待命本身是**从库存推出来的**、每 tick 重算，不是新状态：卸货口一有
+                // 能量判据立刻变假，车下一 tick 就回来装，不存在「永久驻留」。
+                if (pro.outerCarryShouldHold(this, container)
                     && pro.outerCarryHoldOffRoad(this, sm, container)) {
-                    this.memory.carryWait = (this.memory.carryWait || 0) + 1;
+                    this.memory.holdWait = (this.memory.holdWait || 0) + 1;
                     return;
                 }
                 if (this.memory.holdPos) delete this.memory.holdPos;
+                if (this.memory.holdWait) this.memory.holdWait = 0;
+                // 等货结束（卸货口重新有货）：把上一轮的等待计数归零。旧版本把空车的
+                // carryWait 写死在 150，不归零的话这趟装到几十能量就会被上限赶回主房。
+                if (!(this.store[RESOURCE_ENERGY] > 0) && this.memory.carryWait) this.memory.carryWait = 0;
                 if (!this.pos.isNearTo(container)) {
                     // 矿区内部也沿缓存路径反向走到 container，避免 BetterMove
                     // 走出与缓存路径不同的新路线（如 18,40 vs 路径 18,39）
@@ -2696,6 +2709,24 @@ let pro = {
             }
         }
         return best;
+    },
+    /**
+     * 干涸卸货口上的空车要不要退到路线外待命 —— **纯判据**（只读库存，不移动）。
+     *
+     * 之所以单独抽出来：这里是「等货」这条路的唯一闸门，而 0.78.163 就栽在闸门上
+     * 加了一个永远到不了/永远回不来的时长条件（见调用点的长注释）。判据必须能
+     * 单测，且必须**只依赖库存**这两件事：容器里有货就该去装，身上有货就不该退开。
+     *
+     * 注意不要在这里加「keeper 是否还活着」之类的**派生**条件：keeper 刚死、接班
+     * 的还在路上，正是卸货口干涸的原因，用它当闸门等于把需要保护的场景排除掉。
+     *
+     * @return {boolean} true = 该退到路线外等货
+     */
+    outerCarryShouldHold(creep, container) {
+        if (!creep || !creep.store || !container || !container.store) return false;
+        if (container.store[RESOURCE_ENERGY] > 0) return false;   // 卸货口有货：去装
+        if (creep.store[RESOURCE_ENERGY] > 0) return false;       // 带半车货的不许退开
+        return true;
     },
     /**
      * 把「等货的空车」挪到 `outerCarryHoldTile` 选出的待命格；已经在待命格就不动。

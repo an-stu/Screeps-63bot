@@ -25,7 +25,7 @@ const code = raw
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^[ \t]*\/\/.*$/gm, "");
 
-// ── ① 待命格几何（跑真实函数）────────────────────────────────────────────
+// ── ② 待命格几何（跑真实函数）────────────────────────────────────────────
 const ARRAY_PATCH = `
 Array.prototype.head = function () { return this.length ? this[0] : undefined; };
 Array.prototype.last = function () { return this.length ? this[this.length - 1] : undefined; };
@@ -37,7 +37,7 @@ Array.prototype.maxBy = function (fn) {
 Array.prototype.sum = function () { return this.reduce((a, b) => a + b, 0); };
 `;
 
-function makeContext() {
+function makeContext(src) {
     const ctx = {
         console,
         isSaveCpu: true,
@@ -81,8 +81,30 @@ function makeContext() {
     };
     ctx.global = ctx;
     vm.runInNewContext(ARRAY_PATCH, ctx);
-    vm.runInNewContext(raw, ctx);
+    vm.runInNewContext(src === undefined ? raw : src, ctx);
     return ctx;
+}
+
+// ── ① 待命判据（纯函数，跑真实代码）──────────────────────────────────────
+// 0.78.163 曾经在这里挂过「carryWait < OUTER_CARRY_FILL_WAIT」的上限，结果空车
+// 一累到 150 就永久失效（carryWait 只有**有货回程**才清零），于是车被赶回卸货口，
+// 死锁原样复发。这一组断言专门锁死「判据只看库存」这件事。
+{
+    const S = makeContext().StationSources;
+    assert.equal(typeof S.outerCarryShouldHold, "function", "outerCarryShouldHold 必须挂在 StationSources 上");
+    const cont = energy => ({ store: { energy: energy } });
+    const creep = (energy, extra) => Object.assign({ store: { energy: energy } }, extra || {});
+
+    assert.equal(S.outerCarryShouldHold(creep(0), cont(0)), true, "空车 + 干涸卸货口 ⇒ 该退开");
+    assert.equal(S.outerCarryShouldHold(creep(0), cont(400)), false, "卸货口有货 ⇒ 去装，不许退");
+    assert.equal(S.outerCarryShouldHold(creep(300), cont(0)), false, "带半车货 ⇒ 不许退开");
+    // 回归：带上任何「等太久了」的残留计数都必须照样退开（旧版就是把这里判死）
+    assert.equal(S.outerCarryShouldHold(creep(0, { memory: { carryWait: 150 } }), cont(0)), true,
+        "carryWait 到上限也必须继续退开 —— 否则闸门自锁，死锁复发");
+    assert.equal(S.outerCarryShouldHold(creep(0, { memory: { carryWait: 9999 } }), cont(0)), true,
+        "更大的残留值同样不能把判据判死");
+    assert.equal(S.outerCarryShouldHold(null, cont(0)), false, "没有爬 ⇒ 不动作");
+    assert.equal(S.outerCarryShouldHold(creep(0), null), false, "没有容器 ⇒ 不动作");
 }
 
 {
@@ -122,39 +144,38 @@ function makeContext() {
         "没有任何可站格时应返回 undefined");
 }
 
-// ── ② 调用点：待命判定必须在「走到容器」之前，且条件要求双方都没货 ────────
+// ── ③ 调用点：待命判定必须在「走到容器」之前，且条件只由库存决定 ──────────
 {
     const fn = code.slice(code.indexOf("Creep.prototype.harvestEnergyOuterCarry = function"));
     const body = fn.slice(0, fn.indexOf("\n};"));
-    const holdIdx = body.indexOf("pro.outerCarryHoldOffRoad(this, sm, container)");
+    const holdIdx = body.indexOf("pro.outerCarryShouldHold(this, container)");
     const approachIdx = body.indexOf("if (!this.pos.isNearTo(container))");
-    assert.ok(holdIdx > 0, "harvestEnergyOuterCarry 里必须调用 outerCarryHoldOffRoad");
+    assert.ok(holdIdx > 0, "harvestEnergyOuterCarry 里必须调用 outerCarryShouldHold");
     assert.ok(approachIdx > 0, "harvestEnergyOuterCarry 里应有走近容器的分支");
     assert.ok(holdIdx < approachIdx,
         "待命判定必须在「走近容器」之前 —— 否则车已经贴到卸货口了才退，堵还是堵");
 
-    const guard = body.slice(Math.max(0, holdIdx - 260), holdIdx);
-    assert.ok(/!\(container\.store\[RESOURCE_ENERGY\] > 0\)/.test(guard),
-        "待命条件必须要求「容器里没货」（有货就该去装）");
-    assert.ok(/!\(this\.store\[RESOURCE_ENERGY\] > 0\)/.test(guard),
-        "待命条件必须要求「自己空手」（带半车货的不许退开）");
-    assert.ok(/OUTER_CARRY_FILL_WAIT/.test(guard),
-        "待命必须有时长上限（超时走原来的回程逻辑，不能变成永久驻留）");
-    const holdBlock = body.slice(holdIdx - 260, holdIdx + 260);
-    assert.ok(/this\.memory\.carryWait = \(this\.memory\.carryWait \|\| 0\) \+ 1/.test(holdBlock),
-        "待命期间要累加 carryWait，否则上面那个上限永远到不了");
+    // 调用点不许自己再挂时长上限：闸门必须收敛在 outerCarryShouldHold 里一处
+    const guard = body.slice(Math.max(0, holdIdx - 400), holdIdx);
+    assert.ok(!/carryWait/.test(guard), "调用点不许再用 carryWait 当闸门（0.78.164 的闸门自锁根因）");
+    assert.ok(!/OUTER_CARRY_FILL_WAIT/.test(guard), "待命不许有 FILL_WAIT 上限：空车没有回程可走");
+    const holdBlock = body.slice(holdIdx, holdIdx + 300);
+    assert.ok(/this\.memory\.holdWait = \(this\.memory\.holdWait \|\| 0\) \+ 1/.test(holdBlock),
+        "待命期间应累加到 holdWait（纯观测用，不再当闸门）");
 }
 
-// ── ③ 负对照：把「容器有货」的守卫去掉，②的结构断言必须失败 ──────────────
+// ── ④ 负对照：把「容器有货就不退」的守卫改成恒假，① 必须因此失败 ──────────
+// 断言落在**行为**上（同一组输入得到相反结果），不是「源码里少了一行」。
 {
-    const broken = code.replace(/!\(container\.store\[RESOURCE_ENERGY\] > 0\)\s*&&\s*!\(this\.store\[RESOURCE_ENERGY\] > 0\)/,
-        "true");
-    const fn = broken.slice(broken.indexOf("Creep.prototype.harvestEnergyOuterCarry = function"));
-    const body = fn.slice(0, fn.indexOf("\n};"));
-    const holdIdx = body.indexOf("pro.outerCarryHoldOffRoad(this, sm, container)");
-    const guard = body.slice(Math.max(0, holdIdx - 260), holdIdx);
-    assert.ok(!/!\(container\.store\[RESOURCE_ENERGY\] > 0\)/.test(guard),
-        "负对照没生效：改了守卫之后断言应该看不见那条条件");
+    const broken = raw.replace("if (container.store[RESOURCE_ENERGY] > 0) return false;",
+        "if (false) return false;");
+    assert.notEqual(broken, raw, "负对照没生效：没改到守卫");
+    const B = makeContext(broken).StationSources;
+    assert.equal(B.outerCarryShouldHold({ store: { energy: 0 } }, { store: { energy: 400 } }), true,
+        "负对照应当把「卸货口有货」判成该退开 —— 这正是守卫被拆掉之后的行为");
+    assert.equal(makeContext().StationSources
+        .outerCarryShouldHold({ store: { energy: 0 } }, { store: { energy: 400 } }), false,
+        "真实代码必须与负对照相反（否则说明守卫没起作用）");
 }
 
 // ── ④ 待命移动必须带 reusePath（静态目标，MEMORY 记的 10 倍 CPU 差）──────

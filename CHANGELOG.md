@@ -1,3 +1,34 @@
+## v0.78.164 — The standoff gate locked itself, so the v0.78.163 deadlock came back
+
+Two hours after v0.78.163 shipped, W26N59 (29,4) was dead again in exactly the same way: container 0/2000,
+source frozen at 1,500, two empty carriers parked on (28,6)/(27,7) - the two tiles of the single-file
+approach - and the new keeper pinned at (26,8) for the whole 53-tick sampling window. The standoff worked,
+then switched itself off.
+
+Cause: the standoff was gated on `carryWait < OUTER_CARRY_FILL_WAIT`. For an **empty** carrier `carryWait`
+only ever grows inside that very standoff branch, and the only place it is reset to zero sits inside
+`if (this.store[RESOURCE_ENERGY] > 0)` - the "carry the load home" branch, which an empty carrier never
+reaches. So the counter ratchets to 150 and stays there forever, the guard turns permanently false,
+`holdPos` is deleted, and the carrier walks back onto the dock. The cap was also pointless by
+construction: "wait too long, then go home" needs a return trip, and the return trip is exactly what an
+empty carrier cannot do. All the cap did was move the parking spot from an off-road tile back onto the
+corridor.
+
+Fix: the decision moved into `StationSources.outerCarryShouldHold(creep, container)`, a stock-only
+predicate with no time limit - dry dock and empty hands means hold, full stop. It is re-evaluated every
+tick from real inventory, so it is not a new permanent state: the tick the container holds any energy the
+predicate goes false and the carrier walks in. The wait counter is kept for observability only
+(`memory.holdWait`, reset when the hold ends) and no longer doubles as a gate. Stale `carryWait` values
+inherited from 0.78.163 (the two carriers in W26N59 sit at exactly 150) are cleared when the empty
+carrier next heads in to load, so the first load after a dry spell still fills the hold instead of
+departing with a token few hundred energy.
+
+Verification: `test/outer-carry-dock.test.cjs` now pins the predicate behaviourally - an empty carrier on
+a dry dock holds even with `carryWait` at 150 and at 9999 (the exact regression), a carrier with cargo or
+a dock with energy does not, and the negative control patches the stock guard out and asserts the
+predicate flips. The call-site assertions also forbid `carryWait` / `OUTER_CARRY_FILL_WAIT` reappearing in
+the guard, because a second gate there is precisely how this came back.
+
 ## v0.78.163 — Empty carriers parked on the loading dock and deadlocked the keeper
 
 The (29,4) mine point in W26N59 stayed dead after v0.78.162 fixed its top-up: container 0/2000 and the
