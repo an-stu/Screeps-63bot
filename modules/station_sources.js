@@ -4557,6 +4557,21 @@ let pro = {
     update(room) {
         let sources = room[LOOK_SOURCES];
         let usedContainer = {};
+        // link 也要单独去重（键 = **link 自己的 id**）。原来这里复用了
+        // `usedContainer[container.id]`，而上一行刚把该容器标记为已用 ⇒
+        // 过滤条件**恒为假** ⇒ `links` 永远是空数组 ⇒ 所有矿点的
+        // link / link2 都被写成 undefined。
+        //
+        // 后果是链式的，而且不会报错：
+        //   · `harvestEnergyKeeper` 里 `notLinkFull` 恒假 ⇒ keeper 既不往 link
+        //     塞能量、也不再从容器里掏（那段 `withdraw(container)` 在同一分支里）；
+        //     容器 2000 塞满后溢出**掉到地面衰减**。
+        //   · `transformLink` 里 `if (!link) return` ⇒ 矿点 link 永不转出。
+        //   · 更隐蔽的一层：`carrierManager` 判「link≥6 就不用搬运爬扫容器」，
+        //     而 link 实际没接上 ⇒ RCL8 多 link 房**两头都不搬**。
+        // 2026-10-31 实测 14 房 28 个矿点全部 `link=undefined`（nolink=2/2），
+        // 地面散落约 6 万能量在持续衰减（E55S39 两矿 17.6k 且以 ~36/tick 增长）。
+        let usedLink = {};
         let tmp = room.memory[pro.stationName] = room.memory[pro.stationName] || {};
 
         sources.forEach(e => {
@@ -4569,7 +4584,9 @@ let pro = {
             if (container) usedContainer[container.id] = true;
             let links = [];
             if (container) {
-                links = room[STRUCTURE_LINK].filter(e => container.pos.isNearTo(e) && !usedContainer[container.id]);
+                links = room[STRUCTURE_LINK].filter(e => container.pos.isNearTo(e) && !usedLink[e.id]);
+                // 每个 link 只归一个矿点：占位后同房另一个源不会重复认领
+                links.slice(0, 2).forEach(l => usedLink[l.id] = true);
             }
             tmp[e.id]["roomName"] = e.room.name;
             tmp[e.id]["id"] = e.id;

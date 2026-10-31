@@ -1,3 +1,37 @@
+## v0.78.166 — No mine ever got its link, so energy piled up on the ground and decayed
+
+`StationSources.update()` deduped the link list with the **container's** id:
+
+```js
+if (container) usedContainer[container.id] = true;               // mark it used
+links = room[STRUCTURE_LINK].filter(e =>
+    container.pos.isNearTo(e) && !usedContainer[container.id]);  // always false
+```
+
+The guard is evaluated one line after the container is marked used, so it is *always* false and
+`links` is *always* empty - `stationSources[*].link` / `link2` were written as `undefined` for every
+source in every room. The regression came in with the container-dedupe fix in `c6dc5ec`, where the
+new `usedContainer[...] = true` line silently killed the link filter that had been passing only
+because that map was never written before.
+
+The damage is silently chained:
+
+- `harvestEnergyKeeper` sets `notLinkFull = link && ...`; with no link the keeper neither pushes
+  overflow into the link nor pulls from the container (`withdraw(container)` lives in the same
+  branch), so a full 2,000 container just spills onto the ground.
+- `transformLink` returns early on `if (!link)`, so mine links never forward anything.
+- `carrierManager` skips the container-hauling loop when `room.link.length >= 6`, and RCL8 rooms
+  do have 6 links - so those rooms had **neither** path running.
+
+Measured live 2026-10-31: all 14 rooms reported `nolink=2/2`; roughly 60k energy was lying on the
+ground across the empire and decaying. E55S39 was the worst: both mine containers pinned at
+2000/2000 with 8,672 + 5,005 on the ground, still growing ~36 energy/tick.
+
+Fix: dedupe links by the **link's own** id (`usedLink[e.id]`), marking only the first two so a
+third link next to the same container stays available to another source. `test/station-sources-link.test.cjs`
+runs the real module in a VM and asserts each source claims its own adjacent link (dual-link mines get
+both `link` and `link2`); reverting the one line makes it fail with `undefined`, matching production.
+
 ## v0.78.165 — Halve the movement-cache wipe storms (bucket drain mitigation)
 
 (Shipped as 0.78.165 because the live branch had silently advanced to 0.78.164 through parallel
