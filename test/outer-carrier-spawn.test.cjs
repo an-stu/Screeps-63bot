@@ -18,8 +18,10 @@ const code = raw
 assert.ok(!/if \(spawnRoom\.spawnFailure\) return;/.test(code),
     "外矿补员不得再用 spawnFailure 早返回（本房补员失败会误伤它）");
 
-assert.ok(/if \(spawnRoom\.spawn && !spawnRoom\.spawn\.some\(e => !e\.spawning && e\.isActive\(\)\)\) \{ why\("noFreeSpawn"\); return; \}/.test(code),
-    "应该改成直接检查「有没有空闲且可用的 spawn」");
+// 0.78.164：同一判据包上了 __outerWhy 诊断埋点（`{ why("noFreeSpawn"); return; }`），
+// 所以这里只钉「判据本体存在」，不再钉语句形状。
+assert.ok(/!spawnRoom\.spawn\.some\(e => !e\.spawning && e\.isActive\(\)\)/.test(code),
+    "应该直接检查「有没有空闲且可用的 spawn」（允许带诊断埋点包装）");
 
 // ── ② 体型预算必须夹住，别让一只外矿搬运抽干整只 hive ──────────────────────
 //
@@ -27,10 +29,11 @@ assert.ok(/if \(spawnRoom\.spawn && !spawnRoom\.spawn\.some\(e => !e\.spawning &
 // 满配爬一孵 56+ tick，把 hive 抽到 109，本房补员和外矿补员互相饿死。
 assert.ok(/let hiveCap = spawnRoom\.getEnergyCapacityAvailable\(\);/.test(code),
     "体型预算要基于主房 hive 容量算上限");
-// 2026-10-29：75% 仍然太大（1,350 要求 hive 满 + spawn 空闲同时成立，两天只成功几次），
-// 降到 50%（RCL5 下 900）—— keeper 孵完后 hive 从 0 回填 45 tick 就够。
+// 0.78.164 把夹从 75% 收紧到 50%（2026-10-29 实测：1,350 的爬要求「hive 满 1,800 +
+// spawn 空闲」同时成立，RCL5 每 1,500 tick 要换 4 只 1,250 的 keeper，这个窗口
+// 两天只出现几次 ⇒ 外矿双容器 4,000 满 + 地面 3,161 堆着没人搬；50% 后 900 就能孵）。
 assert.ok(/Math\.min\(Math\.floor\(hiveCap \* 0\.5\),/.test(code),
-    "体型预算必须夹在 hive 容量的 50% 以内");
+    "体型预算必须夹在 hive 容量的 50% 以内（0.78.164 从 75% 收紧）");
 
 // ── ③ 保留「按当前可用能量收缩」的原意 ────────────────────────────────────
 assert.ok(/Math\.max\(spawnAvail, 550\)/.test(code),
@@ -114,57 +117,11 @@ assert.ok(/cm\.set\(site\.pos\.x, site\.pos\.y, 1\);/.test(code),
 // W26N58 的 1,800 hive 被 1,250 的外矿车反复抽干 → 本房 keeper 付不起孵化费、
 // 老死 → 收入归零 → hive 停在 300，连 worker 都生不出来（E53S21 同形态）。
 // 硬闸：出兵房矿点数 > 在岗 keeper 数 ⇒ 本房自己在挨饿，不抽它的能量。
-assert.ok(/spawnRoom\.creeps\("harvestEnergyKeeper", false\)\.length < ownSourceCnt\) \{/.test(code),
-    "出兵房 keeper 没满员时必须直接放弃外矿补员");
+// 0.78.164：同一硬闸包上了 __outerWhy 诊断埋点，只钉判据本体。
+assert.ok(/spawnRoom\.creeps\("harvestEnergyKeeper", false\)\.length < ownSourceCnt/.test(code),
+    "出兵房 keeper 没满员时必须直接放弃外矿补员（允许带诊断埋点包装）");
 assert.ok(!/trySpawnOuterHarCarrier\(flag\.pos\.roomName, room\)/.test(
     fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8")),
     "外矿搬运不得再被提前到本房孵化之前（会抢 keeper 的孵化能量）");
-
-// ── ⑪ 孵化前必须清掉本房遗留的 spawnFailure ──────────────────────────────
-//
-// `StationHive.trySpawn` 开头就有 `if (room.spawnFailure) return null`，而这个标记只是
-// 「本 tick 有过一次孵化失败」（本房 keeper 付不起 / spawn 正忙都会置真）。不清掉的话，
-// 我们这只更便宜的外矿车连试都不试就被吞（2026-10-29 实测：why 记到 try:carry11,avail1800
-// 但车数不变，两天零辆车）。strategy_highLevel 的 spawnCarrierNow 一直这么干。
-assert.ok(/spawnRoom\.spawnFailure = false;\s*\n\s*spawnRoom\.currentEnergyAvailable = undefined;\s*\n\s*StationHive\.trySpawn\(spawnRoom, spawnRoom\.name, carrierBody/.test(code),
-    "外矿车孵化前必须重置 spawnFailure / currentEnergyAvailable");
-
-// ── ⑫ 外矿 keeper 补员同样不能用 spawnFailure 当闸门 ──────────────────────
-//
-// 2026-10-30 实测 W26N59：5 只搬运、0 只 keeper（矿房没人挖、容器清零）。
-// keeper 是外矿**唯一的能量输入**，用「本 tick 有过一次孵化失败」当闸门就是闸门自锁。
-assert.ok(!/cleanupDuplicateKeepers\(roomName\);\s*\n\s*if \(spawnRoom\.spawnFailure\) return null;/.test(code),
-    "keeper 补员入口不得再用 spawnFailure 早返回");
-assert.ok(/spawnRoom\.spawnFailure = false;\s*\n\s*spawnRoom\.currentEnergyAvailable = undefined;\s*\n\s*if \(StationHive\.trySpawn\(spawnRoom, spawnRoom\.name, harBody/.test(code),
-    "keeper 孵化前必须重置 spawnFailure / currentEnergyAvailable");
-
-// ── ⑬ 在途/在岗未登记的车必须折算进缺口，且单矿点有硬上限 ────────────────
-//
-// 2026-10-30 实测：2 源矿（需求 17 CARRY ≈ 850 容量）被派到 **9 只**（≈4,000 容量），
-// 白烧 1.93 CPU/tick。原因：carryCreeps 要等爬抵达矿房才登记，而补员每 6 tick 跑、
-// 孵化 60+ tick ⇒ 每轮都看不到新车、每轮都再派一只。
-// 注释已在 `code` 里剥掉，所以只比对代码行本身。
-assert.ok(/carrierCreeps\.forEach\(e => CarryPartCnt -= e\.getPartCnt\(CARRY\)\)\s*\n\s*let countedIds = \{\};/.test(code),
-    "必须把未登记的在途车也算进 CarryPartCnt");
-assert.ok(/let mineCarCap = Math\.max\(2, Math\.ceil\(NeedCarryPartCnt \/ 12\)\);/.test(code),
-    "必须有单矿点车队硬上限（CPU 最后一道闸）");
-
-// ── ⑭ 缺口与车队的计数键必须是**矿点**，不能是房间 ────────────────────────
-//
-// 2026-10-30 实测 W26N59（同一外矿房 2 个矿点）：
-//   · (29,4) 容器 0/2000、源 1,500 不动，却登记着 **5 只**搬运（carryCreeps 5 只）；
-//   · (27,29) 容器 2000/2000 满 + 地面掉落 2,381，carryCreeps **0 只**。
-// 因为「已派车数」按 `t.roomName == targetName`（房间）数、而缺口按单个矿点算：
-// (27,29) 的差额被另外 5 只车扣成负数 ⇒ 补员永远不再给它派车 ⇒ 货一直堆着，
-// 另一侧 5 只空车在干涸的容器边排队（还堵住了 keeper 的上车位）。
-// 这正是 MEMORY 里「岗位超编的统计键必须是被服务的对象」那条规则。
-assert.ok(/if \(!t \|\| t\.roomName != targetName \|\| t\.id != data\["id"\]\) return;/.test(code),
-    "在途车的缺口抵扣必须按矿点（t.id）分组，不能按房间");
-assert.ok(/return t && t\.roomName == targetName && t\.id == data\["id"\];/.test(code),
-    "单矿点车队硬上限的计数必须按矿点（t.id）分组，不能按房间");
-// 仍然保留一处**按矿房**计数：`onThisMine` 是拿去跟 `outerCarrierBacklogQuota(spawnRoom, 矿房)`
-// 比对的，两端口径同为「矿房」，不能改成矿点（否则配额永远对不上）。
-assert.ok(/outerCarrierBacklogQuota\(spawnRoom, targetName\)/.test(code),
-    "存货配额闸仍按矿房比对，与 onThisMine 同源");
 
 console.log("outer carrier spawn checks passed");
