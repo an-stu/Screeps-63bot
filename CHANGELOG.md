@@ -1,3 +1,23 @@
+## v0.78.168 — A powerSpawn task with nothing to carry pinned the room's only carrier
+
+W32N56 (the power-burning room) had exactly one carrier left, and it sat on (15,41) for 40+ minutes
+with `store == 0`, a task stack of `["fillPowerSpawnContinuous"]` and its `ticksToLive` ticking down.
+Nothing else in the room was being hauled: the hub link was stuck at 776 (only emptied when a carrier
+takes it), so both mine links sat at 800/800 and both mine containers at 2000/2000, and the keepers
+had nowhere to put energy but the ground - 8/tick piling up, ~16/tick lost to decay.
+
+`generatorFillPowerSpawnTask` admitted the room with `powerNeed >= fastCarry` but only generated a
+carry task with `powerNeed > fastCarry`. With the powerSpawn at 4800/5000 energy and 30/100 power the
+room entered, generated **zero** carry tasks, and still pushed a lone `fillAllTask`. An empty carrier
+executing `fillAllTask` pops it immediately (`prototype_creep.js:760`), so the next tick
+`fillPowerSpawnContinuous` generated it again: an infinite loop that never fetches and never releases
+the creep - while `isFree()` stayed false, so no other work was ever assigned to it.
+
+The fill task is now only pushed when at least one carry task was actually produced; with an empty
+list the caller pops the task and the carrier goes back to hive/hub/container duty.
+`test/power-spawn-task.test.cjs` pins both directions (degenerate input -> empty list, real deficit ->
+`fillAllTask` plus carries) and fails with the guard removed.
+
 ## v0.78.167 — Mine links: drop the exclusivity idea from v0.78.166, it starved a second mine
 
 v0.78.166 restored link claiming by deduping on the link id. Ten minutes live showed why that is

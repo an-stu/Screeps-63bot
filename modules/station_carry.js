@@ -320,9 +320,28 @@ let pro = {
             let enNeed = room.powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
 
             if (StationCarry.roomMassStoreCnt(room, RESOURCE_POWER) > powerNeed && powerNeed >= fastCarry || enNeed > 1650) {
-                if (powerNeed > fastCarry) tasks.unshift(StationCarry.generatorMassStoreCarry(room, RESOURCE_POWER, powerNeed))
-                if (enNeed > 800) tasks.unshift(StationCarry.generatorMassStoreCarry(room, RESOURCE_ENERGY, enNeed, "registerUsed"))
-                tasks.unshift(UtilsTask.task(room.powerSpawn, "fillAllTask", "registerUsed"))
+                // **没有「去取货」任务时绝不要挂 `fillAllTask`（2026-11-01 实测）。**
+                //
+                // 这个闸门用的是 `powerNeed >= fastCarry`，而下面取货那一行是 `> fastCarry`，
+                // 松了一格：powerSpawn 缺 70 power（正好一格运力）、能量只缺 200 时，闸门放行
+                // 却一条取货任务都不生成，返回的任务表里**只剩一个 fillAllTask**。
+                // 空手爬执行 fillAllTask 会立刻 popTask（store 空 → 见 prototype_creep.js:760），
+                // 下一 tick `fillPowerSpawnContinuous` 又生成一次 ⇒ **无限循环，永不取货**。
+                //
+                // 实测现场 W32N56（烧 power 试点房、`powerBurning=true` 但本房能量
+                // 99,123 < `powerSpawnEnergy` 100,000 ⇒ powerSpawn 根本不 process）：
+                // 全房唯一那只 carrier 在 (15,41) 钉了 40+ 分钟（能量恒 0、ttl 一直往下掉、
+                // 每 tick 只做一次空的 goTo(storage)），于是 hub link 卡在 776 没人搬 ⇒
+                // 两个矿点 link 800/800 + 容器 2000/2000 全满 ⇒ keeper 满仓溢出到地面
+                // （8/tick 在涨，约 16/tick 被衰减掉）。
+                // 判据：**任务表里没有取货任务就等于没活干**，让调用方 popTask 把爬放出去。
+                let carries = []
+                if (enNeed > 800) carries = carries.concat(StationCarry.generatorMassStoreCarry(room, RESOURCE_ENERGY, enNeed, "registerUsed"))
+                if (powerNeed > fastCarry) carries = carries.concat(StationCarry.generatorMassStoreCarry(room, RESOURCE_POWER, powerNeed))
+                if (carries.length) {
+                    tasks.unshift(UtilsTask.task(room.powerSpawn, "fillAllTask", "registerUsed"))
+                    tasks = tasks.concat(carries)
+                }
             }
         }
         return tasks;
