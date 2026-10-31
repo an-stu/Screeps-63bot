@@ -113,7 +113,16 @@ function makeRoom(linkLayout) {
     return room;
 }
 
-// ─────────── 1) 每个矿点认领**贴着自己容器**的 link，且不共用 ───────────
+/** 任意布局（用来复现线上特定房的几何）。 */
+function makeRoomWith(sources, containers, links) {
+    const room = { name: "W1N1", memory: {} };
+    room[CONSTANTS.LOOK_SOURCES] = sources.map(([id, x, y]) => ({ id, pos: pos(x, y), room: { name: "W1N1" } }));
+    room[CONSTANTS.STRUCTURE_CONTAINER] = containers.map(([id, x, y]) => ({ id, pos: pos(x, y) }));
+    room[CONSTANTS.STRUCTURE_LINK] = links.map(([id, x, y]) => ({ id, pos: pos(x, y) }));
+    return room;
+}
+
+// ─────────── 1) 每个矿点认领**贴着自己容器**的 link ───────────
 {
     const ctx = makeContext();
     // 两个矿点各一个专用 link，外加一个远离矿区的中心 link（不该被认领）
@@ -129,7 +138,6 @@ function makeRoom(linkLayout) {
     assert.equal(mem.srcA.link, "linkA", "矿点 A 必须认领自己的 link（去重键写错时会变成 undefined）");
     assert.equal(mem.srcB.link, "linkB", "矿点 B 必须认领自己的 link");
     assert.equal(mem.srcA.link2, undefined, "只有一个贴着的 link 时 link2 应为空");
-    assert.notEqual(mem.srcA.link, mem.srcB.link, "两个矿点不能共用同一个 link");
     assert.notEqual(mem.srcA.link, "linkCenter", "中心 link 不能被矿点抢走");
 
     // 幂等：update 每 tick 都会跑
@@ -151,7 +159,28 @@ function makeRoom(linkLayout) {
     assert.equal(room.memory[S.stationName].srcB.link, "l3", "另一个矿点仍要拿到自己的 link");
 }
 
-// ─────────── 3) 没有容器时不能崩，也不能凭空造 link ───────────
+// ─────────── 3) 共用 link 簇：宁可共用，也不能有一个矿点拿不到 link ───────────
+// 线上 E41S32 的真实几何：两个源只隔 2 格，容器 (20,26)/(20,27) 与
+// link (21,26)/(21,27) 互相都在 1 格内。按「一个 link 只归一个矿点」去重
+// 的话，后一个源会一只都拿不到（实测过）—— 而 link 能被共用正是因为
+// 两个容器彼此相邻，这时候共用本来就是对的。
+{
+    const ctx = makeContext();
+    const room = makeRoomWith(
+        [["srcA", 19, 26], ["srcB", 19, 28]],
+        [["contA", 20, 26], ["contB", 20, 27]],
+        [["lk1", 21, 26], ["lk2", 21, 27]]);
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    S.update(room);
+    const mem = room.memory[S.stationName];
+    assert.ok(mem.srcA.link, "相邻矿点 A 必须拿到 link");
+    assert.ok(mem.srcB.link, "相邻矿点 B 也必须拿到 link（独占去重会让它变 undefined）");
+    assert.equal(mem.srcA.link, "lk1");
+    assert.equal(mem.srcA.link2, "lk2", "A 的容器贴着两个 link，两个都要登记");
+}
+
+// ─────────── 4) 没有容器时不能崩，也不能凭空造 link ───────────
 {
     const ctx = makeContext();
     const room = makeRoom([["linkA", 12, 12]]);

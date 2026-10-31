@@ -1,3 +1,17 @@
+## v0.78.167 — Mine links: drop the exclusivity idea from v0.78.166, it starved a second mine
+
+v0.78.166 restored link claiming by deduping on the link id. Ten minutes live showed why that is
+wrong: E41S32 has its two sources two tiles apart, with containers at (20,26)/(20,27) and links at
+(21,26)/(21,27) - every container is adjacent to every link. The first source claimed both links and
+marked them used, so the second source got `link: undefined` again (26/28 claims empire-wide, the two
+misses being exactly that room and RCL6 W26N58, which genuinely has no mine link).
+
+A link can only be shared when the two containers sit next to each other, and in that case sharing is
+the correct behaviour - both keepers push into whichever link has room, which is what ran in
+production until the regression landed. So the rule is just "a link adjacent to this mine's container",
+with no ownership notion at all. `test/station-sources-link.test.cjs` now also pins the E41S32 geometry
+and fails if exclusivity comes back.
+
 ## v0.78.166 — No mine ever got its link, so energy piled up on the ground and decayed
 
 `StationSources.update()` deduped the link list with the **container's** id:
