@@ -1,4 +1,9 @@
-## v0.78.157 — Halve the movement-cache wipe storms (bucket drain mitigation)
+## v0.78.165 — Halve the movement-cache wipe storms (bucket drain mitigation)
+
+(Shipped as 0.78.165 because the live branch had silently advanced to 0.78.164 through parallel
+deploys that were never committed; this release first snapshots that unpushed station_sources work
+verbatim — dry-mine standby, spawnFailure gate removal on the keeper path, the `__outerWhy` refill
+diagnostic, and the carrier body budget tightened 75% → 50% — then adds the one change below.)
 
 Fresh telemetry after the outer-mine fleet recovered (8 carriers, both containers drained to 0-16,
 keepers 2/2): avg 18.6 CPU/tick on the 20 CPU plan with **23.8% of ticks over the limit**, and the
