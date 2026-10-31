@@ -122,7 +122,7 @@ assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
 // 2026-10-27：预算在「按可用能量」之上再夹一层「hive 容量的 75%」——RCL5 出兵房
 // 只有 1800 容量，满配 1800 的爬一孵就把整只 hive 抽干（掉到 109），本房与外矿补员
 // 互相饿死。两条都要在：按可用能量收缩 + 不超过 hive 的 75%。
-assert.ok(stationSources.includes("let bodyBudget = Math.min(Math.floor(hiveCap * 0.5),")
+assert.ok(stationSources.includes("let bodyBudget = Math.min(Math.floor(hiveCap * 0.75),")
     && stationSources.includes("Math.max(spawnAvail, 550)"),
     "outer carrier bodies must be sized from the energy actually available AND capped at 75% of the hive: a 2500-energy 50-part body queued against a hive holding 2000-5000 energy simply fails to spawn, and on a 1800-capacity RCL5 spawn room even a full-size body drains the hive so far that both the room and the outer mine starve");
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
@@ -217,8 +217,8 @@ assert.ok(main.includes("POWER_CREEP_TICK_INTERVAL = 3") && main.includes("funct
     assert.ok(powerExec > 0, "power creeps must still be executed somewhere");
     assert.equal(powerExec, guarded, "every power creep execution site must go through shouldRunPowerCreeps()");
 }
-assert.ok(/MOVEMENT_CACHE_REFRESH_INTERVAL = 1201/.test(managerRooms),
-    "the movement cache must not be force-cleared every 301 ticks: deletePathInRoom() deletes every cached path crossing the room, so all its creeps re-path at once (unitTasks spikes), while the movement module already expires unused paths after 3000 ticks");
+assert.ok(/MOVEMENT_CACHE_REFRESH_INTERVAL = 2401/.test(managerRooms),
+    "the movement cache must not be force-cleared often: deletePathInRoom() deletes every cached path crossing the room, so all its creeps re-path at once (unitTasks spikes; 23.8% of ticks ran over the 20 CPU limit while the bucket drained 8046->2225 in two days). 2401 stays inside the movement module's own 3000-tick unused-path expiry, so hot paths still get refreshed");
 assert.ok(stationUpgrade.includes("getUpgradePosition(creep, controller") && stationUpgrade.includes("upgradePosition"), "upgraders must reserve independent controller positions");
 assert.ok(stationUpgrade.includes("CONTROLLER_SIGNS") && stationUpgrade.includes("trySignController(creep)"), "owned controllers must receive the curated sign set");
 const signArraySource = stationUpgrade.match(/let CONTROLLER_SIGNS = (\[[\s\S]*?\n\]);/)[1];

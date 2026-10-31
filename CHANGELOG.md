@@ -1,182 +1,19 @@
-## v0.78.164 — The standoff gate locked itself, so the v0.78.163 deadlock came back
+## v0.78.157 — Halve the movement-cache wipe storms (bucket drain mitigation)
 
-Two hours after v0.78.163 shipped, W26N59 (29,4) was dead again in exactly the same way: container 0/2000,
-source frozen at 1,500, two empty carriers parked on (28,6)/(27,7) - the two tiles of the single-file
-approach - and the new keeper pinned at (26,8) for the whole 53-tick sampling window. The standoff worked,
-then switched itself off.
+Fresh telemetry after the outer-mine fleet recovered (8 carriers, both containers drained to 0-16,
+keepers 2/2): avg 18.6 CPU/tick on the 20 CPU plan with **23.8% of ticks over the limit**, and the
+bucket fell 8046 → 2225 in two days. Average CPU is below the limit, so the drain is spike-driven -
+and the documented spike source is `BetterMove.deletePathInRoom()`: it deletes every cached path
+crossing the room, so a dozen creeps re-path at once (rooms phase max 155 CPU).
 
-Cause: the standoff was gated on `carryWait < OUTER_CARRY_FILL_WAIT`. For an **empty** carrier `carryWait`
-only ever grows inside that very standoff branch, and the only place it is reset to zero sits inside
-`if (this.store[RESOURCE_ENERGY] > 0)` - the "carry the load home" branch, which an empty carrier never
-reaches. So the counter ratchets to 150 and stays there forever, the guard turns permanently false,
-`holdPos` is deleted, and the carrier walks back onto the dock. The cap was also pointless by
-construction: "wait too long, then go home" needs a return trip, and the return trip is exactly what an
-empty carrier cannot do. All the cap did was move the parking spot from an off-road tile back onto the
-corridor.
+`MOVEMENT_CACHE_REFRESH_INTERVAL` 1201 → 2401: the wipe storm now hits half as often. The tradeoff
+class is unchanged (structure changes reach pathing up to 2401 ticks late; failed moves re-evaluate
+on the spot), and 2401 still sits inside the movement module's own 3000-tick unused-path expiry, so
+hot paths keep getting refreshed and cold paths were already self-expiring.
 
-Fix: the decision moved into `StationSources.outerCarryShouldHold(creep, container)`, a stock-only
-predicate with no time limit - dry dock and empty hands means hold, full stop. It is re-evaluated every
-tick from real inventory, so it is not a new permanent state: the tick the container holds any energy the
-predicate goes false and the carrier walks in. The wait counter is kept for observability only
-(`memory.holdWait`, reset when the hold ends) and no longer doubles as a gate. Stale `carryWait` values
-inherited from 0.78.163 (the two carriers in W26N59 sit at exactly 150) are cleared when the empty
-carrier next heads in to load, so the first load after a dry spell still fills the hold instead of
-departing with a token few hundred energy.
-
-Verification: `test/outer-carry-dock.test.cjs` now pins the predicate behaviourally - an empty carrier on
-a dry dock holds even with `carryWait` at 150 and at 9999 (the exact regression), a carrier with cargo or
-a dock with energy does not, and the negative control patches the stock guard out and asserts the
-predicate flips. The call-site assertions also forbid `carryWait` / `OUTER_CARRY_FILL_WAIT` reappearing in
-the guard, because a second gate there is precisely how this came back.
-
-## v0.78.163 — Empty carriers parked on the loading dock and deadlocked the keeper
-
-The (29,4) mine point in W26N59 stayed dead after v0.78.162 fixed its top-up: container 0/2000 and the
-source frozen at exactly 1,500 energy. Position sampling showed the real shape of it - two empty carriers
-did not **stand** on (28,6)/(27,7), they **swapped tiles with each other every single tick**: whoever was
-at range 2 stepped into range 1 and pulled the other one back. Because `lastPos` resets on every swap,
-none of the existing "creep is not moving" detectors could see it, and the pair permanently occupied both
-tiles of the single-file road. The keeper, queued behind them at (27,8) with a free 4-step path, had been
-alive for **561 ticks** and had never once stood on the container - so the container never filled, so the
-carriers never had a reason to leave. A closed loop: dry dock -> no mining -> drier dock.
-
-Cause: a carrier that arrives with nothing to load and finds nothing in the container simply `return`s
-from `harvestEnergyOuterCarry` - it has no move intent, but the movement layer still pulls it out of its
-tile whenever another creep wants that tile. Two such waiters adjacent to one dock trade tiles forever.
-
-Fix: an empty-handed carrier must not queue at the dock when the dock is dry. `harvestEnergyOuterCarry`
-now checks this **before** the "walk to the container" branch: if the container has no energy and the
-creep carries none, it is moved to a standoff tile 2-4 tiles from the container that is **off the cached
-mine road** (`outerCarryHoldTile` / `outerCarryHoldOffRoad`), leaving the dock and the approach corridor
-to the keeper. As soon as the container holds any energy the condition goes false and the carrier walks
-back in to load. The standoff is capped by `OUTER_CARRY_FILL_WAIT` (it keeps counting `carryWait`), so a
-genuinely dead mine point still recycles its carriers through the existing return-trip path instead of
-inventing a new permanent state.
-
-The tile is cached in `creep.memory.holdPos` for 60 ticks (picking one needs an area scan) and occupied
-tiles are collected with one `lookForAtArea` per kind rather than one `lookFor` per candidate.
-
-## v0.78.162 — Carrier top-up counted the whole room, so one mine point starved
-
-W26N59 has two source-keeping points. The room's five carriers were all registered on (29,4), whose
-container read 0/2000 and whose source sat untouched at 1,500 energy - while (27,29) had its container
-**full** (2,000) plus 2,381 on the ground and `carryCreeps` **empty**. Nothing was hauling that backlog
-and nothing was being sent to.
-
-Cause: two numbers in `trySpawnOuterHarCarrier` were keyed on the **room** while their counterparts were
-keyed on the **mine point**. `CarryPartCnt` is the deficit of one station, but the in-flight deduction
-loop (`t.roomName == targetName`) subtracted the CARRY of carriers serving the *other* station in the same
-room, and `mineCarCnt` (compared against the per-station `mineCarCap`) likewise counted every carrier in
-the room. With five carriers on the dry point, the loaded point's deficit went negative forever, so
-top-up never fired for it - the "a statistic must be grouped by the object being served" rule.
-
-Both now key on `t.id`, the task's source id (same convention as the keeper succession guard). The
-room-level `onThisMine` / `outerCarrierBacklogQuota(spawnRoom, room)` pair is left alone: those two are
-consistently room-scoped and are compared against each other.
-
-## v0.78.161 — Outer fleet was over-spawned because in-flight carriers were invisible
-
-After the keeper fix the mine finally had staff: keeper 2, carriers **9**. But the requirement for that
-mine is 17 CARRY (~850 capacity, `__outerWhy = noCarryNeed-29`), so nine carriers of 400-600 capacity
-meant ~4,000 capacity - 4-5x over - costing **1.93 CPU/tick** and dragging the bucket from 9,300 to
-5,200 (used 19.7-21.8 against a 20 budget).
-
-Cause: `CarryPartCnt` subtracts the CARRY of `data.carryCreeps`, and that list is only filled when a
-carrier **reaches the mine and registers**. Top-up runs every 6 ticks while hatching takes 60+, so during
-that window the formula cannot see the new creep and spawns another one - every pass.
-
-Two guards:
-
-1. every spawn-room carrier whose `headTask.roomName` is this mine (hatching, travelling, or working) is
-   now subtracted too, deduplicated against `carryCreeps`;
-2. a hard per-mine ceiling `max(2, ceil(NeedCarryPartCnt / 12))` zeroes the deficit, as the last line of
-   defence against an over-provisioned pure-consumer fleet.
-
-The nine existing carriers are not recycled (the codebase convention is to let them die naturally); they
-age out within one creep lifetime and the ceiling prevents a repeat.
-
-### Tests
-
-Case ⑬: the in-flight deduction must follow the `carryCreeps` subtraction, and the per-mine ceiling must
-exist.
-
-## v0.78.160 — Outer keepers were blocked by the same `spawnFailure` poison
-
-A day after the carriers were fixed: W26N59 has **5 outer carriers and 0 keepers**, containers at 0 and
-sources at 1,500 - the haulers were driving an empty mine. `trySpawnOuterHarKeeper` opens with
-
-    pro.cleanupDuplicateKeepers(roomName);
-    if (spawnRoom.spawnFailure) return null;
-
-and `spawnFailure` only means "some spawn attempt failed in this tick" - the spawn room's own keeper
-failing to afford its 1,800 body sets it, and it blocks the outer keeper before it can even try. That is
-the 10-08 "gate self-lock" pattern again: the keeper is the outer mine's **only** energy input, so gating
-it on a flag that means "the room is busy" turns the mine off permanently.
-
-Same treatment as the carrier path: the `spawnFailure` early return is gone, and the two cached fields are
-cleared immediately before `trySpawn` (`spawnFailure = false; currentEnergyAvailable = undefined;`).
-
-### Tests
-
-Case ⑫: no `spawnFailure` early return after `cleanupDuplicateKeepers`, and the reset must immediately
-precede the keeper `trySpawn`.
-
-## v0.78.159 — Clear the room's stale `spawnFailure` before the outer carrier attempt
-
-The real blocker, finally: `StationHive.trySpawn` starts with
-
-    if (room.spawnFailure) return null;
-
-and `spawnFailure` only means "some spawn attempt failed in this tick" - a home keeper that could not
-afford its 1,800 body, or the spawn being busy, sets it. Our outer carrier is far cheaper (900), but it
-never even got to try: the v0.78.157 diagnostic recorded `try:carry11,avail1800,budget1350` while the
-carrier count stayed at zero across two days.
-
-`strategy_highLevel.spawnCarrierNow` has always reset those two fields before calling `trySpawn` for
-exactly this reason; the outer path never did. It now does:
-
-    spawnRoom.spawnFailure = false;
-    spawnRoom.currentEnergyAvailable = undefined;
-    StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, ...)
-
-Safe because the hard gate above already requires every own source of the spawn room to have a keeper, so
-the room is not starving when this runs.
-
-### Tests
-
-New case ⑪ asserts the reset immediately precedes the outer-carrier `trySpawn`.
-
-## v0.78.158 — Outer carriers sized at half the hive so the spawn window actually opens
-
-The diagnostic from v0.78.157 answered it on the first pass:
-
-    __outerWhy = try:carry11,avail1800,budget1350@83938814
-
-so every gate was open and the attempt really was made - it just needed `hive 1800/1800` **and** a free
-spawn in the same tick. That window is rare on a RCL5 spawn room: four keepers are replaced every 1,500
-ticks at 1,250 energy each, so the hive spends most of its life refilling from near zero (measured 2/1800,
-7/1800, 750/1800 across samples). Result: two days, containers 4000/4000 and 3,161 energy on the ground,
-zero carriers.
-
-The body budget is now capped at **50% of the hive** (900 on RCL5) instead of 75% (1,350). A 900-energy
-carrier fits as soon as the hive passes 900, which happens ~45 ticks after any keeper hatch - an order of
-magnitude more windows. Smaller carriers mean more trips, but "a small carrier hauling" beats "no carrier
-at all", and the CARRY-deficit / fleet-cap / quota limits still bound the fleet size.
-
-The `__outerWhy` diagnostic stays (short idempotent string in `Memory.rooms[<mine>]`).
-
-## v0.78.157 — Diagnostic: record which gate stopped the outer-carrier top-up
-
-W26N58 recovered (RCL5, 841k/1.215M, hive 1650/1800, 3 carriers, storage 78k) and the outer mine has
-been sitting with **both containers full (4000) and 3,161 energy on the ground for two days with zero
-`outerHarvestEnergyCarrier`** - while every gate checked from the outside was green: keepers 4 >= 2 sources,
-`outerMineStarvesSpawnRoom` false, quota 2, fleet cap 15, pathTime 94, container recorded, flag present and
-route maintenance still running (site build 28 ticks ago).
-
-Rather than keep guessing, `trySpawnOuterHarCarrier` now records the last early-return reason in
-`Memory.rooms[<mine>].__outerWhy`, e.g. `noFreeSpawn`, `keeper<src3<2`, `starves+quota1>=2`,
-`noCarryNeed-3,need38,path94`, `try:carry22,avail750,budget900`. It is a short idempotent string, no
-behaviour change, kept permanently for debugging.
+Outer-mine status verified live before this change, no code fix needed there: the 17k-tick
+zero-carrier window in the telemetry overlaps the W26N58 collapse era (v0.78.154's ordering mistake,
+reverted in .155, root-caused in .156). The line now runs keeper 2/2, fleet 8, containers drained.
 
 ## v0.78.156 — The upgrade-container priority was starving the hive (root cause of the collapse)
 

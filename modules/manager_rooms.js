@@ -21,8 +21,12 @@ const ROOM_REFRESH_INTERVAL = 61;
  *
  * 拉到 1201：结构变化最多晚 1201 tick 反映到寻路成本上（走错时 move 失败会当场
  * 重新评估，不会真的卡住），尖峰频率降 4 倍。
+ *
+ * 0.78.157 再拉到 2401：bucket 实测两天 8046→2225，遥测 23.8% tick 超限，
+ * 风暴是主要贡献者之一。仍在模块自身 3000 tick 的未用路径过期之内——热路径
+ * （一直在用的）强清仍有意义，冷路径本来就会自己过期。尖峰频率再降一半。
  */
-const MOVEMENT_CACHE_REFRESH_INTERVAL = 1201;
+const MOVEMENT_CACHE_REFRESH_INTERVAL = 2401;
 
 const managerRooms = {
     bootstrapRefreshPending: true,
