@@ -38,6 +38,13 @@ assert.ok(marketSource.includes("getRecentDailyHigh(resType)"),
     "L5 deal path must use the recent daily high");
 assert.ok(marketSource.includes("dailyHighTolerance"),
     "daily high tolerance must be configurable");
+// 用户 10-31：高级商品（L3+，含 X 系强化化合物）要求近日高点，容忍 0.96 → 1.0。
+assert.ok(marketSource.includes("commodityLevel >= 3 && StrategyMarketPrice.getRecentDailyHigh"),
+    "L3+ (X boost compounds included) must use the recent daily high gate");
+assert.ok(/if \(!\(tol >= 0 && tol <= 1\)\) tol = 1\.0;/.test(marketSource),
+    "daily high tolerance default must be 1.0: sell at the recent high, never below");
+assert.ok(!/tol = 0\.96/.test(marketSource),
+    "the old 0.96 tolerance must be gone");
 assert.ok(marketSource.includes("commodityLevel >= 5 ? 1 : MARKET_MIN_COMMODITY_DEAL"),
     "L5 min deal must be 1; L0-L4 keep 100");
 assert.ok(marketSource.includes("Memory.marketSales"),
@@ -45,7 +52,7 @@ assert.ok(marketSource.includes("Memory.marketSales"),
 assert.ok(marketSource.includes("Memory.diagSell"),
     "L5 sell reference must be logged to Memory.diagSell");
 
-// 负对照：L0~L4 的旧价格门槛必须还在（不能被 L5 的日高逻辑覆盖）
+// 负对照：L0~L2 的旧价格门槛必须还在（不能被日高逻辑覆盖；L3+ 缺历史时也退回它）
 assert.ok(marketSource.includes("historyAvg * (1 + dealPremium)"),
     "L0-L4 must keep the history-average premium gate");
 

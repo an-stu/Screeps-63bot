@@ -1185,24 +1185,27 @@ let pro = {
         if (available < minDeal) continue;
         
         let maxPrice = sellPrice[resType];
-        // L0~L4：历史均价 × (1+溢价)，溢价默认 10%（Memory.marketSettings.dealPremium）。
-        // L5：改用“最近日高”参考价（avg+stddev 的日高近似 × 容忍系数，默认 0.96）。
-        // 日高比历史均价更贴近“几乎最高价卖”的要求，也避免吃到过低的二线买单。
+        // L0~L2：历史均价 × (1+溢价)，溢价默认 10%（Memory.marketSettings.dealPremium）。
+        // L3+（含 X 系强化化合物与 L4 中间品）：一律以「近日高点」为底线 ——
+        // 用户 10-31「t5 等高级商品要求近日高点，继续提高阈值，不要低了」：
+        // 容忍系数从 0.96 提到 **1.0** —— 买单价必须 ≥ 近日日高才成交，
+        // 宁可压库存也不贱卖。日高来自引擎 history 的 avg+stddev 近似。
+        // 历史缺失时退回「均价×(1+dealPremium)」的旧底线。
         let historyAvg = StrategyMarketPrice.getResTypeHistory(resType);
         let dealPremium = Number(Memory.marketSettings && Memory.marketSettings.dealPremium || 0.1);
         let dailyHigh = 0;
         let dailyTolerance = 0;
-        if (commodityLevel >= 5 && StrategyMarketPrice.getRecentDailyHigh) {
+        if (commodityLevel >= 3 && StrategyMarketPrice.getRecentDailyHigh) {
             dailyHigh = StrategyMarketPrice.getRecentDailyHigh(resType);
             let tol = Number(Memory.marketSettings && Memory.marketSettings.dailyHighTolerance);
-            if (!(tol >= 0 && tol <= 1)) tol = 0.96;
+            if (!(tol >= 0 && tol <= 1)) tol = 1.0;
             dailyTolerance = tol;
             if (dailyHigh > 0) maxPrice = Math.max(maxPrice, dailyHigh * tol);
             else if (historyAvg > 0) maxPrice = Math.max(maxPrice, historyAvg * (1 + dealPremium));
         } else if (historyAvg > 0) {
             maxPrice = Math.max(maxPrice, historyAvg * (1 + dealPremium));
         }
-        if (commodityLevel >= 5) {
+        if (commodityLevel >= 3) {
             Memory.diagSell = {
                 t: Game.time, r: resType, hi: Math.round(dailyHigh),
                 tol: dailyTolerance, max: Math.round(maxPrice),
