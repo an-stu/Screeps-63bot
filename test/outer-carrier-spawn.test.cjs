@@ -161,9 +161,10 @@ assert.ok(code.indexOf("cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1)") >= 0
     assert.ok(/let siblingMem = Memory\.rooms\[data\.roomName\]/.test(cleanupSrc)
         && /s\.id != data\.id && s\.roadPathStr/.test(cleanupSrc),
         "清理前必须并入兄弟矿点路线（按矿点逐个调用，不合并会误拆正规路）");
-    assert.ok(/structureType == STRUCTURE_ROAD && s\.my/.test(cleanupSrc)
-        && /\.destroy\(\)/.test(cleanupSrc),
-        "矿区/过道房里偏离路线的自建已建路要立即 destroy（主房蓝图路除外）");
+    // 离线已建路：不拆（无主中立房 destroy 会 ERR_NOT_OWNER）也不修（修路爬只认
+    // 路线精确格），任其自然衰减——所以 cleanup 里不得出现 destroy 分支。
+    assert.ok(!/\.destroy\(\)/.test(cleanupSrc),
+        "cleanup 不得 destroy 已建路：中立房无主路拆不动，自然衰减即可");
 }
 
 console.log("outer carrier spawn checks passed");

@@ -1,3 +1,18 @@
+## v0.78.174 — Off-route roads: neither repaired nor destroyed, just left to decay
+
+User: 不 repair 对应 road 就行了，让他自然消失.
+
+The destroy branch added in 0.78.173 was dead code and is reverted: mine/transit
+rooms on our routes are neutral by the long-distance routing rule, and roads in
+neutral rooms have **no owner** (`my: undefined`) - the `s.my` filter never
+matched, and `destroy()` on an unowned structure returns ERR_NOT_OWNER anyway.
+The observed orphan at (20,39) is decaying on its own (300 → 200 hits).
+
+The policy that actually holds: road builders only work on exact route tiles
+(`onRoadPath` + the critical scan both match route waypoints), so off-route
+roads receive no repair and decay naturally; only off-route *sites* are
+removed by the exact-match cleanup.
+
 ## v0.78.173 — Remove the redundant road sites and orphan roads for good
 
 User: 多余的 site remove 掉.

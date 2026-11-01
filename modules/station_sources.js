@@ -2421,15 +2421,11 @@ let pro = {
                     && !route[roomName + ":" + site.pos.x + ":" + site.pos.y]
                     && (!isHome || !planned.has(site.pos.x + ":" + site.pos.y)))
                 .forEach(site => site.remove());
-            // **偏离路线的自建已建路一并拆掉**（矿区/过道房；主房的路归蓝图管）。
-            // 实测 (20,39)：平行时代留下的 6% 孤儿路，没人会修它、占着格子几十年
-            // 才烂完。destroy 立即回收，route 上同格的正规路不受影响。
-            if (!isHome) {
-                room.find(FIND_STRUCTURES)
-                    .filter(s => s.structureType == STRUCTURE_ROAD && s.my
-                        && !route[roomName + ":" + s.pos.x + ":" + s.pos.y])
-                    .forEach(s => s.destroy());
-            }
+            // 偏离路线的**已建路**不拆也不修，任其自然衰减（用户 10-31 定稿）：
+            // 矿区/过道房是无主中立房，路在这里没有 owner（my=undefined）、
+            // destroy() 会 ERR_NOT_OWNER 根本拆不动；修路爬只在路线精确格上
+            // 作业（onRoadPath + 危急扫描都只认路线格），离线路得不到任何维修，
+            // 会自己烂完——实测 (20,39) 孤儿路 300→200 hits 持续衰减中。
         });
     },
     /** 路径上离当前位置最近的路点 */
