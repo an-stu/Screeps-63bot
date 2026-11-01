@@ -2133,7 +2133,8 @@ let pro = {
      */
     ensureOuterRoadPath(data, spawnRoom) {
         let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
-        if (data.roadPathStr && data.roadPathStr.indexOf("undefined") < 0 && data.roadPathTick) {
+        if (data.roadPathStr && data.roadPathStr.indexOf("undefined") < 0
+            && data.roadPathTick && Game.time - data.roadPathTick < OUTER_ROAD_PATH_TTL) {
             let cached = pro.getOuterRoadPath(data);
             let end = cached && cached.last();
             // PathFinder can return a non-empty but incomplete path. The old
@@ -2144,15 +2145,7 @@ let pro = {
             // 而缓存原本要等 1000 tick 才重算（实测 nuker 盖好后外矿爬全卡住）。
             if (end && to && end.roomName == to.roomName
                 && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1
-                && pro.outerRoadWalkable(cached, data)) {
-                // **一条路走到底（用户 10-31）：只要路线仍走得通就续期，绝不为省几格
-                // 代价而换道。** 原来只有 TTL 内复用；TTL（1000 tick）一到就算旧路
-                // 完好也强制重算 —— plain=2 / road=1 下等价路径随时可能判给另一条
-                // 平行线，旧工地还没清、新路 site 已经铺上，两线打架路永远修不完。
-                // 走不通（被新建筑封死）才走下面的 delete + 重算。
-                if (Game.time - data.roadPathTick >= OUTER_ROAD_PATH_TTL) data.roadPathTick = Game.time;
-                return cached;
-            }
+                && pro.outerRoadWalkable(cached, data)) return cached;
             delete data.roadPathStr;
             delete data.roadPathTick;
         }

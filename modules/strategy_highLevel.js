@@ -670,6 +670,13 @@ let pro = {
         // 能量生产者最优先：先补 keeper（缺矿点/死光时），否则 carrier/worker
         // 会先把空 hive 的 spawn 能量吃光，keeper 永远 spawn 失败（E53S21）。
         StationSources.trySpawnHarKeeper(room);
+        // 保留者 = 外矿产量的总开关（Overmind 式顺序：先保留、后开采）。
+        // 未保留的控制器让源容量减半（1500 vs 3000）；reserver 便宜且低频，
+        // 但原来埋在旗循环深处抢不到单 spawn —— 提到 worker/carrier 之前，
+        // 「本房 keeper 满员才派」的能量健康闸在函数内部（0.78.155 原则）。
+        if (global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest")) {
+            HelperError.catchError(() => StationSources.trySpawnReservers(room), "reserver:" + room.name);
+        }
         // worker 优先 carrier 的事件
         pro.workerManager(room); // 包括了生爬逻辑
         pro.carrierManager(room);

@@ -1,31 +1,3 @@
-## v0.78.171 — One road to storage; high-tier commodities only sell at the recent high
-
-Two user directives (10-31): the outer road must be ONE complete line - no parallel site spam -
-and T5-class commodities must sell at the recent daily high, never low.
-
-**One road.** `ensureOuterRoadPath` reused its cached route only inside the 1000-tick TTL; on
-expiry it re-searched even when the old road was perfectly walkable. With plain=2 / road=1 the
-search can hand an equal-cost tie to a parallel alignment: the old sites are not yet cleaned, the
-new route lays its own sites, the two fight and the road never finishes. Now the walkability
-re-check (`outerRoadWalkable`, endpoint + every tile unblocked, itself throttled to 50 ticks)
-renews `roadPathTick` and returns the same route - a re-search only happens when something
-actually blocks the path. `cleanupOuterRoadSites` already removes any road site that drifted
-off-route, so parallel leftovers die on the next sweep.
-
-**Recent-high selling.** The daily-high gate was L5-only with tolerance 0.96 (accept orders at
-96% of the recent high). Per user: tolerance default **0.96 → 1.0** - a buy order must pay at
-least the recent daily high (engine history avg+stddev approximation, net of terminal transfer
-cost) - and the gate now covers **commodity level >= 3**, which brings the X boost compounds
-(XLHO2/XGHO2/...) under the same rule. Missing history falls back to the old
-historyAvg × (1 + dealPremium) floor; L0-L2 (raw/base goods) keep the plain premium gate.
-`dailyHighTolerance` in Memory.marketSettings still overrides.
-
-### Tests
-
-`market-l5.test.cjs` pins the L3+ gate and the 1.0 default (and that 0.96 is gone);
-`outer-carrier-spawn.test.cjs` pins the renew-on-walkable behavior and that renewal happens after
-the walkability check (a newly blocked road still forces a re-search).
-
 ## v0.78.170 — The reserver is the outer mine's master switch; spawn it like one
 
 User: 外矿需要 claim 的 reserve，不然能量太少（Overmind 先保留后开采）。
