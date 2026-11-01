@@ -165,6 +165,21 @@ assert.ok(code.indexOf("cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1)") >= 0
     // 路线精确格），任其自然衰减——所以 cleanup 里不得出现 destroy 分支。
     assert.ok(!/\.destroy\(\)/.test(cleanupSrc),
         "cleanup 不得 destroy 已建路：中立房无主路拆不动，自然衰减即可");
+
+// ── ⑭ 空车按「存货最满的容器」重派（用户 10-31 浪费问题的再平衡）──────────
+// 空车重派固定回注册矿点时，重生期同批孵化挤在一个矿点的偏斜永不自愈：
+// 实测 src0 挂 4 只车（容器 16）、src1 只有 2 只（容器 2000 满 + 地面 1994）。
+// 空车必须选最满容器并迁移注册（carryCreeps 口径保持配额统计真实）。
+{
+    const anchor = code.indexOf('e.memory.tasks = pro.generatorOuterHarCarryTask(target);');
+    assert.ok(anchor > 0, "空车重派必须存在");
+    const maintSrc = code.slice(anchor - 800, anchor + 120);
+    assert.ok(maintSrc.includes("e2 > best") && maintSrc.includes("target = d2"),
+        "空车重派必须选存货最满的容器");
+    assert.ok(maintSrc.includes("carryCreeps = (data.carryCreeps || []).filter(id => id != e.id)")
+        && maintSrc.includes("target.carryCreeps.push(e.id)"),
+        "换矿点时必须迁移 carryCreeps 注册（配额/缺口统计口径真实）");
+}
 }
 
 console.log("outer carrier spawn checks passed");

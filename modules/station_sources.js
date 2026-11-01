@@ -3724,9 +3724,30 @@ let pro = {
                 // 在原地（见 harvestEnergyOuterCarryRoadBuilder 里 store==0 分支的
                 // 注释）。这里发现就立刻把搬运任务派回去，比事后在控制台里一只只
                 // 救省事得多。
+                //
+                // **空车派活按「存货最满的容器」而不是注册归属**（Overmind 式按需
+                // 调度）：空车重派固定回注册矿点时，重生期同批孵化挤在一个矿点的
+                // 偏斜永不自愈——实测 W26N59：src0 挂 4 只车（容器 16）、src1 只有
+                // 2 只（容器 2000 满 + 地面 1994 在烂）。选最满容器并把注册一并
+                // 迁过去，配额/缺口统计（carryCreeps 口径）保持真实。
                 (data["carryCreeps"] || []).map(e => Game.getObjectById(e))
                     .filter(e => e && (!e.memory.tasks || !e.memory.tasks.length))
-                    .forEach(e => { e.memory.tasks = pro.generatorOuterHarCarryTask(data); });
+                    .forEach(e => {
+                        let target = data;
+                        let best = 0;
+                        _.values(sm).forEach(d2 => {
+                            if (!d2 || !d2.container) return;
+                            let c2 = Game.getObjectById(d2.container);
+                            let e2 = c2 ? (c2.store.energy || 0) : 0;
+                            if (e2 > best) { best = e2; target = d2; }
+                        });
+                        if (target != data) {
+                            data.carryCreeps = (data.carryCreeps || []).filter(id => id != e.id);
+                            target.carryCreeps = target.carryCreeps || [];
+                            if (!target.carryCreeps.includes(e.id)) target.carryCreeps.push(e.id);
+                        }
+                        e.memory.tasks = pro.generatorOuterHarCarryTask(target);
+                    });
             });
         }
         // ─────────────── 以下才是补员，可以被能量 / 上限 / spawn 挡住 ───────────────

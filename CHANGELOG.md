@@ -1,3 +1,21 @@
+## v0.78.175 — Rebalance idle outer carriers to the fullest container
+
+User: 外矿能量有点浪费，爬配置合理吗？
+
+Verdict: the config itself has converged - live fleet CARRY 66 vs computed
+demand 56 (reserved regen 10/tick per source, pathTime 82/57), bodies sized by
+the 50% hive-cap rule. The visible waste (1994 energy rotting at src1, container
+full at 2000) is the collapse-era backlog draining too slowly because carrier
+registration is skewed: src0 had 4 carriers for a container at 16 energy while
+src1 had 2 for a full one. Empty carriers were always re-tasked to their
+*registered* source, so the skew could never self-correct.
+
+The task-less re-assignment in the maintenance block now picks the source with
+the fullest container (Overmind demand-driven dispatch) and migrates the
+carrier's carryCreeps registration along with it, keeping the per-source quota
+and gap accounting truthful. Backlog drain at src1 roughly quadruples
+(2.3/tick net -> ~9/tick net with a 3:3 split); no other gates change.
+
 ## v0.78.174 — Off-route roads: neither repaired nor destroyed, just left to decay
 
 User: 不 repair 对应 road 就行了，让他自然消失.
