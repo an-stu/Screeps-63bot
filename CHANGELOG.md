@@ -1,34 +1,4 @@
-## v0.78.178 — Spawn: worker / carrier bodies by the energy this tick can pay too
-
-The upgrader fix in 0.78.176 left the same defect in the other two spawn paths,
-and it is the **same class** as MEMORY rule 16: a threshold or a body size
-written at RCL8 magnitude, silently unreachable (or silently unaffordable) for
-a room whose capacity is smaller.
-
-- `strategy_highLevel.workerManager`: `HiveNeedToFill && energyAvailable < 2500`
-  returned early. For the RCL6 room (cap 2,300) that is **always** true, so a
-  growing room could never spawn a worker — it would never be able to build its
-  own sites once RCL7 unlocks more. Threshold is now `min(2500, cap * 0.5)`:
-  identical for RCL8, reachable for RCL5/6.
-- `trySpawnCarrier`: the "hive has a deficit and we can afford a full body"
-  branch required `energyAvailable >= 2500` — unreachable at cap ≤ 2,500, so a
-  RCL5/6 room could only ever get the fixed 750-energy emergency carrier and
-  never reached its own target count (W26N58: target 4, live 2 + 1 hatching,
-  with 49k storage + 48k terminal in hand). The gate is now
-  `min(2500, cap * 0.6)` (RCL8 unchanged at 2,500).
-- Both bodies are now sized by `spawnTickBudget(room)` — `min(cap, this-tick
-  spendable energy)` — the same rule `trySpawnUpgrader` follows. Sizing from
-  `getEnergyCapacityAvailable()` makes `StationHive.trySpawn` silently bail
-  (`spawnFailure = true`, `return undefined`) whenever the hive is not full,
-  which also **poisons every later spawn attempt in the same tick**.
-
-Full-hive sizing is byte-for-byte unchanged (carrier 33 CARRY + 17 MOVE =
-2,500; worker 11×WORK/CARRY/MOVE = 2,200), so RCL8 rooms behave exactly as
-before. New `test/spawn-body-budget.test.cjs` (negative control: reverting
-either half makes it fail by behavior).
-
 ## v0.78.176 — Freight budget on every terminal send (Overmind equalize pattern)
-
 
 User: 只考虑运费预算（from the Overmind comparison list）.
 
