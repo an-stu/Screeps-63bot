@@ -262,6 +262,22 @@ const OUTER_CARRIER_COST = 2500;
  */
 const OUTER_CARRIER_TRIP = 1700;
 
+/**
+ * 外矿车换代缓冲（Overmind Overlord.ts 的 `prespawn` 项）。
+ *
+ * 换代判定 = `ttl > 生成时间(3×body) + 行军(pathTime) + PRESPAWN`。PRESPAWN
+ * 覆盖「接替请求发出时 spawn 正忙」的排队等待——守卫车换代已有实测校准机制
+ * （defSpawnQueueWait，封顶 600），搬运车先给固定 100：略早出发好过断档。
+ */
+const OUTER_CARRIER_PRESPAWN = 100;
+
+/**
+ * 源再生周期（官方常量 ENERGY_REGEN_TIME）：energyCapacity 在 300 tick 内连续
+ * 回填完毕，速率恒定 = capacity/300（保留房 10/tick，未保留房 5/tick）。
+ * `ticksToRegeneration` 只是 300→0 的倒计时，**不是**分母。
+ */
+const SOURCE_REGEN_TICKS = 300;
+
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
     let rm = Memory.rooms[this.headTask().roomName];
@@ -3919,7 +3935,17 @@ let pro = {
             if (pathTime && data["container"]) {
                 data["carryCreeps"] = data["carryCreeps"] || []
                 data["carryCreeps"] = data["carryCreeps"].filter(e => Game.getObjectById(e))
-                let carrierCreeps = data["carryCreeps"].map(e => Game.getObjectById(e)).filter(e => e && (!e.ticksToLive || e.ticksToLive > e.body.length * 3))
+                // **换代提前量**（Overmind Overlord.ts:273 的计数公式
+                // `ttl > CREEP_SPAWN_TIME × body.length + spawnDistance + prespawn`）：
+                // 剩余寿命不足以「再孵一只 + 走到矿点」的老车不再计入覆盖运力，
+                // 缺口立刻回填 → 接替车在老车退役前就出发，交接零空档。
+                // 原来只减生成时间（body×3），换代必然掉产一拍（pathTime 的缺口
+                // 就是车队「团灭震荡」的节拍器）。
+                let carrierCreeps = data["carryCreeps"].map(e => Game.getObjectById(e)).filter(e => {
+                    if (!e) return false;
+                    if (!e.ticksToLive) return true;
+                    return e.ticksToLive > e.body.length * 3 + (pathTime || 0) + OUTER_CARRIER_PRESPAWN;
+                })
                 let carrierBuildCreep = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).head()
                 // 产出速率：**动态算**，不能写死。
                 //
@@ -3937,8 +3963,13 @@ let pro = {
                 let workCnt = harBody.filter(p => p == WORK).length;
                 let harvestRate = workCnt * HARVEST_POWER;                       // 采集爬能挖多快
                 let sourceObj = Game.getObjectById(data.id);
+                // 矿点再生速率 = energyCapacity / **300**（官方机制：以固定周期 300 tick
+                // 连续回填，速率恒定 —— 保留房 10/tick，未保留房 5/tick）。
+                // 原来把 `ticksToRegeneration`（300→0 的**倒计时**）当分母：倒计时越短
+                // 速率越"快"，实测算出 26.8/tick 的虚假值 → EnergyPerTick 高估 →
+                // 车队过量配置（8 只对稳态 5 只的过冲，一部分就是它喂出来的）。
                 let regenRate = sourceObj
-                    ? sourceObj.energyCapacity / (sourceObj.ticksToRegeneration || 300)   // 矿点能生多快
+                    ? sourceObj.energyCapacity / SOURCE_REGEN_TICKS
                     : harvestRate;
                 let EnergyPerTick = Math.max(1, Math.min(harvestRate, regenRate) || 10);
 

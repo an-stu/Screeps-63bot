@@ -1,3 +1,31 @@
+## v0.78.179 — Overmind replacement lead time + correct source regen rate
+
+Two API/Overmind-grounded fixes for the outer-mine fleet oscillation
+(0.78.177/178 in between were the parallel session's upgrader-body and
+spawn-body releases).
+
+**Replacement lead time** (Overmind Overlord.ts:273): a creep counts toward
+coverage only while `ticksToLive > CREEP_SPAWN_TIME × body.length +
+spawnDistance + prespawn`. Our filter only subtracted spawn time (body×3) -
+the missing pathTime term meant every generational handover dropped
+production for one pathTime (94 ticks on src0), which is literally the
+metronome of the fleet "mass-death oscillation". Carriers within
+`3×body + pathTime + 100` of death no longer count, so replacements depart
+before the veteran retires (the same overlap concept the defender rotation
+already uses via OUTER_DEFENSE_REPLACE_OVERLAP).
+
+**Source regen rate**: the official mechanic is a continuous refill at
+`energyCapacity / 300` per tick (300 = fixed ENERGY_REGEN_TIME; 10/tick
+reserved, 5/tick unreserved). The code divided by `ticksToRegeneration` -
+the 300→0 **countdown** - producing fake instantaneous rates up to 27/tick
+(measured 26.8), overestimating EnergyPerTick and feeding the 8-vs-5 carrier
+overshoot. Now uses the constant SOURCE_REGEN_TICKS = 300.
+
+### Tests
+
+outer-carrier-spawn pins the prespawn constant and the full lead-time
+formula (spawn + travel + buffer).
+
 ## v0.78.176 — Freight budget on every terminal send (Overmind equalize pattern)
 
 User: 只考虑运费预算（from the Overmind comparison list）.

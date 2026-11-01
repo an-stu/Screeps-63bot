@@ -185,4 +185,13 @@ assert.ok(code.indexOf("cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1)") >= 0
 }
 }
 
+// ── ⑮ 换代提前量（Overmind Overlord.ts:273 计数公式）──────────────────────
+// 老车剩余寿命 ≤ 生成时间 + 行军 + 缓冲时不再计入覆盖运力 → 接替车提前出发，
+// 交接零空档。原实现只减生成时间（body×3），换代必然掉产一拍（pathTime 的
+// 缺口就是车队「团灭震荡」的节拍器）。
+assert.ok(/OUTER_CARRIER_PRESPAWN = 100/.test(code),
+    "必须有换代缓冲常量（覆盖 spawn 排队等待）");
+assert.ok(/e\.ticksToLive > e\.body\.length \* 3 \+ \(pathTime \|\| 0\) \+ OUTER_CARRIER_PRESPAWN/.test(code),
+    "换代判定必须 = 生成时间 + 行军(pathTime) + 缓冲，缺行军项则换代必掉产一拍");
+
 console.log("outer carrier spawn checks passed");
