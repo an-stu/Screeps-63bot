@@ -77,6 +77,7 @@ const CONSTANTS = {
     STRUCTURE_SPAWN: "spawn", STRUCTURE_EXTENSION: "extension", STRUCTURE_TOWER: "tower",
     LOOK_STRUCTURES: "structures", LOOK_CONSTRUCTION_SITES: "constructionSite", LOOK_SOURCES: "source",
     LOOK_MINERALS: "mineral", LOOK_POWER_CREEPS: "powerCreep", LOOK_ENERGY: "energy",
+    LOOK_RESOURCES: "resource",
     LOOK_DEPOSITS: "deposit", LOOK_TOMBSTONES: "tombstone",
     FIND_MY_CONSTRUCTION_SITES: 8, FIND_STRUCTURES: 3, FIND_SOURCES: 1, FIND_HOSTILE_CREEPS: 4,
     FIND_HOSTILE_STRUCTURES: 5, FIND_MY_CREEPS: 2, FIND_TOMBSTONES: 4, FIND_DROPPED_RESOURCES: 6,
@@ -1525,6 +1526,90 @@ function defenceGateFixture(defenders) {
         "全局判据会误判成「够了」");
     assert.ok(onW35 < S.outerCarrierBacklogQuota(spawnRoom, "W35N55"),
         "按房判据才看得出 W35N55 还缺车 → 必须放行");
+}
+
+// ────── 12) 存货配额必须再细到**矿点**：一个矿点被塞满，另一个不能替它挡补员 ──
+//
+// 一个外矿房常有 2 个矿点，而一辆车只服务一个矿点。房间口径的配额把两边的货
+// 加起来、车辆也按房名数，于是「A 矿点 2000 满 + 地面在涨、0 只车」会被
+// 「B 矿点有 2 只车」判成够了 —— 2026-11-01 实测 W26N59（出兵房 W26N58）：
+// `__outerWhy=starves+quota2>=2`，(27,29) 容器 2000/2000 + (28,30) 地面 2,249
+// 且 +2.3/tick 在涨、0 只车；(29,4) 容器 0~16、2 只车围着它转。
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+
+    const FULL_ID = "5bbcab769099fc012e6338f1";     // (29,4) 的源（空容器）
+    const STARVED_ID = "5bbcab769099fc012e6338f2";  // (27,29) 的源（容器满 + 地面在涨）
+    const containers = {
+        // 容器在 (29,5)，跟源 (29,4) 相邻
+        cont_full: { id: "cont_full", pos: { x: 29, y: 5 }, store: makeStore({ energy: 10 }, 2000) },
+        // 容器在 (28,30)，跟源 (27,29) 相邻；keeper 就站在容器格上，溢出也掉在同一格
+        cont_starved: { id: "cont_starved", pos: { x: 28, y: 30 }, store: makeStore({ energy: 2000 }, 2000) },
+    };
+    ctx.Memory.rooms = {
+        W26N59: {
+            stationSources: {
+                [FULL_ID]: { id: FULL_ID, roomName: "W26N59", x: 29, y: 4,
+                             container: "cont_full", roadPathStr: encodePath(
+                                 [{ roomName: "W26N59", x: 29, y: 5 }, { roomName: "W26N58", x: 1, y: 23 }]) },
+                [STARVED_ID]: { id: STARVED_ID, roomName: "W26N59", x: 27, y: 29,
+                                container: "cont_starved", roadPathStr: encodePath(
+                                    [{ roomName: "W26N59", x: 28, y: 30 }, { roomName: "W26N58", x: 1, y: 23 }]) },
+            },
+        },
+        W26N58: { stationSources: {} },
+    };
+    // 地面掉落：容器格上有 1,200（溢出），另有一堆在别处 (10,10)=1,500（归属不了矿点）
+    const drops = { "28,30": 1200, "10,10": 1500 };
+    ctx.Game.rooms = {
+        W26N59: {
+            name: "W26N59",
+            // 房间口径的掉落扫描（`outerMineEnergyWaiting` 兜底那一支）
+            find: () => [{ amount: 1200, resourceType: "energy" }],
+            lookForAtArea: (type, top, left) => {
+                const amount = drops[left + "," + top];
+                return amount ? [{ resource: { resourceType: "energy", amount: amount } }] : [];
+            },
+        },
+    };
+    ctx.Game.getObjectById = id => containers[id] || null;
+    const spawnRoom = { name: "W26N58", my: true };
+
+    // ① 单矿点存货：容器 + **容器那一格**的溢出（keeper 采满后掉在脚下）
+    const memStarved = ctx.Memory.rooms.W26N59.stationSources[STARVED_ID];
+    const memFull = ctx.Memory.rooms.W26N59.stationSources[FULL_ID];
+    const waitingStarved = S.outerMineWaitingByMine(spawnRoom, "W26N59", memStarved);
+    assert.equal(waitingStarved, 3200, "满容器 2000 + 容器格地面 1200 = 3200");
+    // ② 负对照：别处那堆 1,500 不能被算进这个矿点（否则又是新的偏差）
+    assert.notEqual(waitingStarved, 4700, "全房掉落不能摊到矿点头上（会重复计数）");
+    assert.equal(S.outerMineWaitingByMine(spawnRoom, "W26N59", memFull), 10, "另一个矿点只有 10");
+
+    // ③ 按矿点算配额：有货的 1 只，没货的 0 只
+    const quotaStarved = Math.floor(waitingStarved / 1700);
+    const quotaFull = Math.floor(S.outerMineWaitingByMine(spawnRoom, "W26N59", memFull) / 1700);
+    assert.equal(quotaStarved, 1, "3200/1700 → 该有 1 只");
+    assert.equal(quotaFull, 0, "没货 → 0 只");
+
+    // ④ 复现现场：2 只车**都**跑 (29,4)，(27,29) 一只没有
+    const carriers = [
+        { headTask: () => ({ roomName: "W26N59", id: FULL_ID }) },
+        { headTask: () => ({ roomName: "W26N59", id: FULL_ID }) },
+    ];
+    const countMine = (id) => carriers.filter(c => {
+        const t = c.headTask && c.headTask();
+        return t && t.roomName == "W26N59" && t.id == id;
+    }).length;
+    // 旧口径（房间级）：2 只 >= 配额 → 直接把 (27,29) 挡死
+    const roomQuota = Math.floor(S.outerMineEnergyWaiting(spawnRoom, "W26N59") / 1700);
+    assert.ok(carriers.length >= roomQuota, "旧口径把满容器矿点判成够了（这就是要修的 bug）");
+    // 新口径（矿点级）：满的那个放行，空的照旧挡住
+    assert.ok(countMine(STARVED_ID) < quotaStarved, "容器满的那个矿点必须放行补员");
+    assert.ok(countMine(FULL_ID) >= quotaFull, "没货的那个矿点不许再出车");
+
+    // ⑤ 总量上限几乎不变（Σ floor(w_i/1700) ≤ floor(Σw/1700) + 矿点数-1）
+    assert.ok(quotaStarved + quotaFull <= roomQuota + 1, "按矿点拆开不会让总编制失控");
 }
 
 console.log("edge link / hauler body / defence gate checks passed");

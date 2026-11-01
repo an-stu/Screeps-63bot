@@ -124,4 +124,20 @@ assert.ok(!/trySpawnOuterHarCarrier\(flag\.pos\.roomName, room\)/.test(
     fs.readFileSync(path.join(root, "modules", "strategy_highLevel.js"), "utf8")),
     "外矿搬运不得再被提前到本房孵化之前（会抢 keeper 的孵化能量）");
 
+// ── ⑪ 「主房穷时按存货配额收敛」必须判到**矿点**，不能停在房间 ────────────
+//
+// 2026-11-01 实测 W26N59（出兵房 W26N58）：(29,4) 容器 0~16、2 只车围着它转；
+// (27,29) 容器 2000/2000 满 + (28,30) 地面 2,249 且 +2.3/tick 在涨、0 只车。
+// 闸门记 `__outerWhy=starves+quota2>=2` —— 房间口径的配额把两边的货加在一起、
+// 车辆也按房名数，于是「对面矿点有 2 只车」替这个满容器矿点挡掉了补员。
+assert.ok(/outerMineWaitingByMine\(spawnRoom, targetName, data\)/.test(code),
+    "存货配额必须按矿点取（容器 + 容器那一格的溢出），不能取房间合计");
+assert.ok(/if \(mineCarriers >= mineQuota\) \{/.test(code),
+    "闸门判据必须是「本矿点的车 >= 本矿点的配额」");
+// 车辆计数必须是本矿点：`t.id == data["id"]`（同一个房间的另一个矿点不算）
+assert.ok(/t\.roomName == targetName && t\.id == data\["id"\]/.test(code),
+    "车辆计数必须按被服务的矿点（t.id），不能只按房名");
+assert.ok(!/onThisMine >= pro\.outerCarrierBacklogQuota\(spawnRoom, targetName\)/.test(code),
+    "不能再用房间口径的 onThisMine >= 房间配额当闸门（会把满容器的矿点饿死）");
+
 console.log("outer carrier spawn checks passed");

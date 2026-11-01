@@ -1,3 +1,27 @@
+## v0.78.171 — One fully-stocked mine in W26N59 had no hauler, because the quota was a room number
+
+(0.78.170 was only a version marker on the snapshot commit and never went live; this is the first
+deploy after 0.78.169.)
+
+W26N59 has two mines. At (29,4) the container held 0-16 and two `outerHarvestEnergyCarrier`s hovered
+around it; at (27,29) the container was pinned at 2000/2000 and the keeper's tile (28,30) held 2249
+energy on the ground, growing +2.3/tick, with **zero** carriers. The two keepers both had full stores
+(50/50) and nowhere to put the 12.8/tick they were still pulling out of the sources, so roughly half
+the room's production was decaying on the floor.
+
+`__outerWhy` named the blocker exactly: `starves+quota2>=2`. The "when the spawn room is poor, only
+top the fleet up to what the backlog warrants" gate counted both the waiting energy and the fleet per
+**room** - 2000 (mine A) + 10 (mine B) worth of quota, 2 carriers anywhere in the room - so mine B's
+carriers were spent as proof that mine A was covered. The per-mine demand formula further down already
+grouped by `t.id`; the gate simply returned before reaching it.
+
+The gate is now evaluated inside the per-mine loop: quota from `StationSources.outerMineWaitingByMine`
+(that mine's container plus the drop standing on the container tile - overflow lands on the keeper's
+own tile, so an empty container never shows it), and fleet counted by `headTask().id`. Total ceiling is
+barely affected, since `sum floor(w_i/1700) <= floor(sum w_i/1700) + mines - 1`; only *who gets a
+carrier* changes. `test/edge-link.test.cjs` §12 replays the live numbers (and fails against the old
+room-level comparison); `test/outer-carrier-spawn.test.cjs` §11 pins the grouping key.
+
 ## v0.78.169 — A carrier hauling minerals had no task at all while the hive needed energy
 
 E48S41 kept exactly one usable carrier and lost mined energy to decay. One of its two carriers sat
