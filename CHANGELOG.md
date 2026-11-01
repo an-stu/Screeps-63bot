@@ -1,28 +1,27 @@
-## v0.78.176 — Upgrade again: size the upgrader body by the energy this tick can actually pay
+## v0.78.176 — Freight budget on every terminal send (Overmind equalize pattern)
 
-Live: W26N58 (RCL6, hive cap 2,300) had **no upgrader for 200+ ticks** — the
-controller sat at 348,023 while storage held 31,587 and five carriers kept the
-hive bouncing between 600 and 1,750. Two independent "hive must be full" gates
-made the spawn request unreachable for any room whose capacity is ≤ 2,500:
+User: 只考虑运费预算（from the Overmind comparison list）.
 
-- `strategy_highLevel`: `HiveNeedToFill(room) && energyAvailable < 2500` — the
-  hardcoded 2,500 is an RCL8 number (19% of 12,900). For a 2,300 hive it is
-  always true (carriers keep `hiveEnergySending` non-zero), so `spawnUpgrader`
-  was skipped on **every** economy pass. Now `min(2500, cap * 0.2)`: identical
-  for RCL8 (2,500), reachable for RCL5/6.
-- `station_upgrade`: the 0-upgrader branch required `energyAvailable >=
-  min(cap, 4000)` (= full hive) and the body was sized from
-  `getEnergyCapacityAvailable()` — 2,100 energy, so even an allowed attempt was
-  silently dropped by `StationHive.trySpawn`. The threshold is now `cap * 0.4`
-  and the body budget is `max(600, min(cap, energy this tick can still spend))`,
-  the same "size by what is affordable" rule keepers and outer carriers already
-  follow. Full-hive sizing is unchanged (16 WORK / 2,100).
+`terminal.send` charges the transfer fee to the **sending** terminal's energy.
+All five resourceBalance send sites (factory-resource dispatch, power
+concentration, room balancing, full-storage relief, storageEmpty evacuation)
+sent fixed amounts without checking it - a far-distance 3000 send could eat
+several thousand energy and drain the sender's terminal, breaking its own
+market deals and balancing tasks downstream.
 
-Also restores the per-mine outer carrier quota that `79e8408` dropped by
-accident: `outerMineWaitingByMine` + `outerCarrierTripCapacity` and the
-mine-level `starves` gate are back (their tests were red on origin/main, and
-W26N59's (27,29) container was full again with 2,311 on the ground). 0.78.175's
-carrier re-tasking is untouched and both changes ship together.
+New `StrategyResourceBalance.freightBudget(fromRoom, toRoom, resType, amount)`
+caps every send to what the sender can actually pay: unit cost is
+`calcTransactionCost(100)/100` (linear, cached per room pair), budget is
+terminal energy minus a 2000 floor, and for energy sends the unit cost is
+`1 + unit` because the fee comes out of the same pile. Sends that budget
+below TERMINAL_MIN_SEND are skipped by the callers. Same accounting rule as
+Overmind's `sendAmount = min(sendAmount, sender.store - sendCost - 10)`.
+
+### Tests
+
+New `test/freight-budget.test.cjs` drives the real function in a VM (ample /
+tight / energy-self / under-floor cases + per-room-pair unit cache) and pins
+that all five send sites go through the budget.
 
 ## v0.78.175 — Rebalance idle outer carriers to the fullest container
 

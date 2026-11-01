@@ -11,6 +11,8 @@ storageEmpty 不填   传送最近的房间
  */
 let STORAGE_MIN_CAP_CNT = 10000
 let NOT_FULL_SEND_RES_SET = [RESOURCE_ENERGY, "U", "L", "K", "Z", "X", "O", "H", "G"].toSet()
+// 运费预算：发送端 terminal 至少保留这么多能量（运费 + 留给市场 deal 的底火）
+const FREIGHT_ENERGY_FLOOR = 2000
 
 let RES_BALANCE_ROOM = function () {
     let obj = {};
@@ -195,6 +197,39 @@ let pro = {
         return pro.roomRequire[room.name][resType]
     },
     /**
+     * **运费预算**（借鉴 Overmind TerminalNetwork.equalize 的
+     * `sendAmount = min(sendAmount, sender.store - sendCost - 10)`）。
+     *
+     * `terminal.send` 的运费从**发送端 terminal 的能量**里扣，原来四处发送
+     * （factory 调拨 / power 集中 / 平衡发送 / 爆仓泄压）都不看运费：
+     * 远距离一笔 3000 的发送可能吃掉几千能量，把发送端 terminal 抽干、
+     * 连带它自己的市场 deal 与平衡任务失败。
+     *
+     * 发送前把数量夹到「付得起运费」的范围：
+     *   · 非能量资源：min(amount, (terminal.energy - FLOOR) / 每单位运费)
+     *   · 能量本身：  min(amount, (terminal.energy - FLOOR) / (1 + 每单位运费))
+     *     （发能量时运费也从同一份能量里扣，净到货 = amount − cost）
+     * 每单位运费按 `calcTransactionCost(100)/100` 线性外推（引擎运费与数量
+     * 线性、只依赖房间对，跨 tick 缓存）。夹出低于 TERMINAL_MIN_SEND(100) 的
+     * 返回值由调用方跳过本次发送。
+     */
+    freightBudget(fromRoom, toRoomName, resType, amount) {
+        let terminal = fromRoom.terminal;
+        if (!terminal || !(amount > 0)) return 0;
+        let key = fromRoom.name + ">" + toRoomName;
+        if (pro._txUnitCache === undefined) pro._txUnitCache = {};
+        let unit = pro._txUnitCache[key];
+        if (unit === undefined) {
+            unit = Game.market.calcTransactionCost(100, fromRoom.name, toRoomName) / 100;
+            pro._txUnitCache[key] = unit;
+        }
+        let energy = terminal.store[RESOURCE_ENERGY] || 0;
+        let budget = Math.max(0, energy - FREIGHT_ENERGY_FLOOR);
+        let costPerUnit = resType == RESOURCE_ENERGY ? 1 + unit : unit;
+        let affordable = Math.floor(budget / Math.max(costPerUnit, 0.001));
+        return Math.max(0, Math.min(amount, affordable));
+    },
+    /**
      * 更新房间的需求
      * @param room
      */
@@ -238,6 +273,8 @@ let pro = {
                     // FACTORY_RES_MAX_NEED[resType]
                     if (fromCnt && (!fromLevel || Math.max((BALANCE_POWER_FACTORY_MAP[fromLevel][resType] || 0), trade ? (BALANCE_POWER_FACTORY_MAP[6][resType] || 0) : 0) * 2 < fromCnt)) {
                         let amount = Math.min(fromCnt, resCnt, fromRoom.terminal.store[resType])
+                        amount = pro.freightBudget(fromRoom, room.name, resType, amount)
+                        if (amount < 100) continue;
                         let code = amount > 0 ? fromRoom.terminal.send(resType, amount, room.name) : ERR_NOT_ENOUGH_RESOURCES
                         if (code == OK) {
                             console.log("factory send ", code, fromRoom.name, resType, amount, room.name, resCnt)
@@ -256,8 +293,11 @@ let pro = {
             let targetRoom = rooms.find(e => !e._power_vis && StationCarry.roomMassStoreCnt(e, RESOURCE_ENERGY) < 210000 && e.terminal.store[RESOURCE_POWER] > 1000)
             if (targetRoom) {
                 targetRoom._power_vis = true
-                targetRoom.terminal.send(RESOURCE_POWER, targetRoom.terminal.store[RESOURCE_POWER], room.name);
-                console.log(targetRoom.name + " -> " + room.name + " power " + targetRoom.terminal.store[RESOURCE_POWER])
+                let pAmount = pro.freightBudget(targetRoom, room.name, RESOURCE_POWER, targetRoom.terminal.store[RESOURCE_POWER])
+                if (pAmount >= 100) {
+                    targetRoom.terminal.send(RESOURCE_POWER, pAmount, room.name);
+                    console.log(targetRoom.name + " -> " + room.name + " power " + pAmount)
+                }
             }
         }
     },
@@ -315,6 +355,9 @@ let pro = {
                     if (requireCnt) {
                         let amount = Math.min(requireCnt, sendAble[resType])
                         if (RESOURCE_ENERGY == resType) amount = Math.min(requireCnt, Math.floor(sendAble[resType] / 2))
+                        // 运费预算：远距离大额发送先把运费从发送端预算里扣掉
+                        amount = pro.freightBudget(room, targetRoom.name, resType, amount)
+                        if (amount < 100) continue;
                         let code = room.terminal.send(resType, amount, targetRoom.name);
                         if (code == OK) {
                             pro.resRoomBalanceCache[room.name][resType] = 1;
@@ -348,7 +391,8 @@ let pro = {
                 if (maxCnt) {
                     let sends = (targetRoom, mul) => {
                         if (targetRoom.storage && targetRoom.storage.store.getFreeCapacity() > STORAGE_MIN_CAP_CNT * mul) {
-                            let amount = Math.min(room.terminal.store[maxResType], 3000)
+                            let amount = pro.freightBudget(room, targetRoom.name, maxResType, Math.min(room.terminal.store[maxResType], 3000))
+                            if (amount < 100) return false;
                             let code = room.terminal.send(maxResType, amount, targetRoom.name);
                             if (code == OK) console.log("full storage send : " + room.name + " -> " + targetRoom.name + " = ( " + amount + " , " + maxResType + " ) ")
                             if (code == OK) return true;
@@ -406,6 +450,8 @@ let pro = {
                 let amount = Math.floor(Math.min(energyCnt / 2, room.terminal.store[resType]))
                 if (amount < TERMINAL_MIN_SEND) return
                 if (roomName == "random") amount = Math.min(amount, 10000)
+                amount = pro.freightBudget(room, targetRoom.name, resType, amount)
+                if (amount < TERMINAL_MIN_SEND) return
 
                 let code = room.terminal.send(resType, amount, targetRoom.name)
                 console.log("storageEmpty from ", room.name, "to", targetRoom.name, amount, resType, code)
