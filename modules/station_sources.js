@@ -1393,6 +1393,21 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
                 if (road) {
                     if (road.hits < road.hitsMax / 10 * 9) {
                         this.$repair(road)
+                    } else {
+                        // **危急优先**（Overmind RoadLogistics.criticalThreshold = 0.25）：
+                        // 本格健康时向前扫 3 个路点，有 hits < 25% 的路就隔格修
+                        // （repair 合法 range 3）—— 不等搬运路过完这一整趟，
+                        // 防止它烂到 0 消失后再花一整趟重建。只扫缓存路线上的格子。
+                        for (let i = pathIndex + 1; i <= pathIndex + 3; i++) {
+                            let wpAhead = roadPath[i];
+                            if (!wpAhead || wpAhead.roomName != this.room.name) break;
+                            let roadAhead = this.room.lookForAt(LOOK_STRUCTURES, wpAhead.x, wpAhead.y)
+                                .filter(s => s.structureType == STRUCTURE_ROAD && s.my).head();
+                            if (roadAhead && roadAhead.hits < roadAhead.hitsMax / 4) {
+                                this.$repair(roadAhead);
+                                break;
+                            }
+                        }
                     }
                 } else {
                     let cs = this.pos.lookFor(LOOK_CONSTRUCTION_SITES).filter(e => e.structureType == STRUCTURE_ROAD).head();
@@ -2026,7 +2041,7 @@ let pro = {
         }
         return room._plannedRoadSet;
     },
-    outerRoadRoomCallback(roomName, useBlueprint, homeRoom) {
+    outerRoadRoomCallback(roomName, useBlueprint, homeRoom, mergePaths) {
         let room = Game.rooms[roomName];
         let cm = new PathFinder.CostMatrix();
         let terrain = Game.map.getRoomTerrain(roomName);
@@ -2037,6 +2052,17 @@ let pro = {
                 // 空地必须留出一档差距，否则路和草地等价、寻路完全不会偏向已有的路，
                 // 于是它顺着草地走，逼我们另外铺一条新路。沼泽仍 5。
                 cm.set(x, y, t == TERRAIN_MASK_WALL ? 255 : (t == TERRAIN_MASK_SWAMP ? 5 : 2));
+            }
+        }
+        // **合并激励**（Overmind RoadPlanner.encourageRoadMerging）：重算某条矿点
+        // 路线时，把兄弟矿点的缓存路线压到代价 1 —— 多源矿在共享走廊里走同一条
+        // 主干路，而不是各铺各的平行线。此折扣先写，下面「不可走建筑」的 255
+        // 会按格覆盖回来，不会把路开进墙里。
+        if (mergePaths) {
+            for (let mergePath of mergePaths) {
+                for (let p of mergePath) {
+                    if (p.roomName == roomName && cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1);
+                }
             }
         }
         if (!room) return cm;
@@ -2163,6 +2189,19 @@ let pro = {
             return undefined;
         }
         let ret;
+        // 合并激励的输入：兄弟矿点的缓存路线（重算只在缓存真失效时发生，成本可忽略）
+        let mergePaths = undefined;
+        let siblingMem = Memory.rooms[data.roomName] && Memory.rooms[data.roomName][pro.stationName];
+        if (siblingMem) {
+            mergePaths = [];
+            _.values(siblingMem).forEach(s => {
+                if (s && s.id != data.id && s.roadPathStr) {
+                    let p = pro.getOuterRoadPath(s);
+                    if (p && p.length) mergePaths.push(p);
+                }
+            });
+            if (!mergePaths.length) mergePaths = undefined;
+        }
         try {
             ret = PathFinder.search(from, to, {
             plainCost: 1,
@@ -2172,7 +2211,7 @@ let pro = {
             // 就提前结束。此搜索仅在缓存失效时运行，允许一次完整求解。
             maxOps: 20000,
             range: 1,
-            roomCallback: roomName => pro.outerRoadRoomCallback(roomName, true, spawnRoom.name),
+            roomCallback: roomName => pro.outerRoadRoomCallback(roomName, true, spawnRoom.name, mergePaths),
         });
         } catch (e) {
             data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
@@ -2193,7 +2232,7 @@ let pro = {
                     maxRooms: 8,
                     maxOps: 20000,
                     range: 1,
-                    roomCallback: roomName => pro.outerRoadRoomCallback(roomName, false, spawnRoom.name),
+                    roomCallback: roomName => pro.outerRoadRoomCallback(roomName, false, spawnRoom.name, mergePaths),
                 });
             } catch (e) {
                 data.roadPathError = "fallback search threw: " + e.message + " tick=" + Game.time;

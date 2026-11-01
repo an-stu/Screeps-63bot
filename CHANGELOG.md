@@ -1,3 +1,29 @@
+## v0.78.172 — Overmind road method: critical-first repair and route merging
+
+User: road 也参考 Overmind 寻路和修的方法. Read the actual Overmind source
+(bencbartlett/Overmind: RoadLogistics.ts / RoadPlanner.ts / repair.ts) and adopted
+the two practices our implementation lacked - the rest was already equivalent
+(repair target 0.9 = RoadLogistics.repairThreshold, route-only repairs =
+roadShouldBeHere, one canonical cached route + rare recompute = roadLookup,
+complete-road gating = roadCoverage).
+
+- **Critical-first repair** (RoadLogistics.criticalThreshold = 0.25): when the
+  road-builder stands on a healthy road, it now scans the next 3 route waypoints
+  for a road below 25% hits and repairs it at range 3, instead of letting it
+  decay to 0 (losing the tile costs a full rebuild trip). Route tiles only.
+- **Route merging** (RoadPlanner.encourageRoadMerging): when a mine point's route
+  is re-searched (only on real blockage since 0.78.171), the sibling mine
+  points' cached routes are discounted to cost 1 in the roomCallback - multi-
+  source mines share one corridor trunk instead of growing parallel lines.
+  Blocked tiles (255) are applied per-tile after the discount, so merged paths
+  never run into structures. Applied to both the blueprint and fallback searches.
+
+Not adopted, deliberately: Overmind's road-planning terrain costs (plain 3 /
+swamp 4) shorten paths through swamps, which is optimal for the finished state;
+our plain 2 / swamp 5 keeps the construction-phase haul speed high (swamp
+travel is 5/tick until the road exists). Our carriers also double as builders
+(user-approved 0.78.152+ design) rather than Overmind's dedicated home workers.
+
 ## v0.78.171 — One road to storage; high-tier commodities only sell at the recent high
 
 Two user directives (10-31): the outer road must be ONE complete line - no parallel site spam -

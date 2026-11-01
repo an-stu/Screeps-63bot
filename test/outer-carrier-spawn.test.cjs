@@ -136,4 +136,18 @@ assert.ok(code.indexOf("outerRoadWalkable(cached, data)") >= 0
         > code.indexOf("outerRoadWalkable(cached, data)"),
     "续期必须发生在可走复检通过之后（新建筑封路仍会触发重算）");
 
+// ── ⑫ Overmind 式修路：危急优先 + 兄弟路线合并 ─────────────────────────────
+// RoadLogistics.criticalThreshold = 0.25：本格健康时向前扫 3 个路点，
+// hits < 25% 的路隔格修，防止烂到 0 消失再花一整趟重建。
+assert.ok(/hitsMax \/ 4/.test(code) && /pathIndex \+ 1; i <= pathIndex \+ 3/.test(code),
+    "修路爬必须危急优先：本格健康时向前扫 3 个路点修 hits<25% 的路");
+// RoadPlanner.encourageRoadMerging：重算时把兄弟矿点缓存路线压到代价 1，
+// 多源矿在共享走廊合并成一条主干，而不是各铺各的平行线。
+assert.ok(/outerRoadRoomCallback\(roomName, useBlueprint, homeRoom, mergePaths\)/.test(code),
+    "代价矩阵必须接受兄弟路线合并输入");
+assert.ok(code.indexOf("cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1)") >= 0
+    && code.indexOf("outerRoadRoomCallback(roomName, true, spawnRoom.name, mergePaths)") >= 0
+    && code.indexOf("outerRoadRoomCallback(roomName, false, spawnRoom.name, mergePaths)") >= 0,
+    "两次搜索（蓝图 + 兜底）都必须应用合并折扣，且不可覆盖被建筑封死的格");
+
 console.log("outer carrier spawn checks passed");
