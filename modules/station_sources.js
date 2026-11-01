@@ -253,13 +253,12 @@ const OUTER_TERMINAL_RESERVE = 50000;
  */
 const OUTER_CARRIER_COST = 2500;
 /**
- * 一只**满编**外矿搬运爬一趟能运多少能量：34 CARRY × 50 = 1,700。
+ * 一只外矿搬运爬**一趟大约能运多少能量**：满编 50 部件 = 1,700（与下面注释里的
+ * 「一趟运 1700」同源），RCL5 出兵房的 900~1,000 体型也在同一量级。
  *
- * ⚠️ 这只是**理论上限**，不能直接拿来折算配额：实际孵出的体型由
- * `bodyBudget = min(floor(hiveCap*0.5), ...)` 决定，RCL6 出兵房只有 600~700 运力。
- * 配额的分母一律用 `outerCarrierTripCapacity(spawnRoom)`（按真实体型算，
- * 并且以本常量封顶）。2026-11-01 实测：用 1700 折算让 W26N59 两个满容器矿点
- * 各只配 1 只车，容器 2000/2000 恒满、keeper 塞不下 ⇒ 采集停摆。
+ * 配额（outerCarrierBacklogQuota）要按它折算「这批存货需要几只车」——
+ * 用 `OUTER_CARRIER_COST`（造车价 2,500）当分母是单位错配：那是**成本**，
+ * 不是**运力**，会把「4,000 货」算成 1 只（实际要 4 只），车队被封死在 1。
  */
 const OUTER_CARRIER_TRIP = 1700;
 
@@ -3536,82 +3535,6 @@ let pro = {
         return total;
     },
     /**
-     * **单个矿点**堆着等运的能量（容器 + 容器那一格的掉落）。
-     *
-     * 补员闸原来用房间口径（`outerMineEnergyWaiting(spawnRoom, targetName)`）：
-     * 一个外矿房 2 个矿点时，「本房存货/配额」把两边的货加在一起，而车辆计数
-     * 也按房名，于是**一个矿点被塞满、另一个矿点一只车都没有**时判成「够了」。
-     *
-     * 2026-11-01 实测 W26N59（出兵房 W26N58）：(29,4) 容器 0~16、2 只车围着它转，
-     * (27,29) 容器 2000/2000 满 + (28,30) 地面 2,249 且 **+2.3/tick 在涨**、
-     * 0 只车；`__outerWhy=starves+quota2>=2` —— 闸门拿对面矿点的 2 只车当「本矿点够了」，
-     * 那堆 4.2k 就一直在衰减（分矿点需求公式其实算得对，就是到不了那里）。
-     * 与 MEMORY 第 1 条「统计键必须是被服务的对象」同源。
-     *
-     * 掉落**只认容器那一格**：全房掉落归属不了具体矿点，把两边的货加到一起
-     * 又会造出新的偏差（正是这次要修的东西）。容器不可见时退回读 Memory 的坐标。
-     */
-    outerMineWaitingByMine(spawnRoom, roomName, data) {
-        let cache = spawnRoom._outerMineWaitingByMine;
-        if (!cache) cache = spawnRoom._outerMineWaitingByMine = {};   // room 对象每 tick 重建
-        if (cache[data.id] !== undefined) return cache[data.id];
-        let total = 0;
-        let container = data[STRUCTURE_CONTAINER] && Game.getObjectById(data[STRUCTURE_CONTAINER]);
-        if (container && container.store) total += container.store[RESOURCE_ENERGY] || 0;
-        let room = Game.rooms[roomName];
-        let x = container ? container.pos.x : data.x;
-        let y = container ? container.pos.y : data.y;
-        if (room && room.lookForAtArea && x !== undefined && y !== undefined) {
-            // 容器满了以后，keeper 采出来的那部分就掉在自己脚下（= 容器那一格），
-            // 不把它算进存货，光看容器存量永远等于「刚好一趟」，补员永远停在 1 只。
-            room.lookForAtArea(LOOK_RESOURCES, y, x, y, x, true).forEach(e => {
-                if (e.resource && e.resource.resourceType == RESOURCE_ENERGY) total += e.resource.amount || 0;
-            });
-        }
-        cache[data.id] = total;
-        return total;
-    },
-    /**
-     * 本出兵房**实际孵得出**的外矿搬运爬，一趟能运多少能量。
-     *
-     * `OUTER_CARRIER_TRIP`(1700) 描述的是**满编 50 部件**（34 CARRY）的运力，
-     * 而补员实际用的体型由 `bodyBudget = min(floor(hiveCap*0.5), max(spawnAvail,550))`
-     * 决定：RCL6 出兵房（hiveCap 2,300）只给 1,150 ⇒ `getOuterHarCarrierBodyConfig(1150)`
-     * 出 14 CARRY / 7 MOVE = **700**，修路版（2 WORK）更小 = **600**。两者差 2.4~2.8 倍。
-     *
-     * 拿 1700 折算配额，等于把「这批货要几只车」少算近 3 倍 —— 而配额正是
-     * `outerMineStarvesSpawnRoom` 的自锁豁免（主房穷时唯一还允许补员的路径），
-     * 算小了它就形同虚设：容器 2000/2000 永远满、keeper 手里 50 能量塞不下
-     * ⇒ 采集停摆。2026-11-01 实测 W26N59（出兵房 W26N58，storage 0 / terminal 26.9k）：
-     *   `__outerWhy=starves+mineQ1>=1@27,29`，两矿点容器都 2000/2000、
-     *   地面 ~1.6k 不再下降、keeper 停在 e50、源只出 10/tick（应 26.7）。
-     * 与 MEMORY 第 7 条「同一决策的两层阈值必须收敛成一个常量且两侧同源」同型：
-     * **体型和配额必须一起改**，否则配额恒小于真实需求。
-     *
-     * 口径取**两者较小的那个**（修路版 CARRY 更少），保守估计、不会超编；
-     * 上限仍是 `OUTER_CARRIER_TRIP`（满编一趟），防止畸形体型算出超额。
-     */
-    outerCarrierTripCapacity(spawnRoom) {
-        if (spawnRoom._outerCarrierTripCap !== undefined) return spawnRoom._outerCarrierTripCap;
-        let hiveCap = 0;
-        if (typeof spawnRoom.getEnergyCapacityAvailable == "function") hiveCap = spawnRoom.getEnergyCapacityAvailable();
-        else if (typeof spawnRoom.energyCapacityAvailable == "number") hiveCap = spawnRoom.energyCapacityAvailable;
-        // 拿不到容量（VM 桩、极早期房）→ 退回满编口径，行为与改前完全一致。
-        if (!hiveCap) { spawnRoom._outerCarrierTripCap = OUTER_CARRIER_TRIP; return OUTER_CARRIER_TRIP; }
-        // 与 trySpawnOuterHarCarrier 的 bodyBudget 上限同源（hive 的 50%）。
-        let budget = Math.floor(hiveCap * 0.5);
-        let maxPart = 50;
-        let plain = pro.getOuterHarCarrierBodyConfig(budget, maxPart);
-        let build = pro.getOuterHarCarrierBuildBodyConfig(budget, maxPart);
-        let carryParts = Math.min(
-            plain.filter(p => p == CARRY).length,
-            build.filter(p => p == CARRY).length);
-        // 一个 CARRY 部件 = CARRY_CAPACITY(50) 能量。
-        let cap = Math.min(OUTER_CARRIER_TRIP, Math.max(1, carryParts * 50));
-        spawnRoom._outerCarrierTripCap = cap;
-        return cap;
-    },
-    /**
      * 外矿有货等着运时，**按存货**该有几只搬运爬 —— 不看主房穷不穷。
      *
      * 这道判据专门用来破 `outerMineStarvesSpawnRoom` 的自锁：那个闸门的输入
@@ -3645,12 +3568,55 @@ let pro = {
         // 配额却把车队封在 1（实测 2026-10-27 W26N59：spawn 空闲、能量满 1800/1800、
         // 容器 2000/2000 + 地面 6,800，就是不孵第二只）。
         // 换算成「一趟运力」后：无货仍为 0（不会把闸门永久架空），4,000 货 ⇒ 4 只。
-        // 分母必须用**本房实际孵得出的体型**的运力，不能用满编常数 1700：
-        // 出兵房的体型被 hive 的 50% 夹住（RCL6 ⇒ 600~700），拿 1700 算会把
-        // 「这批货要几只车」少算近 3 倍（见 outerCarrierTripCapacity 的实测数字）。
-        let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom, roomFilter) / pro.outerCarrierTripCapacity(spawnRoom));
+        let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom, roomFilter) / OUTER_CARRIER_TRIP);
         cache[cacheKey] = quota;
         return quota;
+    },
+    /**
+     * 外矿保留者（reserver）补员 —— **外矿产量的总开关**。
+     *
+     * 未保留的控制器让源容量减半（1500 vs 3000，即 5/tick vs 10/tick 的再生），
+     * 而保留者本身便宜（RCL5/6 出兵房 3 CLAIM ≈ 1950，每 ~1500 tick 才一只）。
+     * 原来它的孵化埋在旗循环深处（strategy_outerHarvest.exec），排在主房全部
+     * 经济补员之后 —— 单 spawn 房常年 100% 忙，实测永远抢不到坑
+     * （W26N59 `noFreeSpawn` 连续数日，控制器始终裸奔）。
+     *
+     * Overmind 式顺序：**先保留、后开采**。本函数由 strategy_highLevel 在
+     * home keeper 之后、worker/carrier 之前调用；能量健康闸沿用 0.78.155
+     * 原则 —— 本房 keeper 没满员就不派，主房永远优先。
+     *
+     * 目标侧条件与旗循环老入口一致；两边靠「无在役 reserver」天然去重，
+     * 谁先碰到空闲 spawn 都算数。每 pass 最多排一只。
+     */
+    trySpawnReservers(spawnRoom) {
+        let ownSourceCnt = spawnRoom.source ? spawnRoom.source.length : 2;
+        if (spawnRoom.creeps("harvestEnergyKeeper", false).length < ownSourceCnt) return;
+        if (spawnRoom.spawn && !spawnRoom.spawn.some(e => !e.spawning && e.isActive())) return;
+        let flags = ManagerFlags.getFlagsByPrefix("har");
+        for (let flag of flags) {
+            if (flag.memory.spawnRoom && flag.memory.spawnRoom != spawnRoom.name) continue;
+            let targetRoomName = flag.pos.roomName;
+            if (global.StrategyOuterHarvest) {
+                if (StrategyOuterHarvest.hasStopRemoteFlag(targetRoomName)) continue;
+                if (StrategyOuterHarvest.invaderCoreBlocks(targetRoomName)) continue;
+            }
+            let roomMem = Memory.rooms[targetRoomName];
+            if (!roomMem || !roomMem[pro.stationName]) continue;
+            let harRoom = Game.rooms[targetRoomName];
+            if (!harRoom || !harRoom.controller || harRoom.controller.my) continue;
+            let resv = harRoom.controller.reservation;
+            // 自己的保留且余量充足 → 不用管；没有保留 / 快到期 / 别人的保留 → 派
+            if (resv && resv.username == WHO_AM_I && resv.ticksToEnd >= 1000) continue;
+            let assigned = spawnRoom.creeps("reserver", false).some(e => {
+                let t = e.headTask && e.headTask();
+                return t && t.roomName == targetRoomName;
+            });
+            if (assigned) continue;
+            let body = pro.getReverserBodyConfig(spawnRoom.getEnergyCapacityAvailable());
+            let tasks = [UtilsTask.task(harRoom.controller, "reserveOuterHar")];
+            StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "reserver", tasks);
+            return;
+        }
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
         let targetName = roomName.name || roomName;
@@ -3722,15 +3688,14 @@ let pro = {
         // 豁免按**本矿房存货**折算出该有几只（每只成本 2500、一趟运 1700），
         // 存货清完自动失效，所以不会把闸门永久架空；本矿房的车队已经到配额就不再多出。
         //
-        // 计数与配额**都必须落到矿点**（`t.id`），不能停在房间：
-        //   · 房间口径的计数会把「A 矿点挤了 5 只、B 矿点一只没有」判成「够了」
-        //     （2026-10-08 实测 W34N55 5 只 / W35N55 2 只，而 W35N55 还压着
-        //     6000 容器 + 7105 地面）；
-        //   · 房间口径的配额会把两边的货加在一起，于是「对面矿点有车」就能替
-        //     本矿点挡掉补员 —— 2026-11-01 实测 W26N59：(29,4) 2 只车、
-        //     (27,29) 容器 2000 满 + 地面 2,249 在涨、0 只车，闸门记
-        //     `starves+quota2>=2` 直接放过了它，那 4.2k 一路衰减。
-        // 判据本体搬进下面的按矿点循环（`outerMineWaitingByMine`）。
+        // 计数必须**只数跑这条矿点**的车（按 headTask 的目标房名），不能用全局
+        // 车数：一辆车只服务一条路线，全局计数会把「别的矿点挤满了、这个矿点
+        // 一只没有」判成「够了」——2026-10-08 实测 W34N55 5 只 / W35N55 2 只，
+        // 而 W35N55 还压着 6000 容器 + 7105 地面。
+        let onThisMine = roomCarriers.filter(c => {
+            let t = c.headTask && c.headTask();
+            return t && t.roomName == targetName;
+        }).length;
         // **出兵房自己的 keeper 没满员就一律不补外矿搬运。**
         //
         // 2026-10-27 现场：把外矿搬运提前到本房孵化之前（v0.78.154）之后，W26N58 的
@@ -3743,6 +3708,11 @@ let pro = {
         if (targetName != spawnRoom.name
             && spawnRoom.creeps("harvestEnergyKeeper", false).length < ownSourceCnt) {
             why("keeper<src" + spawnRoom.creeps("harvestEnergyKeeper", false).length + "<" + ownSourceCnt);
+            return null;
+        }
+        if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)
+            && onThisMine >= pro.outerCarrierBacklogQuota(spawnRoom, targetName)) {
+            why("starves+quota" + onThisMine + ">=" + pro.outerCarrierBacklogQuota(spawnRoom, targetName));
             return null;
         }
         if (roomCarriers.length >= carrierMax) { why("fleetCap" + roomCarriers.length + ">=" + carrierMax); return null; }
@@ -3762,31 +3732,6 @@ let pro = {
             // 都没孵出来，就是这个标记把补员几乎每次都挡掉了。改成直接看有没有空闲 spawn。
             // 真机上 room.spawn 一定有；VM 桩里可能没定义，缺失时不做这层判断。
             if (spawnRoom.spawn && !spawnRoom.spawn.some(e => !e.spawning && e.isActive())) { why("noFreeSpawn"); return; }
-            // **「主房穷时按存货配额收敛」这道闸必须按矿点判。**
-            //
-            // 原来它写在循环外面，配额和车辆计数都按**房间**：一个外矿房两个矿点时，
-            // 「本房存货 / 一趟运力」把两边的货加起来，车辆又按房名数 —— 于是
-            // 「(29,4) 2 只车、(27,29) 容器 2000 满 + 地面 2,249 且 +2.3/tick 在涨、
-            // 0 只车」被 `onThisMine(2) >= quota(2)` 判成「够了」，那 4.2k 一路衰减
-            // （2026-11-01 实测 W26N59，`__outerWhy=starves+quota2>=2`；分矿点需求
-            //  公式本来算得对，只是根本走不到那里）。
-            // 改到矿点粒度后总和上限几乎不变（Σ floor(w_i/1700) ≤ floor(Σw/1700)+矿点数-1），
-            // 只是把「谁该分到车」判对 —— 与 MEMORY 第 1 条同一条规则。
-            if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) {
-                // 配额的分母必须是**本房实际孵得出的体型**的运力（见
-                // outerCarrierTripCapacity）：用满编常数 1700 会把小车房
-                // （hive 的 50% 夹出 600~700 运力）的豁免配额算小近 3 倍，
-                // 于是「主房穷」时那道豁免形同虚设 —— 容器永远满、keeper 塞不下。
-                let mineQuota = Math.floor(pro.outerMineWaitingByMine(spawnRoom, targetName, data) / pro.outerCarrierTripCapacity(spawnRoom));
-                let mineCarriers = roomCarriers.filter(c => {
-                    let t = c.headTask && c.headTask();
-                    return t && t.roomName == targetName && t.id == data["id"];
-                }).length;
-                if (mineCarriers >= mineQuota) {
-                    why("starves+mineQ" + mineCarriers + ">=" + mineQuota + "@" + data.x + "," + data.y);
-                    return;
-                }
-            }
             // container 不可见时仍可按缓存 ID / 坐标孵化；carrier 抵达矿区后
             // 再解析对象即可。否则 keeper 死后失去视野会再次把外矿锁死。
             if (pathTime && data["container"]) {

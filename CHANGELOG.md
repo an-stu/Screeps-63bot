@@ -1,103 +1,37 @@
-## v0.78.172 — The "spawn room is poor" exemption sized the fleet for a carrier this room cannot build
+## v0.78.170 — The reserver is the outer mine's master switch; spawn it like one
 
-0.78.171 made the poor-room gate per-mine, but the quota it compares against still divided the
-backlog by `OUTER_CARRIER_TRIP = 1700` — the **fully-loaded 50-part** body (34 CARRY). The body the
-outer-carrier spawner actually builds is capped by `bodyBudget = min(floor(hiveCap * 0.5), ...)`.
-For a RCL6 room (hive capacity 2300) that budget is 1150, so `getOuterHarCarrierBodyConfig(1150)`
-returns 14 CARRY / 7 MOVE = **700**, and the road-builder variant (2 WORK) only **600**. The quota
-was therefore ~2.8x too small, and it is the *only* path that can add carriers while the spawn room
-is poor (everything else is behind `outerMineStarvesSpawnRoom`).
+User: 外矿需要 claim 的 reserve，不然能量太少（Overmind 先保留后开采）。
 
-Live at 2026-11-01 18:50, W26N58: storage 0, terminal 26898 -> `starves=true`. W26N59 both mines
-held 2000/2000 containers with one 600-capacity carrier each; `__outerWhy=starves+mineQ1>=1@27,29`
-(quota 1, fleet 1, so no reinforcement). One carrier moved 600 per ~114-tick round trip = 5.3/tick
-against 13.3/tick of source regen per mine, so the containers never drained, both keepers sat on a
-full 50/50 store with nowhere to put the ore, and the sources only gave ~10/tick instead of 26.7.
-Ground energy stopped falling (~1.6k, flat over 46 ticks) — a backlog sitting at equilibrium, not
-a leak, which is why neither the status script nor the drop trend flagged it.
+Confirmed live: W26N59's controller has been unreserved for days (`reservation: null`), so both
+sources sit at **1500 capacity and regenerate 5/tick instead of 10/tick** - the entire outer
+operation (2 keepers + up to 8 carriers) has been running at half its potential throughput. The
+reserver machinery existed (`getReverserBodyConfig`, the `reserveOuterHar` task, the spawn gate in
+`strategy_outerHarvest.exec`) but was buried inside the flag loop, behind every home spawn demand.
+W26N58's single spawn is ~100% busy; the `__outerWhy` diagnostic showed `noFreeSpawn` again and
+again - the reserver (1950 energy, one creep per ~1500 ticks) lost every race indefinitely.
 
-The denominator is now `StationSources.outerCarrierTripCapacity(spawnRoom)`: it derives the body from
-the same budget the spawn call uses, takes the smaller CARRY count of the plain and road-builder
-variants, multiplies by 50, and caps at `OUTER_CARRIER_TRIP`. RCL8 rooms (budget 6450 -> 32 CARRY =
-1600) keep their old numbers; only small spawn rooms get a bigger allowance. Rooms that cannot report
-a capacity (VM stubs, very early rooms) fall back to 1700, so existing offline fixtures are unchanged.
+`StationSources.trySpawnReservers(spawnRoom)` now runs from `strategy_highLevel.exec` **after home
+keepers but before worker/carrier demand**:
 
-Same defect class as MEMORY rule 7 — the two layers of one decision (body budget, quota divisor) must
-come from one source. `test/outer-carrier-quota.test.cjs` pins the RCL6 capacity at 600, replays
-2000 backlog -> 1 carrier (old) vs 3 (new), and asserts the RCL8 numbers did not move.
+- Overmind ordering: reserve first, harvest second. Reservation doubles source capacity - it is the
+  enabler, not a consumer.
+- The 0.78.155 health gate is preserved: the spawn room's own keepers must be at full count before
+  any reserver is spawned.
+- Target-side conditions match the old gate (stopRemote, invaderCoreBlocks, unreserved / ticksToEnd
+  < 1000 / foreign reservation, no live reserver assigned) and de-duplicate with the in-loop
+  fallback naturally.
 
-## v0.78.171 — One fully-stocked mine in W26N59 had no hauler, because the quota was a room number
+The carrier sizing needs no change: `EnergyPerTick` is computed from the live source object, so the
+fleet requirement self-adjusts upward once the reservation lands (10/tick regen).
 
-(0.78.170 was only a version marker on the snapshot commit and never went live; this is the first
-deploy after 0.78.169.)
+### Tests
 
-W26N59 has two mines. At (29,4) the container held 0-16 and two `outerHarvestEnergyCarrier`s hovered
-around it; at (27,29) the container was pinned at 2000/2000 and the keeper's tile (28,30) held 2249
-energy on the ground, growing +2.3/tick, with **zero** carriers. The two keepers both had full stores
-(50/50) and nowhere to put the 12.8/tick they were still pulling out of the sources, so roughly half
-the room's production was decaying on the floor.
-
-`__outerWhy` named the blocker exactly: `starves+quota2>=2`. The "when the spawn room is poor, only
-top the fleet up to what the backlog warrants" gate counted both the waiting energy and the fleet per
-**room** - 2000 (mine A) + 10 (mine B) worth of quota, 2 carriers anywhere in the room - so mine B's
-carriers were spent as proof that mine A was covered. The per-mine demand formula further down already
-grouped by `t.id`; the gate simply returned before reaching it.
-
-The gate is now evaluated inside the per-mine loop: quota from `StationSources.outerMineWaitingByMine`
-(that mine's container plus the drop standing on the container tile - overflow lands on the keeper's
-own tile, so an empty container never shows it), and fleet counted by `headTask().id`. Total ceiling is
-barely affected, since `sum floor(w_i/1700) <= floor(sum w_i/1700) + mines - 1`; only *who gets a
-carrier* changes. `test/edge-link.test.cjs` §12 replays the live numbers (and fails against the old
-room-level comparison); `test/outer-carrier-spawn.test.cjs` §11 pins the grouping key.
-
-## v0.78.169 — A carrier hauling minerals had no task at all while the hive needed energy
-
-E48S41 kept exactly one usable carrier and lost mined energy to decay. One of its two carriers sat
-on (16,45) for 200+ ticks carrying `{O: 1650}` with `memory.tasks == []` and its `ticksToLive`
-dropping (1035 -> 903). With it out of the fleet, the hub link stayed at 776 (only a carrier empties
-it) so both mine links froze at 800/800 and both mine containers at 2000/2000; the two keepers stood
-on full containers with full stores and had nowhere to put energy but the ground - the only such pile
-in the empire, growing ~20/tick.
-
-The carrier was locked out of both exits:
-- `carrierManager`'s hive branch filters `!storeContainsEnergyOtherResType()`, which correctly refuses
-  to stuff minerals into spawns/extensions;
-- the only "dump into storage" branch (`if (!HiveNeedToFill(room))`) requires the hive to be full.
-
-So whenever the hive is short - which is exactly when a room is spawning replacements - a carrier
-holding minerals is assigned nothing at all. It is not idle, it *is* the work.
-
-New `StrategyHighLevel.dumpNonEnergyCargo(room)` empties such carriers into storage/terminal and is
-called at the top of `carrierManager`, before the hive branch, which `return`s early while the hive
-is short. It does not compete with hive filling: a creep loaded with minerals cannot carry energy
-anyway. `test/carrier-nonenergy-dump.test.cjs` covers mineral-only, mixed cargo, busy creeps and the
-negative control (pure-energy carriers keep no storage task); it fails with the call removed and also
-asserts the call site precedes the hive branch.
-
-Reported, not changed: while a hive is short, link draining is skipped outright by that `return`, so
-mine links stay full and keepers overflow. That is the deliberate "hive above everything" ordering
-(2026-10-27 crash), and the chain unblocks by itself once the hive fills - needs a decision, not a
-patch.
-
-## v0.78.168 — A powerSpawn task with nothing to carry pinned the room's only carrier
-
-W32N56 (the power-burning room) had exactly one carrier left, and it sat on (15,41) for 40+ minutes
-with `store == 0`, a task stack of `["fillPowerSpawnContinuous"]` and its `ticksToLive` ticking down.
-Nothing else in the room was being hauled: the hub link was stuck at 776 (only emptied when a carrier
-takes it), so both mine links sat at 800/800 and both mine containers at 2000/2000, and the keepers
-had nowhere to put energy but the ground - 8/tick piling up, ~16/tick lost to decay.
-
-`generatorFillPowerSpawnTask` admitted the room with `powerNeed >= fastCarry` but only generated a
-carry task with `powerNeed > fastCarry`. With the powerSpawn at 4800/5000 energy and 30/100 power the
-room entered, generated **zero** carry tasks, and still pushed a lone `fillAllTask`. An empty carrier
-executing `fillAllTask` pops it immediately (`prototype_creep.js:760`), so the next tick
-`fillPowerSpawnContinuous` generated it again: an infinite loop that never fetches and never releases
-the creep - while `isFree()` stayed false, so no other work was ever assigned to it.
-
-The fill task is now only pushed when at least one carry task was actually produced; with an empty
-list the caller pops the task and the carrier goes back to hive/hub/container duty.
-`test/power-spawn-task.test.cjs` pins both directions (degenerate input -> empty list, real deficit ->
-`fillAllTask` plus carries) and fails with the guard removed.
+New `test/reserver-priority.test.cjs` drives the real functions in a VM: unreserved controller with
+full home keepers spawns a 3-CLAIM reserver; short-handed keepers (0.78.155 gate) and an existing
+live reserver and a healthy own reservation (>= 1000) each do not spawn; a < 1000 remainder renews;
+a busy spawn skips. Plus an ordering pin: the strategy_highLevel call sits between
+`trySpawnHarKeeper` and `workerManager`. The external-road ordering pin is now scoped inside
+`trySpawnOuterHarCarrier` (the reserver has its own legitimate free-spawn check).
 
 ## v0.78.167 — Mine links: drop the exclusivity idea from v0.78.166, it starved a second mine
 

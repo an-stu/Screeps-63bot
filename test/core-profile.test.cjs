@@ -86,7 +86,14 @@ assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.inc
 assert.ok(stationSources.includes("reachesDestination") && stationSources.includes("ret.path.length > 1"), "external-road paths must be cached only when the endpoint actually reaches storage");
 // 2026-10-27：外矿补员的闸门从 `spawnFailure` 改成了「有没有空闲 spawn」——
 // 路线维护仍然必须排在这道闸之前（它只更新缓存路线，不需要 spawn）。
-assert.ok(stationSources.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < stationSources.indexOf("if (spawnRoom.spawn && !spawnRoom.spawn.some("), "external-road route refresh must not be blocked by local spawn pressure");
+// 0.78.170：trySpawnReservers 也有自己的「空闲 spawn」闸（reserver 出兵确实需要），
+// 所以这条顺序断言收窄到 trySpawnOuterHarCarrier 函数内部比较。
+{
+    const carrierSrc = stationSources.slice(stationSources.indexOf("trySpawnOuterHarCarrier(roomName, spawnRoom)"));
+    assert.ok(carrierSrc.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") >= 0
+        && carrierSrc.indexOf("pro.ensureOuterRoadPath(data, spawnRoom)") < carrierSrc.indexOf("if (spawnRoom.spawn && !spawnRoom.spawn.some("),
+        "external-road route refresh must not be blocked by local spawn pressure");
+}
 // 原来的预算是 maxRooms:4 / maxOps:8000。外矿房可能隔好几房（W35N55 要走
 // W35N55 → W34N55 → W33N55 三房。maxRooms=4 余量太小，搜索空间被截断 → incomplete=true
 // 直接缓存不了路线（实测 W35N55 的两个源就是这么变成 NOPATH 的）。预算放宽到 maxRooms:8 / maxOps:20000。
