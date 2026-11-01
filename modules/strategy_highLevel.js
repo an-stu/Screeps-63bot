@@ -242,7 +242,31 @@ let pro = {
         if (!freeCarries.length) return;
 
     },
+    /**
+     * 带**非能量**货物（矿物 / 化合物 / 复合货）的空闲 carrier，无条件倒回 storage。
+     *
+     * 为什么必须无条件（2026-11-01 E48S41 实测）：
+     *   · hive 缺能分支只收 `!storeContainsEnergyOtherResType()` 的爬 —— 抱着 O 的
+     *     不能填 hive（会把矿物塞进 spawn/extension），被排除是对的；
+     *   · 而唯一的「倒进 storage」出口（carrierManager 里 `if (!HiveNeedToFill)`）
+     *     **挂在 hive 吃饱这个前提上** ⇒ hive 长期缺能期间，这只爬两条路都进不去，
+     *     `memory.tasks` 恒空，被**永久钉死**（不是"没活干"，是"它自己就是活"）。
+     *   现场：carrier 抱 1650 O 在 (16,45) 站了 200+ tick（ttl 1035→903），
+     *   E48S41 因此只剩 1 只可用搬运 ⇒ hub link 卡 776、两个矿点 link 800/800 +
+     *   容器 2000/2000 全满 ⇒ keeper 满仓只能往地上倒（地面掉落 ~20/tick 递增，
+     *   全账号唯一一例，见 2026-11-01 巡检）。
+     *
+     * 与「hive 永远第一」不冲突：这只爬本来就载不了能量，倒货不会抢走填 hive 的运力。
+     */
+    dumpNonEnergyCargo(room) {
+        room.creeps("carrier")
+            .filter(e => e.isFree() && !e.storeEmpty() && e.storeContainsEnergyOtherResType())
+            .forEach(e => e.fillAllMainRoomStorage());
+    },
     carrierManager(room) {
+        // 先把「载着非能量货的空转搬运」放出去（见 dumpNonEnergyCargo）。
+        // 必须放在 hive 分支**之前**：hive 缺能时该分支会 `return`，错过就再也轮不到。
+        pro.dumpNonEnergyCargo(room);
         // 最高优先级：hive（spawn/extension）缺能时先扣住空闲 carrier 填 hive。
         // 但塔防/维修不能停：hive 缺口期间也预留一只 carrier 填塔，避免
         // tower 空能量、rampart 掉血无人修（E53S21 教训）。

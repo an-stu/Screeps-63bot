@@ -1,3 +1,32 @@
+## v0.78.169 — A carrier hauling minerals had no task at all while the hive needed energy
+
+E48S41 kept exactly one usable carrier and lost mined energy to decay. One of its two carriers sat
+on (16,45) for 200+ ticks carrying `{O: 1650}` with `memory.tasks == []` and its `ticksToLive`
+dropping (1035 -> 903). With it out of the fleet, the hub link stayed at 776 (only a carrier empties
+it) so both mine links froze at 800/800 and both mine containers at 2000/2000; the two keepers stood
+on full containers with full stores and had nowhere to put energy but the ground - the only such pile
+in the empire, growing ~20/tick.
+
+The carrier was locked out of both exits:
+- `carrierManager`'s hive branch filters `!storeContainsEnergyOtherResType()`, which correctly refuses
+  to stuff minerals into spawns/extensions;
+- the only "dump into storage" branch (`if (!HiveNeedToFill(room))`) requires the hive to be full.
+
+So whenever the hive is short - which is exactly when a room is spawning replacements - a carrier
+holding minerals is assigned nothing at all. It is not idle, it *is* the work.
+
+New `StrategyHighLevel.dumpNonEnergyCargo(room)` empties such carriers into storage/terminal and is
+called at the top of `carrierManager`, before the hive branch, which `return`s early while the hive
+is short. It does not compete with hive filling: a creep loaded with minerals cannot carry energy
+anyway. `test/carrier-nonenergy-dump.test.cjs` covers mineral-only, mixed cargo, busy creeps and the
+negative control (pure-energy carriers keep no storage task); it fails with the call removed and also
+asserts the call site precedes the hive branch.
+
+Reported, not changed: while a hive is short, link draining is skipped outright by that `return`, so
+mine links stay full and keepers overflow. That is the deliberate "hive above everything" ordering
+(2026-10-27 crash), and the chain unblocks by itself once the hive fills - needs a decision, not a
+patch.
+
 ## v0.78.168 — A powerSpawn task with nothing to carry pinned the room's only carrier
 
 W32N56 (the power-burning room) had exactly one carrier left, and it sat on (15,41) for 40+ minutes
