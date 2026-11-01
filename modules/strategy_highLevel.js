@@ -38,14 +38,47 @@ const POWER_SPAWN_ENERGY_FLOOR = 30000;
 const WORKER_ENERGY_FLOOR = 10000;
 
 let pro = {
+    /**
+     * 本 tick 还能花在孵化上的能量 —— **体型预算必须以它为准**，不能按本房满容量算。
+     *
+     * `StationHive.trySpawn` 的判据是
+     * `if (room.currentEnergyAvailable < spend) { room.spawnFailure = true; return undefined }`
+     * 也就是「付不起就静默放弃」，从外面看和「闸门没通过」一模一样；更糟的是
+     * `spawnFailure` 是整 tick 的粘滞标记，本房孵化的**后续**尝试（carrier、外矿搬运）
+     * 会被一起吞掉。2026-11-01 W26N58（RCL6、容量 2,300、hive 在 600~1,750 之间被
+     * 反复抽干）就是这样：worker/carrier 的体型按 2,300 算，付不起 ⇒ 一次都不生。
+     *
+     * `room.currentEnergyAvailable` 是本 tick 的孵化预算缓存（首个 trySpawn 初始化、
+     * 每次成功孵化扣减；Room 对象每 tick 重建，所以它天然按 tick 复位）。
+     * 取它和实时能量的**小值**，再不超本房容量。
+     */
+    spawnTickBudget(room) {
+        let cached = room.currentEnergyAvailable === undefined
+            ? room.energyAvailable
+            : Math.min(room.energyAvailable, room.currentEnergyAvailable);
+        // 真机 Room 一定有这个方法；VM 桩里可能只给了属性（同站内其它地方的写法）。
+        let cap = room.getEnergyCapacityAvailable
+            ? room.getEnergyCapacityAvailable()
+            : (room.energyCapacityAvailable || 0);
+        return Math.max(0, Math.min(cap, cached));
+    },
     workerManager(room) {
         // 空 hive 保护：hive 缺口大且可用能量很低时不再生 worker，
         // 把 spawn 能量留给 keeper 和 bootstrap carrier（E53S21 教训）。
-        if (StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500) return;
+        //
+        // ⚠️ 门槛按**本房容量**折算，不能写死 2,500 —— 那是 RCL8（12,900）的量级，
+        // 对 cap ≤ 2,500 的 RCL5/6 房它恒真（hive 满格也只有 1,800 / 2,300），
+        // 等于「hive 一缺能就永远不生 worker」，RCL6 房连自己的工地都盖不动
+        // （与 2026-11-01 upgrader 那个坑同一形态，见 MEMORY 第 16 条）。
+        if (StationHive.HiveNeedToFill(room)
+            && room.energyAvailable < Math.min(2500, room.energyCapacityAvailable * 0.5)) return;
         // 本房根本没能量可花 → 不生 worker（见 WORKER_ENERGY_FLOOR 的说明）
         if (!pro.workerHasEnergyToSpend(room)) return;
         let spawnWorker = () => {
-            let body = StationWork.getMiddleLevelWorkerBodyConfig(room);
+            // 体型按「本 tick 付得起」定（见 spawnTickBudget）：按满容量算的体型在
+            // hive 未满时会被 trySpawn 静默吞掉，还会把 spawnFailure 置真挡住后面的
+            // carrier / 外矿补员。
+            let body = StationWork.getMiddleLevelWorkerBodyConfig(room, pro.spawnTickBudget(room));
             let partCnt = body.filter(e => e == WORK).length;
             let boostLevel = global.StationLab ? StationLab.boostAbleLevel(room, "build", partCnt, 1) : -1;
             let isBoost = room.creeps("carrier").length && boostLevel >= 0;
@@ -56,7 +89,7 @@ let pro = {
         }
         let spawnHighLevelWorker = () => {
             if (!global.StationLab) return spawnWorker();
-            let body = StationWork.getHighLevelWorkerBodyConfig(room);
+            let body = StationWork.getHighLevelWorkerBodyConfig(room, pro.spawnTickBudget(room));
             let boostRes = { [BOOST_RES["build"][1]]: 30 * 30, [BOOST_RES["fatigue"][1]]: 10 * 30, [BOOST_RES["capacity"][1]]: 10 * 30 }
             if (body.filter(e => e == WORK).length != 30 || !StationLab.boostAble(room, boostRes) || room.creeps("carrier").length == 0)
                 return spawnWorker();
@@ -542,8 +575,18 @@ let pro = {
             room.memory.carryBusy.push(0)
             return;
         }
+        // 「够满配 carrier」的门槛按**本房容量**折算，不能写死 2,500。
+        //
+        // 2,500 是 RCL8（12,900）的量级：对 cap ≤ 2,500 的 RCL5/6 房
+        // （hive 满格只有 1,800 / 2,300）它**永不可达** ⇒ 下面那条「按满配体型补员」
+        // 的分支一次都不会进，carrier 只能靠 750 的应急小爬，或者「一只都没有」时
+        // 重建，编制目标（hive 有缺口时 +1）形同虚设。2026-11-01 W26N58 实测：
+        // 目标 4 只、在职 2 只（+1 在孵），手上 49k storage + 48k terminal 却补不出
+        // 第 3 只 —— 与 upgrader 那个坑同一形态（MEMORY 第 16 条）。
+        // 折算后 RCL8 仍是 2,500（行为不变），RCL5/6 分别是 1,080 / 1,380。
+        let carrierBodyMinEnergy = Math.min(2500, (room.energyCapacityAvailable || 0) * 0.6);
         if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 50 == 0
-            && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 750 && room.energyAvailable < 2500) {
+            && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 750 && room.energyAvailable < carrierBodyMinEnergy) {
             let emergencyBody = ManagerCreeps.calcBodyPart({ [MOVE]: 5, [CARRY]: 10 });
             spawnCarrierNow(emergencyBody);
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
@@ -553,23 +596,23 @@ let pro = {
         // hive 缺口 + 能量已够满配 carrier：不等 avgBusy 门槛（空 hive 时
         // avgBusy 常年在 0.85 以下，单 carrier 永远等不到第二只）。
         if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 25 == 0
-            && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 2500) {
-            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room));
+            && StationHive.HiveNeedToFill(room) && room.energyAvailable >= carrierBodyMinEnergy) {
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)));
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
         }
         if (starved && carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 100 == 0) {
-            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room))
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)))
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
         }
         if ((carrierCnt <= 0 && (room.storage.store[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
             carrierCnt < carrierTarget &&
-            !(StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500) &&
+            !(StationHive.HiveNeedToFill(room) && room.energyAvailable < carrierBodyMinEnergy) &&
             avgBusy > carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
-            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room))
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)))
         }
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
         room.memory.carryBusy.push(room.creeps("carrier").filter(e => !e.isFree()).reduce((a) => a + 1, 0))
