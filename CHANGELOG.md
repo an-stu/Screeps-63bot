@@ -1,3 +1,31 @@
+## v0.78.172 — The "spawn room is poor" exemption sized the fleet for a carrier this room cannot build
+
+0.78.171 made the poor-room gate per-mine, but the quota it compares against still divided the
+backlog by `OUTER_CARRIER_TRIP = 1700` — the **fully-loaded 50-part** body (34 CARRY). The body the
+outer-carrier spawner actually builds is capped by `bodyBudget = min(floor(hiveCap * 0.5), ...)`.
+For a RCL6 room (hive capacity 2300) that budget is 1150, so `getOuterHarCarrierBodyConfig(1150)`
+returns 14 CARRY / 7 MOVE = **700**, and the road-builder variant (2 WORK) only **600**. The quota
+was therefore ~2.8x too small, and it is the *only* path that can add carriers while the spawn room
+is poor (everything else is behind `outerMineStarvesSpawnRoom`).
+
+Live at 2026-11-01 18:50, W26N58: storage 0, terminal 26898 -> `starves=true`. W26N59 both mines
+held 2000/2000 containers with one 600-capacity carrier each; `__outerWhy=starves+mineQ1>=1@27,29`
+(quota 1, fleet 1, so no reinforcement). One carrier moved 600 per ~114-tick round trip = 5.3/tick
+against 13.3/tick of source regen per mine, so the containers never drained, both keepers sat on a
+full 50/50 store with nowhere to put the ore, and the sources only gave ~10/tick instead of 26.7.
+Ground energy stopped falling (~1.6k, flat over 46 ticks) — a backlog sitting at equilibrium, not
+a leak, which is why neither the status script nor the drop trend flagged it.
+
+The denominator is now `StationSources.outerCarrierTripCapacity(spawnRoom)`: it derives the body from
+the same budget the spawn call uses, takes the smaller CARRY count of the plain and road-builder
+variants, multiplies by 50, and caps at `OUTER_CARRIER_TRIP`. RCL8 rooms (budget 6450 -> 32 CARRY =
+1600) keep their old numbers; only small spawn rooms get a bigger allowance. Rooms that cannot report
+a capacity (VM stubs, very early rooms) fall back to 1700, so existing offline fixtures are unchanged.
+
+Same defect class as MEMORY rule 7 — the two layers of one decision (body budget, quota divisor) must
+come from one source. `test/outer-carrier-quota.test.cjs` pins the RCL6 capacity at 600, replays
+2000 backlog -> 1 carrier (old) vs 3 (new), and asserts the RCL8 numbers did not move.
+
 ## v0.78.171 — One fully-stocked mine in W26N59 had no hauler, because the quota was a room number
 
 (0.78.170 was only a version marker on the snapshot commit and never went live; this is the first

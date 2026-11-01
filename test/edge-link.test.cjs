@@ -1587,8 +1587,13 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerMineWaitingByMine(spawnRoom, "W26N59", memFull), 10, "另一个矿点只有 10");
 
     // ③ 按矿点算配额：有货的 1 只，没货的 0 只
-    const quotaStarved = Math.floor(waitingStarved / 1700);
-    const quotaFull = Math.floor(S.outerMineWaitingByMine(spawnRoom, "W26N59", memFull) / 1700);
+    //    分母走实现本体（`outerCarrierTripCapacity`）：这个 spawnRoom 桩没有容量
+    //    ⇒ 退回满编 1700，与历史数值一致；真实房间里 RCL6 房会算出 600（见
+    //    test/outer-carrier-quota.test.cjs）。
+    assert.equal(S.outerCarrierTripCapacity(spawnRoom), 1700, "容量未知时退回满编口径");
+    const trip = S.outerCarrierTripCapacity(spawnRoom);
+    const quotaStarved = Math.floor(waitingStarved / trip);
+    const quotaFull = Math.floor(S.outerMineWaitingByMine(spawnRoom, "W26N59", memFull) / trip);
     assert.equal(quotaStarved, 1, "3200/1700 → 该有 1 只");
     assert.equal(quotaFull, 0, "没货 → 0 只");
 
