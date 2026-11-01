@@ -2378,23 +2378,33 @@ let pro = {
         data.roadSiteCleanupTick = Game.time;
         let path = pro.getOuterRoadPath(data);
         if (!path || !path.length) return;
-        // 路线附近 ±1 格都算「在路上」。
+        // **精确匹配，不搞 ±1 容差**（Overmind roadLookup 式白名单）。
         //
-        // 原来只保留**精确**落在当前路线上的工地，而路线每 1000 tick 会重算一次；
-        // 重算时 PathFinder 的 roomCallback 会把「已建成的路」当可走、把蓝图建筑
-        // 当高代价，代价矩阵一有变化，解出来的路线就可能整体平移一格。于是刚批量
-        // 立好的 56 个工地被清理掉 41 个，路修到一半又没了（W34N55 实测 56 → 1）。
-        // 放宽到 ±1 格后，路线小幅漂移不会再把自己的工地删掉。
+        // ±1 容差是「路线会整体平移一格」年代的保险：重算漂移时 ±1 内的工地不算
+        // 垃圾。0.78.171 之后路线只要走得通就续期复用、根本不再漂移，容差反而
+        // **保护了平行时代的残留**——实测 W26N59 的 4 个旧工地 (15,44)/(15,45)/
+        // (16,44)/(18,41) 全部不在路线精确格上、却都贴着路线 1 格内被容差豁免，
+        // 顶着已建路旁边的空地永远不删（用户 10-31：多余的 site remove 掉）。
         let route = {};
         let rooms = {};
         path.forEach(p => {
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    route[p.roomName + ":" + (p.x + dx) + ":" + (p.y + dy)] = true;
-                }
-            }
+            route[p.roomName + ":" + p.x + ":" + p.y] = true;
             rooms[p.roomName] = true;
         });
+        // **兄弟矿点的路线也算「该在的路」**：cleanup 按矿点逐个调用，
+        // 不合并的话 src0 的清理会把 src1 路线上的正规路/工地当垃圾拆掉。
+        let siblingMem = Memory.rooms[data.roomName] && Memory.rooms[data.roomName][pro.stationName];
+        if (siblingMem) {
+            _.values(siblingMem).forEach(s => {
+                if (s && s.id != data.id && s.roadPathStr) {
+                    let p = pro.getOuterRoadPath(s);
+                    if (p) p.forEach(q => {
+                        route[q.roomName + ":" + q.x + ":" + q.y] = true;
+                        rooms[q.roomName] = true;
+                    });
+                }
+            });
+        }
         Object.keys(rooms).forEach(roomName => {
             let room = Game.rooms[roomName];
             if (!room) return;
@@ -2411,6 +2421,15 @@ let pro = {
                     && !route[roomName + ":" + site.pos.x + ":" + site.pos.y]
                     && (!isHome || !planned.has(site.pos.x + ":" + site.pos.y)))
                 .forEach(site => site.remove());
+            // **偏离路线的自建已建路一并拆掉**（矿区/过道房；主房的路归蓝图管）。
+            // 实测 (20,39)：平行时代留下的 6% 孤儿路，没人会修它、占着格子几十年
+            // 才烂完。destroy 立即回收，route 上同格的正规路不受影响。
+            if (!isHome) {
+                room.find(FIND_STRUCTURES)
+                    .filter(s => s.structureType == STRUCTURE_ROAD && s.my
+                        && !route[roomName + ":" + s.pos.x + ":" + s.pos.y])
+                    .forEach(s => s.destroy());
+            }
         });
     },
     /** 路径上离当前位置最近的路点 */

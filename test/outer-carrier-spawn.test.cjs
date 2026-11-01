@@ -150,4 +150,20 @@ assert.ok(code.indexOf("cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1)") >= 0
     && code.indexOf("outerRoadRoomCallback(roomName, false, spawnRoom.name, mergePaths)") >= 0,
     "两次搜索（蓝图 + 兜底）都必须应用合并折扣，且不可覆盖被建筑封死的格");
 
+// ── ⑬ 多余 site 清零：精确匹配 + 兄弟路线并入白名单（用户 10-31）──────────
+// ±1 容差是「路线会漂移」年代的保险；0.78.171 后路线不再漂移，容差反而把
+// 平行时代的残留工地豁免掉（实测 W26N59 4 个旧工地全部贴着路线 1 格内）。
+{
+    const cleanupSrc = code.slice(code.indexOf("cleanupOuterRoadSites(data, spawnRoom)"),
+        code.indexOf("nextRoadPathIndex(roadPath, pos)"));
+    assert.ok(!/for \(let dx = -1; dx <= 1; dx\+\+\)/.test(cleanupSrc),
+        "cleanup 的路线白名单必须精确到格（±1 容差会豁免平行残留工地）");
+    assert.ok(/let siblingMem = Memory\.rooms\[data\.roomName\]/.test(cleanupSrc)
+        && /s\.id != data\.id && s\.roadPathStr/.test(cleanupSrc),
+        "清理前必须并入兄弟矿点路线（按矿点逐个调用，不合并会误拆正规路）");
+    assert.ok(/structureType == STRUCTURE_ROAD && s\.my/.test(cleanupSrc)
+        && /\.destroy\(\)/.test(cleanupSrc),
+        "矿区/过道房里偏离路线的自建已建路要立即 destroy（主房蓝图路除外）");
+}
+
 console.log("outer carrier spawn checks passed");

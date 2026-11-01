@@ -1,3 +1,22 @@
+## v0.78.173 — Remove the redundant road sites and orphan roads for good
+
+User: 多余的 site remove 掉.
+
+The live audit found exactly four road sites in W26N59 - (15,44), (15,45), (16,44), (18,41) - and
+every one of them is OFF the canonical route, sitting 1-2 tiles beside built road. They survived
+because `cleanupOuterRoadSites` built its whitelist with a **±1 tolerance**: that was insurance
+for the era when route recomputes drifted a tile, but since 0.78.171 renews a walkable route
+instead of re-searching, the tolerance only shields the parallel-era leftovers.
+
+- The cleanup whitelist is now **exact-tile** (Overmind roadLookup style).
+- It merges the **sibling mine points' routes** into the whitelist first - cleanup runs per mine
+  point, and without the merge, src0's sweep would destroy src1's legitimate road tiles.
+- In mine/transit rooms, off-route roads **built by us** are `destroy()`ed immediately instead of
+  decaying for days (the 6%-hits orphan at (20,39)). Home rooms stay blueprint-governed.
+
+Pins in `outer-carrier-spawn.test.cjs`: exact whitelist (no ±1 loop inside cleanup), sibling
+merge present, destroy branch present.
+
 ## v0.78.172 — Overmind road method: critical-first repair and route merging
 
 User: road 也参考 Overmind 寻路和修的方法. Read the actual Overmind source
