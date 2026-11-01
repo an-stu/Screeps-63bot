@@ -1,3 +1,29 @@
+## v0.78.176 — Upgrade again: size the upgrader body by the energy this tick can actually pay
+
+Live: W26N58 (RCL6, hive cap 2,300) had **no upgrader for 200+ ticks** — the
+controller sat at 348,023 while storage held 31,587 and five carriers kept the
+hive bouncing between 600 and 1,750. Two independent "hive must be full" gates
+made the spawn request unreachable for any room whose capacity is ≤ 2,500:
+
+- `strategy_highLevel`: `HiveNeedToFill(room) && energyAvailable < 2500` — the
+  hardcoded 2,500 is an RCL8 number (19% of 12,900). For a 2,300 hive it is
+  always true (carriers keep `hiveEnergySending` non-zero), so `spawnUpgrader`
+  was skipped on **every** economy pass. Now `min(2500, cap * 0.2)`: identical
+  for RCL8 (2,500), reachable for RCL5/6.
+- `station_upgrade`: the 0-upgrader branch required `energyAvailable >=
+  min(cap, 4000)` (= full hive) and the body was sized from
+  `getEnergyCapacityAvailable()` — 2,100 energy, so even an allowed attempt was
+  silently dropped by `StationHive.trySpawn`. The threshold is now `cap * 0.4`
+  and the body budget is `max(600, min(cap, energy this tick can still spend))`,
+  the same "size by what is affordable" rule keepers and outer carriers already
+  follow. Full-hive sizing is unchanged (16 WORK / 2,100).
+
+Also restores the per-mine outer carrier quota that `79e8408` dropped by
+accident: `outerMineWaitingByMine` + `outerCarrierTripCapacity` and the
+mine-level `starves` gate are back (their tests were red on origin/main, and
+W26N59's (27,29) container was full again with 2,311 on the ground). 0.78.175's
+carrier re-tasking is untouched and both changes ship together.
+
 ## v0.78.175 — Rebalance idle outer carriers to the fullest container
 
 User: 外矿能量有点浪费，爬配置合理吗？

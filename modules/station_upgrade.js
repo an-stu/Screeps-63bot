@@ -340,11 +340,27 @@ let pro = {
         return selected;
     },
     trySpawnUpgrader(room) {
-        let getBodyLowLevel = function () { //低等级的part 无限多
+        // 体型必须**本 tick 真付得起**，否则 `StationHive.trySpawn` 只会静默
+        // `return undefined`（顺带把 `spawnFailure` 置真）—— 表现是「闸门层层放行、
+        // 就是不生」，从外面看和「闸门没通过」一模一样。
+        //
+        // 2026-11-01 W26N58 实测：RCL6，hive 容量 2,300，spawn 常年被 keeper /
+        // 外矿搬运轮流占用，hive 在 600~1,750 之间被反复抽干；而这里按
+        // `getEnergyCapacityAvailable()`（2,300）算体型 = 2,000 能量 ⇒ 只要 hive
+        // 不满格就永远付不起 ⇒ 全房 0 只 upgrader、控制器进度 348,023 连续 200+ tick
+        // 一动不动（storage 31,587 明明够养）。keeper / 外矿搬运早就按「可用能量」
+        // 收缩体型，upgrader 漏了同一件事。
+        //
+        // `room.currentEnergyAvailable` 是本 tick 的孵化预算缓存（首个 trySpawn 初始化、
+        // 每次成功孵化就扣减），取它和实时能量的**小值**才是本 tick 还能花的钱。
+        let cachedEnergy = room.currentEnergyAvailable === undefined
+            ? room.energyAvailable : Math.min(room.energyAvailable, room.currentEnergyAvailable);
+        let bodyBudget = Math.max(600, Math.min(room.getEnergyCapacityAvailable(), cachedEnergy));
+        let getBodyLowLevel = function (budget) { //低等级的part 无限多
             let current = 0;
             let cost = BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE];
             let num = 0;
-            let energy = room.getEnergyCapacityAvailable();
+            let energy = Math.min(room.getEnergyCapacityAvailable(), budget || room.getEnergyCapacityAvailable());
             while (current + cost <= energy - BODYPART_COST[CARRY] * Math.ceil(num / 5)) {// 超过 10个 work 加一个 carry
                 num += 1;
                 current += cost
@@ -366,7 +382,7 @@ let pro = {
             body = ManagerCreeps.calcBodyPart({ [MOVE]: 8, [WORK]: 15, [CARRY]: 2 });
             if (room.storage) boostLevel = StationLab.boostAbleLevel(room, "upgradeController", 15, 1);
         } else {
-            body = getBodyLowLevel();
+            body = getBodyLowLevel(bodyBudget);
             partCnt = body.filter(e => e == WORK).length;
             if (room.storage) boostLevel = StationLab.boostAbleLevel(room, "upgradeController", partCnt, 1);
         }
@@ -413,10 +429,21 @@ let pro = {
                 if (split.length >= 2) minUpgraderCnt = parseInt(split[2])
                 else upgradeFlag.remove()
             }
+            // 「0 只 upgrader」时要多快补一只 —— 门槛**不能是「hive 满格」**。
+            //
+            // 原写法 `energyAvailable >= Math.min(cap, 4000)`：对 cap ≤ 4,000 的房
+            // 等价于「hive 必须满格」。RCL5/6（1,800 / 2,300）的 spawn 常年被 keeper
+            // 与外矿搬运轮流占用，hive 在 600~1,750 之间被反复抽干，**满格那个窗口
+            // 几乎不出现** ⇒ 整房 0 只 upgrader、控制器进度原地不动
+            // （2026-11-01 W26N58：348,023 连续 200+ tick 不动，hive 容量 2,300）。
+            // 按容量折算 40%（RCL8 仍走下面那条 2,500 的分支，行为不变），
+            // 体型由 trySpawnUpgrader 按真实可用能量收缩 —— 门槛只决定「什么时候值得派」，
+            // 不再隐含「必须付得起满配」。
+            let zeroUpgraderNeedEnergy = Math.min(room.getEnergyCapacityAvailable() * 0.4, 4000)
             if (!room.storage || room.controller.progress >= room.controller.progressTotal)
                 spawn()
             else if (room.creeps("upgrader", false).length == 0
-                && room.energyAvailable >= Math.min(room.energyCapacityAvailable, 4000)
+                && room.energyAvailable >= zeroUpgraderNeedEnergy
                 && (room.controller.ticksToDowngrade < 100000 || room.controller.progress < room.controller.progressTotal))
                 spawn()
             else if (WHO_AM_I == "an_w" && minUpgraderCnt > room.creeps("upgrader", false).length)

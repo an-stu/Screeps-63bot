@@ -88,10 +88,13 @@ assert.ok(!/capPath\.length \* \(roadDone \? 1\.2 : 3\)/.test(code),
 //
 // OUTER_CARRIER_COST(2500) 是**造一只车**的价格，被当成了「一只车能清多少货」：
 // 容器 4,000 ⇒ floor(4000/2500) = 1 只，而实际要 4 只（每趟约 1,000）。
+// 0.78.172：分母再由「满编 1700」细化成 `outerCarrierTripCapacity(spawnRoom)`
+// （按本房实际孵出的体型算，见 test/outer-carrier-quota.test.cjs）——
+// RCL6 出兵房只有 600 运力，用 1700 会把「主房穷」时的豁免配额算小近 3 倍。
 assert.ok(/OUTER_CARRIER_TRIP = 1700/.test(code),
-    "必须有「一趟运力」常量（满编一趟 1,700）");
-assert.ok(/let quota = Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/ OUTER_CARRIER_TRIP\);/.test(code),
-    "配额 = 存货 / 一趟运力（无货仍为 0，不会把闸门永久架空）");
+    "必须保留「满编一趟运力」常量（作为按体型算出的运力的上限）");
+assert.ok(/\/ pro\.outerCarrierTripCapacity\(spawnRoom\)/.test(code),
+    "配额 = 存货 / 本房实际一趟运力（无货仍为 0，不会把闸门永久架空）");
 assert.ok(!/Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/ OUTER_CARRIER_COST\)/.test(code),
     "不能再用造的价钱当分母");
 

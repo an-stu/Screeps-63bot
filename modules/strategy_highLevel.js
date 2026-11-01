@@ -692,7 +692,16 @@ let pro = {
             HelperError.catchError(() => StrategyOuterHarvest.exec(room), room.name);
         }
         StationMineral.trySpawnHarKeeper(room);
-        if (!(StationHive.HiveNeedToFill(room) && room.energyAvailable < 2500)) StationUpgrade.spawnUpgrader(room);
+        // 「hive 见底就别为 upgrader 抽能量」（90fca62）—— 但**门槛必须按本房容量折算**。
+        //
+        // 写死的 2,500 是 RCL8 的量级（12,900 的 ~19%）；对 cap ≤ 2,500 的 RCL5/6 房
+        // 它恒真（hive 满格也只有 1,800 / 2,300），于是**每次经济 pass 都跳过**
+        // `spawnUpgrader`，upgrader 连「试一下」的机会都没有：2026-11-01 W26N58
+        // 实测 RCL6、hive 容量 2,300、控制器进度 348,023 连续 200+ tick 不动、
+        // storage 31,587 却没人升。改成「本房容量的 20%」后 RCL8（2,580→2,500）
+        // 与历轮行为一致，小房则拿到真实存在的窗口。
+        let hiveStarvingEnergy = Math.min(2500, room.energyCapacityAvailable * 0.2);
+        if (!(StationHive.HiveNeedToFill(room) && room.energyAvailable < hiveStarvingEnergy)) StationUpgrade.spawnUpgrader(room);
 
 
         //最后回收全部资源！
