@@ -1,3 +1,20 @@
+## v0.78.181 — BOOST_POWER keyed by compound, not by action name
+
+API-structure bug found during the docs sweep: the engine's `BOOSTS[part][action]`
+maps `{compound: multiplier}` (e.g. `BOOSTS.TOUGH.damage = {GO: 0.7, GHO2: 0.5,
+XGHO2: 0.3}`). The old construction took `_.values(...).head()` of each action
+table - the FIRST compound's multiplier - but keyed the result by **action
+name**, while every consumer looks up by `part.boost`, a **compound name**
+('XGHO2', ...). Every lookup returned undefined, so all boost-aware damage
+math (getHitsNextTick, possibleDamage family, possibleHealHoldRealDamage) was
+NaN for boosted creeps. Unboosted targets (invaders, keepers) fall back to
+`|| 1`, which is why peacetime never noticed - combat vs boosted units was
+blind.
+
+Rebuilt as an inverted compound→multiplier table; pins assert compound lookups
+(XUH2O 4, XGHO2 0.3, XKH2O 150), that action names are no longer keys, and
+that the old single-line construction is gone.
+
 ## v0.78.180 — A stranded upgrader must go back to work after unboosting
 
 Measured 2026-11-02 in W26N58 (RCL6): the controller sat at 586,826 for

@@ -872,8 +872,20 @@ Creep.prototype.autoHeal = function () {
 
 /** 基础攻击力 */
 const BODY_POWER = { [WORK]: DISMANTLE_POWER, [RANGED_ATTACK]: RANGED_ATTACK_POWER, [ATTACK]: ATTACK_POWER, [HEAL]: HEAL_POWER }
-/** Boost 对应的倍数*/
-const BOOST_POWER = _.values(BOOSTS).map(e => Object.entries(e).map(e => [e[0], _.values(e[1]).head()])).flat().toMap()
+/**
+ * Boost 对应的倍数：**化合物名 → 倍率**。
+ *
+ * 引擎结构是 `BOOSTS[部件][动作] = {化合物: 倍率}`（三层），把内两层反转成
+ * 按化合物查——所有调用方手里的都是 `part.boost` 化合物名（'XGHO2' 等）。
+ * 原实现 `_.values(e[1]).head()` 取的是每个动作表里**第一个化合物**的倍率、
+ * 键却是动作名 —— 用化合物名查询永远 undefined，对强化爬的伤害估算
+ * （getHitsNextTick / possibleDamage 系 / possibleHealHoldRealDamage）全是
+ * NaN。只影响强化目标：invader / keeper 无 boost（undefined || 1 = 1），
+ * 所以和平期一直没炸，战斗对上强化单位就全瞎。
+ */
+const BOOST_POWER = {};
+_.values(BOOSTS).forEach(partMap => _.values(partMap).forEach(actionMap =>
+    Object.entries(actionMap).forEach(([compound, mult]) => { BOOST_POWER[compound] = mult; })));
 
 
 /**
