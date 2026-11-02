@@ -391,8 +391,36 @@ let pro = {
         if (boostLevel >= 0) task = task.concat(StationLab.generatorBoostLevelTask(room, "upgradeController", partCnt, boostLevel))
         StationHive.trySpawn(room, room.name, body, "upgrader", task);
     },
+    /**
+     * 给「任务栈空了的在职 upgrader」补回升级任务（2026-11-02 W26N58 实测）。
+     *
+     * 全仓库**没有任何地方**给任务栈空了的 upgrader 补任务：
+     * `StrategyLowLevel` / `workerManagerAfterCarrier` 里的 `generatorUpgradeTask`
+     * 只发给 `room.creeps("worker")`；`spawnUpgrader` 只在**数量**上做闸门
+     * （用户 2026-10-19 明确「岗位闸门只控数量，不控在职者干不干活」）。
+     * 于是任何一条「弹任务」的路径一旦把栈弹空，这只爬就带着存量站在那儿
+     * 把剩余寿命站完 —— 实测 W26N58 `shard3_84014505_1`：store 0、tasks []、
+     * ttl 4 后老死，同期控制器 586,826 连续 ~330 tick 不动。
+     *
+     * 已知的弹空路径（都靠这里兜底）：`StationLab` 卸强化完成后 `popTask()`；
+     * 卸强化容器缺失/被拆时直接 `popTask()`（`UnboostCreepBodyPart`）。
+     * `UnboostCreepBodyPart` 那边另外做了**当 tick 立即**补任务（不等下一 tick），
+     * 这里是跨路径的最后一道网，幂等（栈非空直接跳过）。
+     */
+    rescueIdleUpgraders(room) {
+        if (!room.controller) return;
+        for (let creep of room.creeps("upgrader")) {
+            if (creep.spawning || !creep.ticksToLive) continue;
+            // 任务栈必须是真数组才动它：老记忆/残缺对象上宁可不补，也不能凭空造一条
+            if (!Array.isArray(creep.memory.tasks) || creep.memory.tasks.length) continue;
+            creep.addTask(pro.generatorUpgradeKeeperTask(room));
+            creep.registerStationUpgrade();
+        }
+    },
     spawnUpgrader(room) {
         let sm = room.memory[pro.stationName];
+        // 先救「在位的爬」再做孵化决策：这道闸门只该管「要不要再派一只」。
+        pro.rescueIdleUpgraders(room);
         if (!sm["creeps"]) sm["creeps"] = []
         // 容器被拆/退化时，只要升级 link 还在，upgradeKeeper 仍能取能量升级；
         // 只有 container 和 link 都没了才放弃本 tick，等 stationUpgrade.update 重建。

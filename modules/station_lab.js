@@ -191,7 +191,29 @@ Creep.prototype.UnboostCreepBodyPart = function () {
             this.moveTo(container)
         }
     }else{
-        this.popTask().execLastTask();
+        this.popTask();
+        // 卸强化会把 upgrader 的**唯一一条**任务（`upgradeKeeper`）弹掉，而全仓库
+        // 没有任何地方给「任务栈空了的在职 upgrader」补任务 —— 它就带着 0 能量
+        // （`station_upgrade.js` 那条链会先 `drop(RESOURCE_ENERGY)`）站在 lab 旁边
+        // 把剩余寿命站完，控制器进度原地不动。
+        //
+        // 2026-11-02 实测 W26N58：`shard3_84014505_1` 停在 (41,7)（紧邻 lab (41,6)、
+        // 距控制器 (9,7) 32 格）、`store` 0、`memory.tasks` 恒 []、ttl 4 后老死；
+        // 同期控制器 586,826 连续 ~330 tick 不变，卸强化容器 (41,5) 存在。
+        // 用户 2026-10-19 明确「在位的爬必须干活」⇒ 卸完必须把升级任务还回去。
+        //
+        // 同时覆盖另一条同源路径：`!container`（本房没有卸强化容器 / 容器被拆）时
+        // 也会走到这里 —— 那种情况下这个爬**根本卸不了**，更不该把升级任务丢掉。
+        let mainRoom = this.mainRoom();
+        if (this.memory.role == "upgrader"
+            && this.ticksToLive > 0
+            && this.memory.tasks && !this.memory.tasks.length
+            && mainRoom && mainRoom.controller
+            && global.StationUpgrade) {
+            this.addTask(StationUpgrade.generatorUpgradeKeeperTask(mainRoom));
+            this.registerStationUpgrade();
+        }
+        this.execLastTask();
     }
 }
 

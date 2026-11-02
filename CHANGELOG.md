@@ -1,3 +1,51 @@
+## v0.78.180 — A stranded upgrader must go back to work after unboosting
+
+Measured 2026-11-02 in W26N58 (RCL6): the controller sat at 586,826 for
+~330 ticks while an upgrader (`shard3_84014505_1`) stood at (41,7), next to
+lab (41,6), 32 tiles from the controller (9,7), `store` 0 and `memory.tasks`
+permanently `[]` until it aged out.
+
+**Root cause.** `station_upgrade.js` sends an upgrader to unboost when
+`ticksToLive < pathTime * 1.5` (~124 ticks here): it drops its energy,
+unregisters from the station and pops its **only** task to push the unboost
+chain. When the unboost chain finishes, `UnboostCreepBodyPart` does
+`popTask().execLastTask()` - with an empty stack that is a dead end: nothing
+in the codebase ever re-tasks an upgrader whose stack ran dry (the
+`generatorUpgradeTask` calls in `StrategyLowLevel` /
+`workerManagerAfterCarrier` only feed `room.creeps("worker")`). So the creep
+idles out its remaining life. The same hole opens when the unboost container
+is missing or was destroyed: `!container` takes the identical `popTask()`
+branch even though the creep *cannot* unboost, so it forfeits a perfectly
+good upgrade task.
+
+**Fix.** Two layers:
+
+1. `UnboostCreepBodyPart` re-adds `upgradeKeeper` and re-registers to the
+   station **in the same tick** when an upgrader ends up with an empty stack
+   (and still has ttl). Workers/carriers are untouched - they have their own
+   managers.
+2. `StationUpgrade.rescueIdleUpgraders(room)` as the cross-path safety net,
+   called from `spawnUpgrader` (which both strategy passes hit every tick)
+   *before* the spawn decision and before the container/link early return.
+   It is idempotent: a creep with a non-empty task stack, a spawning creep,
+   or a legacy creep without a real `tasks` array is left alone.
+
+Consistent with the 2026-10-19 rule: the spawn gate decides *how many*
+upgraders; a creep that is already alive must always have work to do.
+
+Not changed on purpose: the ~150-tick spawn+travel gap after an upgrader
+dies (no pre-spawn lead). Giving the upgrader a replacement lead means
+spending ~2,100 hive energy ahead of the next keeper replacement - the
+`spawn order must not be reshuffled` red line. Reported, not changed.
+
+### Tests
+
+`test/upgrader-unboost-retask.test.cjs` pins both layers with negative
+controls: carrier in the same state gets no task, ttl-0 upgrader gets no
+task, non-empty stack is never overwritten, spawning/legacy creeps are
+skipped, and the retask call sites must sit between `popTask()` and
+`execLastTask()` (and ahead of the container/link early return).
+
 ## v0.78.179 — Overmind replacement lead time + correct source regen rate
 
 Two API/Overmind-grounded fixes for the outer-mine fleet oscillation
