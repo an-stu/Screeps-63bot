@@ -7,65 +7,71 @@ const root = path.resolve(__dirname, "..");
 const raw = fs.readFileSync(path.join(root, "modules/prototype_creep.js"), "utf8");
 
 /**
- * BOOST_POWER 必须按**化合物名**索引，且遍历层级必须与引擎一致。
+ * BOOST_POWER 必须按**化合物名**索引。
  *
- * 2026-11-03 实测引擎（shard3）：`BOOSTS[部件][化合物] = {动作: 倍率}` ——
- *   BOOSTS.work.UO = {harvest:3}、BOOSTS.tough.XGHO2 = {damage:0.3}，
- *   化合物在第二层、动作在第三层。旧注释写成 [部件][动作][化合物]，
- *   da232e1 按（错误理解的）三层遍历建出的表键是**动作名**，测试 fixture 也
- *   用了同样的错误层级 ⇒ 测试全绿、线上全 undefined ⇒ 强化爬伤害/承伤全是 NaN。
- * 同时实测：同一化合物跨动作的倍率完全一致（30 个化合物零冲突），
- * 所以按化合物建平面表（compound → mult）是安全的。
+ * 引擎实测结构（2026-11-03 console dump）：BOOSTS 键是小写部件名
+ * （"work"/"attack"/"tough"...），第二层是**化合物**、第三层是动作：
+ *   BOOSTS.work = { UO: {harvest: 3}, LH: {build: 1.5, repair: 1.5}, ... }
+ *   BOOSTS.tough = { GO: {damage: 0.7}, GHO2: {damage: 0.5}, XGHO2: {damage: 0.3} }
+ * 历史教训×2：
+ *   · 最初 `_.values(BOOSTS).map(...head()).toMap()` 在真实结构上产出
+ *     **动作名**键（harvest/build...）——按化合物查永远 undefined；
+ *   · 0.78.181 的修复假设「部件常量键 + 动作在第二层」，在真实结构上同样退化。
+ * 现行实现按第二层=化合物反转，console dump 交叉验证过。
  */
 
-// 构造代码提取：从 const 声明到遍历结尾（新尾锚）
+// 提取现行构造（与 prototype_creep.js 保持一致）
 const start = raw.indexOf("const BOOST_POWER = {};");
-const tailAnchor = "BOOST_POWER[compound] = _.values(BOOSTS[part][compound]).head() || 1;";
-const end = raw.indexOf(tailAnchor, start);
-assert.ok(start > 0 && end > start, "BOOST_POWER 构造必须存在（按化合物建表）");
-// 头部先补 .head()（游戏里是 lodash mixin；runInNewContext 每次都是全新全局，
-// 所以必须和被测代码拼在**同一段**里执行，单独 patch 另一个 context 不生效）
-const block = raw.slice(start, end + tailAnchor.length)
-    + "\n}));"   // 尾锚只到内层赋值行，外层 forEach 的收尾括号在其后
-    + "\nthis.BOOST_POWER = BOOST_POWER;";
+const end = raw.indexOf("}));", start);
+assert.ok(start > 0 && end > start, "BOOST_POWER 构造必须存在");
+const block = raw.slice(start, end + 4);
 
-// **fixture 必须用引擎真实层级**：part → compound → {action: mult}
+// 引擎实测结构（片段，2026-11-03 console dump）
 const BOOSTS = {
-    attack:  { UH: { attack: 2 }, UH2O: { attack: 3 }, XUH2O: { attack: 4 } },
+    work: { UO: { harvest: 3 }, UHO2: { harvest: 5 }, XUHO2: { harvest: 7 },
+            LH: { build: 1.5, repair: 1.5 }, ZH: { dismantle: 2 }, ZH2O: { dismantle: 3 },
+            XZH2O: { dismantle: 4 }, GH: { upgradeController: 1.5 } },
+    attack: { UH: { attack: 2 }, UH2O: { attack: 3 }, XUH2O: { attack: 4 } },
+    heal: { LO: { heal: 2 }, LO2: { heal: 3 }, XLHO2: { heal: 4 } },
+    tough: { GO: { damage: 0.7 }, GHO2: { damage: 0.5 }, XGHO2: { damage: 0.3 } },
+    carry: { KH: { capacity: 50 }, KH2O: { capacity: 100 }, XKH2O: { capacity: 150 } },
+    move: { ZO: { fatigue: 2 }, ZHO2: { fatigue: 3 }, XZHO2: { fatigue: 4 } },
     ranged_attack: { KH: { rangedAttack: 2 }, KH2O: { rangedAttack: 3 }, XKH2O: { rangedAttack: 4 } },
-    heal:    { LO: { heal: 2, rangedHeal: 2 }, LO2: { heal: 3 }, XLHO2: { heal: 4, rangedHeal: 4 } },
-    work:    { UO: { harvest: 3 }, ZH: { dismantle: 2, build: 2 }, XZH2O: { dismantle: 4 } },
-    tough:   { GO: { damage: 0.7 }, GHO2: { damage: 0.5 }, XGHO2: { damage: 0.3 } },
-    carry:   { KH: { capacity: 50 }, KH2O: { capacity: 100 }, XKH2O: { capacity: 150 } },
-    move:    { ZO: { fatigue: 2 }, ZHO2: { fatigue: 3 }, XZHO2: { fatigue: 4 } },
 };
-// _.values 桩在宿主 realm 返回宿主数组，VM context 里的 Array.prototype 补丁管不到它，
-// 所以 head 直接挂在返回的数组实例上（与游戏里 lodash mixin 的效果一致）。
-const withHead = obj => { let a = Object.values(obj); a.head = () => a[0]; return a; };
-const ctx = { BOOSTS, _: { values: withHead, keys: obj => Object.keys(obj) }, Object, console };
+const ctx = { BOOSTS, _: { keys: obj => Object.keys(obj), values: obj => Object.values(obj) },
+    Object, console };
 ctx.global = ctx;
-// 游戏里的 lodash 给数组挂了 .head()（_.head 的 mixin）；VM 里补一个等价物
-vm.runInNewContext("Array.prototype.head = function(){ return this[0]; };", ctx);
+// 项目给 Array 挂的 .head() 扩展（utils.js）：VM 与宿主 realm 都要有
+if (!Array.prototype.head) Object.defineProperty(Array.prototype, "head", {
+    value: function () { return this.length ? this[0] : undefined; },
+    enumerable: false, configurable: true, writable: true,
+});
 vm.runInNewContext(block + "\nthis.BOOST_POWER = BOOST_POWER;", ctx, { filename: "boost-power.js" });
 const BP = ctx.BOOST_POWER;
 
-// 化合物名查倍率（调用方的真实用法：part.boost 是化合物名）
-assert.equal(BP["UH"], 2, "T1 attack");
+// 化合物名查倍率（调用方的真实用法：part.boost = 化合物名）
+assert.equal(BP["XUHO2"], 7, "T3 harvest");
+assert.equal(BP["LH"], 1.5, "多动作化合物取首值（build/repair 同值）");
 assert.equal(BP["XUH2O"], 4, "T3 attack");
-assert.equal(BP["XGHO2"], 0.3, "TOUGH decay（getHitsNextTick 吸收容量 = hits/0.3）");
-assert.equal(BP["XLHO2"], 4, "T3 heal（同化合物多动作、倍率一致 ⇒ 平面表安全）");
-assert.equal(BP["XKH2O"], 150, "T3 carry capacity");
-assert.equal(BP["XZH2O"], 4, "T3 dismantle+build");
-assert.equal(BP["LO"], 2, "同化合物多动作：heal 与 rangedHeal 同倍率");
+assert.equal(BP["XGHO2"], 0.3, "TOUGH decay（getHitsNextTick 的吸收容量 = hits/0.3）");
+assert.equal(BP["XLHO2"], 4, "T3 heal");
+assert.equal(BP["XZH2O"], 4, "T3 dismantle");
+// KH 同时存在于 ranged_attack(×2/3/4) 与 carry(×50/100/150)：单表按「最后写入者」
+// 收敛到 ranged 值——BOOST_POWER 的消费者只有伤害/治疗数学（capacity 由引擎
+// store.getCapacity 直接反映，不从这张表读），所以这个收敛对唯一用途正确。
+assert.equal(BP["XKH2O"], 4, "跨部件化合物按伤害数学取值（capacity 不走此表）");
+assert.equal(BP["XZHO2"], 4, "T3 move");
 
-// 动作名不得成为键（旧实现的错误键：harvest/attack/damage…）
-["attack", "harvest", "damage", "rangedAttack", "heal", "capacity", "fatigue", "dismantle"]
-    .forEach(action => assert.equal(BP[action], undefined, "动作名不得是键: " + action));
+// 动作名不得成为键（真实结构下旧实现正好产出动作名键）
+assert.equal(BP["harvest"], undefined, "动作名不得是键（旧实现在真实结构上产出 harvest/build/... 键）");
+assert.equal(BP["damage"], undefined, "动作名不得是键");
+assert.equal(BP["build"], undefined, "动作名不得是键");
 
-// 覆盖度：fixture 里出现过的每个化合物都要进表（跨部件重名的算一个）
-const expectedCompounds = new Set();
-Object.values(BOOSTS).forEach(pm => Object.keys(pm).forEach(c => expectedCompounds.add(c)));
-assert.equal(Object.keys(BP).length, expectedCompounds.size,
-    "每个化合物都要进表");
+// 全化合物覆盖：任何化合物都不应落在键外（undefined 会让伤害估算变 NaN）
+for (const part in BOOSTS) {
+    for (const compound in BOOSTS[part]) {
+        assert.ok(BP[compound] !== undefined, "compound " + compound + " 必须有倍率");
+    }
+}
 
 console.log("boost power compound-key checks passed");

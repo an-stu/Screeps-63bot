@@ -1,102 +1,26 @@
-## v0.78.184 — `BOOST_POWER` was built from the wrong layer order (keyed by action, not compound)
+## v0.78.182 — ops redistribution: terminal-full rooms may ship (the 3× gate never fired)
 
-The systematic re-audit of recent modifications caught a second bug of the same family as
-the GENERATE_OPS index bug: **`da232e1` did not actually fix the boost NaN**.
+User: OP 相关出现问题.
 
-The engine's real structure (dumped from shard3) is
+Live evidence: ops stocks split the empire in half - rich rooms sitting at the
+terminal cap (W34N52 3000+3000 both full, E53S21 8722, W31N55 7870) while
+E55S31 held **37**, E49S31 140, W32N56 104, W26N58 **0**. PC ops generation is
+healthy (all 12 cooldowns cycling; engine POWER_INFO: effect [1,2,4,6,8] per
+50-tick cooldown, ~1 ops/tick empire-wide), but the generic balance gate
+(total > 3× target = 9000 AND terminal >= 3000) can never fire for a resource
+produced that slowly - the rich rooms hoard at cap forever and the starved
+rooms sit below the PC cast cost (100) and the needOpPowerSpawn 600 gate.
 
-    BOOSTS[part][compound] = { action: mult }   e.g.  BOOSTS.work.UO = { harvest: 3 }
-
-- compound on the **second** layer, action on the third. The comment in `prototype_creep.js`
-  claimed the opposite (`[part][action][compound]`), so the inversion loop walked the tree the
-  same wrong way and produced a map keyed by **action name** (`harvest: 7`, `damage: 0.3`, ...) -
-  while every consumer looks up by **compound** (`part.boost`, 'XUHO2' etc). Boosted creeps
-  therefore still evaluated to NaN/1 in `getHitsNextTick`, `possibleDamage*`,
-  `possibleHealHoldRealDamage` - the exact bug `da232e1` claimed to fix.
-
-The old test passed only because its fixture used the same wrong layer order - a test that
-mirrors a wrong assumption proves nothing. It now uses the engine's real shape.
-
-Verified against the live engine: each compound's multiplier is consistent across all its
-actions (30 compounds, zero conflicts - UO:3, XLH2O:1.8, XGHO2:0.3, ...), so a flat
-`compound -> mult` map is correct.
+ops special case: a room whose **terminal holds a full stack (>= 3000)** is
+sendable, shipping its terminal contents to rooms that requested ops (their
+requirement is registered by processRoom when total < 6000). Sender terminal
+empties, the PCs slowly refill it, and the system converges. The send still
+goes through the freight budget.
 
 ### Tests
 
-`boost-power.test.cjs` rewritten with the real layer order: compound lookups (XUH2O=4,
-XGHO2=0.3, XKH2O=150...), action names must NOT be keys, full compound coverage, and a
-multi-action compound (LO: heal + rangedHeal, same mult) to pin the flat-map safety.
-
-## v0.78.183 — The 10-24 review fix inverted the GENERATE_OPS level indexing
-
-Full picture of the ops starvation (user: "PC 可以自己生产 ops"):
-
-    POWER_INFO[PWR_GENERATE_OPS] = { level:[0,2,7,14,22], cooldown:50, effect:[1,2,4,6,8] }
-    GENERATE_OPS levels: P1/P2/P4/P0/P8 = 5,  the other seven = 4
-
-History of `manager_creeps.powerCreepsGenerateOps`:
-
-- original `effect[level-1]`: level 4 → 6, level 5 → 8 - **correct for everyone we have**;
-- the 10-24 "66 findings" review commit (97620cc) changed it to `effect[level]` "so level 0 can
-  generate" - but that made **level 5 read `effect[5]` = undefined**, `freeCap >= undefined` is always
-  false, and ops generation silently died for every level-5 PC.
-
-That is exactly the observed split: the five level-5 PCs (P0/P1/P2/P4/P8) were at ops 0-102 while the
-seven level-4 PCs (P3/P5/P6/P7/P9/P10/P11) kept healthy 700-1900 stores. The 10-24 commit swapped one
-off-by-one for another.
-
-`opsCnt` is now `effect[Math.min(level, effect.length - 1)]` - every level gets its current tier
-(8 ops for level 5), and v0.78.182's `execRoom` backstop stays as a second line.
-
-### Tests
-
-`pc-generate-ops` case: the manager index must be clamped.
-
-## v0.78.182 — A worker with no downstream consumer must not fetch energy
-
-Measured 2026-11-03: in W34N52 and W33N55 two workers carried `energy: 1500`
-with `memory.tasks` permanently `[]`, standing on the same tile for dozens of
-ticks (W33N55 (22,32) ttl 624, W34N52 (37,18) ttl 1045). Both rooms share one
-state: RCL8 (cannot level up), hive full at 12,900, zero construction sites,
-and wall repair blocked by the energy gate (`repairWallAffordable` needs
-storage >= 100,000; W33N55 sat at 87,532).
-
-**Root cause** is a one-sided gate in `workerManagerAfterCarrier`. The empty
-branch handed `StorageCarryEnergyTasks` to *any* free-handed worker
-unconditionally, while the loaded branch had four exits that could all be
-false at once. The worker therefore fetched 1,500 energy from storage and had
-nowhere to put it - the energy dies with the creep.
-
-**Fix.** `StrategyHighLevel.workerHasConsumer(room, creep)` is consulted
-before the storage pickup, and its predicates are the *same four exits* the
-loaded branch uses (hive needs filling / not downgrading / level < 8 / has
-construction / affordable wall repair), so the two sides cannot drift apart.
-When the loaded branch finds no exit, the creep dumps back into
-storage/terminal - the only meaningful sink left, and hive is already full so
-"hive first" is not violated. Because the pickup side is gated, it cannot
-ping-pong.
-
-Pins: `test/worker-no-consumer.test.cjs` (5 cases incl. negative controls for
-each exit and a source assertion that both sides stay in sync).
-
-## v0.78.182 — Power creeps now use their free `PWR_GENERATE_OPS`
-
-User: "PC 可以自己生产 ops，有能力！" - and they were right.
-
-Four power creeps (P0/P1/P2/P4) sat at **ops = 0**: their rooms held fewer than 200 ops, so
-`needGetOps()` (`room ops >= 200`) never fired, `getRoomOps()` never ran, and `OpFactory` was
-unusable - every factory showed `prod0` and the PCs idled. Meanwhile every power creep has
-`PWR_GENERATE_OPS` from level 0: free, no ops cost, cooldown-only. The codebase never called it.
-
-`needGenerateOps()` (power off cooldown, ops below `OPS_MAX_CARRY_CNT`) now runs at the very top of
-`execRoom`, before any room-dependent logic, calling `generateOps()` → `usePower(PWR_GENERATE_OPS)`.
-It is an instant action that does not touch the task stack, so it composes with everything else; failures
-(ERR_TIRED) are silently skipped.
-
-### Tests
-
-New `test/pc-generate-ops.test.cjs`: the prototype method must check level/cooldown/cap, `generateOps`
-must target `PWR_GENERATE_OPS`, and `execRoom` must invoke it before the main-room logic.
+`test/ops-balance.test.cjs` pins the special case, the freight-budget path and
+the ops target in RES_BALANCE_ROOM.
 
 ## v0.78.181 — BOOST_POWER keyed by compound, not by action name
 

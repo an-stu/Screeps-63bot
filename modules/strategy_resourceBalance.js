@@ -345,6 +345,18 @@ let pro = {
                     sendAble[RESOURCE_ENERGY] = Math.min(eTerminal, surplus, 30000);
                 }
             }
+            // **ops 特例：terminal 存量满格即可发**（2026-11-03 实测）。
+            //
+            // ops 产出自 power creep（全账号 12 只 ≈ 1/tick 量级），3× 门槛
+            // （>9000）实测永不触发——丰房囤在 terminal 3000 cap（W34N52
+            // 双满 6000 卡死、E53S21 8722）、饥房 37~198（低于 PC 施法成本
+            // 100×2 与 needOpPowerSpawn 的 600 门槛），永不调拨。
+            // ops 满格（>= 3000）就算可发，把存量匀给缺 room 的房间，
+            // 发送端 terminal 清空后由 PC 继续慢慢产，自然收敛。
+            if (sendAble[RESOURCE_OPS] === undefined
+                && room.terminal.store[RESOURCE_OPS] >= RES_BALANCE_ROOM[RESOURCE_OPS]) {
+                sendAble[RESOURCE_OPS] = room.terminal.store[RESOURCE_OPS];
+            }
             for (let targetRoom of targetRooms) {
                 for (let resType in sendAble) {
                     // 低能量模式：能量只救 <2 万的饥饿房，不再 50k <-> 50k 互相搬运。
