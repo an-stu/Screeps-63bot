@@ -1,3 +1,30 @@
+## v0.78.182 — A worker with no downstream consumer must not fetch energy
+
+Measured 2026-11-03: in W34N52 and W33N55 two workers carried `energy: 1500`
+with `memory.tasks` permanently `[]`, standing on the same tile for dozens of
+ticks (W33N55 (22,32) ttl 624, W34N52 (37,18) ttl 1045). Both rooms share one
+state: RCL8 (cannot level up), hive full at 12,900, zero construction sites,
+and wall repair blocked by the energy gate (`repairWallAffordable` needs
+storage >= 100,000; W33N55 sat at 87,532).
+
+**Root cause** is a one-sided gate in `workerManagerAfterCarrier`. The empty
+branch handed `StorageCarryEnergyTasks` to *any* free-handed worker
+unconditionally, while the loaded branch had four exits that could all be
+false at once. The worker therefore fetched 1,500 energy from storage and had
+nowhere to put it - the energy dies with the creep.
+
+**Fix.** `StrategyHighLevel.workerHasConsumer(room, creep)` is consulted
+before the storage pickup, and its predicates are the *same four exits* the
+loaded branch uses (hive needs filling / not downgrading / level < 8 / has
+construction / affordable wall repair), so the two sides cannot drift apart.
+When the loaded branch finds no exit, the creep dumps back into
+storage/terminal - the only meaningful sink left, and hive is already full so
+"hive first" is not violated. Because the pickup side is gated, it cannot
+ping-pong.
+
+Pins: `test/worker-no-consumer.test.cjs` (5 cases incl. negative controls for
+each exit and a source assertion that both sides stay in sync).
+
 ## v0.78.181 — BOOST_POWER keyed by compound, not by action name
 
 API-structure bug found during the docs sweep: the engine's `BOOSTS[part][action]`

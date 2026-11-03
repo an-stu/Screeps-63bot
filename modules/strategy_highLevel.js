@@ -177,6 +177,29 @@ let pro = {
             }
         }
     },
+    /**
+     * 本房 worker 取到能量之后**还有没有下家**（2026-11-03）。
+     *
+     * 旧代码给空手 worker **无条件**发「从 storage 取能量」的任务
+     * （`StorageCarryEnergyTasks`），但取完之后有没有活干是另一回事。
+     * RCL8 房在「hive 满 + 0 工地 + 修墙被能量闸挡住（storage 能量低于
+     * `StationDefense.repairWallEnergyFloor`）+ 等级 8 已不能再升级」时，
+     * `workerManagerAfterCarrier` 的四条出路**全不成立** ⇒ 车取满 1,500 能量
+     * 站在原地把 ttl 站完（实测 W33N55 (22,32) 1,500/1,500、W34N52 (37,18)
+     * 1,500/1,500，连续 70+ tick 同一格、`memory.tasks` 恒 []，还会随时间反复出现）。
+     *
+     * 判据与「有货」分支的四条出路**逐条同源**：只改一边就会变成
+     * 「取货有门、卸货无门」或反过来（MEMORY 第 14 条）。
+     */
+    workerHasConsumer(room, creep) {
+        if (!room) return false;
+        if (StationHive.HiveNeedToFill(room)) return true;      // 填 spawn/extension
+        if (room.isDownGrade()) return false;                   // 不能升级，也不该再搬
+        if (room.level < 8) return true;                        // 还能拿去升级
+        let mainRoom = creep && creep.mainRoom ? creep.mainRoom() : room;
+        if (mainRoom && StationWork.constructionNeedBuild(mainRoom)) return true;
+        return !!StationDefense.needBuildWallWorkerFree(room);
+    },
     workerManagerAfterCarrier(room) {
         // worker 核心工作
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
@@ -189,7 +212,8 @@ let pro = {
             if (creep.storeEmpty()) {
                 if (creep.ticksToLive < 80 && creep.memory.needUnboost === undefined) {
                     pro.unboostWorker(room, creep)
-                } else if (StorageCarryEnergyTasks.length > 0) {
+                } else if (StorageCarryEnergyTasks.length > 0 && pro.workerHasConsumer(room, creep)) {
+                    // 没有下家就别去 storage 取：取了只能站着（见 workerHasConsumer）
                     creep.addTask(StorageCarryEnergyTasks)
                 } else if (lowEnergyCarry && lowEnergyCarry.length) {
                     creep.addTask(lowEnergyCarry.pop())
@@ -206,6 +230,11 @@ let pro = {
                 else if (!StationDefense.needBuildWallWorkerFree(room) && room.level < 8) {
                     creep.addTask(StationUpgrade.generatorUpgradeTask(room));
                 }
+                // 兜底出口：RCL8 + 无工地 + 修墙被能量闸挡住 ⇒ 上面四条全不成立，
+                // 载货 worker 会原地站到老死（能量随尸体消失）。倒回 storage/terminal
+                // 是唯一有意义的出口；这里 hive 已经满了，不违反「hive 永远第一」。
+                // 取货侧已被 workerHasConsumer 挡住，所以不会「取—倒」来回打乒乓。
+                if (creep.isFree() && !creep.storeEmpty()) creep.fillAllMainRoomStorage();
             }
         })
     },
