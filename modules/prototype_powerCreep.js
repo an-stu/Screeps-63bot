@@ -259,6 +259,20 @@ PowerCreep.prototype.saveRoomOps = function () {
     }
 }
 
+PowerCreep.prototype.needGenerateOps = function () {
+    // **PWR_GENERATE_OPS：每只 PC 0 级就自带、无消耗、只吃冷却的产 ops 能力。**
+    // 整个代码库此前从未调用过它 —— ops 归零的 PC 全是「所在房 ops < 200、
+    // needGetOps 不成立」才饿死的，而这条本可以一直白产（2026-11-03）。
+    let pw = this.powers[PWR_GENERATE_OPS];
+    if (!pw || pw.cooldown > 0) return false;
+    return (this.store[RESOURCE_OPS] || 0) < OPS_MAX_CARRY_CNT;
+};
+
+PowerCreep.prototype.generateOps = function () {
+    // 瞬时动作：成功即入冷却，失败（ERR_TIRED 等）静默轮空即可，不占任务栈。
+    return this.usePower(PWR_GENERATE_OPS);
+};
+
 PowerCreep.prototype.needGetOps = function () {
     return this.store[RESOURCE_OPS] < OPS_MIN_CARRY_CNT && StationCarry.roomMassStoreCnt(this.mainRoom(), RESOURCE_OPS) >= 200
 }

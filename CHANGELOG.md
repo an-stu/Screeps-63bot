@@ -25,6 +25,25 @@ ping-pong.
 Pins: `test/worker-no-consumer.test.cjs` (5 cases incl. negative controls for
 each exit and a source assertion that both sides stay in sync).
 
+## v0.78.182 — Power creeps now use their free `PWR_GENERATE_OPS`
+
+User: "PC 可以自己生产 ops，有能力！" - and they were right.
+
+Four power creeps (P0/P1/P2/P4) sat at **ops = 0**: their rooms held fewer than 200 ops, so
+`needGetOps()` (`room ops >= 200`) never fired, `getRoomOps()` never ran, and `OpFactory` was
+unusable - every factory showed `prod0` and the PCs idled. Meanwhile every power creep has
+`PWR_GENERATE_OPS` from level 0: free, no ops cost, cooldown-only. The codebase never called it.
+
+`needGenerateOps()` (power off cooldown, ops below `OPS_MAX_CARRY_CNT`) now runs at the very top of
+`execRoom`, before any room-dependent logic, calling `generateOps()` → `usePower(PWR_GENERATE_OPS)`.
+It is an instant action that does not touch the task stack, so it composes with everything else; failures
+(ERR_TIRED) are silently skipped.
+
+### Tests
+
+New `test/pc-generate-ops.test.cjs`: the prototype method must check level/cooldown/cap, `generateOps`
+must target `PWR_GENERATE_OPS`, and `execRoom` must invoke it before the main-room logic.
+
 ## v0.78.181 — BOOST_POWER keyed by compound, not by action name
 
 API-structure bug found during the docs sweep: the engine's `BOOSTS[part][action]`

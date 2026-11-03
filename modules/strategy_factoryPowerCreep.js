@@ -47,6 +47,9 @@ let pro = {
             pc.spawnPowerCreep(room.powerSpawn, "OPF", flag.pos.roomName)
         }
         if (!pc.ticksToLive) return;
+        // **先把免费的 ops 生成用了**（瞬时、不占任务栈）：ops 归零的 PC 多半
+        // 就是因为所在房 ops < 200、needGetOps 永远轮不到，而 GENERATE_OPS 本可白产。
+        if (pc.needGenerateOps()) pc.generateOps();
         let mainRoom = pc.mainRoom();
         if (!mainRoom) return;
         // 工厂卡在 produce + !powered 时，PC 可能正停在 goToNearPop（停车）上，
