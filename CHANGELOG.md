@@ -1,3 +1,32 @@
+## v0.78.184 — `BOOST_POWER` was built from the wrong layer order (keyed by action, not compound)
+
+The systematic re-audit of recent modifications caught a second bug of the same family as
+the GENERATE_OPS index bug: **`da232e1` did not actually fix the boost NaN**.
+
+The engine's real structure (dumped from shard3) is
+
+    BOOSTS[part][compound] = { action: mult }   e.g.  BOOSTS.work.UO = { harvest: 3 }
+
+- compound on the **second** layer, action on the third. The comment in `prototype_creep.js`
+  claimed the opposite (`[part][action][compound]`), so the inversion loop walked the tree the
+  same wrong way and produced a map keyed by **action name** (`harvest: 7`, `damage: 0.3`, ...) -
+  while every consumer looks up by **compound** (`part.boost`, 'XUHO2' etc). Boosted creeps
+  therefore still evaluated to NaN/1 in `getHitsNextTick`, `possibleDamage*`,
+  `possibleHealHoldRealDamage` - the exact bug `da232e1` claimed to fix.
+
+The old test passed only because its fixture used the same wrong layer order - a test that
+mirrors a wrong assumption proves nothing. It now uses the engine's real shape.
+
+Verified against the live engine: each compound's multiplier is consistent across all its
+actions (30 compounds, zero conflicts - UO:3, XLH2O:1.8, XGHO2:0.3, ...), so a flat
+`compound -> mult` map is correct.
+
+### Tests
+
+`boost-power.test.cjs` rewritten with the real layer order: compound lookups (XUH2O=4,
+XGHO2=0.3, XKH2O=150...), action names must NOT be keys, full compound coverage, and a
+multi-action compound (LO: heal + rangedHeal, same mult) to pin the flat-map safety.
+
 ## v0.78.183 — The 10-24 review fix inverted the GENERATE_OPS level indexing
 
 Full picture of the ops starvation (user: "PC 可以自己生产 ops"):

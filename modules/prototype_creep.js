@@ -873,19 +873,22 @@ Creep.prototype.autoHeal = function () {
 /** 基础攻击力 */
 const BODY_POWER = { [WORK]: DISMANTLE_POWER, [RANGED_ATTACK]: RANGED_ATTACK_POWER, [ATTACK]: ATTACK_POWER, [HEAL]: HEAL_POWER }
 /**
- * Boost 对应的倍数：**化合物名 → 倍率**。
+ * Boost 倍率表：**化合物名 → 倍率**。
  *
- * 引擎结构是 `BOOSTS[部件][动作] = {化合物: 倍率}`（三层），把内两层反转成
- * 按化合物查——所有调用方手里的都是 `part.boost` 化合物名（'XGHO2' 等）。
- * 原实现 `_.values(e[1]).head()` 取的是每个动作表里**第一个化合物**的倍率、
- * 键却是动作名 —— 用化合物名查询永远 undefined，对强化爬的伤害估算
- * （getHitsNextTick / possibleDamage 系 / possibleHealHoldRealDamage）全是
- * NaN。只影响强化目标：invader / keeper 无 boost（undefined || 1 = 1），
- * 所以和平期一直没炸，战斗对上强化单位就全瞎。
+ * ⚠️ 引擎真实结构是 `BOOSTS[部件][化合物] = {动作: 倍率}` —— **化合物在第二层、
+ * 动作在第三层**（实测 shard3：BOOSTS.work.UO = {harvest:3}、BOOSTS.tough.XGHO2 =
+ * {damage:0.3}）。旧注释写成了 [部件][动作][化合物]，按那个顺序遍历建出来的表
+ * 键是**动作名**（harvest/build/…），而所有消费端都拿 `part.boost`（化合物名，
+ * 'XUHO2' 等）查询 ⇒ 永远 undefined ⇒ 强化爬伤害/承伤估算全是 NaN
+ * （da232e1 想修的正是它，但 fixture 也用了相反层级，测试通过、线上没修到）。
+ *
+ * 实测（2026-11-03，shard3）：同一化合物跨动作的倍率完全一致（30 个化合物零冲突：
+ * UO:3、XLH2O:1.8、XGHO2:0.3…），所以按化合物建平面表是安全的。
  */
 const BOOST_POWER = {};
-_.values(BOOSTS).forEach(partMap => _.values(partMap).forEach(actionMap =>
-    Object.entries(actionMap).forEach(([compound, mult]) => { BOOST_POWER[compound] = mult; })));
+_.keys(BOOSTS).forEach(part => _.keys(BOOSTS[part]).forEach(compound => {
+    BOOST_POWER[compound] = _.values(BOOSTS[part][compound]).head() || 1;
+}));
 
 
 /**
