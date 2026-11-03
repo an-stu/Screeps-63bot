@@ -1,3 +1,27 @@
+## v0.78.185 — ship the four fixes that never reached the live branch
+
+The live branch was running a build assembled from **older revisions** while
+still reporting `version: 0.78.182`. Module-by-module comparison against every
+commit in `HEAD`'s history showed each differing live module to be byte-identical
+to an ancestor (nothing live-only to preserve), but five modules were behind:
+
+    module                        live ==   missing change
+    prototype_creep               23c8e7b   BOOSTS layer order (474620f)
+    prototype_powerCreep          89a9698   needGenerateOps / generateOps
+    manager_creeps                3051379   GENERATE_OPS level clamp (23c8e7b)
+    strategy_highLevel             da232e1   workerHasConsumer gate
+    strategy_factoryPowerCreep    89a9698   free GENERATE_OPS before the task stack
+
+Live confirmation of the GENERATE_OPS one: precisely the five **level-5** PCs
+(P0/P1/P2/P4/P8) had `PWR_GENERATE_OPS.cooldown == 0` (never cast) while every
+level-4 PC had a live cooldown (3–37) — `effect[level]` reads `effect[5]` =
+undefined for level 5, so the cast was skipped forever. Cooldowns were checked
+again after the deploy and all twelve PCs cycle.
+
+No source change beyond the version string: this release exists so the payload
+that goes over the live branch is traceable (same version number must never mean
+two different builds).
+
 ## v0.78.182 — ops redistribution: terminal-full rooms may ship (the 3× gate never fired)
 
 User: OP 相关出现问题.
