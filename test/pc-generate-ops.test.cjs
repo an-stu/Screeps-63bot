@@ -27,4 +27,11 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/
     assert.ok(genIdx < spawnIdx, "白嫖 ops 要发生在主房逻辑之前（越早越好，且不依赖房间）");
 }
 
+// ── manager_creeps 的按档产量必须夹住数组下标（两次踩坑：-1 与 +1 都炸过）──────
+{
+    const mcCode = strip(fs.readFileSync(path.join(root, "modules", "manager_creeps.js"), "utf8"));
+    assert.ok(/effect\[Math\.min\(pcPower\.level, POWER_INFO\[PWR_GENERATE_OPS\]\.effect\.length - 1\)\]/.test(mcCode),
+        "manager_creeps 的产量下标必须 clamp（effect[level-1] 与 effect[level] 都曾越界）");
+}
+
 console.log("pc generate ops checks passed");

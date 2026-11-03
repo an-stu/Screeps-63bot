@@ -1,3 +1,28 @@
+## v0.78.183 — The 10-24 review fix inverted the GENERATE_OPS level indexing
+
+Full picture of the ops starvation (user: "PC 可以自己生产 ops"):
+
+    POWER_INFO[PWR_GENERATE_OPS] = { level:[0,2,7,14,22], cooldown:50, effect:[1,2,4,6,8] }
+    GENERATE_OPS levels: P1/P2/P4/P0/P8 = 5,  the other seven = 4
+
+History of `manager_creeps.powerCreepsGenerateOps`:
+
+- original `effect[level-1]`: level 4 → 6, level 5 → 8 - **correct for everyone we have**;
+- the 10-24 "66 findings" review commit (97620cc) changed it to `effect[level]` "so level 0 can
+  generate" - but that made **level 5 read `effect[5]` = undefined**, `freeCap >= undefined` is always
+  false, and ops generation silently died for every level-5 PC.
+
+That is exactly the observed split: the five level-5 PCs (P0/P1/P2/P4/P8) were at ops 0-102 while the
+seven level-4 PCs (P3/P5/P6/P7/P9/P10/P11) kept healthy 700-1900 stores. The 10-24 commit swapped one
+off-by-one for another.
+
+`opsCnt` is now `effect[Math.min(level, effect.length - 1)]` - every level gets its current tier
+(8 ops for level 5), and v0.78.182's `execRoom` backstop stays as a second line.
+
+### Tests
+
+`pc-generate-ops` case: the manager index must be clamped.
+
 ## v0.78.182 — A worker with no downstream consumer must not fetch energy
 
 Measured 2026-11-03: in W34N52 and W33N55 two workers carried `energy: 1500`

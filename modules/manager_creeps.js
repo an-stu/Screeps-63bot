@@ -54,10 +54,14 @@ let pro={
         pro.getAllAlivePowerCreeps().forEach(pc=>{
             let pcPower = pc.powers[PWR_GENERATE_OPS]//
             if(pcPower&&!pcPower.cooldown){
-                // effect 数组与 level 平行（0~4），level 0 也要能产 ops：
-                // 原来用 level-1，level 0 取 effect[-1] 为 undefined，
-                // `freeCap >= undefined` 恒 false —— 该 PC 永远不产 ops。
-                let opsCnt = POWER_INFO[PWR_GENERATE_OPS].effect[pcPower.level]
+                // effect 数组与 level 平行（0~4）：[1,2,4,6,8]，cooldown 固定 50。
+                // 两次踩坑记录：
+                //   · 原始 `effect[level-1]`：level 0 取 effect[-1] = undefined ⇒ 该 PC 永不产 ops；
+                //   · 10-24 的审查修复改成 `effect[level]`：**level 5 取 effect[5] = undefined**，
+                //     恰好杀死了所有 5 级 PC（实测 4 只 5 级 PC ops=0、4 级的 7 只一直正常）。
+                // 正确写法：按数组长度夹住下标，任何等级都能取到当档产量。
+                let opsCnt = POWER_INFO[PWR_GENERATE_OPS]
+                    .effect[Math.min(pcPower.level, POWER_INFO[PWR_GENERATE_OPS].effect.length - 1)]
                 let freeCap = pc.store.getFreeCapacity(RESOURCE_OPS)
                 if(freeCap>=opsCnt){
                     pc.usePower(PWR_GENERATE_OPS)
