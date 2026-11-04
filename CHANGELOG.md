@@ -1,3 +1,35 @@
+## v0.78.187 — a room that dropped to one carrier could not replace it for 175 ticks
+
+`trySpawnCarrier` keeps a rolling utilisation sample (`carryBusy` = the *number* of busy
+carriers per economy pass) and the last replenish gate requires
+`avgBusy > 0.85 * carriers on the roster`. At `n = 1` that gate is unreachable by construction:
+a lone carrier alternates 0/1 samples (between economy passes it has no task to run), so its
+mean settles around 0.69 < 0.85 and the routine path never fires again.
+
+The only remaining exit was "hive deficit + `(Game.time + hashCode) % 25 == 0` aligned with the
+room's economy slot". The slot is `% 7`, so the two phases line up once every `lcm(7,25) = 175`
+ticks - which is exactly the 150-tick spawn time of a 50-part carrier. Net effect: lose a
+carrier, run at half hauling capacity for ~3 minutes.
+
+Live evidence (E53S21, tick 84061017-84061170, RCL8, 3 idle spawns, 4 links, 2 sources):
+storage at 0, both source containers at their 2,000 cap, **ground energy 4,878 -> 7,129
+(+28/tick, exactly the room's mining income)** while the other 13 rooms had zero on the floor.
+The lone carrier's utilisation mean measured 0.692. Replacement only started spawning at
+84061170, 153 ticks after the loss.
+
+Fix: `haulerSaturated = carrierCnt <= 1 || avgBusy > alive * 0.85`. A single carrier is a
+single point of failure for the whole room economy and utilisation cannot be measured on n=1,
+so replenish to `carrierTarget` unconditionally. The target still caps it, and
+`creeps(role, false)` counts creeps already spawning, so one loss yields at most one
+replacement - no ratchet.
+
+### Tests
+
+New `test/carrier-single-replenish.test.cjs`: one carrier at 0.69 utilisation must spawn;
+negative controls at target-2 (same low mean), unaffordable body (energy 1,200 < 2,500),
+over-target (3 > 2) must not; hive-full + one carrier still replenishes; source assertion keeps
+the raw `avgBusy > 0.85 * roster` expression out of the gate.
+
 ## v0.78.186 — The terminal-50k balance rule drained every room's storage to zero
 
 Census (tick 84060600): all **14 storages at 0 or exactly 776** while terminals held 2k-40k

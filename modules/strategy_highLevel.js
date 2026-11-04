@@ -637,10 +637,27 @@ let pro = {
             room.memory.carryBusy.push(0)
             return;
         }
+        // **「运力打满」这条判据在只剩 1 只时必须自动放行**，否则这条唯一的
+        // 常规补员路径永久不可达（MEMORY 第 4 条：闸门自锁）。
+        //
+        // `carryBusy` 记的是「忙碌只数」的**绝对数**，阈值 0.85×在册只数；
+        // 单只车的样本只有 0/1 两值（两次经济 pass 之间它本来就得等下一批任务），
+        // 均值实测 0.692 < 0.85 ⇒ 房一旦掉到 1 只，这里再也不会进。
+        // 剩下的出口只有上面「hive 缺口 + (t+hash)%25 撞上本房经济槽」那条，
+        // 而经济槽是 %7 ⇒ lcm(7,25)=175 tick 才凑巧对上一次，恰好等于一只
+        // 50 部件车的孵化时间 150 tick：等于「死一只 → 半运力空转 3 分钟」。
+        //
+        // 2026-11-04 E53S21 实地：carrier 只剩 1 只，storage 归零、两个源容器各
+        // 2,000 满、地面能量 4.9k→7.1k（+28/tick，正好是全房采矿收入），一直等到
+        // %25 相位凑上才补出第 2 只。单只 = 整房经济的单点故障，n=1 时利用率
+        // 量不出「够不够」，只能无条件补到编制（编制本身仍由 carrierTarget 封顶，
+        // 且 `creeps(role, false)` 把孵化中的算进编制 ⇒ 不会连环刷）。
+        let aliveCarrierCnt = carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length;
+        let haulerSaturated = carrierCnt <= 1 || avgBusy > aliveCarrierCnt * 0.85;
         if ((carrierCnt <= 0 && (room.storage.store[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
             carrierCnt < carrierTarget &&
             !(StationHive.HiveNeedToFill(room) && room.energyAvailable < carrierBodyMinEnergy) &&
-            avgBusy > carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length * 0.85)) {
+            haulerSaturated)) {
             spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)))
         }
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
