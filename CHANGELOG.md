@@ -1,3 +1,21 @@
+## v0.78.189 — Energy buy orders for RCL<8 upgrading rooms (target 300k, competitive price)
+
+User: RCL<8 房间购买能量升级，挂单。
+
+`autoBuyLowRclEnergy` had two blockers that prevented it from working:
+1. Target 100k: W26N58 already had 108k total (terminal 10k + storage 98k)
+   → `energyCnt >= target` → skipped. An actively upgrading RCL6 room burns
+   20+/tick, so 100k only lasts 5000 ticks. The target is now **300k** for
+   RCL<8 rooms with `progress < progressTotal`.
+2. Price 27.79 (below market sell-low 33.26): a buy order priced below the
+   cheapest sell order sits unfilled forever. The price now tracks
+   `max(maxBuy × 1.05, sellLow × 1.02)` - competitive enough to fill quickly.
+   Credits (83.8B) far exceed the 5M gate.
+
+Room filter tightened: only RCL<8 rooms with `progress < progressTotal`
+(actively upgrading) get the 300k target; RCL8 rooms still use the 50k
+threshold for rescue buys.
+
 ## v0.78.188 — Power creeps run every tick (no throttle)
 
 User: PC 部分功能应该提前落位，OpSource 尽可能无缝衔接不浪费，没必要 2t 走一步，

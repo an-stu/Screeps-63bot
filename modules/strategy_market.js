@@ -574,7 +574,7 @@ let pro = {
     autoBuyLowRclEnergy() {
         if (Game.market.credits < 5000000) return;
         // 覆盖两类房间：
-        //  1) RCL<8 的升级房
+        //  1) RCL<8 且还在升级中的房间（progress < total）
         //  2) RCL8 但存量能量见底（<50k）的停摆房
         //  3) 任何还挂着 energy buy 单的房间——必须纳入管理，才能把
         //     恢复后或升级后的旧单撤销/缩小，防止遗留巨单继续吃信用点。
@@ -582,19 +582,30 @@ let pro = {
             .filter(o => o.remainingAmount > 0 && o.resourceType == RESOURCE_ENERGY && o.type == ORDER_BUY)
             .map(o => o.roomName));
         let rooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.terminal
-            && (e.level < 8 || StationCarry.roomMassStoreCnt(e, RESOURCE_ENERGY) < 50000
+            && ((e.level < 8 && e.controller && e.controller.progress < e.controller.progressTotal)
+                || StationCarry.roomMassStoreCnt(e, RESOURCE_ENERGY) < 50000
                 || energyOrderRooms.has(e.name)));
         if (!rooms.length) return;
         let buyOrders = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_BUY);
         let maxBuy = buyOrders.length ? buyOrders.maxBy(e => e.price).price : 0;
         let avg = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
-        // 低 RCL 加速升级也要控制信用点消耗：目标 10 万即可，价格不超过历史
-        // 均价 1.5 倍（此前 300k 目标 + 最高买价跟价导致信用点快速流失）。
-        let desiredPrice = Math.max(avg, Math.min(maxBuy * 1.05, avg * 1.5));
+        // 挂单价要有竞争力才有人卖给你：跟到最高买价 × 1.05 或最低卖价 × 1.02，
+        // 取较高者——低于最低卖价的买单会永远挂着没人理。
+        // 信用点 83.8B 远超门槛，能量才是升级瓶颈。
+        let sellLow = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_SELL)
+            .filter(o => o.amount > 0)
+            .reduce((min, o) => Math.min(min, o.price), Infinity);
+        let desiredPrice = Math.max(
+            Math.max(maxBuy * 1.05, isFinite(sellLow) ? sellLow * 1.02 : 0),
+            avg);
+        // **RCL<8 升级中房间 target = 300k**（用户 11-04：能量买来升级）。
+        // 原来 100k target 在 W26N58 有 108k 时直接跳过（108000 >= 100000）
+        // ——升级中的房间能量消耗速率 20+/tick，100k 只够 5000 tick，
+        // 必须持续补货才能维持 upgrader 编制。
         rooms.forEach(room => {
-            // E53S21 在 RCL7 冲刺期需要 80 万能量缓冲；升到 RCL8 后恢复
-            // 100k 目标，避免继续用信用点囤积不再需要的能量。
-            let target = room.name === "E53S21" && room.level < 8 ? 800000 : 100000;
+            let activelyUpgrading = room.level < 8 && room.controller
+                && room.controller.progress < room.controller.progressTotal;
+            let target = activelyUpgrading ? 300000 : (room.name === "E53S21" && room.level < 8 ? 800000 : 100000);
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
             let orders = _.values(Game.market.orders).filter(e => e.remainingAmount > 0
                 && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);
