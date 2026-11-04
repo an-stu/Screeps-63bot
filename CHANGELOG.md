@@ -1,3 +1,30 @@
+## v0.78.186 — The terminal-50k balance rule drained every room's storage to zero
+
+Census (tick 84060600): all **14 storages at 0 or exactly 776** while terminals held 2k-40k
+(total storage+terminal 358k, down from ~940k two days ago). Walls stopped repairing
+(`repairWallEnergyFloor=100k`), power burning stopped (`powerSpawnEnergy=100k`), and rooms
+had zero buffer - though hives stayed full so nothing deadlocked.
+
+Cause: `balanceTerminalResource` moves energy between storage and terminal until the terminal
+holds exactly `RES_BALANCE_ROOM[ENERGY] = 50000` - a target meant for RCL8 market rooms, applied
+to every room. A low-RCL room (W26N58, RCL6, income barely above its upgrader) can never sustain
+a 50k terminal, so the rule hauled the storage's last energy into the terminal and left it there.
+The pre-loop then deletes ENERGY from the balance list (storage empty, nothing to move), so it
+never self-corrects.
+
+Two changes in `balanceTerminalResource`:
+
+1. **energy reverse rescue**: if storage < 50k AND storage < terminal, haul terminal → storage
+   (amount = min(tE-sE, tE/2, carrier free space)) before the normal gate scan.
+2. **no storage→terminal drain**: for energy with `resCount > 0` (terminal below target) and
+   storage < 100k, drop ENERGY from the balance list instead of hauling - the terminal→storage
+   refill direction still works, and RCL8 market rooms with real surplus are unaffected.
+
+### Tests
+
+New `test/energy-balance-direction.test.cjs`: reverse rescue exists and lands on storage,
+storage→terminal blocked below 100k, terminal→storage refill preserved, ops special case intact.
+
 ## v0.78.185 — ship the four fixes that never reached the live branch
 
 The live branch was running a build assembled from **older revisions** while

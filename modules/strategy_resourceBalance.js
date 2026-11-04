@@ -66,6 +66,30 @@ Creep.prototype.balanceTerminalResource = function () {
     let needBalance = pro.resRoomBalanceCache[this.room.name];
     let resTypes = _.keys(needBalance) // 从小到大排序
         .sort((a, b) => (this.room.terminal.store[a] || 0) - (this.room.terminal.store[b] || 0));
+    // **能量反向急救**（2026-11-04）：
+    // 下面「terminal 归位 5 万」的内部平衡会把 storage 的最后一格能量也灌进
+    // terminal —— 实测 14 个房 storage 全部清空（4 个房同值 776），墙体停修
+    // （repairWallEnergyFloor=100k）、power 烧制停摆（powerSpawnEnergy=100k）、
+    // 房间完全没有缓冲。storage 见底（<5 万）且比 terminal 还少 ⇒ 先把 terminal
+    // 的能量反向搬回 storage，把房间自己的缓冲填起来；本轮只干这一件事，
+    // 其它资源的内部平衡下一轮再说。RCL8 市场房（storage 富余）不受影响。
+    let sE = this.room.storage ? (this.room.storage.store[RESOURCE_ENERGY] || 0) : 0;
+    let tE = this.room.terminal.store[RESOURCE_ENERGY] || 0;
+    let energyReverse = sE < 50000 && sE < tE;
+    if (energyReverse && this.ticksToLive > 30 && this.store.getResTypeList().length == 0
+        && this.room.storage) {
+        let amount = Math.min(tE - sE, Math.floor(tE / 2), this.store.getFreeCapacity(RESOURCE_ENERGY));
+        if (amount > 0) {
+            this.addTask([
+                UtilsTask.task(this.room.storage, "fillRes", undefined,
+                    { resType: RESOURCE_ENERGY, resCount: amount }),
+                UtilsTask.task(this.room.terminal, "carryRes", undefined,
+                    { resType: RESOURCE_ENERGY, resCount: amount }),
+            ]);
+            this.execLastTask();
+            return;
+        }
+    }
     while (resTypes.head()) {
         let resType = resTypes.head()
         let resCnt = RES_BALANCE_ROOM[resType] || RES_HOLD_ROOM[resType];
@@ -81,6 +105,14 @@ Creep.prototype.balanceTerminalResource = function () {
     let resType = resTypes.head();
     if (resType && this.ticksToLive > 30 && this.store.getResTypeList().length == 0) {
         let resCount = (RES_BALANCE_ROOM[resType] || RES_HOLD_ROOM[resType]) - (this.room.terminal.store[resType] || 0)
+        // **storage 不许向 terminal 灌能量**（除非 storage ≥10 万真有富余）：
+        // 2026-11-04 实测这条把 14 个房的 storage 灌到 0 —— terminal 的 5 万
+        // 交易备火是 RCL8 市场房的需求，低 RCL 房的 storage 缓冲比它重要。
+        // （terminal → storage 的回填方向不受影响，照常工作。）
+        if (resType == RESOURCE_ENERGY && resCount > 0 && sE < 100000) {
+            delete needBalance[RESOURCE_ENERGY];
+            return;
+        }
         let ops = {
             resType: resType,
             resCount: resCount > 0 ? resCount : -resCount
