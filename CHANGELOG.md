@@ -1,3 +1,17 @@
+## v0.78.188 — Power creeps run every tick (no throttle)
+
+User: PC 部分功能应该提前落位，OpSource 尽可能无缝衔接不浪费，没必要 2t 走一步，
+正常 1t 一步。
+
+The 3-tick throttle (0.78.148→182) made PC movement 1/3 speed. For
+PWR_REGEN_SOURCE (cd 100, wait 50): a 20-tile walk took 60 real ticks at 1/3
+speed but only 50 were available → **~10-tick buff gap per handover** (REGEN
+coverage <97% on W26N59). Now POWER_CREEP_TICK_INTERVAL = 1: full-speed
+movement, seamless handover.
+
+CPU cost: ~0.85/tick for 12 PCs (mostly cooldown checks + cached moveTo).
+The seamless 2× source regen (+10/tick/source) far outweighs this.
+
 ## v0.78.187 — a room that dropped to one carrier could not replace it for 175 ticks
 
 `trySpawnCarrier` keeps a rolling utilisation sample (`carryBusy` = the *number* of busy

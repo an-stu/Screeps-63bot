@@ -4,22 +4,19 @@ Logger.info("Script reload", "bucket", Game.cpu.bucket, "version", RUNTIME_PROFI
 const CPU_PROFILE_INTERVAL = 97;
 const OPTIONAL_CPU_OFFSETS = {marketAutoBuy:19, autoPlanner:7, visual:3};
 /**
- * Power creep 每隔几 tick 才执行一次 task。
+ * Power creep 每 tick 执行（0.78.184 取消节流）。
  *
- * 它们的 task 绝大多数时间都在等技能冷却（`PWR_OPERATE_FACTORY` 是 800 tick
- * 量级），每 tick 跑一遍纯属浪费 —— 遥测里 `power:OPF` 实测 **1.04 CPU/tick**
- * （12 只 × ~0.09），而且这条路径**连 bucket ≤ 40 的极低桶保护都不跳过**
- * （见下面 `isSaveCpu` 分支），也就是最缺 CPU 的时候照样吃满。
+ * 历史：最初隔 tick 执行省 ~0.5 CPU/tick（12 只 × ~0.04/次），后来加到 3。
+ * 但 3-tick 节流让 PC 移动速度降到 1/3 —— PWR_REGEN_SOURCE 的 PC 从
+ * powerSpawn 走到 source（~20 格）需要 60 real tick，而 OP_SOURCE_WAIT_TIME
+ * 只给了 50 tick 的提前量 ⇒ **每次换代必然 ~10 tick 的 buff 空档**（实测
+ * W26N59 双源的 REGEN 覆盖率 <97%）。用户 11-03：PC 应满速移动、无缝衔接。
  *
- * 隔 tick 执行：技能最多晚 1 tick 触发（冷却期内本来就无事可做），
- * power creep 移动速度减半（它们不赶时间），省下约 0.5 CPU/tick。
- * `ROLE_PRIORITY` 那套只过滤普通爬，power creep 不在其中，所以必须单独判。
- *
- * 0.78.148：间隔 2 → 3。线上 power:OPF 仍有 ~1.0 CPU/tick，技能最短冷却
- * （GENERATE_OPS ~50、其余 300~800+）都远大于 3 tick，晚 2 tick 触发无感；
- * 烧 power 的 credit 配速按效果窗口剩余 tick 摊薄，本身会自校正。
+ * 取消节流的 CPU 代价：12 只 PC 每 tick 跑一遍 ≈ 0.85 CPU/tick（含移动+
+ * 冷却检查）。PWR_REGEN_SOURCE 的 2× 源产（+10/tick/源）远超此开销。
+ * 技能冷却期间 PC 只做冷却检查 + moveTo（引擎内置路径缓存），CPU 开销可控。
  */
-const POWER_CREEP_TICK_INTERVAL = 3;
+const POWER_CREEP_TICK_INTERVAL = 1;
 function shouldRunPowerCreeps() {
     return Game.time % POWER_CREEP_TICK_INTERVAL == 0;
 }

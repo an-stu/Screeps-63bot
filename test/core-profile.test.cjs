@@ -218,8 +218,8 @@ assert.ok(stationUpgrade.includes("room.creeps(\"upgrader\", false).length == 0"
     "the spawn gate must still spawn when a room has no upgrader at all");
 assert.ok(main.includes("Game.cpu.bucket >= 6000") && !main.includes("plannerAverage <"), "auto planner must stay enabled above the bucket safety floor");
 assert.ok(main.includes("health.autoPlanner"), "auto planner CPU must be measured online");
-assert.ok(main.includes("POWER_CREEP_TICK_INTERVAL = 3") && main.includes("function shouldRunPowerCreeps()"),
-    "power creeps must be throttled to every 3rd tick: 12 of them measured 1.04 CPU/tick while their tasks only wait on skill cooldowns (all >= 50, most 300-800), and even every-2nd-tick still cost ~1.0 CPU/tick online; the bucket<=40 emergency path used to run them unthrottled");
+assert.ok(main.includes("POWER_CREEP_TICK_INTERVAL = 1") && main.includes("function shouldRunPowerCreeps()"),
+    "power creeps must run every tick (0.78.184): the 3-tick throttle made PC movement 1/3 speed, causing ~10-tick buff gaps in REGEN_SOURCE handover (walk 20 tiles takes 60 real ticks at 1/3 speed but OP_SOURCE_WAIT_TIME only gives 50). The ~0.85 CPU/tick cost is justified by +10/tick/source from seamless 2x regen coverage");
 {
     const powerExec = (main.match(/HelperError\.runEach(?:Profiled)?\(objects\.powerCreeps/g) || []).length;
     const guarded = (main.match(/shouldRunPowerCreeps\(\)\) HelperError\.runEach(?:Profiled)?\(objects\.powerCreeps/g) || []).length;
