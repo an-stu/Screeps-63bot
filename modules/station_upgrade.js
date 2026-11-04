@@ -450,6 +450,18 @@ let pro = {
         let upgradeFlag = room.flags("upgrade").head()
 
         let checkGCL = () => (Game.shard.name.startsWith("shard") || Game.gcl.level < MAX_GCL)
+        // **RCL<8 动态 upgrader 数量**（用户 11-03：RCL 升级太慢）。
+        //
+        // 原公式 `/ 1000000` 只对 RCL8（1M storage）有意义——RCL6 的 55k
+        // storage 算出 0.03，永远只出 1 只。参考 Overmind upgradeSite.ts 的
+        // `energyPerBodyUnit = 10000`（每 10k 盈余加 1 个 WORK 部件），
+        // RCL6 的 upgrader 体型 ~7 WORK ⇒ 每只 ~7 万盈余；但 7 万只出 1 只
+        // 还是太保守（用户要的是"快"），取 30000（≈ Overmind 10000 × 3 WORK
+        // 的最小组装粒度）。RCL<8 的 storage 正常区间是 5~15 万：
+        // 55k ⇒ 2 只、100k ⇒ 3 只、150k ⇒ 4 只，随能量盈余动态伸缩。
+        // RCL8 仍走下面那条 1M 分支（行为不变）。
+        // trySpawnUpgrader 会把体型收缩到本 tick 付得起，不会抽干 hive。
+        let upgradeDivisor = room.level < 8 ? 30000 : 1000000;
         if (room.level < 8 || !room.storage) {
             let minUpgraderCnt = 0;
             if (upgradeFlag || (upgradeFlag && room.terminal && room.terminal.my)) {
@@ -476,7 +488,7 @@ let pro = {
                 spawn()
             else if (WHO_AM_I == "an_w" && minUpgraderCnt > room.creeps("upgrader", false).length)
                 spawn()
-            else if (((room.storage.store[RESOURCE_ENERGY] - (room.level - 3.5) * 10000) / 1000000 > room.creeps("upgrader", false).length)
+            else if (((room.storage.store[RESOURCE_ENERGY] - (room.level - 3.5) * 10000) / upgradeDivisor > room.creeps("upgrader", false).length)
                 || room.controller.ticksToDowngrade < 500
                 || (room.storage.store[RESOURCE_ENERGY] > 10000 && minUpgraderCnt > room.creeps("upgrader", false).length))
                 spawn()

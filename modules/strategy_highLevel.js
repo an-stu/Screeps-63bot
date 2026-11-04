@@ -74,14 +74,17 @@ let pro = {
             && room.energyAvailable < Math.min(2500, room.energyCapacityAvailable * 0.5)) return;
         // 本房根本没能量可花 → 不生 worker（见 WORKER_ENERGY_FLOOR 的说明）
         if (!pro.workerHasEnergyToSpend(room)) return;
-        let spawnWorker = () => {
+        // **修墙爬不强化**（用户 11-03：修墙不需要满 boost，CPU 足够时用非 boost 爬，
+        // 参考 Overmind —— 常规工地/修墙是后台工作，boost 化合物留给战斗与 upgrade
+        // 高价值场景）。只有 isSaveCpu（少爬多活降 CPU）时才走强化路径。
+        let spawnWorker = (noBoost) => {
             // 体型按「本 tick 付得起」定（见 spawnTickBudget）：按满容量算的体型在
             // hive 未满时会被 trySpawn 静默吞掉，还会把 spawnFailure 置真挡住后面的
             // carrier / 外矿补员。
             let body = StationWork.getMiddleLevelWorkerBodyConfig(room, pro.spawnTickBudget(room));
             let partCnt = body.filter(e => e == WORK).length;
-            let boostLevel = global.StationLab ? StationLab.boostAbleLevel(room, "build", partCnt, 1) : -1;
-            let isBoost = room.creeps("carrier").length && boostLevel >= 0;
+            let boostLevel = noBoost ? -1 : (global.StationLab ? StationLab.boostAbleLevel(room, "build", partCnt, 1) : -1);
+            let isBoost = !noBoost && room.creeps("carrier").length && boostLevel >= 0;
             if (LOCAL_SHARD_NAME == "6g3y-station") isBoost = false
             let task = []
             if (isBoost) task = StationLab.generatorBoostLevelTask(room, "build", partCnt, boostLevel)
@@ -121,11 +124,10 @@ let pro = {
             }
         } else if (StationDefense.needBuildWall(room) && !MIN_CPU) {//如果需要修墙
             if (room.level < 8 && (noWorker || EnergyOver)) { // 8前优先修墙，但受维修编制上限约束
-                spawnWorker();
+                spawnWorker(true); // 修墙不强化（CPU 足够时用非 boost 爬）
             } else if (((room.storage.store[RESOURCE_ENERGY] > 180000) && noWorker) || EnergyOver) {
                 if (isSaveCpu) spawnHighLevelWorker();
-                else spawnWorker();
-                // spawnWorker();
+                else spawnWorker(true); // 修墙不强化
             }
         }
 
