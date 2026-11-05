@@ -446,7 +446,7 @@ let pro = {
             for (let creep of emptyPool) {
                 if (!availableLoads.length) break;
                 let capacity = creep.store.getCapacity(RESOURCE_ENERGY);
-                let sourceIndex = availableLoads.findIndex(source => source.partial ? source.amount > 0 : source.amount > 200);
+                let sourceIndex = availableLoads.findIndex(source => source.partial ? source.amount > 0 : source.amount > capacity * 0.5);
                 if (sourceIndex < 0) continue;
                 availableLoads.splice(sourceIndex, 1);
                 creep.addTask(UtilsTask.task(creep, "carryEnergyAuto"));
