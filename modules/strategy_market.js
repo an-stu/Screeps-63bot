@@ -598,14 +598,14 @@ let pro = {
         let desiredPrice = Math.max(
             Math.max(maxBuy * 1.05, isFinite(sellLow) ? sellLow * 1.02 : 0),
             avg);
-        // **RCL<8 升级中房间 target = 300k**（用户 11-04：能量买来升级）。
-        // 原来 100k target 在 W26N58 有 108k 时直接跳过（108000 >= 100000）
-        // ——升级中的房间能量消耗速率 20+/tick，100k 只够 5000 tick，
-        // 必须持续补货才能维持 upgrader 编制。
+        // **RCL<8 升级中房间 target = 120k**（用户 11-05：能量不要买太多，容器都满了；
+        // 减少量，确保正常运营）。300k 在 W26N58 实测把 storage+terminal 灌到 ~290k、
+        // 容器全满，存款采掘又占着 CPU —— 120k 足够 50/tick 消耗 ~2300 tick 的缓冲，
+        // 低于目标再小批量补，平时靠本矿收入。
         rooms.forEach(room => {
             let activelyUpgrading = room.level < 8 && room.controller
                 && room.controller.progress < room.controller.progressTotal;
-            let target = activelyUpgrading ? 300000 : (room.name === "E53S21" && room.level < 8 ? 800000 : 100000);
+            let target = activelyUpgrading ? 120000 : (room.name === "E53S21" && room.level < 8 ? 800000 : 100000);
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
             let orders = _.values(Game.market.orders).filter(e => e.remainingAmount > 0
                 && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);

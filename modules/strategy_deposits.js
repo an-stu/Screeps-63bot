@@ -91,6 +91,9 @@ Creep.prototype.concatDeposit = function () {
 };
 
 Creep.prototype.harvestDeposit = function () {
+    // **bucket < 3500 时存款采集暂停**：比 MIN_CPU(2000) 的阈值高出一档，
+    // 让 deposit 爬先歇，别把 bucket 压穿 2000 触发全局降载殃及核心房间。
+    if ((Game.cpu ? Game.cpu.bucket : 10000) < 3500) return;
     let task = this.headTask();
     if (this.hits < this.hitsMax - 1000 && this.lastTask().flagName) {
         let flag = Game.flags[this.lastTask().flagName];
@@ -120,6 +123,7 @@ Creep.prototype.harvestDeposit = function () {
 };
 
 Creep.prototype.carryDeposit = function () {
+    if ((Game.cpu ? Game.cpu.bucket : 10000) < 3500) return;
     let task = this.headTask();
     // ⚠️ 旗子没了就**无论在哪都直接回家**。原来只在「已经到了目标房」那一支里查旗，
     // 于是**在途**的爬会一直朝一个已经没有任务的目标房赶（`goTo(task)` 那一支
@@ -253,6 +257,11 @@ let pro = {
     },
     exec(room) {
         pro.cleanFlag();
+        // **bucket 节流**（用户 2026-11-05：不要让 CPU 影响房间正常运行）：
+        // 存款采掘是奖励性产出，房间核心循环（升级/防御/孵化）才是刚需。
+        // bucket < 5000 时不再派新爬/维护旗子 —— 已在场的老爬自然老死退场，
+        // CPU 预算让给核心循环，bucket 回升后自动恢复。
+        if ((Game.cpu ? Game.cpu.bucket : 10000) < 5000) return;
         if ((Game.time + room.hashCode()) % 3 != 0) return;
         ManagerFlags.getFlagsByPrefixAndRoom("deposit", room.name).forEach(flag => {
             flag.memory.flagName = flag.name

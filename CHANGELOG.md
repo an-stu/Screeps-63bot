@@ -129,6 +129,28 @@ movement, seamless handover.
 CPU cost: ~0.85/tick for 12 PCs (mostly cooldown checks + cached moveTo).
 The seamless 2× source regen (+10/tick/source) far outweighs this.
 
+## v0.78.188 — Buy less energy for W26N58; deposit mining yields CPU to the core loop
+
+User: 能量不要买太多了（容器都满了），减少量确保正常运营，不要让 CPU 影响房间正常运行。
+
+Two changes:
+
+1. `autoBuyLowRclEnergy`: RCL<8 upgrading-room energy target **300k → 120k**. At 300k the room sat at
+   ~290k storage+terminal with every container full. W26N58 currently has no open buy order (massStore
+   285k ≥ target, auto-cancelled); new modest orders only appear below 120k.
+
+2. **Deposit mining yields CPU to the core loop** (self-balancing throttle):
+   - `StrategyDeposits.exec` returns when bucket < 5000 - no new deposit creeps, existing ones age out;
+   - `harvestDeposit` / `carryDeposit` pause when bucket < 3500 - a tier above MIN_CPU(2000), so deposit
+     mining stalls first and the core loop (upgrade / defense / hatchery) never gets frozen by CPU
+     again. Deposits are bonus production; hysteresis-free thresholds resume automatically.
+
+Defensive `Game.cpu` reads (tests run in sandboxes without it).
+
+### Tests
+
+New `test/deposit-cpu-throttle.test.cjs` pins all three gates and the 120k target.
+
 ## v0.78.187 — a room that dropped to one carrier could not replace it for 175 ticks
 
 `trySpawnCarrier` keeps a rolling utilisation sample (`carryBusy` = the *number* of busy
