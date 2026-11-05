@@ -1,3 +1,28 @@
+## v0.78.190 — 外矿补员不再被自己那层 %6 节流挡在经济 pass 之外
+
+`StrategyOuterHarvest.exec` 开头有一层 `(Game.time + room.hashCode()) % 6 != 0 → return`，
+而调用方本来就已经节流（`StrategyHighLevel` 每 economyInterval=7、低桶 14 tick 一次；
+`StrategyLowLevel` 是 %3）。两个周期互质 ⇒ 真正能走到「补员」那几行的机会只剩约
+**1/3 的 pass**。
+
+后果不是「慢一点」，而是**声明的孵化优先级失效**：同一次 pass 里 `exec(room)` 排在
+`StationUpgrade.spawnUpgrader` **之前**（keeper → reserver → worker → carrier → 外矿 →
+upgrader 的顺序就靠调用位置实现），可外矿只有 1/3 的 pass 会真的去要 spawn，
+upgrader 每次都在要 ⇒ 空闲 spawn 基本都被 upgrader 拿走。
+
+现场（tick 84080184，W26N58 RCL6 单 spawn 房）：
+- spawn **idle**、hive 2300/2300 满，`__outerWhy` 却停在
+  `try:carry9,avail2300,budget1150@84080144` —— 40 tick 里一次都没再试；
+- W26N59 两个矿点：容器 2000/2000 满 + 地面 3,800，另一矿点容器 250 + 地面 2,800，
+  全部在衰减，只有 2 只车（需求公式还差 9 个 CARRY 部件）。
+即「spawn 空着、货堆着、缺口算得出来，就是不孵」。
+
+改法：删掉这层 %6，只留一条「同 tick 别跑两遍」的守卫（room 对象每 tick 重建，
+守卫自然失效）。本函数幂等（路线维护自带缓存、补员只是 trySpawn），实测整条
+`trySpawnOuterHarCarrier` 0.168 CPU ⇒ 每 pass 一次约 0.01 CPU/tick。
+新增 `test/outer-pass-cadence.test.cjs`（行为式负对照：旧实现两个相邻 tick 一次都不补，
+实测会红）。
+
 ## v0.78.189 — Energy buy orders for RCL<8 upgrading rooms (target 300k, competitive price)
 
 User: RCL<8 房间购买能量升级，挂单。

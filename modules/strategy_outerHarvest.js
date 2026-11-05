@@ -246,7 +246,29 @@ let pro = {
         return (m.deployAt || 0) - Game.time <= pro.INVADER_CORE_MATURE_WARN;
     },
     exec(room) {
-        if ((Game.time + room.hashCode()) % 6 != 0) return;
+        // **不要再加一层 `(Game.time + hashCode) % N` 的节流**（2026-11-05 拆掉）。
+        //
+        // 调用方本来就有节流：`StrategyHighLevel.exec` 每 economyInterval（7，低桶时 14）
+        // tick 才跑一次本房的经济 pass，`StrategyLowLevel` 是 `%3`。在这之上再叠一个
+        // `%6`，两个周期互质 ⇒ 真正能走到「补员」那几行的机会只剩约 **1/3 的 pass**。
+        //
+        // 后果不是「慢一点」，而是**声明的孵化优先级失效**：同一次 pass 里
+        // `exec(room)` 排在 `StationUpgrade.spawnUpgrader` **之前**（keeper → carrier →
+        // 外矿 → upgrader 的顺序就靠这个调用位置实现），可外矿只有 1/3 的 pass 会真的
+        // 去要 spawn，upgrader 每次都在要 ⇒ spawn 一空出来基本都被 upgrader 拿走。
+        //
+        // 实测（2026-11-05 W26N58，RCL6 单 spawn 房）：
+        //   · tick 84080184 spawn **idle**、hive 2300/2300 满，`__outerWhy` 却停在
+        //     `try:carry9,avail2300,budget1150@84080144` —— 40 tick 里一次都没试；
+        //   · 同期 W26N59 两个矿点：容器 2000/2000 满 + 地面 3,800，另一矿点容器 250
+        //     + 地面 2,800，全部在衰减，只有 2 只车（需求公式还差 9 个 CARRY 部件）。
+        // 即「spawn 空着、货堆着、缺口算得出来，就是不孵」——典型的周期性闸门互质。
+        //
+        // 本函数自身是幂等的（路线维护带自己的缓存、补员只是 trySpawn），
+        // 所以只留一条「同 tick 别跑两遍」的守卫，代价可忽略
+        // （实测整条 `trySpawnOuterHarCarrier` 0.168 CPU，每 pass 一次 ≈ 0.01 CPU/tick）。
+        if (room._outerPassTick === Game.time) return;
+        room._outerPassTick = Game.time;
         let flags = ManagerFlags.getFlagsByPrefix("har");
         if (!flags.length) return;
         // 生产优先级按**离主房的线性距离**排（用户 10-03 指示）：主房最高（由
