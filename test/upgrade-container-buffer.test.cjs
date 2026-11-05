@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
-const raw = fs.readFileSync(path.join(root, "modules/station_upgrade.js"), "utf8");
+const raw = fs.readFileSync(path.join(root, "modules/station_upgrade.js"), "utf8").replace(/\r\n/g, "\n");
 const code = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
 // ── 升级容器必须作为常备缓冲，不被「link 有能量」卡住 ────────────────────────
