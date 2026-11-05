@@ -1,3 +1,86 @@
+## v0.78.187 — a room that dropped to one carrier could not replace it for 175 ticks
+
+`trySpawnCarrier` keeps a rolling utilisation sample (`carryBusy` = the *number* of busy
+carriers per economy pass) and the last replenish gate requires
+`avgBusy > 0.85 * carriers on the roster`. At `n = 1` that gate is unreachable by construction:
+a lone carrier alternates 0/1 samples (between economy passes it has no task to run), so its
+mean settles around 0.69 < 0.85 and the routine path never fires again.
+
+The only remaining exit was "hive deficit + `(Game.time + hashCode) % 25 == 0` aligned with the
+room's economy slot". The slot is `% 7`, so the two phases line up once every `lcm(7,25) = 175`
+ticks - which is exactly the 150-tick spawn time of a 50-part carrier. Net effect: lose a
+carrier, run at half hauling capacity for ~3 minutes.
+
+Live evidence (E53S21, tick 84061017-84061170, RCL8, 3 idle spawns, 4 links, 2 sources):
+storage at 0, both source containers at their 2,000 cap, **ground energy 4,878 -> 7,129
+(+28/tick, exactly the room's mining income)** while the other 13 rooms had zero on the floor.
+The lone carrier's utilisation mean measured 0.692. Replacement only started spawning at
+84061170, 153 ticks after the loss.
+
+Fix: `haulerSaturated = carrierCnt <= 1 || avgBusy > alive * 0.85`. A single carrier is a
+single point of failure for the whole room economy and utilisation cannot be measured on n=1,
+so replenish to `carrierTarget` unconditionally. The target still caps it, and
+`creeps(role, false)` counts creeps already spawning, so one loss yields at most one
+replacement - no ratchet.
+
+### Tests
+
+New `test/carrier-single-replenish.test.cjs`: one carrier at 0.69 utilisation must spawn;
+negative controls at target-2 (same low mean), unaffordable body (energy 1,200 < 2,500),
+over-target (3 > 2) must not; hive-full + one carrier still replenishes; source assertion keeps
+the raw `avgBusy > 0.85 * roster` expression out of the gate.
+
+## v0.78.186 — The terminal-50k balance rule drained every room's storage to zero
+
+Census (tick 84060600): all **14 storages at 0 or exactly 776** while terminals held 2k-40k
+(total storage+terminal 358k, down from ~940k two days ago). Walls stopped repairing
+(`repairWallEnergyFloor=100k`), power burning stopped (`powerSpawnEnergy=100k`), and rooms
+had zero buffer - though hives stayed full so nothing deadlocked.
+
+Cause: `balanceTerminalResource` moves energy between storage and terminal until the terminal
+holds exactly `RES_BALANCE_ROOM[ENERGY] = 50000` - a target meant for RCL8 market rooms, applied
+to every room. A low-RCL room (W26N58, RCL6, income barely above its upgrader) can never sustain
+a 50k terminal, so the rule hauled the storage's last energy into the terminal and left it there.
+The pre-loop then deletes ENERGY from the balance list (storage empty, nothing to move), so it
+never self-corrects.
+
+Two changes in `balanceTerminalResource`:
+
+1. **energy reverse rescue**: if storage < 50k AND storage < terminal, haul terminal → storage
+   (amount = min(tE-sE, tE/2, carrier free space)) before the normal gate scan.
+2. **no storage→terminal drain**: for energy with `resCount > 0` (terminal below target) and
+   storage < 100k, drop ENERGY from the balance list instead of hauling - the terminal→storage
+   refill direction still works, and RCL8 market rooms with real surplus are unaffected.
+
+### Tests
+
+New `test/energy-balance-direction.test.cjs`: reverse rescue exists and lands on storage,
+storage→terminal blocked below 100k, terminal→storage refill preserved, ops special case intact.
+
+## v0.78.185 — ship the four fixes that never reached the live branch
+
+The live branch was running a build assembled from **older revisions** while
+still reporting `version: 0.78.182`. Module-by-module comparison against every
+commit in `HEAD`'s history showed each differing live module to be byte-identical
+to an ancestor (nothing live-only to preserve), but five modules were behind:
+
+    module                        live ==   missing change
+    prototype_creep               23c8e7b   BOOSTS layer order (474620f)
+    prototype_powerCreep          89a9698   needGenerateOps / generateOps
+    manager_creeps                3051379   GENERATE_OPS level clamp (23c8e7b)
+    strategy_highLevel             da232e1   workerHasConsumer gate
+    strategy_factoryPowerCreep    89a9698   free GENERATE_OPS before the task stack
+
+Live confirmation of the GENERATE_OPS one: precisely the five **level-5** PCs
+(P0/P1/P2/P4/P8) had `PWR_GENERATE_OPS.cooldown == 0` (never cast) while every
+level-4 PC had a live cooldown (3–37) — `effect[level]` reads `effect[5]` =
+undefined for level 5, so the cast was skipped forever. Cooldowns were checked
+again after the deploy and all twelve PCs cycle.
+
+No source change beyond the version string: this release exists so the payload
+that goes over the live branch is traceable (same version number must never mean
+two different builds).
+
 ## v0.78.182 — ops redistribution: terminal-full rooms may ship (the 3× gate never fired)
 
 User: OP 相关出现问题.
