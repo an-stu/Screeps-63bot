@@ -1,3 +1,31 @@
+## v0.78.193 — upgrader 的「退化体型下限」把它自己锁死（600 ⇒ 恒付不起）
+
+0.78.192 修掉 `spawnFailure` 粘滞标记后，W26N58 当天确实出过 upgrader；但下午又开始
+0 只、控制器冻在 2,302,949 约 30 分钟。这次不是 spawn 被抢，而是**体型预算的下限**：
+
+```
+let bodyBudget = Math.max(600, Math.min(cap, cachedEnergy));
+```
+
+下限 600 会把预算**强行抬到 600**，`getBodyLowLevel(600)` 造出 4 WORK 的 **550 能量**
+体型；而 `StationHive.trySpawn` 的判据是 `currentEnergyAvailable < spend ⇒ 静默失败`。
+RCL6 单 spawn 房里 keeper（950）与 carrier（1,100~1,500）轮流把 hive 抽干，hive 长期停在
+**300~500** ⇒ 550 的体型**永远付不起** ⇒ 和这行代码自己的注释「体型必须本 tick 真付得起」
+正好相反（MEMORY 第 3/5 条：闸门不许自锁、下限不能写死成大房量级）。
+
+现场（tick 84084819~84084827 逐格采样）：storage 161,167、terminal 151,523、升级容器
+1,870、spawn 大段空闲、hive 158/300/464/704 打转；唯一一次冲到 1,354 时 spawn 正在孵
+keeper（84084680 起 64 tick），等它空出来 hive 又掉回 400。
+
+修：下限 600 → **300**（`getBodyLowLevel` 的 num=1 档：2 WORK + 1 MOVE + 1 CARRY）。
+300 比 keeper 的 950 还便宜 ⇒ 抢不走 keeper 的孵化费（keeper 仍是 spawn 队列第一位），
+但能让「0 只 upgrader + spawn 空着 + hive 400」这个真实窗口孵出一只真在升级的爬。
+hive 充足时行为不变（体型照样按真实能量放大到 16 WORK）。
+
+新增 `test/upgrader-degraded-body.test.cjs`：按线上 `trySpawn` 语义（付不起就失败）复刻
+现场，hive 464 + 0 只 upgrader 必须孵出 ≤464 的体型；负对照把下限改回 600 实测红
+（同一现场一只都孵不出来）。`test/upgrader-affordable-body.test.cjs` 的源码断言同步到 300。
+
 ## v0.78.192 — `spawnFailure` 粘滞标记吞掉 upgrader（真正的根因）
 
 0.78.191 那道「退化态先救生长」的闸只是止血。继续查 `__ts` 埋点发现真正的原因在更上游：

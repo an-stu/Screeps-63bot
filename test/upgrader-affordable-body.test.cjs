@@ -175,8 +175,10 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
         "getBodyLowLevel 必须传预算（bodyBudget）调用");
     assert.ok(!/getBodyLowLevel\(\s*\)/.test(upg),
         "负对照：不得再有无预算的 getBodyLowLevel() 调用（那会按 hive 满容量算体型）");
-    assert.ok(/bodyBudget\s*=\s*Math\.max\(600,\s*Math\.min\(room\.getEnergyCapacityAvailable\(\),\s*cachedEnergy\)\)/.test(upg),
-        "bodyBudget 必须夹在 [600, 本房容量] 之间，且输入是本 tick 真可用能量");
+    assert.ok(/bodyBudget\s*=\s*Math\.max\(300,\s*Math\.min\(room\.getEnergyCapacityAvailable\(\),\s*cachedEnergy\)\)/.test(upg),
+        "bodyBudget 必须夹在 [300, 本房容量] 之间，且输入是本 tick 真可用能量"
+        + "（下限 300 = 最便宜的可用法体型 2 WORK + 1 MOVE + 1 CARRY；"
+        + "2026-11-05 实测下限 600 会造出 550 体型的爬，hive 长期 300~500 的房里恒付不起 ⇒ 与「真付得起」自相矛盾）");
     assert.ok(/zeroUpgraderNeedEnergy\s*=\s*Math\.min\(room\.getEnergyCapacityAvailable\(\)\s*\*\s*0\.4,\s*4000\)/.test(upg),
         "0 只 upgrader 的门槛必须按本房容量折算，不能写死 hive 满格");
     assert.ok(upg.includes("room.energyAvailable >= zeroUpgraderNeedEnergy"),

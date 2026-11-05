@@ -353,9 +353,23 @@ let pro = {
         //
         // `room.currentEnergyAvailable` 是本 tick 的孵化预算缓存（首个 trySpawn 初始化、
         // 每次成功孵化就扣减），取它和实时能量的**小值**才是本 tick 还能花的钱。
+        // **下限必须是「最便宜的可用法体型（300）」，不能是 600。**
+        //
+        // 600 的下限会强行把预算抬到 600 ⇒ `getBodyLowLevel` 造出 4 WORK 的 550
+        // 能量体型。而 RCL6 单 spawn 房的 hive 在后一次孵化之后长期停在 300~500
+        // （keeper 950、carrier 1,100~1,500 轮流抽干）⇒ 这个体型**永远付不起**，
+        // `trySpawn` 静默失败、spawn 空转，控制器进度原地不动。
+        //
+        // 2026-11-05 W26N58 实测：控制器 2,302,949 冻结 ~30 分钟，storage 161,167、
+        // 升级容器 1,870、spawn 大段空闲，hive 在 158/300/464/704 之间打转；
+        // 唯一一次冲到 1,354 时 spawn 正在孵 keeper（84084680 起 64 tick），
+        // 等它空出来 hive 又掉回 400。**这一段完全可以用 2 WORK 的退化体型顶住**。
+        //
+        // 300 = 2 WORK + 1 MOVE + 1 CARRY（`getBodyLowLevel(300)` 的 num=1 档），
+        // 比 keeper（950）便宜 ⇒ 抢不走 keeper 的孵化费（MEMORY：keeper 永远第一）。
         let cachedEnergy = room.currentEnergyAvailable === undefined
             ? room.energyAvailable : Math.min(room.energyAvailable, room.currentEnergyAvailable);
-        let bodyBudget = Math.max(600, Math.min(room.getEnergyCapacityAvailable(), cachedEnergy));
+        let bodyBudget = Math.max(300, Math.min(room.getEnergyCapacityAvailable(), cachedEnergy));
         let getBodyLowLevel = function (budget) { //低等级的part 无限多
             let current = 0;
             let cost = BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE];
@@ -499,6 +513,12 @@ let pro = {
             // 按容量折算 40%（RCL8 仍走下面那条 2,500 的分支，行为不变），
             // 体型由 trySpawnUpgrader 按真实可用能量收缩 —— 门槛只决定「什么时候值得派」，
             // 不再隐含「必须付得起满配」。
+            //
+            // 40% 仍然不是「可达」的理由（2026-11-05 W26N58 复盘）：这条门槛只是
+            // 「0 只 upgrader 且 storage 不富裕」时的兜底 —— storage 有余量的房由下面
+            // `/30000` 那条分支按盈余派车，根本不经过这里。所以这里保持原口径，
+            // 真正卡住现场的**不是**这道闸，而是 `trySpawnUpgrader` 的体型预算下限
+            // （见那里的 `bodyBudget`）。
             let zeroUpgraderNeedEnergy = Math.min(room.getEnergyCapacityAvailable() * 0.4, 4000)
             if (!room.storage || room.controller.progress >= room.controller.progressTotal)
                 spawn()
