@@ -142,7 +142,29 @@ let pro = {
             }
         }
 
-        _.values(room.memory[StationSources.stationName]).forEach(e => {
+        // 矿点 link 的发送必须**公平轮转**（2026-11-05 E55S39 实测）。
+        //
+        // 「一次只能发一个矿点」是物理约束，不是偷懒：hub link 容量 800，正好等于
+        // 一个矿点 link 的存量，发完它就不再是 empty，后面的矿点本轮只能等。
+        // 而 `_.values()` 的顺序是固定的（按 Memory 里的键序），于是**排在前面的
+        // 矿点永远先发**，后面的矿点只能碰「它刚好不满」的间隙 —— 那个间隙对
+        // 一个 10/tick 一直在灌的矿点来说几乎不存在。
+        //
+        // 实测 E55S39（RCL8、6 link、两只 keeper 两个矿点）：
+        //   · (14,8) 的两个 link 每轮 800 → 400 → 800 地周转；
+        //   · (39,20) 的两个 link **连续 30+ tick 卡 800/800**、容器 2000/2000 满，
+        //     keeper 站在 (38,20) 抱着 400 没处放，只能往地上倒；
+        //   · 那个矿点地面 12.9k → 13.6k 在涨（10/tick 产出全丢，还在衰减）。
+        // 全账号同形态的还有 E48S41 / E55S31 / W31N55 / W32N56 / W33N55 / E41S32
+        // —— 都是「所有矿点 link 800 + hub 776 + 地面在涨」。
+        //
+        // 按「上次发送时刻」升序轮转（从没发过的 lastLinkSend 视为 0，排最前），
+        // 谁都不会被饿死；仍是「一个 pass 只发一个」，吞吐上限没变，改的只是
+        // 谁拿到这一次机会。写 Memory 的是一个 tick 数，每 pass 一次，代价可忽略。
+        let mines = _.values(room.memory[StationSources.stationName])
+            .filter(e => e && typeof e == "object" && e.id);
+        mines.sort((a, b) => (a.lastLinkSend || 0) - (b.lastLinkSend || 0));
+        for (let e of mines) {
             let link = Game.getObjectById(e["link"]);
             let link2 = Game.getObjectById(e["link2"]);
             let minFreeSend = 100
@@ -151,22 +173,23 @@ let pro = {
                     link = link2
             }
             let container = Game.getObjectById(e[STRUCTURE_CONTAINER]);
-            if (!link) return;
+            if (!link) continue;
             let sendAble = link.store.getFreeCapacity(RESOURCE_ENERGY) <= minFreeSend
-            if (!sendAble) return;
+            if (!sendAble) continue;
             if (upgradeLink && sendAble && upgradeLink.store.isEmpty()) {
                 link.transferEnergy(upgradeLink);
                 upgradeLink = null
-                return;
+                continue;
             }
 
             if (centerLink && sendAble && centerLink.store.isEmpty()) {
                 if (container && container.store[RESOURCE_ENERGY] > ((link && link2 && (link.store.isFull() && link2.store.isFull())) ? 0 : 800)) {
                     link.transferEnergy(centerLink);
                     centerLink = null
+                    e.lastLinkSend = Game.time;
                 }
             }
-        })
+        }
 
         if (upgradeLink && upgradeLink.store.isEmpty() && centerLink && !centerLink.store.isEmpty()) {
             centerLink.transferEnergy(upgradeLink);
