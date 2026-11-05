@@ -182,7 +182,7 @@ let pro = {
                 continue;
             }
 
-            if (centerLink && sendAble && centerLink.store.getFreeCapacity(RESOURCE_ENERGY) > minFreeSend) {
+            if (centerLink && sendAble && centerLink.store.isEmpty()) {
                 if (container && container.store[RESOURCE_ENERGY] > ((link && link2 && (link.store.isFull() && link2.store.isFull())) ? 0 : 800)) {
                     link.transferEnergy(centerLink);
                     centerLink = null
