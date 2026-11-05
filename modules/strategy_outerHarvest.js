@@ -165,6 +165,15 @@ let pro = {
         });
         if (busting.length) return;
         let body = ManagerCreeps.calcBodyPart({ [ATTACK]: 15, [HEAL]: 10, [MOVE]: 15 });
+        // 出兵房**永远付不起**时不要再去试。
+        //
+        // `StationHive.trySpawn` 付不起会置 `spawnFailure = true`，而那个标记是整 tick
+        // 粘滞的 —— 排在后面的所有角色（尤其 upgrader）会被一起吞掉。2026-11-05 实测
+        // W26N58（容量 2,300）对着 W26N59 的敌方塔每个 pass 都试 4,450 的体型，
+        // 于是 upgrader 一整天一只都孵不出来（详见 `StationUpgrade.trySpawnUpgrader`
+        // 末尾那段注释）。付不起就别占位：塔留给有大 spawn 的房去拆。
+        if (global.Utils && Utils.getBodyEnergyNeed
+            && Utils.getBodyEnergyNeed(body) > spawnRoom.getEnergyCapacityAvailable()) return;
         let tasks = [UtilsTask.task(tower, "coreBuster")];
         StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "towerBuster", tasks);
     },

@@ -1,3 +1,77 @@
+## v0.78.192 — `spawnFailure` 粘滞标记吞掉 upgrader（真正的根因）
+
+0.78.191 那道「退化态先救生长」的闸只是止血。继续查 `__ts` 埋点发现真正的原因在更上游：
+
+`StationHive.trySpawn` 第一行是 `if (room.spawnFailure) return null`，而 `spawnFailure`
+的含义只是「**本 tick** 已经有过一次孵化尝试失败」，**既不代表 spawn 被占，也不代表
+我们付不起**。W26N58 这一 tick 里排在 upgrader 前面尝试孵化的角色依次是
+coreBuster / towerBuster / keeper / carrier / 外矿搬运，任何一个付不起都会把它置真。
+
+现场（tick 84082272 / 84082286 的 pass 记录）：
+
+```
+worker(2,200)              → Y（hive 2,300 → 100，spawn 被占 99 tick）
+towerBuster(4,450)         → N  ← 就这一只把 spawnFailure 置真
+outerHarvestEnergyCarrier  → N
+upgrader(2,100 / 550)      → N  ← 被上面的标记吞掉，连试都没试
+```
+
+而 `towerBuster` 之所以每个 pass 都被尝试，是因为外矿房 **W26N59 里有一座敌方塔**
+（12,41 与 13,42，各 3,000 血；同房还有敌方 spawn 5,000 / storage 10,000 / 十余个
+extension —— 一座被打残的旧基地）。它的 40 部件体型要 4,450 能量，而 W26N58 容量只有
+2,300 ⇒ **永远付不起、永远失败、永远毒化整 tick**。结果就是控制器一整天 0 只
+upgrader，源容器 2,000/2,000 + 三个 link 全满，地面能量 8,356 在涨。
+
+两处修：
+
+- `StationUpgrade.trySpawnUpgrader`：`trySpawn` 前 `room.spawnFailure = false`
+  （carrier / 外矿搬运两条路径早就在这么做，upgrader 这条漏了）。体型已经按
+  `spawnTickBudget` 收缩过，付不起有它自己的判据，不该替别人背锅。
+  只解标记，**不动 `currentEnergyAvailable`**。
+- `StrategyOuterHarvest.spawnTowerBuster`：出兵房容量付不起这只专队时直接返回，
+  不再每个 pass 去试。塔留给有大 spawn 的房拆（W26N58 RCL6 拆不动它，属已知限制）。
+
+新增 `test/sticky-spawn-failure.test.cjs`（负对照：删掉 `room.spawnFailure = false`
+后 upgrader 一条都孵不出，实测会红）。
+
+## v0.78.191 — 还在升级的房（RCL<8）一只 upgrader 都没有时，spawn 先救生长
+
+巡检报「地面能量在堆积 39,663（+6.4/tick）」。逐层查下来，W26N58（RCL6、**单 spawn**、
+hive 2,300、storage 135k、terminal 141k）的控制器上**一只 upgrader 都没有**：
+它是这个房**唯一**的能量出口，出口一断，挖出来的能量就只能在源容器/link 里堆满、
+溢出到地面衰减 —— 现场两个源容器 2,000/2,000 满、三个 link 全满（796/800/800）、
+地面 8,356 在涨。
+
+`__ts` 埋点（tick 84082272 的经济 pass，单 spawn 房）给出了确切的死法：
+
+```
+worker(33 部件 / 2,200)            → Y   hive 2,300 → 100，spawn 被占 99 tick
+towerBuster(40 部件 / 4,450)       → N   付不起
+outerHarvestEnergyCarrier ×4(1,050) → N  spawn 被占
+upgrader(2,100)                    → N  spawn 被占
+```
+
+紧接着几个 pass 的 hive 只有 114 / 1,350 / 2,050，upgrader 每次都撞在「spawn 被占」
+或「付不起」上 —— 队列里排在它前面的**全是后台/可选岗位**（修墙 worker、外矿搬运），
+而它是唯一没人管的。keeper → carrier → 外矿 → upgrader 这个顺序靠调用位置实现，
+**不去动它**；改成在**退化态**（0 只 upgrader 且 RCL<8）把可选岗位的补员暂停，
+让 spawn 空出来的第一个窗口归 upgrader，孵出即自清：
+
+- `StrategyHighLevel.upgraderStarved(room)`：RCL<8 && `creeps("upgrader", false).length == 0`。
+- `workerManager` 的修墙分支加上它（修墙是后台的无限下沉）。
+- `trySpawnOuterHarCarrier` 的补员段加上它（`__outerWhy=needUpgrader*`，外面能看见）。
+  在役的爬一律不动；keeper / 本房 carrier 两条主房能量循环**不**经过这道闸。
+
+同一根因还修掉了孵化预算被清零的记账错误：`spawnCarrierNow` 与外矿 carrier 补员都在
+`trySpawn` 前 `room.currentEnergyAvailable = undefined`。而 `room.energyAvailable`
+在**同一 tick 内不反映刚花掉的能量**（实测孵完 2,200 的 worker 后读回仍是 2,300），
+清掉缓存就等于让后面所有角色按满格旧值算体型 —— upgrader 因此算出 2,100 的体型去要
+一个只剩 100 能量的 spawn。现在只解 `spawnFailure` 这个粘滞标记，预算保留。
+外矿 carrier 的 `spawnAvail` 也改用 `spawnTickBudget`（夹住本 tick 真实余额）。
+
+新增 `test/upgrader-first-spawn.test.cjs`（行为式负对照：把闸门关掉，0 只 upgrader 时
+仍会孵外矿车，实测会红）。
+
 ## v0.78.190 — 外矿补员不再被自己那层 %6 节流挡在经济 pass 之外
 
 `StrategyOuterHarvest.exec` 开头有一层 `(Game.time + room.hashCode()) % 6 != 0 → return`，

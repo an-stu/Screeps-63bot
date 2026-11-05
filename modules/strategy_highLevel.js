@@ -39,6 +39,34 @@ const WORKER_ENERGY_FLOOR = 10000;
 
 let pro = {
     /**
+     * 「本房还在长（RCL<8），却一只 upgrader 都没有」—— 单 spawn 房退化态守卫。
+     *
+     * 这不是「谁先吃 spawn」的顺序问题，而是**退化态下必须先救生长**：
+     * 一个还在升级的房，upgrader 是它**唯一**的能量出口（其余全是 hive/容器/storage
+     * 这种无限下沉）。一旦这个出口断了，挖出来的能量就只能在源容器/link 里堆满、
+     * 溢出到地面衰减 —— 整个房的经济空转。
+     *
+     * 2026-11-05 W26N58（RCL6，单 spawn，hive 2,300）实测：
+     *   · 两个源容器 2,000/2,000 全满、三个 link 全满、地面 8,356 在涨；
+     *   · 控制器 0 只 upgrader；`stationUpgrade.creeps` 为空；
+     *   · 经济 pass 的 spawn 队列（`__ts` 埋点，tick 84082272）：
+     *     worker(33 部件/2,200 能量) → outerHarvestEnergyCarrier×4(1,050) → upgrader(2,100)。
+     *     前者把 2,300 的 hive 一次抽到 100，随后 spawn 被占 99 tick；
+     *     接下来几 pass hive 只有 114 / 1,350 / 2,050，而 spawn 一直在孵 →
+     *     upgrader 每次都因 `spawnFailure`/占用失败。**队列里排在它前面的
+     *     全是后台/可选岗位**（修墙 worker、外矿搬运），它是唯一没人管的。
+     *
+     * 所以只在**退化态**（0 只 upgrader，且 RCL<8）把可选岗位的补员暂停，
+     * 让 spawn 空出来的第一个窗口归 upgrader；一孵出来本守卫立即失效（自清）。
+     * 在役的爬一律不动（岗位闸门只控数量，不控在职者干不干活），keeper /
+     * 本房 carrier 这两条「主房能量循环」也**不**经过这里。
+     */
+    upgraderStarved(room) {
+        if (!room || !room.my || !room.controller) return false;
+        if (room.level >= 8) return false;          // RCL8 不再长，upgrader 只是维持项
+        return room.creeps("upgrader", false).length === 0;
+    },
+    /**
      * 本 tick 还能花在孵化上的能量 —— **体型预算必须以它为准**，不能按本房满容量算。
      *
      * `StationHive.trySpawn` 的判据是
@@ -122,7 +150,10 @@ let pro = {
             if (room.creeps("worker", false).length < 3 && num >= 3 && room.level == 8) {// 如果一个都没有就生一个（保证有人去修工地,如果能量够可以多生几个
                 spawnWorker();
             }
-        } else if (StationDefense.needBuildWall(room) && !MIN_CPU) {//如果需要修墙
+        } else if (StationDefense.needBuildWall(room) && !MIN_CPU && !pro.upgraderStarved(room)) {
+            // 修墙是后台的「无限下沉」：RCL6 的修墙 worker 体型（33 部件 / 2,200 能量）
+            // 会把 2,300 的 hive 一次抽到 100，并占住 spawn 99 tick。所以
+            // 「本房一只 upgrader 都没有」时先不派它（见 `upgraderStarved` 的实测）。
             if (room.level < 8 && (noWorker || EnergyOver)) { // 8前优先修墙，但受维修编制上限约束
                 spawnWorker(true); // 修墙不强化（CPU 足够时用非 boost 爬）
             } else if (((room.storage.store[RESOURCE_ENERGY] > 180000) && noWorker) || EnergyOver) {
@@ -523,7 +554,14 @@ let pro = {
             // 由后面按满配体型的几条分支来造。
             if (!body || !body.some(p => p === CARRY)) return;
             room.spawnFailure = false;
-            room.currentEnergyAvailable = undefined;
+            // **不要清 `room.currentEnergyAvailable`。** 它是本 tick 的孵化预算缓存
+            // （首个 trySpawn 初始化、每次成功孵化扣减），而 `room.energyAvailable`
+            // 在同一 tick 内**不会**反映刚花掉的能量（2026-11-05 W26N58 实测：
+            // 孵完 2,200 的 worker 之后读回仍是 2,300）。把它清成 undefined，
+            // 下一次 trySpawn 就会用满格的旧值重算体型 —— 实测同一 pass 里
+            // upgrader 据此算出 2,100 的体型去要 spawn，而实际只剩 100 能量，
+            // 白占一个 pass 还把 `spawnFailure` 置真。这里只需要解除上一轮的
+            // 「付不起」粘滞标记，预算本身必须保留。
             StationHive.trySpawn(room, room.name, body, "carrier", []);
         };
         // 目标 carrier 数量：高等级房保留 7 只上限；低等级房按矿点+keeper
@@ -599,7 +637,8 @@ let pro = {
                 let harData = _.values(room.memory[StationSources.stationName] || {}).find(d => d && d.id);
                 let bootTasks = harData ? StationSources.generatorReleaseAbleHarTask(harData) : [];
                 room.spawnFailure = false;
-                room.currentEnergyAvailable = undefined;
+                // 同 spawnCarrierNow：只解粘滞标记，**不动**孵化预算缓存
+                // （`room.energyAvailable` 在本 tick 内不反映刚花掉的能量）。
                 StationHive.trySpawn(room, room.name, workerBody, "worker", bootTasks);
             }
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)

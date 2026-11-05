@@ -3889,6 +3889,25 @@ let pro = {
             return null;
         }
         if (roomCarriers.length >= carrierMax) { why("fleetCap" + roomCarriers.length + ">=" + carrierMax); return null; }
+        // **「本房一只 upgrader 都没有」⇒ 先别把 spawn 给外矿搬运。**
+        //
+        // 外矿搬运是纯消耗的运力，而 upgrader 是还在升级的房（RCL<8）**唯一**的
+        // 能量出口：出口一断，挖出来的能量就只能在源容器/link 里堆满并溢出到地面
+        // 衰减。2026-11-05 W26N58（RCL6 单 spawn）实测：容器 2,000/2,000 满 +
+        // 三 link 全满 + 地面 8,356 在涨，控制器 0 只 upgrader；经济 pass 的
+        // spawn 队列里外矿搬运排在 upgrader **之前**（keeper → carrier → 外矿 →
+        // upgrader 这个顺序靠调用位置实现，不去动它），于是 spawn 一空出来就被
+        // 外矿拿走，upgrader 连续 5 个 pass 都因「spawn 被占」失败。
+        //
+        // 守卫只在**退化态**（0 只 upgrader）生效，孵出第一只立刻自清；
+        // 在役的外矿搬运不受影响（岗位闸门只控数量），keeper / 本房 carrier
+        // 两条主房能量循环也都不经过这里。
+        let high = global.StrategyHighLevel;
+        if (targetName != spawnRoom.name && high && typeof high.upgraderStarved == "function"
+            && high.upgraderStarved(spawnRoom)) {
+            why("needUpgrader" + roomCarriers.length);
+            return null;
+        }
         // 注意：这里**不能**用 spawnFailure 提前返回。路线是同矿点所有爬共用的一份
         // 缓存，而它一旦缺失，修路爬就没有路点可铺、carrier 也退化成原生 moveTo。
         // 主房 spawn 常年是忙的（spawnFailure 常真），把路线维护挡在后面等于
@@ -4036,8 +4055,10 @@ let pro = {
                 // ⇒ **体型付不起就直接不出兵，spawn 空转**。实测外矿 fleet 反复从
                 // 15 只整批老死到 1~2 只、几千 tick 补不回来（keeper 早就是按可用
                 // 能量收缩体型的写法，见 trySpawnOuterHarKeeper 的 energyBudget，这里漏了）。
-                let spawnAvail = spawnRoom.getEnergyAvailable
-                    ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
+                let spawnAvail = high && typeof high.spawnTickBudget == "function"
+                    ? high.spawnTickBudget(spawnRoom)
+                    : (spawnRoom.getEnergyAvailable
+                        ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0));
                 // **体型预算再夹一层「hive 容量的 75%」。** 满配 50 部件要 2,500：RCL8 房
                 // （12,900）无所谓，但出兵房 RCL5 只有 1,800 —— 满配爬一孵就是 56+ tick，
                 // 把整只 hive 抽干，本房 spawn/extension 补员与外矿补员互相饿死
@@ -4072,8 +4093,14 @@ let pro = {
                     // 但调用后车数不变 ⇒ 就被这个标记挡了（两天零辆车、容器 4000 满）。
                     // strategy_highLevel 的 spawnCarrierNow 一直在用同样的重置写法，这里照做。
                     // 安全性：本房 keeper 已满员（上面的硬闸），不会抢走主房的救命能量。
+                    // **只解粘滞标记，绝不清 `currentEnergyAvailable`。**
+                    // 后者是本 tick 的孵化预算缓存（首个 trySpawn 初始化、每次成功孵化
+                    // 扣减），`room.energyAvailable` 在同一 tick 内并不反映刚花掉的能量
+                    // （2026-11-05 W26N58 实测：孵完 2,200 的 worker 后读回仍是 2,300）。
+                    // 清掉它 ⇒ 同一 pass 里后面所有角色（尤其紧挨着的 upgrader）
+                    // 都按满格旧值算体型去要 spawn，实测 upgrader 因此算出 2,100 的
+                    // 体型而实际只剩 100 能量，白丢一个 pass。
                     spawnRoom.spawnFailure = false;
-                    spawnRoom.currentEnergyAvailable = undefined;
                     StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestEnergyCarrier", tasks)
                 }
                 // 路没修完时再补专职修路的 carrier。

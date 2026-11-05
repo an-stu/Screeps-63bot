@@ -389,6 +389,26 @@ let pro = {
 
         let task = pro.generatorUpgradeKeeperTask(room);
         if (boostLevel >= 0) task = task.concat(StationLab.generatorBoostLevelTask(room, "upgradeController", partCnt, boostLevel))
+        // **必须解掉本 tick 的 `spawnFailure` 粘滞标记。**
+        //
+        // `StationHive.trySpawn` 第一行是 `if (room.spawnFailure) return null`，而这个
+        // 标记的含义只是「本 tick 已经有过一次孵化尝试失败」，**不代表 spawn 被占，也不代表
+        // 我们付不起**（体型已经按 `spawnTickBudget` 收缩过，付不起会有自己的判据）。
+        // 本房这一 tick 里排在 upgrader 前面尝试孵化的角色：coreBuster / towerBuster /
+        // keeper / carrier / 外矿搬运 —— 任何一个付不起都会把它置真，后面的 upgrader 就
+        // 连「试一下」的机会都没有。
+        //
+        // 2026-11-05 W26N58 实测（**整整一天 0 只 upgrader**）：外矿房 W26N59 里有一座
+        // **敌方塔**（12,41 / 13,42，各 3,000 血），于是每个 economy pass 都走
+        // `spawnTowerBuster` 去孵 4,450 能量的 40 部件专队，而该房容量只有 2,300
+        // ⇒ 必然付不起 ⇒ `spawnFailure = true` ⇒ 紧随其后的 upgrader 每个 pass 都被吞。
+        // 症状：控制器 0 只 upgrader、源容器 2,000/2,000 + 三个 link 全满、地面 8,356
+        // 在涨（全账号 +6.4/tick），而 hive 与 spawn 看起来都正常。
+        //
+        // carrier / 外矿搬运两条路径早就在 trySpawn 前 `spawnFailure = false`（同一病根），
+        // upgrader 这条漏了。**只解标记，不动 `currentEnergyAvailable`**（见
+        // `StrategyHighLevel.spawnCarrierNow` 的注释：清掉它会让体型按满格旧值重算）。
+        room.spawnFailure = false;
         StationHive.trySpawn(room, room.name, body, "upgrader", task);
     },
     /**
