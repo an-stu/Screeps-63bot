@@ -695,8 +695,13 @@ let pro = {
         // 且 `creeps(role, false)` 把孵化中的算进编制 ⇒ 不会连环刷）。
         let aliveCarrierCnt = carrierList.filter(e => !e.ticksToLive || e.ticksToLive > e.body.length * 3).length;
         let haulerSaturated = carrierCnt <= 1 || avgBusy > aliveCarrierCnt * 0.85;
+        // **换代提前量**：aliveCarrierCnt 排除了将死的爬（ttl ≤ 3×body）。
+        // 用它（而非含将死的 carrierCnt）对标 carrierTarget ⇒ 老车还没死、
+        // 接替车就开始孵，无缝衔接（用户 11-04：carrier 应及时孵化不要等死）。
+        // 原来用 carrierCnt：老车死掉 → 编制降 → 才触发补员 → 孵化 150 tick
+        // ⇒ 每次换代必然 ~150 tick 运力空档（外矿车队的同一震荡模式）。
         if ((carrierCnt <= 0 && (room.storage.store[RESOURCE_ENERGY] > 3000 || room.creeps("harvestEnergyKeeper", false).length > 0)) || (
-            carrierCnt < carrierTarget &&
+            aliveCarrierCnt < carrierTarget &&
             !(StationHive.HiveNeedToFill(room) && room.energyAvailable < carrierBodyMinEnergy) &&
             haulerSaturated)) {
             spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)))
