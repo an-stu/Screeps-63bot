@@ -1019,6 +1019,18 @@ function moveOneStep(creep, visualStyle, toPos) {
     if (creep.fatigue) {
         return ERR_TIRED;
     }
+    // 已经站在路径终点：**不许再自增 idx**。
+    // 原实现无条件 idx++，走到终点后 `directionArray[len]` 是 undefined，
+    // 下一次进 betterMoveTo 时 `isEqual(pos, posArray[idx])` / `isNear(...)`
+    // 会落到 `getDirection(this.pos, this.pos)`，而 getDirection 对同一个点
+    // 返回 undefined ⇒ `originMove(undefined)` 每 tick 一条无效意图，爬被
+    // **永久钉在自己的格子上**，后面一整队跟着堵死。
+    // 现场 2026-11-05 W26N58：一只外矿修路搬运(idx 已到终点)堵住 3 只
+    // （载体 8152、外矿 8614、upgrader），hive 300/2300、38 个 extension 全空，
+    // 房 6 个小时发不出爬。判据：idx 到最后一个点即视为「已到达」。
+    if (creepCache.idx >= creepCache.path.posArray.length - 1) {
+        return OK;
+    }
     creepCache.idx++;
     creepMoveCache[creep.name] = Game.time;
     if (enableCpuStats) {
@@ -1321,14 +1333,24 @@ function betterMoveTo(firstArg, secondArg, opts) {
                     return originMove.call(this, getDirection(this.pos, posArray[idx]));  // 有可能是第一步就没走上路or通过略过moveTo的move操作偏离路线，直接call可兼容
                 } else if (idx - 1 >= 0 && isNear(this.pos, posArray[idx - 1])) {  // 因为堵路而被自动传送反向跨房了
                     //this.say('偏离一格');
-                    if (this.pos.roomName == posArray[idx - 1].roomName && ops.ignoreCreeps) {    // 不是跨房而是偏离，检查对穿
-                        trySwap(this, posArray[idx - 1], false, true);
+                    if (isEqual(this.pos, posArray[idx - 1])) {
+                        // 自己就站在「上一格」上、而 posArray[idx] 已经不是相邻格
+                        // （idx 越过终点或缓存与外部位移不一致）：这时
+                        // `getDirection(this.pos, posArray[idx - 1])` 是对自己取方向，
+                        // 恒返回 undefined ⇒ `originMove(undefined)` 不移动，且本分支
+                        // 每 tick 重复同一判断 —— 永久死锁，还会把别人堵在身后。
+                        // 作废这条缓存路，让下一次 moveTo 重新寻路。
+                        deletePath(path);
+                    } else {
+                        if (this.pos.roomName == posArray[idx - 1].roomName && ops.ignoreCreeps) {    // 不是跨房而是偏离，检查对穿
+                            trySwap(this, posArray[idx - 1], false, true);
+                        }
+                        if (visualStyle) {
+                            showVisual(this, toPos, posArray, idx, 1, visualStyle);
+                        }
+                        creepMoveCache[this.name] = Game.time;
+                        return originMove.call(this, getDirection(this.pos, posArray[idx - 1]));    // 同理兼容略过moveTo的move
                     }
-                    if (visualStyle) {
-                        showVisual(this, toPos, posArray, idx, 1, visualStyle);
-                    }
-                    creepMoveCache[this.name] = Game.time;
-                    return originMove.call(this, getDirection(this.pos, posArray[idx - 1]));    // 同理兼容略过moveTo的move
                 } // else 彻底偏离，重新寻路
             } // else 目的地变了
         } // else 缓存中没路或者条件变了
@@ -1636,6 +1658,17 @@ if (!Creep.prototype.$moveTo) {
             if (lastPos.time < 6) {
                 lastPos.time += 1;
                 if (lastPos.time > 6 && memory.dontPullMe !== true) memory.dontPullMe = true;
+            } else if (!lastPos.t || Game.time - lastPos.t >= 6) {
+                // 连续 6 tick 调用 moveTo 却一厘米没挪：这只爬的缓存路可能把 idx
+                // 指到了死点（终点/自身格），光靠重试永远出不来 —— 而且它会成为
+                // 后面一整队的墙（W26N58 实测：一只堵 3 只，hive 300/2300）。
+                // 作废**本爬**的缓存路（不动共享的 path 对象），下一次 moveTo
+                // 重新寻路。每 6 tick 最多一次，避免每 tick 一次 PathFinder。
+                // 注意只对「真的在调 moveTo」的爬生效：原地干活（harvest /
+                // upgrade / build）的爬不发 moveTo，lastPos 不会刷新，不会误伤。
+                lastPos.t = Game.time;
+                let stuckCache = creepPathCache[this.name];
+                if (stuckCache) stuckCache.path = undefined;
             }
         } else {
             // 就地改写已有的 lastPos，省掉每次移动都要新建一个对象

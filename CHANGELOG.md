@@ -1,3 +1,34 @@
+## v0.78.195 — 站在自己下一格上的爬被永久钉死（W26N58 的 hive 一整天回不了血）
+
+巡检「必须处理：W26N58 hive 只有 300/2300 而 storage 有 88,495」。房内 4 只爬
+（载体 8152、外矿 8614/8544、upgrader 39,7）全部原地不动几十 tick，`lastPos.time`
+都卡在 6 —— 逐只读 `BetterMove.creepPathCache` 才看清是一条链：
+
+```
+8152(38,10)   下一格 37,9  ← 被 8614 占着
+8614(37,9)    下一格 38,8  ← 被 8544 占着
+8544(38,8)    下一格 38,8  ← 就是自己站的格子   ← 钉子
+upgrader(39,7) 下一格 38,8 ← 被 8544 占着
+```
+
+8544 走到缓存路终点后，`moveOneStep` 无条件 `idx++` 越过终点 ⇒ 下一次
+`directionArray[len]` 是 undefined；再下一次落到 `getDirection(this.pos, this.pos)`，
+而 getDirection 对同一个点**返回 undefined** ⇒ `originMove(undefined)` 每 tick 一条
+无效意图。爬一动不动，后面一整队跟着堵死，hive 六小时没人补，38 个 extension 全空，
+房连一只爬都发不出来。
+
+修三处（都在移动优化器里，只让「无效意图」变成「安静/重寻路」）：
+
+1. `moveOneStep`：`idx` 已到最后一个路点就**安静返回 OK**，不再自增；
+2. `betterMoveTo` 的 `idx-1` 兜底分支：自己就站在 `posArray[idx-1]` 上时
+   `deletePath()` 去重新寻路，不再 `originMove(undefined)`；
+3. `moveTo` 包装层：连续 6 tick 调了 moveTo 却一厘米没挪 ⇒ 作废**本爬**的缓存路
+   （每 6 tick 最多一次，不动共享 path 对象；原地干活、根本不调 moveTo 的爬不受影响）。
+
+新增 `test/move-pin-guard.test.cjs`：终点不自增 / `idx-1` 自指必须作废缓存 /
+6 tick 停滞作废缓存三条，每条都带「把守卫改回去」的负对照（实测退化回
+`originMove(undefined)`）。
+
 ## v0.78.194 — 矿点 link 的发送按固定键序轮，第二个矿点被永久饿死
 
 巡检「必须处理：地面能量在堆积 68,881（+8.3/tick）」。逐房拆开看是同一副形态：
