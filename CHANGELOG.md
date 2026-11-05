@@ -87,6 +87,31 @@ negative controls at target-2 (same low mean), unaffordable body (energy 1,200 <
 over-target (3 > 2) must not; hive-full + one carrier still replenishes; source assertion keeps
 the raw `avgBusy > 0.85 * roster` expression out of the gate.
 
+## v0.78.187 — Fill the upgrade container as a standing buffer (Overmind Controller-Manager pattern)
+
+User report: W26N58's upgrader energy supply broken, carriers not hauling. Measured:
+
+    4 upgraders (52 work) standing between link(7,6)=582 and cont(8,6)=0, all at e0
+    2 carriers idle (one empty, one holding 1200) with no tasks
+    controller rate saw-toothing 0 -> 49/tick between link refills
+
+`generatorFillEnergyTask` put the container-fill branch **inside** the "upgrade link is completely
+empty" gate, so while the link held energy the container was never filled and carriers had nothing to
+do; once the link drained, the refill had to wait for the transformLink chain (center link must be
+empty first), leaving 0/tick stalls.
+
+Overmind's Controller Manager pattern (bencbartlett's Overmind: a dedicated upgrader plus a controller
+container, transporters keeping it topped) is the fix: the container is a **standing buffer** filled
+whenever it drops below 2000 (reservation included), independent of link state; upgraders withdraw from
+the link first and fall back to the container. The center-link fill branch is preserved as the link-path
+supplement.
+
+### Tests
+
+New `test/upgrade-container-buffer.test.cjs`: the container branch must precede and be independent of
+the link gate, its condition must be only "below 2000", the center-link branch and the `room.used`
+stacking reservation must survive.
+
 ## v0.78.186 — The terminal-50k balance rule drained every room's storage to zero
 
 Census (tick 84060600): all **14 storages at 0 or exactly 776** while terminals held 2k-40k

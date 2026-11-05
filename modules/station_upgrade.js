@@ -541,17 +541,23 @@ let pro = {
         if (rm) {
             let container = Game.getObjectById(rm[pro.stationName][STRUCTURE_CONTAINER]);
             let upgradeLink = Game.getObjectById(rm[pro.stationName][STRUCTURE_LINK]);
-            if (!upgradeLink || upgradeLink && upgradeLink.store.isEmpty()) {
-                let centerLink = Game.getObjectById(rm[StationCarry.stationName][STRUCTURE_LINK]);
-                if (centerLink && upgradeLink && upgradeLink.store.isEmpty() && centerLink.store.isEmpty()) {
-                    return [UtilsTask.task(centerLink, "fillRes", "registerStationUpgradeCarryInRoom", { resType: RESOURCE_ENERGY })]
-                }
+                // **容器是缓冲，不再要求「link 完全空」才补**（2026-11-05，Overmind 模式）。
+                // 旧逻辑把容器填充整个塞进「link 为空」分支 ⇒ link 有 582 时容器恒 0、
+                // carrier 闲着没任务；upgrader 抽空 link 后要等 transformLink 链条
+                // （center 空 → 逐级单发）慢慢单发，期间 4 只 upgrader（52 work）0/tick 空转。
+                // Overmind 的 Controller Manager：专用 upgrader + 控制器旁容器，
+                // 容器常备缓冲；upgrader 优先吃 link，link 断供吃容器，两条补给线并行。
                 if (container
-                    && ((room.used[container.id] || 0) + container.store[RESOURCE_ENERGY] + Math.min(1000, Math.max((carryCap || 0) - 400, 0)) < 2000)
-                    && (!upgradeLink || (container && ((room.used[container.id] || 0) + container.store.getUsedCapacity(RESOURCE_ENERGY) < 800) && upgradeLink.store.isEmpty()))) {
+                    && ((room.used[container.id] || 0) + container.store[RESOURCE_ENERGY]
+                        + Math.min(1000, Math.max((carryCap || 0) - 400, 0)) < 2000)) {
                     return [UtilsTask.task(container, "fillRes", "registerStationUpgradeCarryInRoom", { resType: RESOURCE_ENERGY })]
                 }
-            }
+                if (!upgradeLink || upgradeLink.store.isEmpty()) {
+                    let centerLink = Game.getObjectById(rm[StationCarry.stationName][STRUCTURE_LINK]);
+                    if (centerLink && upgradeLink && upgradeLink.store.isEmpty() && centerLink.store.isEmpty()) {
+                        return [UtilsTask.task(centerLink, "fillRes", "registerStationUpgradeCarryInRoom", { resType: RESOURCE_ENERGY })]
+                    }
+                }
         }
         return [];
     }
