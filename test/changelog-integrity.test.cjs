@@ -98,7 +98,12 @@ assert.equal(sections(text).includes(version), true, `v${version} 应已留档`)
     const broken = parts.filter((_, i) => i !== idx).join("\n");
     const errs = audit(broken, version);
     assert.equal(errs.some(e => e.includes("0.78.195")), true, "删掉 v0.78.195 必须报错");
-    assert.equal(errs.some(e => e.includes("历史下限")), true, "小节数下降也必须报错");
+    // 下限闸门只抓「整份被旧副本覆盖」，单个小节不该触发 —— 所以负对照要**造**一个
+    // 低于下限的文本，而不是指望「真实节数刚好贴着下限」。原来直接借用本文件的真实
+    // 节数，发一次版（+1 节）就让这条断言失去余量、当场变红（2026-11-06 撞到）。
+    const trimmed = parts.slice(0, MIN_SECTIONS - 1).join("\n");
+    assert.equal(sections(trimmed).length < MIN_SECTIONS, true, "负对照前提：截出的文本确实低于下限");
+    assert.equal(audit(trimmed, version).some(e => e.includes("历史下限")), true, "小节数下降也必须报错");
 }
 
 // ③ 负对照：只剩顶部几十行（模拟旧副本覆盖）必须被抓到，且不能只报一条含糊错误

@@ -1,3 +1,25 @@
+## v0.78.202 — Power Bank 补员闸门：L1/L2 闩锁只挡「还有攻击手在打」，carrier 数活的
+
+线上两个 powerBank 旗子同时停摆：`powerBank_E55S39_E57S40_5_29`（窝已打剩
+**171,200 / 2,000,000** 血、离 disappearTime 还有 2,521 tick）与
+`powerBank_E41S23_E39S20_25_42`（7,518 power、剩 576 tick）。两边的 `attacker` / `healer`
+id `Game.getObjectById` 全为 null（老死），6 只 PBCarrier 在 (1,26~31) 干等、ttl 只剩 335~482。
+
+根因两条，都属「闸门自锁」：
+
+1. `exec` 的波次上限 `(boostModel == BOOST_L1 && L1Boosted)` 是**永久闩锁**：L1 波次一旦派出，
+   `L1Boosted` 永久为真 ⇒ 那波老死后**再不出兵**。而一波 attacker 只有 1,500 tick 命、
+   一个窝要 ~2,000,000 点伤害（一波约打 1.8M）—— 一波打不完是常态，后半程必然停摆。
+   改成 `pro.pbWaveBlocked(flag)`：L1/L2 只在 `pbFightersAlive(flag)`（**只看 attacker/healer**）
+   为真时挡。**不能**复用 `pbTeamAlive`：它把 carrier 算作「队伍还在」（撤旗用是对的），
+   6 只 carrier 全活着 ⇒ 恒真 ⇒ 等于没修。
+2. carrier 补员比的是 `flag.memory.carrierCnt`（**累计派过几只**），搬运老死后不回落 ⇒
+   到目标数就永久停派，攻击手把窝打开也没人搬。改成 `pro.pbLiveCarrierCnt(flag)`
+   （`flag.memory.carrier` 逐个查活）；`carrierCnt` 继续写回，只作观测值。
+
+非 L1/L2 的 `index > 3` 硬上限原样保留；不动 spawn 优先级顺序。
+新增 `test/power-bank-respawn.test.cjs`（把旧表达式塞回 `pbWaveBlocked` 实测红：actual true / expected false）。
+
 ## v0.78.201 — carrier 换代提前量：拿「不含将死」的编制去对标目标
 
 `strategy_highLevel.carrierManager` 的补员触发条件原来是 `carrierCnt < carrierTarget`，
