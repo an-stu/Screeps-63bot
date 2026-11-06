@@ -1,3 +1,37 @@
+## v0.78.203 — 本房 keeper 按「本 tick 真剩下多少能量」定体型（550 下限把缺能房锁死 650 tick）
+
+2026-11-06 08:17 巡检：W26N58（RCL6 单 spawn、容量 2,300）报告「hive 只有 300/2300
+而 storage 99,115」「keeper 0 < 矿点 2」。深探时间线：
+
+- 两只 keeper 的 `spawnTime` 都是 84095966（记录龄 + ttl 恒 = 1,500）⇒ **84097466 同时老死**；
+- 此后 **650 tick 一只 keeper 都补不出来**：全房零收入，storage 99,115 一动不动，
+  W26N59 外矿跟着掉到 1 只 keeper（`__outerWhy=keeper<src1<2`）、容器 2,000 满 + 地面 5,098；
+- hive 在 228 / 300 / 400 / 550 之间打转（1 只 carrier 要补 40 个 extension，还被 tower 抽）；
+- **hive 一冲到 650（tick 84098118）当场就孵出 keeper** —— 卡点就是 550 这条线。
+
+根因：`trySpawnOuterHarKeeper` 的
+`energyBudget = Math.min(cap, Math.max(room.energyAvailable, 550))`
+把预算**强行抬到 550**（= 2WORK+2MOVE+1CARRY），而 `StationHive.trySpawn` 的判据是
+`currentEnergyAvailable < spend ⇒ 静默失败`（`station_hive.js:177`）⇒ **hive 长期 < 550 的房
+永远孵不出 keeper**，与那行注释「让缺能房先恢复挖矿」正好相反。同一个病根在 0.78.193
+（`f704f98`）刚修过 upgrader 的 600 下限，keeper 这条漏了（MEMORY 第 5 条：阈值不能
+写死成大房量级）。
+
+修法（`station_sources.js`）：
+
+1. **本房** keeper 的预算 = 本 tick 真剩余能量（`currentEnergyAvailable`，缺省
+   `getEnergyAvailable()`），不再抬 550 ⇒ hive 300 就派 300 体型的 keeper（2 WORK，
+   4 能量/tick 的产出也好过 0）；hive 充裕时仍按 `innerMaxPartCnt` 放大到 800。
+2. 连 1 组都付不起（`getHarvesterBodyConfig` 返回空体型）或算出来的体型比预算贵一格
+   （循环里多带 1 个 CARRY）时**这一轮不试**：`spawnCreep([])` 是 `ERR_INVALID_ARGS`，
+   硬试只会在 `trySpawn` 里静默失败并把 `spawnFailure` 置真、拖累同 tick 后面的
+   carrier / upgrader。
+3. 外矿 keeper 保留 550 下限（要飞外矿、可能要扛 source keeper，小体型是送人头）。
+
+新增 `test/keeper-affordable-body.test.cjs`：现场复刻（hive 400 + 0 只 keeper 必须孵出
+且体型 ≤ 400）、hive 300 退化档、hive 满格放大到 800、hive ≤ 250 不硬造空体型；
+负对照把预算改回 550 下限后，hive 400 实测孵不出来（证明测的是行为而不是字面）。
+
 ## v0.78.202 — Power Bank 补员闸门：L1/L2 闩锁只挡「还有攻击手在打」，carrier 数活的
 
 线上两个 powerBank 旗子同时停摆：`powerBank_E55S39_E57S40_5_29`（窝已打剩
