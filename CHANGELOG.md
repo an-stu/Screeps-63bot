@@ -1,3 +1,35 @@
+## v0.78.211 — 「snapshot reconcile」把两个已修好的补员闸门退回旧版（keeper 550 下限 / PB 波次闩锁）
+
+2026-11-07 01:14 巡检：主脚本两档皆空，但 `node test/*.cjs` 三红。前两条不是测试坏了，
+是**线上代码真的退回去了** —— `71d01c3 snapshot: reconcile local HEAD over the parallel remote state`
+拿一份「有 0.78.190 新功能、但早于 0.78.202/0.78.203 两个修复」的本地副本整份覆盖，
+把 `modules/station_sources.js`（1 个 hunk）和 `modules/strategy_powerBank.js`（3 个 hunk）
+一起盖回旧内容，同时还把 `main_mount.js` 的版本号从 0.78.203 退回 0.78.202。
+
+两个被吃掉的修复，后果都是「静默停摆」，脚本看不出来：
+
+- **本房 keeper 预算又被抬回 550**（0.78.203 修的就是这个）：`Math.max(energyAvailable, 550)`
+  让 RCL6 单 spawn 房（hive 容量 2,300、长期在 300~500 打转）每 pass 都付不起 ⇒
+  `trySpawn` 静默失败 + `spawnFailure` 粘滞 ⇒ 整房零收入。测试实测 550 > 400 直接断言失败。
+- **L1/L2 波次闩锁又变永久**、`carrierCnt` 又按「累计派过几只」比：`pbFightersAlive` /
+  `pbLiveCarrierCnt` / `pbWaveBlocked` 三个函数整体消失，exec 里退回那行手写条件 ⇒
+  攻击手老死后没人补位、6 只 carrier 在窝门口干等到旗子过期（0.78.202 修的）。
+
+处置：`git checkout 71d01c3^ -- modules/station_sources.js modules/strategy_powerBank.js`
+定向还原（**只**这两处；`71d01c3` 同时带进来的 `main.js` 源容器监控、`strategy_highLevel.js`
+的 transformLink 每 tick 执行是前进改动，保留）。两个测试随即转绿。
+
+判据补充：**「脚本全绿 + 测试有红」= 线上代码被覆盖，先看 git 图再谈深探**。
+`71d01c3` 这类快进提交在 git 上没有任何冲突痕迹（等于用旧内容覆盖新内容），
+只有 `test/*.cjs` 和 `check-sync` 会响。以后合并远端后，先跑测试再看指标。
+
+## v0.78.210 — T0/T1 商品扫货（市场价低于合成价值就挂买单）
+
+`scanUnderpricedCommodities()`：每 500 tick 从 `COMMODITIES` 动态构建 T0/T1 合成链，
+按历史均价算原料成本、按当前买单价算产物收入，利润率 > 50%（`Memory.marketSettings.scanMarginPct`
+可覆盖）就对原料挂大额买单。只管挂单不管 deal —— deal 吃卖单要付路费，挂单让卖方送上门。
+信用点 < 1,000,000 时不扫。
+
 ## v0.78.204 — high-margin ingredient buys track market price (no avg cap)
 
 User: T0 原料价格高也要买，L5 产品 1000%+ 利润足以覆盖。
