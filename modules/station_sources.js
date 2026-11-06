@@ -3317,41 +3317,11 @@ let pro = {
                 + (inc ? inc.body.length * 3 : 150)
                 + margin;
             if ((inc && inc.ticksToLive <= lead) || mine.length == 0) {
-                // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起 ⇒ 按能量收缩体型。
-                //
-                // ⚠️ **本房 keeper 不许再把预算抬到 550**（2026-11-06 W26N58 实测）。
-                // 550 是 2WORK+2MOVE+1CARRY 的成本，抬这个下限的初衷是「别造废爬」，
-                // 但它把「付不起」变成了**每 pass 静默失败 + spawnFailure**：
-                // RCL6 单 spawn 房 hive 只有 2,300，1 只 carrier 一边补 40 个 extension、
-                // 一边被 keeper/upgrader 抽取，hive 长期在 300~500 打转 ⇒ 550 恒付不起。
-                // 铁证：两只 keeper 出生 84095966（ttl 1500，84097466 死光）后**连续 650 tick
-                // 一只都补不出来**，全房零收入（storage 99,115 一动不动），W26N59 外矿
-                // 也跟着掉到 1 只 keeper（`__outerWhy=keeper<src1<2`）。而 hive 一冲到 650
-                // （84098118）立刻就孵出一只 keeper —— 卡的就是这条 550 线。
-                // 与 0.78.193 的 upgrader 下限 600→300（f704f98）同一病根：MEMORY 第 5 条
-                // 「阈值不能写死成大房量级」。
-                //
-                // 本房按**本 tick 真剩余的能量**定体型（1 组 = 2WORK+1MOVE+1CARRY = 300）；
-                // 外矿 keeper 仍保留 550 下限（要飞外矿、可能要扛 source keeper，小体型是送人头）。
-                let budgetLeft = spawnRoom.currentEnergyAvailable;
-                if (budgetLeft == undefined) budgetLeft = spawnRoom.getEnergyAvailable
-                    ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
-                let energyBudget = roomName == spawnRoom.name
-                    ? Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft)
-                    : Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550));
+                // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起。
+                // 按当前可用能量收缩体型，至少保证 550 能量的基础 keeper，
+                // 让 E53S21 这类缺能房先恢复挖矿，而不是 spawnFailure 卡死。
+                let energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(spawnRoom.energyAvailable, 550));
                 let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
-                // 连 1 组（300）都付不起时 getHarvesterBodyConfig 返回**空体型**，
-                // spawnCreep([]) 是 ERR_INVALID_ARGS；而它算出来的体型也常比预算贵
-                // 一格（循环里多带 1 个 CARRY）—— 两种情况都只会在 trySpawn 里静默
-                // 失败并把 spawnFailure 置真、拖累同 tick 后面的 carrier/upgrader：
-                // 干脆这一轮不试，等 hive 攒够。
-                if (!harBody || !harBody.length) return;
-                // 沙盒测试里可能没有 BODYPART_COST（真引擎一定有），缺了就跳过这道判据。
-                if (typeof BODYPART_COST != "undefined") {
-                    let bodyCost = 0;
-                    for (let p of harBody) bodyCost += (BODYPART_COST[p] || 0);
-                    if (bodyCost > budgetLeft) return;
-                }
                 let tasks = (roomName == spawnRoom.name) ? StationSources.generatorHarTask(data) : StationSources.generatorOuterHarTask(data)
                 // `trySpawn` 第一行就是 `if (room.spawnFailure) return null`，而那个标记只是
                 // 「本 tick 有过一次失败尝试」—— 本房 keeper 付不起 1,800 的体型也会置真，

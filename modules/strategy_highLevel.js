@@ -779,6 +779,14 @@ let pro = {
     },
     exec(room) {
         if (!MIN_CPU) pro.processPowerSpawn(room)// 每tick都要处理
+        // **link 发送每 tick 执行**（0.78.190）：原来跟经济 pass 共用 %7 门槛，
+        // 4 个源 link 轮转一圈要 28 tick——OPERATE_SOURCE 的 40/tick 产出
+        // 远超 28/tick 的 link 吞吐 ⇒ 容器 2000 满、keeper 往地上倒。
+        // transformLink 本身很便宜（几个 getObjectById + store 检查），
+        // 移到门槛前每 tick 执行，link cooldown 由引擎控制发送节奏。
+        if (!MIN_CPU && global.StationCarry) {
+            HelperError.catchError(() => StationCarry.transformLink(room), room.name + ":transformLink");
+        }
         // Task assignment and spawn planning tolerate a short delay. Spreading
         // this expensive economy pass across rooms keeps ordinary ticks below
         // the shard's 20 CPU allowance without delaying tower defense.
@@ -800,8 +808,7 @@ let pro = {
         if (global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")) ManagerAutoPlanner.tryAutoBuildHighLevel(room);
 
 
-
-        StationCarry.transformLink(room);
+        // transformLink 已移到 exec 开头每 tick 执行（0.78.190）
         // 能量生产者最优先：先补 keeper（缺矿点/死光时），否则 carrier/worker
         // 会先把空 hive 的 spawn 能量吃光，keeper 永远 spawn 失败（E53S21）。
         StationSources.trySpawnHarKeeper(room);

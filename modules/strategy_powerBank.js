@@ -247,48 +247,6 @@ let pro = {
         }
         return ids.some(id => id && Game.getObjectById(id));
     },
-    /**
-     * 还在打的那半边（attacker / healer）有没有活人。
-     *
-     * 和 pbTeamAlive 的区别：那个把 carrier 也算「队伍还在」（撤旗用，不能把在途的搬运扔掉），
-     * 但**补员闸门不能算 carrier**。carrier 是独立补的廉价单位，只要它们还活着，
-     * 「本旗已派过 L1 波次」的闩锁就恒为真 ⇒ 攻击手老死后永远没人补位。
-     * 2026-11-06 实测 E55S39→E57S40：窝已打剩 171,200/2,000,000 血，6 只 carrier
-     * 在门口干等，attacker/healer 全老死，旗子到 disappearTime 都没再出兵。
-     */
-    pbFightersAlive(flag) {
-        let mem = (flag && flag.memory) || {};
-        for (let k of ["attacker", "healer"]) {
-            let m = mem[k];
-            if (!m) continue;
-            let ids = Array.isArray(m) ? m : Object.keys(m).map(j => m[j]);
-            if (ids.some(id => id && Game.getObjectById(id))) return true;
-        }
-        return false;
-    },
-    /** 还活着的搬运数。flag.memory.carrier 只增不减，必须逐个查活。*/
-    pbLiveCarrierCnt(flag) {
-        let ids = (flag && flag.memory && flag.memory.carrier) || [];
-        let n = 0;
-        for (let id of ids) if (id && Game.getObjectById(id)) n++;
-        return n;
-    },
-    /**
-     * 这一 tick 还该不该派新的攻击波次。
-     *
-     * 非 L1/L2：硬上限 4 波（index>3 就停，原样保留）。
-     * L1/L2：一次只允许**一波在打**，那波死了就要补。原来是无条件永久闩锁
-     * （L1Boosted 一置真就再也不生），可一波 attacker 只有 1500 tick 命、
-     * 一个窝要 ~2,000,000 点伤害 —— 一波打不完 ⇒ 后半程必然停摆。
-     */
-    pbWaveBlocked(flag) {
-        let mem = (flag && flag.memory) || {};
-        if (mem.boostModel != BOOST_L1 && (mem.index || 0) > 3) return true;
-        let fighters = pro.pbFightersAlive(flag);
-        if (mem.boostModel == BOOST_L1 && mem.L1Boosted) return fighters;
-        if (mem.boostModel == BOOST_L2 && mem.L2Boosted) return fighters;
-        return false;
-    },
     recordMissionDecision(targetRoomName, powerBankData, decision, spawnRoomName) {
         // A PB is only visible for the Observer tick in which it was scanned.
         // Keep one compact, replace-in-place decision record so `dash` can
@@ -543,7 +501,7 @@ let pro = {
 
             flag.memory.index = flag.memory.index || 0
             if (flag.memory.beingAttack) needSpawn = true; // 如果是t2 出1队，否则出3队
-            if (pro.pbWaveBlocked(flag))
+            if ((flag.memory.boostModel != BOOST_L1 && (flag.memory.index > 3)) || (flag.memory.boostModel == BOOST_L1 && flag.memory.L1Boosted) || (flag.memory.boostModel == BOOST_L2 && flag.memory.L2Boosted))
                 needSpawn = false;// 如果超过上限就不生了
 
             // log(flag.name,needSpawn,(flag.memory.lastSpawnTime||0)+respawnTime-Game.time,flag.memory.beingAttack ,flag.memory.beingAttack&&flag.memory.boostModel != BOOST_L1)
@@ -597,14 +555,9 @@ let pro = {
                 let carrierCnt = Math.ceil(flag.memory.power / 1650)
                 let needCarry = flag.memory.power / carrierCnt
                 // let needCarry =1650
-                // carrierCnt 记的是「本旗累计派过几只」，搬运老死后不回落 ⇒ 到目标数就永久停派，
-                // 攻击手把窝打开也没人搬（2026-11-06 E57S40：ccc=6=目标数，6 只 ttl 只剩 335~482）。
-                // 改成数**活的**：carrier 列表只增不减，逐个 Game.getObjectById 查。
-                let liveCarrierCnt = pro.pbLiveCarrierCnt(flag)
-                flag.memory.carrierCnt = liveCarrierCnt
-                if (liveCarrierCnt < carrierCnt) {
+                if (flag.memory.carrierCnt < carrierCnt) {
                     if (pro.trySpawnPBCarrier(room, flag.memory, needCarry))
-                        flag.memory.carrierCnt = liveCarrierCnt + 1
+                        flag.memory.carrierCnt++
                 }
             }
 

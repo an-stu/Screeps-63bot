@@ -285,19 +285,26 @@ let updateCodeHealth = function () {
         }
     }
     let objects = getTickObjects();
+    // **源容器积压监控**（0.78.190）：满格源容器数量是 link 吞吐和 carrier
+    // 运力是否足够的直接指标——持续 >= 总数的一半说明 link/carrier 链路有瓶颈。
+    let fullConts = 0, totalConts = 0;
+    objects.rooms.filter(e => e.my && e.level >= 6 && Memory.rooms[e.name]
+        && Memory.rooms[e.name][StationSources.stationName]).forEach(room => {
+        _.values(Memory.rooms[room.name][StationSources.stationName]).forEach(d => {
+            let c = Game.getObjectById(d.container);
+            if (c) { totalConts++; if (c.store[RESOURCE_ENERGY] >= 1900) fullConts++; }
+        });
+    });
     Memory.codeHealth = Object.assign(previousHealth, {
         time: Game.time,
         cpu: Game.cpu.getUsed(),
         averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),
-        // cpuLongTerm / moduleCpu 曾经也落在这里，但它们是
-        // HelperCpuUsed.longTermSummary() / profileSummary() 的完整副本：
-        // moduleCpu(4.6KB) 与 Memory.cpuModuleTelemetry(4.5KB) 完全重复，
-        // cpuLongTerm 又派生自 Memory.cpuTelemetry。两者都改为 dashboard
-        // 按需计算（helper_consoleDashboard 里），每 tick 少序列化约 5KB。
         bucket: Game.cpu.bucket,
         creeps: objects.creeps.length,
         powerCreeps: objects.powerCreeps.filter(e => e.ticksToLive).length,
         upgraderInterval: Game._upgraderInterval || getUpgraderInterval(),
+        fullSourceContainers: fullConts,
+        totalSourceContainers: totalConts,
         missingTaskHandlers: missingTaskHandlers,
         phases: Game._coreCpuProfile || Memory.codeHealth.phases || {},
     });
