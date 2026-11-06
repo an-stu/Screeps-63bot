@@ -1,3 +1,18 @@
+## v0.78.204 — high-margin ingredient buys track market price (no avg cap)
+
+User: T0 原料价格高也要买，L5 产品 1000%+ 利润足以覆盖。
+
+The ingredient buying logic capped maxBuyPrice at `historyPrice × (1 +
+buyPremium)`. When the market ask exceeded this cap, the ingredient was
+added to `noCheap` and skipped — even when the downstream L5 product's
+realMargin was 1000%+ (device 1167%, organism 1486%). The silicon cost of
+~30k credits against a 44M credit revenue is a rounding error, but the
+average-price cap blocked the entire production chain.
+
+Fix: when realMargin > 500%, `maxBuyPrice = Infinity` — the system buys at
+whatever the market asks, knowing the margin absorbs it. Below 500% margin,
+the original avg-price cap still applies.
+
 ## v0.78.203 — 本房 keeper 按「本 tick 真剩下多少能量」定体型（550 下限把缺能房锁死 650 tick）
 
 2026-11-06 08:17 巡检：W26N58（RCL6 单 spawn、容量 2,300）报告「hive 只有 300/2300

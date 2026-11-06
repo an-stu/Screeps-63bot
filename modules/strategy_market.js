@@ -430,9 +430,15 @@ let pro = {
                     if (gap < 1000) continue;
                     let price = StrategyMarketPrice.getResTypeHistory(comp);
                     if (!price || price <= 0) price = 0.01;
-                    // 只吃“便宜”的卖单：卖一价最多比历史均价高 buyPremium。
-                    // 买不到就等，不再挂高价/大额买单（metal 2w @239 的教训）。
-                    let maxBuyPrice = price * (1 + buyPremium);
+                    // **高利润时直接跟最低卖价**（用户 11-04：T0 原料价格高也要买，
+                    // L5 产品 1000%+ 的利润足以覆盖）。原来 maxBuyPrice = 历史均价 ×
+                    // (1+buyPremium)，silicon 市场价 295 vs 上限 176 被拒——但 device
+                    // margin 1167%、organism 1486%，silicon 成本只占零头，按均价控价
+                    // 等于放弃了整个生产链。现在：realMargin > 500% 时 maxBuyPrice
+                    // 直接跟 minSellPrice，按市价买入；低于 500% 维持原有控价。
+                    let maxBuyPrice = realMargin > 500
+                        ? Infinity  // 高利润：不设上限，直接吃最低卖单
+                        : price * (1 + buyPremium);
                     let sellList = pro.getAllOrdersCacheList(comp, ORDER_SELL).filter(o => o.amount > 0);
                     if (!sellList.length) continue;
                     let minSellPrice = sellList.reduce((min, o) => Math.min(min, o.price), Infinity);
