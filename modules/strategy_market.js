@@ -263,6 +263,8 @@ let pro = {
             }
             // RCL<8 的升级房持续大量买能量，不依赖 buyEnergy 开关。
             pro.autoBuyLowRclEnergy();
+            // T0/T1 商品扫货：市场价低于合成价值时挂大额买单（隔 500 tick 一次）
+            pro.scanUnderpricedCommodities();
             // 不买 power（用户 2026-10-08）：这一路现在只负责**撤销**自家 power 买单，
             // 见 autoBuyPower 的说明。
             pro.autoBuyPower();
@@ -430,15 +432,9 @@ let pro = {
                     if (gap < 1000) continue;
                     let price = StrategyMarketPrice.getResTypeHistory(comp);
                     if (!price || price <= 0) price = 0.01;
-                    // **高利润时直接跟最低卖价**（用户 11-04：T0 原料价格高也要买，
-                    // L5 产品 1000%+ 的利润足以覆盖）。原来 maxBuyPrice = 历史均价 ×
-                    // (1+buyPremium)，silicon 市场价 295 vs 上限 176 被拒——但 device
-                    // margin 1167%、organism 1486%，silicon 成本只占零头，按均价控价
-                    // 等于放弃了整个生产链。现在：realMargin > 500% 时 maxBuyPrice
-                    // 直接跟 minSellPrice，按市价买入；低于 500% 维持原有控价。
-                    let maxBuyPrice = realMargin > 500
-                        ? Infinity  // 高利润：不设上限，直接吃最低卖单
-                        : price * (1 + buyPremium);
+                    // 原料买入用**挂买单**（用户 11-04）：deal 吃卖单要付路费，
+                    // 挂买单让卖方送上门。挂单价跟到当前最高买价附近即可。
+                    let maxBuyPrice = price * (1 + buyPremium);
                     let sellList = pro.getAllOrdersCacheList(comp, ORDER_SELL).filter(o => o.amount > 0);
                     if (!sellList.length) continue;
                     let minSellPrice = sellList.reduce((min, o) => Math.min(min, o.price), Infinity);
@@ -648,6 +644,90 @@ let pro = {
                 roomName: room.name,
             });
         });
+    },
+    /**
+     * **T0/T1 商品扫货**：市场价明显低于合成价值时挂大额买单。
+     *
+     * 原理：从 COMMODITIES 动态构建「T0→T1」和「T1→T2」合成链，按当前市场
+     * 价格计算每条链的利润率。利润率 > SCAN_MARGIN_PCT% 时挂买单买原料。
+     *
+     * 隔 SCAN_INTERVAL（500 tick）扫一次（用户 11-04：隔长时间算一次）。
+     * 只管挂单不管 deal——deal 吃卖单要付路费，挂单让卖方送上门。
+     * 使用 `Memory.marketSettings.scanMarginPct` 可覆盖利润率阈值。
+     */
+    scanUnderpricedCommodities() {
+        let interval = 500;
+        if (Game.time % interval != 0) return;
+        if (Game.market.credits < 1000000) return;
+
+        let marginPct = Number(Memory.marketSettings && Memory.marketSettings.scanMarginPct) || 50;
+        let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY) || 0.05;
+
+        // 从 COMMODITIES 动态构建合成链：找所有「产出的商品在市场上有买单价」
+        // 且「原料包含 T0 deposit 或 T1 商品」的配方
+        let t0Set = new Set(["silicon", "metal", "biomass", "mist"]);
+        let t1Set = new Set(["wire", "alloy", "cell", "condensate"]);
+        let results = [];
+
+        for (let product in COMMODITIES) {
+            let recipe = COMMODITIES[product];
+            if (!recipe.components) continue;
+            let hasT0orT1 = Object.keys(recipe.components).some(c => t0Set.has(c) || t1Set.has(c));
+            if (!hasT0orT1) continue;
+
+            // 原料总成本（按历史均价算，实际买入按市场价）
+            let totalCost = 0;
+            for (let comp in recipe.components) {
+                let price = StrategyMarketPrice.getResTypeHistory(comp);
+                if (!price || price <= 0) { totalCost = 0; break; }
+                totalCost += recipe.components[comp] * price;
+            }
+            if (totalCost <= 0) continue;
+
+            // 产品收入（按当前最高买价或历史均价）
+            let buyList = pro.getAllOrdersCacheList(product, ORDER_BUY);
+            let salePrice = buyList.length ? buyList.maxBy(o => o.price).price : 0;
+            if (!salePrice) salePrice = StrategyMarketPrice.getResTypeHistory(product) || 0;
+            if (salePrice <= 0) continue;
+
+            let revenue = recipe.amount * salePrice;
+            let margin = (revenue - totalCost) / Math.max(revenue, 1) * 100;
+            results.push({ product, margin, recipe, totalCost, revenue, salePrice });
+        }
+
+        // 按利润率降序，只处理 > marginPct% 的
+        results.sort((a, b) => b.margin - a.margin);
+        for (let r of results) {
+            if (r.margin < marginPct) break;
+            // 找配方中的 T0/T1 原料（买这些最便宜的原材料）
+            for (let comp in r.recipe.components) {
+                if (!t0Set.has(comp) && !t1Set.has(comp)) continue;
+                // 已有买单则跳过
+                let hasOrder = _.values(Game.market.orders).some(o => o.remainingAmount > 0
+                    && o.resourceType == comp && o.type == ORDER_BUY);
+                if (hasOrder) continue;
+
+                // 挂单价：略高于当前最高买价（确保排前）
+                let buyList = pro.getAllOrdersCacheList(comp, ORDER_BUY);
+                let buyHigh = buyList.length ? buyList.maxBy(o => o.price).price : 0;
+                let histPrice = StrategyMarketPrice.getResTypeHistory(comp) || 0.01;
+                let orderPrice = Math.max(buyHigh * 1.02, histPrice * 0.9, 0.01);
+                let buyAmount = 50000;
+                Game.market.createOrder({
+                    type: ORDER_BUY,
+                    resourceType: comp,
+                    price: orderPrice,
+                    totalAmount: buyAmount,
+                    roomName: "E41S23",
+                });
+                console.log(`[scanUnderpriced] ${comp} buy ${buyAmount} @ ${orderPrice.toFixed(2)}`
+                    + ` (chain margin ${Math.round(r.margin)}%, product ${r.product})`);
+                break; // 每 pass 最多挂一单
+            }
+        }
+        if (results.length && results[0].margin > marginPct) {
+            console.log(`[scanUnderpriced] best: ${results[0].product} margin ${Math.round(results[0].margin)}%`);
+        }
     },
     /**
      * deposit 基础品（silicon / metal / biomass / mist）的溢出处理。
