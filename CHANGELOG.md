@@ -1,3 +1,22 @@
+## v0.78.214 — station_carry 烧制/灌能闸改 storage 单口径（terminal 存货不再背书）
+
+0.78.213 上线后的现场复核：E41S23 storage 97~99k 时 power spawn 仍被灌了 2,850 能量
++93 power（改版前开闸窗口的在途任务余波，一次性），且审查发现 `station_carry.js` 里
+还有**同族口径问题**：
+
+- `tryProcessPower` 与 `generatorFillPowerSpawnTask` 的能量口径都是
+  `roomMassStoreCnt` = **storage + terminal**。而文档自己写着「terminal 是市场储备，
+  不给可选消耗背书」（POWER_SPAWN_ENERGY_FLOOR 的推导）——市场房 terminal 堆 10 万
+  货、storage 归零时，质量口径照样开闸烧/送料，**正是 2026-10-08 W33N55 那个 bug
+  （storage 0 + terminal 41636 照烧）在这条路上的残留形态**。
+- 修墙闸（repairWallAffordable）与 0.78.213 改的 roomEnergyAbundant 都是 storage
+  单口径 ⇒ 三处口径从此同源：**可选消耗（烧 ops / 灌 power spawn）只认 storage**。
+
+改动：两处 `roomMassStoreCnt(room, RESOURCE_ENERGY)` → `room.storage.store[ENERGY]`
+（power 保持质量口径不动——账号 power 百万级富余，瓶颈从来是能量）。
+测试：`power-spawn-burn.test.cjs` 新增 terminal 背书负例（storage 9 万 + terminal 5 万
+⇒ 必须停烧，旧口径下 14 万会照烧）；makeRoom 桩随口径更新。
+
 ## v0.78.213 — ops 烧制地板 3 万 → 10 万（与修墙储备同源），拔掉 worker 挂机的抽水机
 
 2026-11-07 用户追问「worker 为什么挂机，是不是修 rampart 出问题」。排查结论：**修墙

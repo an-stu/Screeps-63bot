@@ -284,7 +284,13 @@ let pro = {
         let low = Number(ms.powerSpawnLow) >= 0 ? Number(ms.powerSpawnLow) : 100;
         let floor = Number(ms.powerSpawnEnergy) > 0 ? Number(ms.powerSpawnEnergy) : 100000;
         let power = pro.roomMassStoreCnt(room, RESOURCE_POWER);
-        let energy = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
+        // 能量口径 = **storage 单口径**（2026-11-07，0.78.214）：terminal 是市场储备、
+        // 不给可选消耗背书（与 POWER_SPAWN_ENERGY_FLOOR / roomEnergyAbundant /
+        // StationDefense.repairWallAffordable 同源）。旧的质量口径（storage+terminal）
+        // 在市场房 terminal 堆货时会把 storage 见底的房也算成「可烧」—— 正是
+        // 2026-10-08「W33N55 storage 0 + terminal 41636 照烧」那个 bug 的残留形态，
+        // 也是 E41S23 worker 挂机排查（0.78.213）里修墙预算被抽穿的族源。
+        let energy = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
         let target = ms.powerSpawnRoom === undefined ? "W32N56" : ms.powerSpawnRoom;
         let isTarget = !!target && room.name == target;
         // **没有 OPERATE_POWER 效果的房间：正常烧**（用户 2026-10-21：
@@ -324,7 +330,11 @@ let pro = {
         pro.tryProcessPower(room);
         room.used = room.used || {};
         let tasks = []
-        let energyCnt = pro.roomMassStoreCnt(room, RESOURCE_ENERGY);
+        // 能量口径与 tryProcessPower 同步为 storage 单口径（2026-11-07，0.78.214）：
+        // 灌能闸若用 storage+terminal 质量口径，市场房 terminal 存货会让烧制在
+        // storage 跌穿修墙储备（repairWallAffordable，10 万）时仍开闸送料，
+        // power spawn 照烧 50 能量/tick ⇒ worker 无墙可修 ⇒ 挂机循环。
+        let energyCnt = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
         let powerCnt = pro.roomMassStoreCnt(room, RESOURCE_POWER);
         // powerSpawn 只是喷嘴：power 容量 100、能量 5000，**每 tick 吃 1 power + 50 能量**。
         // 所以只要「本房是烧 power 的试点房」且存量够开闸，就要往里送料，

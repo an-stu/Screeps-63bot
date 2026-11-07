@@ -33,8 +33,9 @@ function load(settings, room) {
     vm.runInNewContext(src, ctx, { filename: "station_carry.js" });
     ctx.__burn = 0;
     room.powerSpawn.processPower = () => { ctx.__burn++; return ctx.OK; };
-    ctx.StationCarry.roomMassStoreCnt = (r, res) =>
-        res == "energy" ? room.__energy : (res == "power" ? room.__power : 0);
+    // 0.78.214 起 tryProcessPower 的**能量**口径改为 storage 单口径（直接读
+    // room.storage），stub 只需照顾 power 的质量口径（storage+terminal）
+    ctx.StationCarry.roomMassStoreCnt = (r, res) => (res == "power" ? room.__power : 0);
     return ctx;
 }
 
@@ -45,6 +46,8 @@ function makeRoom(power, energy, effects) {
         name: "W32N56",
         __power: power,
         __energy: energy,
+        storage: { store: { energy: energy } },   // 0.78.214：烧制闸读 storage 单口径
+        terminal: { store: { energy: 0 } },
         powerSpawn: {
             store: { power: 100, energy: 500 },
             effects: effects === undefined ? OP_EFFECT : effects,
@@ -93,6 +96,20 @@ function makeRoom(power, energy, effects) {
     const ctx = load(ms, room);
     ctx.StationCarry.tryProcessPower(room);
     assert.equal(ctx.__burn, 0, "能量低于下限停烧");
+    assert.equal(ms.powerBurning, false);
+}
+
+{
+    // storage 单口径：terminal 存货**不许给烧制背书**（0.78.214）。
+    // 2026-10-08 W33N55 现场：storage 0 + terminal 41636，质量口径（storage+terminal）
+    // 算成充裕照烧 50 能量/tick —— 只改了 strategy_highLevel 那条路，station_carry
+    // 这条一直残留。E41S23 worker 挂机（0.78.213 排查）的族源。
+    const room = makeRoom(5000, 90000);
+    room.terminal.store.energy = 50000;   // 质量口径 14 万 ≥ 10 万，storage 只有 9 万
+    const ms = { powerBurning: true };
+    const ctx = load(ms, room);
+    ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ctx.__burn, 0, "storage 9 万 < 10 万：terminal 的 5 万不许背书，必须停烧");
     assert.equal(ms.powerBurning, false);
 }
 
