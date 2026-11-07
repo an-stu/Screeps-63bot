@@ -295,6 +295,13 @@ let pro = {
                     pro.unboostWorker(room, creep)
                 } else if (StorageCarryEnergyTasks.length > 0 && pro.workerHasConsumer(room, creep)) {
                     // 没有下家就别去 storage 取：取了只能站着（见 workerHasConsumer）
+                    // 修墙配对（0.78.220，用户「怎么又在挂机」）：墙缺口存在时把
+                    // repair 任务一起压栈 —— 栈 LIFO，先压修墙（栈底）、再压取能
+                    // （栈顶）⇒ 取能完成当 tick 无缝接修墙，省掉「取完等下个
+                    // 经济 pass（bucket<5000 时长达 14 tick）才派修墙」的可见空窗。
+                    let wallRepairTask = StationDefense.needBuildWallWorkerFree(room) && !room.isDownGrade()
+                        ? StationDefense.generatorRepairTask(room) : [];
+                    if (wallRepairTask.length) creep.addTask(wallRepairTask);
                     creep.addTask(StorageCarryEnergyTasks)
                 } else if (lowEnergyCarry && lowEnergyCarry.length) {
                     creep.addTask(lowEnergyCarry.pop())

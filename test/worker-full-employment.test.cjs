@@ -234,6 +234,20 @@ function mkRoom({ workers, carriers = [], storageEnergy = 98671, fillTowerTasks,
     assert.equal(w.memory.tasks[0].taskName, "carryRes");
 }
 
+{   // ── ⑩ 修墙配对（0.78.220）：取能 + 修墙一次压栈，取完无缝接修 ─────────
+    // 现场：E55S31 worker 修完一车站桩等下个经济 pass（bucket<5000 时长达
+    // 14 tick）才拿到下一个 repairWall —— 用户看到的「又在挂机」。
+    const High = load();
+    const w = mkCreep({});
+    const room = mkRoom({ workers: [w], carriers: [mkCreep({})], fillTowerTasks: [] });
+    room._wallFree = true;  // workerHasConsumer 经 needBuildWallWorkerFree 命中（缺口存在）
+    High.workerManagerAfterCarrier(room);
+    assert.equal(w.memory.tasks.length, 2, "墙缺口 + storage 有货 ⇒ [repairWall, carryRes] 配对，实得 "
+        + JSON.stringify(w.memory.tasks));
+    assert.equal(w.memory.tasks[0].taskName, "repairWall", "栈底是修墙（取完弹栈即接上）");
+    assert.equal(w.memory.tasks[1].taskName, "carryRes", "栈顶是取能（LIFO 先执行）");
+}
+
 {   // ── ⑨ 源码 pin：出口链顺序、栈配对、迟滞、豁免、carrier 缓存 ──────────
     const code = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     const iFetch = code.indexOf("pro.workerHasConsumer(room, creep)");
