@@ -112,6 +112,22 @@ function flag(memory) {
         "pbWaveBlocked 必须有 beingAttack 直通分支");
 }
 
+// ⑤c 被打房永久记账（0.78.222，用户：「补太慢了来不及，直接检查收过攻击的房间，
+//     直接这些房间都用 T2 强化」）——检测需要视野、常常来不及；凡被袭击过的目标房
+//     写进 Memory.powerBankAttackedRooms，之后打这房的任务从第一波起 T2 + 波次不设限。
+{
+    const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/Memory\.powerBankAttackedRooms\[flag\.memory\.roomName\] = \{ user: raider\.owner\.username, tick: Game\.time \}/.test(codeOnly),
+        "检测到玩家袭击必须把目标房写进 powerBankAttackedRooms 永久记账");
+    // 有被打史的房：任务直接按被打处理（beingAttack 强制 + lastSpawnTime=0 立即补波）
+    assert.ok(/Memory\.powerBankAttackedRooms\s*&&\s*Memory\.powerBankAttackedRooms\[flag\.memory\.roomName\]\)/.test(codeOnly),
+        "exec 必须在每 pass 检查目标房的被打史");
+    assert.ok((codeOnly.match(/flag\.memory\.beingAttack = true;/g) || []).length >= 2,
+        "被打史 ⇒ beingAttack 强制置真（检测 + 强制两处，T2 + 波次不设限从第一波生效）");
+    assert.ok((codeOnly.match(/flag\.memory\.lastSpawnTime = 0;/g) || []).length >= 2,
+        "被打史 ⇒ lastSpawnTime 归零立即补波（不等 respawnTime）");
+}
+
 // ⑥ carrier 必须数活的，不数派过的
 {
     const S = load({ alive: ["c1", "c2"] });

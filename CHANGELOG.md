@@ -19,6 +19,24 @@
 测试：worker-full-employment ⑪ 新增（工地 + 墙缺口同时成立 ⇒ 只有 carryRes、
 无 repairWall；负对照去掉闸门即失败），⑨ 加源码 pin，①⑧⑩ 原钉不破。
 
+## v0.78.223 — 被打房永久记账：收过攻击的 PB 目标房直接 T2，不再等检测
+
+用户指示（2026-11-07）：「补太慢了来不及，你直接检查收过攻击的房间，然后直接这些
+房间都用 T2 强化就行」。
+
+0.78.221 的检测依赖**当下视野**——PB 房只在 observer 扫到时可见，袭击瞬间常常无
+视野，等看到再补波已经来不及。改为**记账制**：
+
+- 检测到玩家袭击时，目标房写入 `Memory.powerBankAttackedRooms`（{user, tick}，
+  永久，不设过期）；
+- 每 pass 对每个 PB 旗检查目标房是否在账上：在 ⇒ `beingAttack` 强制置真 +
+  `lastSpawnTime=0` 立即补波 ⇒ 走 0.78.221 的被打分支（L2 > L1 > DAMAGE，波次
+  不设限），**从第一波起就是 T2**，不再从 L1 爬坡。
+- 存量任务同步生效：`powerBank_E49S31_E46S30_30_23`（被 Apple 打过）部署时经
+  控制台把 E46S30 记入账本，下一 pass 即 T2 补波。
+测试：power-bank-respawn ⑤c 源码 pin（记账写入、每 pass 查账、beingAttack 强制、
+lastSpawnTime 归零）。
+
 ## v0.78.221 — PB 被打自动升阶：玩家袭击 ⇒ 一直派更高一级小队（L2 不再受白名单锁）
 
 用户报告（2026-11-07）：任务 `powerBank_E49S31_E46S30_30_23` 的小队被玩家 **Apple**

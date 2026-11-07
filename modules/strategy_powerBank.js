@@ -549,6 +549,11 @@ let pro = {
             // 原来这段检测整段注释掉了，`beingAttack` 只能手动设 ⇒ 被打后毫无反应。
             // 现在：PB 周围 10 格内出现**玩家**（非 Invader）带 ATTACK/RANGED 的爬
             // ⇒ 置 beingAttack（黏性，直到任务结束）、记录袭击者、立刻补波。
+            // **被打房永久记账**（0.78.222，用户：「补太慢了来不及，直接检查收过攻击
+            // 的房间，直接这些房间都用 T2 强化」）——检测需要视野，袭来那一刻常常没
+            // 观察视野，等看到再补波来不及。凡被袭击过的目标房写进
+            // `Memory.powerBankAttackedRooms`，之后**所有**打这个房的 PB 任务从第一波
+            // 起就按被打处理（T2 强化 + 波次不设限），不再从 L1 爬坡。
             let pbFlagRoom = Game.rooms[flag.pos.roomName];
             if (pbFlagRoom) {
                 let raider = pbFlagRoom.find(FIND_HOSTILE_CREEPS).find(h =>
@@ -562,7 +567,18 @@ let pro = {
                     }
                     flag.memory.hostileUser = raider.owner.username;
                     flag.memory.hostileTick = Game.time;
+                    Memory.powerBankAttackedRooms = Memory.powerBankAttackedRooms || {};
+                    if (!(Memory.powerBankAttackedRooms[flag.memory.roomName]
+                        && Memory.powerBankAttackedRooms[flag.memory.roomName].user == raider.owner.username))
+                        Memory.powerBankAttackedRooms[flag.memory.roomName] = { user: raider.owner.username, tick: Game.time };
                 }
+            }
+            // 有被打史的目标房：整场任务直接按被打处理（T2 + 波次不设限），补波不再等检测
+            if (!flag.memory.beingAttack && Memory.powerBankAttackedRooms
+                && Memory.powerBankAttackedRooms[flag.memory.roomName]) {
+                flag.memory.beingAttack = true;
+                flag.memory.hostileUser = Memory.powerBankAttackedRooms[flag.memory.roomName].user;
+                flag.memory.lastSpawnTime = 0;
             }
 
             flag.memory.index = flag.memory.index || 0
