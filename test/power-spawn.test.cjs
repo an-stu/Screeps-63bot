@@ -69,15 +69,21 @@ function makeRoom(storageEnergy, { hasStorage = true } = {}) {
     ctx.StrategyHighLevel.processPowerSpawn(thin);
     assert.equal(thin.calls.length, 0, "storage 只有 3077 也不许烧");
 
-    // ③ 阈值正下方 → 不许烧
-    const justBelow = makeRoom(29999);
+    // ③ 阈值正下方 → 不许烧（2026-11-07 地板从 3 万抬到 10 万，与修墙储备同源：
+    //    E41S23 实测 storage 9.7 万时旧 3 万闸照样烧，把修墙预算抽穿 ⇒ worker 挂机）
+    const justBelow = makeRoom(99999);
     ctx.StrategyHighLevel.processPowerSpawn(justBelow);
-    assert.equal(justBelow.calls.length, 0, "29999 低于 3 万门槛");
+    assert.equal(justBelow.calls.length, 0, "99999 低于 10 万门槛（修墙储备之下不许烧 ops）");
+
+    // ③b 旧 3 万地板时代的「合法烧制区」现在也是禁区（3万~10万正是 worker 挂机窗口带）
+    const oldBand = makeRoom(30000);
+    ctx.StrategyHighLevel.processPowerSpawn(oldBand);
+    assert.equal(oldBand.calls.length, 0, "storage 3 万在修墙储备（10 万）之下，不许烧");
 
     // ④ 正好等于阈值 → 允许（>= 语义）
-    const atFloor = makeRoom(30000);
+    const atFloor = makeRoom(100000);
     ctx.StrategyHighLevel.processPowerSpawn(atFloor);
-    assert.deepEqual(atFloor.calls, ["processPower"], "正好 3 万可以烧");
+    assert.deepEqual(atFloor.calls, ["processPower"], "正好 10 万（修墙闸重开）可以烧");
 
     // ⑤ 充裕的房照常烧（不能让改动把功能停掉）
     const rich = makeRoom(120000);

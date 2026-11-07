@@ -11,12 +11,16 @@
  * 照样每 tick 烧 50 energy；同一时刻 E41S32 的 storage 只有 3077、
  * E41S23 只有 11901，12 个房的 powerSpawn 全在烧。
  *
- * 阈值取 3 万：与 StationHive.isEnergyAbundant 的账号级门槛同量级（它要求
- * 每个房 storage+terminal ≥ 4 万才敢开），略低一点是为了不把「本房 storage
- * 3 万、terminal 空」的房也一起停掉。可用 Memory.marketSettings.powerSpawnEnergyFloor
- * 覆盖。
+ * ⚠️ 阈值从 3 万抬高到 **10 万**（2026-11-07，用户问「worker 为什么挂机」的排查结论）：
+ * 原来的 3 万是 10-08「防饿死房」时代定的，后来修墙闸（StationDefense.repairWallEnergyFloor
+ * 默认 10 万，storage 单口径）抬高时没有同步 —— 于是出现一条 **3 万~10 万的窗口带**：
+ * 账号充裕 + storage 9.7 万 ⇒ 烧 power 照常（≥3 万），修墙闸却关着（<10 万）⇒
+ * worker 生出来无活可干。E41S23 实测：power spawn -48 energy/tick > 全房净收入
+ * ~20/tick，storage 在 10 万闸门附近锯齿震荡，worker「生→闲置→回收」循环。
+ * 现在默认取 `StationDefense.repairWallEnergyFloor`（与修墙储备**同源**），
+ * Memory.marketSettings.powerSpawnEnergyFloor 仍可显式覆盖。
  */
-const POWER_SPAWN_ENERGY_FLOOR = 30000;
+const POWER_SPAWN_ENERGY_FLOOR = 100000;
 
 /**
  * 本房没有可花的能量时**不生 worker**（用户 10-11 指示：「有的主房间没有能量
@@ -782,7 +786,12 @@ let pro = {
      */
     roomEnergyAbundant(room) {
         if (!room || !room.storage) return false;
+        // 默认与修墙储备闸同源（StationDefense.repairWallEnergyFloor，默认 10 万）：
+        // ops 烧制只能在修墙预算**之上**的余量里运行，否则就是 2026-11-07 E41S23
+        // 那种「烧 power 把 storage 抽穿 10 万闸 ⇒ worker 无墙可修 ⇒ 挂机」的循环。
+        // Memory.marketSettings.powerSpawnEnergyFloor 显式覆盖优先。
         let floor = Number(Memory.marketSettings && Memory.marketSettings.powerSpawnEnergyFloor)
+            || (global.StationDefense && StationDefense.repairWallEnergyFloor)
             || POWER_SPAWN_ENERGY_FLOOR;
         return (room.storage.store[RESOURCE_ENERGY] || 0) >= floor;
     },

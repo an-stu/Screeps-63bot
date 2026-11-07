@@ -1,3 +1,28 @@
+## v0.78.213 — ops 烧制地板 3 万 → 10 万（与修墙储备同源），拔掉 worker 挂机的抽水机
+
+2026-11-07 用户追问「worker 为什么挂机，是不是修 rampart 出问题」。排查结论：**修墙
+管线本身没有 bug**（E41S23 37 面 rampart 最低 299.03M < 300M 目标，差 ~0.97M ≈ 1 万
+能量修理量，有活），挂机是**能量侧把修墙预算抽穿了**：
+
+- E41S23 **不是**试点房（`powerSpawnRoom` 未设，默认 W32N56；`powerBurning: false`），
+  但 `processPowerSpawn`（每房每 tick 那条路，`powerSpawnOtherRooms: true`）在烧：
+  本房闸门用的是 10-08 时代定的 `POWER_SPAWN_ENERGY_FLOOR = 30,000`。
+- 修墙闸（`repairWallAffordable`）是 10-21 抬到 **10 万**（storage 单口径）。
+  于是存在 **3 万~10 万的窗口带**：storage 9.7 万 ⇒ 烧 power 照常（≥3 万 + 账号充裕），
+  修墙闸却关着（<10 万）⇒ worker 生出来无活可干。
+- 25 tick 实测：power spawn **-48 energy/tick**（1 power+50 能量/tick 满速）、塔 -9.6，
+  而全房净收入 ~20/tick —— 烧制独自超过产能，storage 在 10 万闸门附近锯齿震荡，
+  worker「过闸孵化 → 几分钟被抽穿 → 挂机 → 回收」循环（三只 worker 全验证）。
+
+修复：`POWER_SPAWN_ENERGY_FLOOR` 30,000 → **100,000**，且 `roomEnergyAbundant` 默认取
+`StationDefense.repairWallEnergyFloor`（与修墙储备**同源**，改一处两边跟）；
+`Memory.marketSettings.powerSpawnEnergyFloor` 仍可显式覆盖。效果：烧 ops 与修墙
+共用同一条 10 万储备线，"烧 power 但 worker 无墙可修"的窗口带归零 —— storage ≥10 万
+时两者都开（修墙 trip 只拿 ~1 万，余量归 ops），<10 万时两者都停（此时 worker 闲置
+属政策正确，850 tick 回收兜底）。
+测试：`power-spawn.test.cjs` 边界随地板更新（③ 99999 不烧 / ③b 旧 3 万区不烧 /
+④ 10 万正边界烧），`process-power-switch` 注释同步。
+
 ## v0.78.212 — worker「要么别生，生了必须全程工作」：空手出口链补全 + 长时空闲回收
 
 2026-11-07 用户报告：E41S23 `shard3_84111958_1`（满 boost 30W 高级 worker）tasks 恒 []、

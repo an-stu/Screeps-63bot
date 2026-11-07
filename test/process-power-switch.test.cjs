@@ -94,7 +94,7 @@ function makeRoom(name, storageEnergy) {
     assert.equal(room.calls.n, 0, "账号级不充裕时不烧（原闸门）");
 
     const ctx2 = load({ powerSpawnOtherRooms: true });
-    const poor = makeRoom("E41S32", 20000);   // < POWER_SPAWN_ENERGY_FLOOR(30000)
+    const poor = makeRoom("E41S32", 20000);   // < POWER_SPAWN_ENERGY_FLOOR(100000，2026-11-07 与修墙储备同源)
     ctx2.StrategyHighLevel.processPowerSpawn(poor);
     assert.equal(poor.calls.n, 0, "本房 storage 低于 floor 时不烧（原闸门）");
 }
