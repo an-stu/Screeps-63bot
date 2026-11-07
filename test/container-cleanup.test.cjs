@@ -106,6 +106,20 @@ function makeRoom({ containers = [], mineralContainer = undefined, storageFree =
     ctx2.StrategyHighLevel.cleanDirtyContainers(room2, [carrier2]);
     const kinds = carrier2.calls.filter(c => c && c.taskName === "carryRes").map(c => c.data.resType).sort();
     assert.deepEqual(kinds, ["GH", "power"], "矿物容器里的非本行矿物仍要搬走，本行矿物(O)留着");
+
+    // ②c 矿物容器里的**能量**也算脏（用户 2026-11-07：「mineral container 有莫名其妙
+    //    的能量以及其他东西，carrier 空闲时候转移掉，不要卡住」）—— 实测 E41S23×2 /
+    //    E49S31×92 / W26N58×106 / W33N55×106 能量躺在矿物容器里挤占采集容量：
+    //    keeper 只在 freeCapacity(resType) > 80 时 harvest。旧逻辑无条件豁免能量
+    //    （对源容器是对的），矿物容器成了永久盲区。
+    const ctx3 = makeContext();
+    const withEnergy = makeContainer("cM", { X: 244, energy: 106 });
+    const carrier3 = makeCarrier();
+    const room3 = makeRoom({ containers: [withEnergy], mineralContainer: "cM", mineralRes: "X" });
+    ctx3.StrategyHighLevel.cleanDirtyContainers(room3, [carrier3]);
+    const kinds3 = carrier3.calls.filter(c => c && c.taskName === "carryRes").map(c => c.data.resType);
+    assert.deepEqual(kinds3, ["energy"], "矿物容器里的能量必须搬走，本行矿物(X)留着");
+    assert.ok(carrier3.calls.includes("fillAllMainRoomStorage"), "清完要倒进 storage");
 }
 
 {

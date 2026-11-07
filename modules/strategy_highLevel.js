@@ -337,7 +337,7 @@ let pro = {
         })
     },
     /**
-     * 容器清理：**非矿物容器应当只装能量**。
+     * 容器清理：**非矿物容器应当只装能量；矿物容器只装「自己的矿」**。
      *
      * 用户 2026-10-16：「有部分 container 里面不止有一种东西，把 container 清理一下，
      * 多余的搬到 storage。source 旁边的应该只有能量。」
@@ -345,7 +345,14 @@ let pro = {
      *   · 强化化合物 GO/KO/ZH/UH/OH —— boost 流程的残留
      *   · biomass —— deposit 采集的残留
      *   · power —— 打完 powerBank 收回来的
-     * **矿物容器豁免**（StationMineral 登记的那个）—— 矿物本来就该在那里等运矿车。
+     * 矿物容器（StationMineral 登记的那个）豁免「自己那种矿物」—— 矿物本来就该
+     * 在那里等运矿车。
+     *
+     * **矿物容器里的能量也算脏**（用户 2026-11-07：「mineral container 有莫名其妙
+     * 的能量以及其他东西，carrier 空闲时候转移掉，不要卡住」）：实测 E41S23×2 /
+     * E49S31×92 / W26N58×106 / W33N55×106 能量躺在矿物容器里占采集容量 ——
+     * keeper 只在 `freeCapacity(resType) > 80` 时才 harvest，脏货直接挤占采矿空间。
+     * 旧逻辑无条件豁免能量（对源容器是对的），矿物容器成了永久盲区。
      *
      * 一轮只派一只 carrier 清一个容器：这是收尾活儿，不能把运力从能量搬运上抽走，
      * 所以先 pop 一只空闲 carrier、没活儿再放回去。
@@ -367,12 +374,13 @@ let pro = {
             || room.find(FIND_STRUCTURES, { filter: e => e.structureType == STRUCTURE_CONTAINER });
         for (let c of containers) {
             let dirty = _.keys(c.store).filter(r => {
-                if (r == RESOURCE_ENERGY || !(c.store[r] > 0)) return false;
-                // 矿物容器**不是整个豁免**，它只允许装「自己那种矿物」（+能量）：
-                // 实测 E49S31 的矿物容器里躺着 power x100、W31N55 里混了 GH x25，
-                // 这些照样是多余的，一样要搬走。
-                if (c.id == mineralContainer && r == mineralRes) return false;
-                return true;
+                if (!(c.store[r] > 0)) return false;
+                // 矿物容器：只豁免「自己那种矿物」，**能量与其他杂物一律算脏**
+                //（实测 E49S31 躺过 power x100、W31N55 混过 GH x25、2026-11-07 四房
+                // 的矿物容器混着能量 —— 全都挤占采矿容量，一样要搬走）。
+                if (c.id == mineralContainer) return r != mineralRes;
+                // 普通容器（源容器/升级容器）：只该装能量，其余全脏。
+                return r != RESOURCE_ENERGY;
             });
             if (!dirty.length) continue;
             // 逐种资源 withdraw 出来，再统一灌进 storage/terminal（fillAllMainRoomStorage）
