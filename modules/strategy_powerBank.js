@@ -276,6 +276,9 @@ let pro = {
     /**
      * 这一 tick 还该不该派新的攻击波次。
      *
+     * **被打（beingAttack）⇒ 永不阻塞**（用户 2026-11-07「直接一直派更高一级的
+     * 小队去打 PB，防止被打」）：4 波硬上限与 L1/L2 单波闩锁全部解除 —— 只要
+     * spawn 能力允许就一波接一波地派，直到把袭击者（如 Apple）打退 / 窝打完。
      * 非 L1/L2：硬上限 4 波（index>3 就停，原样保留）。
      * L1/L2：一次只允许**一波在打**，那波死了就要补。原来是无条件永久闩锁
      * （L1Boosted 一置真就再也不生），可一波 attacker 只有 1500 tick 命、
@@ -283,6 +286,7 @@ let pro = {
      */
     pbWaveBlocked(flag) {
         let mem = (flag && flag.memory) || {};
+        if (mem.beingAttack) return false;
         if (mem.boostModel != BOOST_L1 && (mem.index || 0) > 3) return true;
         let fighters = pro.pbFightersAlive(flag);
         if (mem.boostModel == BOOST_L1 && mem.L1Boosted) return fighters;
@@ -541,6 +545,26 @@ let pro = {
             //     flag.memory.beingAttack = true // 可能已经被打了,这时候出t2
             // }
 
+            // **被打检测（用户 2026-11-07：PB 小队被玩家 Apple 打了要一直派更高级小队）**
+            // 原来这段检测整段注释掉了，`beingAttack` 只能手动设 ⇒ 被打后毫无反应。
+            // 现在：PB 周围 10 格内出现**玩家**（非 Invader）带 ATTACK/RANGED 的爬
+            // ⇒ 置 beingAttack（黏性，直到任务结束）、记录袭击者、立刻补波。
+            let pbFlagRoom = Game.rooms[flag.pos.roomName];
+            if (pbFlagRoom) {
+                let raider = pbFlagRoom.find(FIND_HOSTILE_CREEPS).find(h =>
+                    h.owner && h.owner.username != "Invader"
+                    && h.pos.inRangeTo(flag, 10)
+                    && h.body.some(p => p.type == ATTACK || p.type == RANGED_ATTACK));
+                if (raider) {
+                    if (!flag.memory.beingAttack) {
+                        flag.memory.beingAttack = true;
+                        flag.memory.lastSpawnTime = 0;   // 立刻补一波（跳过 respawnTime 等待）
+                    }
+                    flag.memory.hostileUser = raider.owner.username;
+                    flag.memory.hostileTick = Game.time;
+                }
+            }
+
             flag.memory.index = flag.memory.index || 0
             if (flag.memory.beingAttack) needSpawn = true; // 如果是t2 出1队，否则出3队
             if (pro.pbWaveBlocked(flag))
@@ -550,13 +574,24 @@ let pro = {
             if (StationHive.spawnAble(room) && needSpawn) {
                 let boostLevel = NO_BOOST
                 // if(flag.memory.beingAttack){
-                if (StationLab.boostAbleLevel(room, "damage", 3, 1, 1) == 1) boostLevel = BOOST_DAMAGE
-                if ((isSaveCpu || flag.memory.beingAttack) && StationLab.boostAble(room,
-                    { [BOOST_RES["damage"][1]]: 30 * 5, [BOOST_RES["attack"][1]]: 30 * 20, [BOOST_RES["heal"][0]]: 30 * 19, [BOOST_RES["rangedAttack"][0]]: 30 * 6 }) && !hostileRoom.contains(flag.memory.roomName)
-                ) boostLevel = BOOST_L1
-                else if ((isSaveCpu || flag.memory.beingAttack) && StationLab.boostAble(room,
-                    { [BOOST_RES["damage"][2]]: 30 * 5, [BOOST_RES["attack"][1]]: 30 * 20, [BOOST_RES["heal"][1]]: 30 * 25 }) && hostileRoom.contains(flag.memory.roomName)
+                // 被打（用户 2026-11-07「直接一直派更高一级的小队」）：能上多高上多高
+                // L2 > L1 > DAMAGE，**不再受 hostileRoom 白名单限制**（E46S30 这种
+                // 不在名单的房被打时也要能上 L2——t2 化合物该用就用）。
+                if (flag.memory.beingAttack && StationLab.boostAble(room,
+                    { [BOOST_RES["damage"][2]]: 30 * 5, [BOOST_RES["attack"][1]]: 30 * 20, [BOOST_RES["heal"][1]]: 30 * 25 })
                 ) boostLevel = BOOST_L2
+                else if (flag.memory.beingAttack && StationLab.boostAble(room,
+                    { [BOOST_RES["damage"][1]]: 30 * 5, [BOOST_RES["attack"][1]]: 30 * 20, [BOOST_RES["heal"][0]]: 30 * 19, [BOOST_RES["rangedAttack"][0]]: 30 * 6 })
+                ) boostLevel = BOOST_L1
+                else if (StationLab.boostAbleLevel(room, "damage", 3, 1, 1) == 1) boostLevel = BOOST_DAMAGE
+                if (!flag.memory.beingAttack) {
+                    if ((isSaveCpu || flag.memory.beingAttack) && StationLab.boostAble(room,
+                        { [BOOST_RES["damage"][1]]: 30 * 5, [BOOST_RES["attack"][1]]: 30 * 20, [BOOST_RES["heal"][0]]: 30 * 19, [BOOST_RES["rangedAttack"][0]]: 30 * 6 }) && !hostileRoom.contains(flag.memory.roomName)
+                    ) boostLevel = BOOST_L1
+                    else if ((isSaveCpu || flag.memory.beingAttack) && StationLab.boostAble(room,
+                        { [BOOST_RES["damage"][2]]: 30 * 5, [BOOST_RES["attack"][1]]: 30 * 20, [BOOST_RES["heal"][1]]: 30 * 25 }) && hostileRoom.contains(flag.memory.roomName)
+                    ) boostLevel = BOOST_L2
+                }
                 if (flag.memory.beingAttack && boostLevel != BOOST_L1 && boostLevel != BOOST_L2) {
                     // 被打了又出不了 T2：**只有确定没人可派时才撤掉任务**。
                     // 原来是无条件 `flag.remove()` —— 旗一删，已经派出去/在途的队伍就

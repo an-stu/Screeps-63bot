@@ -96,6 +96,22 @@ function flag(memory) {
     assert.equal(S.pbWaveBlocked(flag({ index: 3, boostModel: 1 })), false, "index<=3 照常派");
 }
 
+// ⑤b 被打（beingAttack）⇒ 波次上限全解除（用户 2026-11-07：PB 小队被玩家 Apple
+//    打了要「直接一直派更高一级的小队」，防止被打）——4 波硬上限、L1/L2 单波
+//    闩锁在被打态全部失效；同时检测代码必须真的在 exec 里跑（不再整段注释）。
+{
+    const S = load({ alive: ["a0"] });
+    assert.equal(S.pbWaveBlocked(flag({ index: 5, boostModel: 0, beingAttack: true })), false,
+        "被打时 4 波硬上限解除：一波接一波地派");
+    assert.equal(S.pbWaveBlocked(flag({ index: 2, boostModel: 3, L2Boosted: true, attacker: { 0: "a0" }, beingAttack: true })), false,
+        "被打时 L2 单波闩锁解除：打的人还在也继续补波");
+    const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(/h\.owner\.username != "Invader"/.test(codeOnly),
+        "被打检测必须在 exec 里生效（只认玩家袭击者，Invader 不触发升级）");
+    assert.ok(/mem\.beingAttack\) return false;/.test(codeOnly),
+        "pbWaveBlocked 必须有 beingAttack 直通分支");
+}
+
 // ⑥ carrier 必须数活的，不数派过的
 {
     const S = load({ alive: ["c1", "c2"] });

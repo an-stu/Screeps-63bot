@@ -1,3 +1,27 @@
+## v0.78.221 — PB 被打自动升阶：玩家袭击 ⇒ 一直派更高一级小队（L2 不再受白名单锁）
+
+用户报告（2026-11-07）：任务 `powerBank_E49S31_E46S30_30_23` 的小队被玩家 **Apple**
+攻击，但 bot 毫无反应。根因三处：
+
+1. **被打检测整段注释掉**（exec 里 10-10 时代的 `beingAttack` 自动检测被注释，
+   只能手动设）⇒ 被打后零反应。恢复并加强：PB 周围 10 格内出现**玩家**（非
+   Invader）带 ATTACK/RANGED 的爬 ⇒ 置 `beingAttack`（黏性至任务结束）、记录
+   `hostileUser`/`hostileTick`、`lastSpawnTime=0` 立刻补波。
+2. **非 L1 波次硬上限 4 波**（index>3 停派）⇒ 被打时解除：`pbWaveBlocked` 加
+   `beingAttack` 直通——4 波上限与 L1/L2 单波闩锁在被打态全部失效，一波接一波
+   一直派（spawnAble 自然限流，不会挤爆孵化队列）。
+3. **L2 强化被硬编码 hostileRoom 白名单锁死**（E46S30 不在名单 ⇒ 永远到不了 L2）
+   ⇒ 被打时升阶不再看名单：能上多高上多高（L2 > L1 > DAMAGE > NO_BOOST），
+   t2 化合物该用就用。
+
+Lab 出不了 L1/L2 时维持 10-10 原则：有人在外面就保留旗打完/撤退，没人才撤旗。
+Memory 清理（同日用户指示）：删除 51 个孤儿键（97→56）——2M tick 前的一次性
+diag/_ 探针、claim 战役遗留、旧版本空结构（RoomControlData/TeamData 等）、marketAudit、
+__P_ 价格缓存残留；全部经 grep 确认无代码引用。diagBuy/diagSell/marketSales/
+cpuTelemetry 等活缓存保留。
+测试：power-bank-respawn ⑤b 新增被打直通两例 + 源码 pin（检测必须在 exec 生效、
+Invader 不触发、pbWaveBlocked 必须有 beingAttack 分支）。
+
 ## v0.78.220 — worker 取能+修墙配对压栈：消掉「取完等 pass」的可见空窗
 
 用户报告（2026-11-07）：「shard3_84124997_1 怎么 worker 又在挂机」。六连拍实测：
