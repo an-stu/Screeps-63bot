@@ -2521,23 +2521,35 @@ let pro = {
         if (data && data.roadPathFailTick) delete data.roadPathFailTick;
     },
     /**
-     * Walk an external route exactly one cached waypoint at a time. Adjacent
-     * route points deliberately use `move`, not `moveTo`, so Screeps never
-     * spends PathFinder CPU or cuts a parallel road. A creep displaced from
-     * the road force-moves back to its nearest cached point with `moveTo`
-     * (a single-step move would be blocked by walls/buildings and get
+     * Walk an external route exactly one cached waypoint at a time. Both
+     * same-room and cross-room steps go through `moveTo` (never a bare
+     * `creep.move(dir)` — the engine silently cancels those when the landing
+     * tile is occupied, see 0.78.224). A creep displaced from the road
+     * force-moves back to its nearest cached point with `moveTo` (a
+     * single-step move would be blocked by walls/buildings and get
      * misreported as an invalid path).
      */
     moveToOuterRoadPoint(creep, task, point) {
         let positionKey = creep.pos.roomName + ":" + creep.pos.x + ":" + creep.pos.y;
         let targetKey = point.roomName + ":" + point.x + ":" + point.y;
-        if (task.outerRoadMovePos == positionKey && task.outerRoadMoveTarget == targetKey) {
+        // 卡住计数只统计**连续 tick**：上一次调用不在上一 tick（车中途真的挪过、
+        // 或被经济 pass 跳过几 tick）就必须重置。
+        //
+        // 原来只比「同一格 + 同一路点」，隔拍调用照样累加 —— 2026-11-08 实测
+        // shard3_84131356_1 在 W26N58(13,0) / W26N59(13,49) 边境来回弹跳约 450 tick，
+        // outerRoadStuck 一路涨到 197，越过 OUTER_ROAD_STUCK_INVALIDATE(25) 之后
+        // **每次**调用都在下面第一道闸直接 return ERR_NO_PATH ⇒ 调用方每 tick 判
+        // 「路线不可达」并作废共享路线、车永久退化成原生 goTo，再也走不回缓存路线
+        // （闸门自锁，MEMORY 第 3 条）。
+        if (task.outerRoadMovePos == positionKey && task.outerRoadMoveTarget == targetKey
+            && task.outerRoadStuckTick === Game.time - 1) {
             task.outerRoadStuck = (task.outerRoadStuck || 0) + 1;
         } else {
             task.outerRoadStuck = 0;
         }
         task.outerRoadMovePos = positionKey;
         task.outerRoadMoveTarget = targetKey;
+        task.outerRoadStuckTick = Game.time;
         // 同一路点反复无法到达（如路点被建筑永久占据）：返回 ERR_NO_PATH，
         // 让调用方失效缓存路径并触发重算（重算已剔除 storage/terminal 终点）
         // 连续卡住时**先交给移动优化器**，不要死磕裸 creep.move。
@@ -2553,6 +2565,11 @@ let pro = {
         // 把交通问题交给优化器；只有卡到 OUTER_ROAD_STUCK_INVALIDATE 才认定路线
         // 真的不可达、去重算。
         if (task.outerRoadStuck >= OUTER_ROAD_STUCK_INVALIDATE) {
+            // 判一次就够：计数器必须在这里归零。否则它一直 ≥ 阈值，这只爬
+            // **永远**不再尝试走缓存路线（每 tick 都在这里 return），而调用方
+            // 每 tick 都会 invalidate 共享路线 —— 双向下不来。调用方这一 tick
+            // 已经去重算路线，下一轮从 0 重新数即可。
+            task.outerRoadStuck = 0;
             return ERR_NO_PATH;
         }
         if (task.outerRoadStuck >= OUTER_ROAD_STUCK_FALLBACK) {
