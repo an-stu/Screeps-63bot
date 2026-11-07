@@ -299,7 +299,18 @@ let pro = {
         let fx0 = s.effects && s.effects.find(e => e.power == PWR_OPERATE_POWER);
         if (!fx0) {
             if (!isTarget && ms.powerSpawnOtherRooms === false) return;
-            if (power <= low || energy < floor) return;
+            if (power <= low) return;
+            // 非试点房开闸线 = 停烧线 + 5 万恢复带（滞回，与 strategy_highLevel 的
+            // POWER_SPAWN_ENERGY_OPEN 同源同旋钮 powerSpawnOpenEnergy）：
+            // 10 万~15 万是修墙/经济的独占恢复带 —— 烧制的连续抽水（50/tick）会把
+            // storage 钉在 10 万闸门正下方，worker 永远凑不齐完整修墙 trip
+            // （0.78.214 E41S23 实测：storage 99.4~100.1k 闪断带，41 tick 闪烧 12 发）。
+            if (isTarget) {
+                if (energy < floor) return;
+            } else {
+                let open = Number(ms.powerSpawnOpenEnergy) > 0 ? Number(ms.powerSpawnOpenEnergy) : floor + 50000;
+                if (energy < open) return;
+            }
             s.processPower();
             return;
         }

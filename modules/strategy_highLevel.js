@@ -23,6 +23,18 @@
 const POWER_SPAWN_ENERGY_FLOOR = 100000;
 
 /**
+ * 非试点房烧 power 的**开闸线**（滞回）：比停烧线（POWER_SPAWN_ENERGY_FLOOR）高 5 万。
+ *
+ * 0.78.214 现场实测：烧制与修墙共用同一条 10 万线时，烧制的连续抽水（50/tick）
+ * 会把 storage 钉在 99.4~100.1k 的闪断带 —— worker 每次刚取完能量，下一个经济
+ * pass 修墙闸就关了，永远凑不齐一个完整修墙 trip（修墙 trip 需要 ≥10 万维持
+ * 取货+走路+修理 ~2-3 分钟）。10 万~15 万划给修墙/经济独占恢复，≥15 万才轮到
+ * ops；试点房（powerSpawnRoom）不受此线约束，走自己的 powerBurning/配速机制。
+ * 可用 Memory.marketSettings.powerSpawnOpenEnergy 覆盖。
+ */
+const POWER_SPAWN_ENERGY_OPEN = 150000;
+
+/**
  * 本房没有可花的能量时**不生 worker**（用户 10-11 指示：「有的主房间没有能量
  * 就不要生产 worker 了，也用不了」）。
  *
@@ -786,14 +798,14 @@ let pro = {
      */
     roomEnergyAbundant(room) {
         if (!room || !room.storage) return false;
-        // 默认与修墙储备闸同源（StationDefense.repairWallEnergyFloor，默认 10 万）：
-        // ops 烧制只能在修墙预算**之上**的余量里运行，否则就是 2026-11-07 E41S23
-        // 那种「烧 power 把 storage 抽穿 10 万闸 ⇒ worker 无墙可修 ⇒ 挂机」的循环。
-        // Memory.marketSettings.powerSpawnEnergyFloor 显式覆盖优先。
-        let floor = Number(Memory.marketSettings && Memory.marketSettings.powerSpawnEnergyFloor)
-            || (global.StationDefense && StationDefense.repairWallEnergyFloor)
-            || POWER_SPAWN_ENERGY_FLOOR;
-        return (room.storage.store[RESOURCE_ENERGY] || 0) >= floor;
+        // 开闸线取 POWER_SPAWN_ENERGY_OPEN（默认 15 万 = 修墙储备 10 万 + 5 万恢复带）：
+        // 非试点房的烧制只在修墙预算**之上**的真余量里运行，否则就是 E41S23 那种
+        // 「烧 power 把 storage 钉在 10 万闸门正下方 ⇒ worker 凑不齐修墙 trip」的循环。
+        // Memory.marketSettings.powerSpawnOpenEnergy 显式覆盖优先。
+        let open = Number(Memory.marketSettings && Memory.marketSettings.powerSpawnOpenEnergy)
+            || (global.StationDefense && StationDefense.repairWallEnergyFloor
+                ? StationDefense.repairWallEnergyFloor + 50000 : POWER_SPAWN_ENERGY_OPEN);
+        return (room.storage.store[RESOURCE_ENERGY] || 0) >= open;
     },
     processPowerSpawn(room) {
         // **烧 power 的唯一权威开关是 `Memory.marketSettings.powerSpawnOtherRooms`。**

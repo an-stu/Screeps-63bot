@@ -1,3 +1,25 @@
+## v0.78.215 — 非试点房烧制开闸线 15 万（滞回）：10~15 万恢复带归修墙独占
+
+0.78.214 上线后的现场复核（E41S23，41 tick 采样）：`processPowerSpawn` 已停，但
+storage 99.4~100.1k 闪断带里两条烧制通路合计闪烧 12 发（psE -600 / psP -12）——
+**烧制与修墙共用同一条 10 万线**，烧制的连续抽水（50/tick）把 storage 钉在闸门正
+下方：worker 刚取完能量，下一个经济 pass 修墙闸就关了，永远凑不齐一个完整修墙
+trip（取货+走路+修理需要 ≥10 万维持 2-3 分钟）。
+
+修复：给非试点房的烧制加**滞回开闸线** —— `POWER_SPAWN_ENERGY_OPEN = 150000`
+（= 修墙储备 10 万 + 5 万恢复带）：
+
+- `roomEnergyAbundant`（strategy_highLevel）：storage ≥ **15 万**才开闸；
+- `tryProcessPower` 非试点分支（station_carry）：同样 ≥15 万；试点房（powerSpawnRoom）
+  不受影响，仍走 powerBurning/配速机制（停烧线 10 万 + OPERATE_POWER 效果期摊薄）；
+- 旋钮 `Memory.marketSettings.powerSpawnOpenEnergy` 可覆盖（两条路同源）。
+
+效果分区：**<10 万** 修墙/烧制全停（真稀缺，worker 850 tick 回收兜底）；**10~15 万**
+修墙/经济独占（worker 有完整修墙窗口，ops 让位）；**≥15 万** ops 恢复生产。
+E41S23（99.5k）从此完全静默，storage 以 ~20/tick 回升越闸，worker 复工修墙。
+测试：power-spawn.test.cjs 边界更新（10 万不烧/149999 不烧/150000 烧/16 万烧/
+powerSpawnOpenEnergy 覆盖），power-spawn-burn 新增非试点开闸线两例。
+
 ## v0.78.214 — station_carry 烧制/灌能闸改 storage 单口径（terminal 存货不再背书）
 
 0.78.213 上线后的现场复核：E41S23 storage 97~99k 时 power spawn 仍被灌了 2,850 能量

@@ -80,15 +80,21 @@ function makeRoom(storageEnergy, { hasStorage = true } = {}) {
     ctx.StrategyHighLevel.processPowerSpawn(oldBand);
     assert.equal(oldBand.calls.length, 0, "storage 3 万在修墙储备（10 万）之下，不许烧");
 
-    // ④ 正好等于阈值 → 允许（>= 语义）
-    const atFloor = makeRoom(100000);
-    ctx.StrategyHighLevel.processPowerSpawn(atFloor);
-    assert.deepEqual(atFloor.calls, ["processPower"], "正好 10 万（修墙闸重开）可以烧");
+    // ④ 开闸线（滞回，0.78.215）：10 万~15 万是修墙/经济独占恢复带 —— 烧制不许进
+    const restoreBand = makeRoom(100000);
+    ctx.StrategyHighLevel.processPowerSpawn(restoreBand);
+    assert.equal(restoreBand.calls.length, 0, "正好 10 万（修墙闸重开线）不许烧：恢复带归修墙");
+    const justBelowOpen = makeRoom(149999);
+    ctx.StrategyHighLevel.processPowerSpawn(justBelowOpen);
+    assert.equal(justBelowOpen.calls.length, 0, "149999 低于 15 万开闸线不许烧");
+    const atOpen = makeRoom(150000);
+    ctx.StrategyHighLevel.processPowerSpawn(atOpen);
+    assert.deepEqual(atOpen.calls, ["processPower"], "≥15 万（修墙预算之上的真余量）才开闸烧");
 
     // ⑤ 充裕的房照常烧（不能让改动把功能停掉）
-    const rich = makeRoom(120000);
+    const rich = makeRoom(160000);
     ctx.StrategyHighLevel.processPowerSpawn(rich);
-    assert.deepEqual(rich.calls, ["processPower"], "storage 12 万的房要照常产 ops");
+    assert.deepEqual(rich.calls, ["processPower"], "storage 16 万的房要照常产 ops");
 
     // ⑥ 没有 storage（低等级房）→ 不许烧
     const noStorage = makeRoom(0, { hasStorage: false });
@@ -105,8 +111,8 @@ function makeRoom(storageEnergy, { hasStorage = true } = {}) {
 }
 
 {
-    // ⑧ Memory 覆盖阈值
-    const ctx = makeContext({ marketSettings: { powerSpawnEnergyFloor: 80000 } });
+    // ⑧ Memory 覆盖开闸线（0.78.215 起旋钮为 powerSpawnOpenEnergy）
+    const ctx = makeContext({ marketSettings: { powerSpawnOpenEnergy: 80000 } });
     const mid = makeRoom(50000);
     ctx.StrategyHighLevel.processPowerSpawn(mid);
     assert.equal(mid.calls.length, 0, "覆盖成 8 万后，5 万的房要停");

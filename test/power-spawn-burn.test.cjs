@@ -122,10 +122,28 @@ function makeRoom(power, energy, effects) {
 }
 
 {
-    const room = makeRoom(5000, 120000, [{ power: 2, effect: 2, level: 3, ticksRemaining: 500 }]);
+    const room = makeRoom(5000, 500000, [{ power: 2, effect: 2, level: 3, ticksRemaining: 500 }]);
+    room.name = "E53S21";
     const ctx = load({}, room);
     ctx.StationCarry.tryProcessPower(room);
-    assert.equal(ctx.__burn, 1, "只把 PWR_OPERATE_POWER 当加速窗口，其他效果按普通速率烧");
+    assert.equal(ctx.__burn, 1, "只把 PWR_OPERATE_POWER 当加速窗口，其他效果按普通速率烧（50 万 ≥ 开闸线 15 万）");
+}
+
+{
+    // 0.78.215 非试点房开闸线（滞回）：storage <15 万不许烧 —— 10 万~15 万是修墙/经济
+    // 独占恢复带，烧制的连续抽水会把 storage 钉在 10 万闸门正下方（E41S23 worker
+    // 挂机的最后一层：闪断带里 worker 凑不齐完整修墙 trip）
+    const below = makeRoom(5000, 149999, []);
+    below.name = "E53S21";
+    const ctx = load({}, below);
+    ctx.StationCarry.tryProcessPower(below);
+    assert.equal(ctx.__burn, 0, "非试点房 149999 < 开闸线 15 万不许烧");
+
+    const at = makeRoom(5000, 150000, []);
+    at.name = "E53S21";
+    const ctx2 = load({}, at);
+    ctx2.StationCarry.tryProcessPower(at);
+    assert.equal(ctx2.__burn, 1, "非试点房 ≥15 万开闸烧");
 }
 
 {
