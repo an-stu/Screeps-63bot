@@ -1,3 +1,26 @@
+## v0.78.217 — 采集政策改价格闸：矿价 > 能量价一半就采，有矿就采，多余 >2 万挂卖单
+
+用户指示（2026-11-07）：「只采集单价大于能量一半价格的 mineral……有 mineral 可以就
+采集」「多余的 mineral 直接挂卖单售卖 >20k」。
+
+- **采集判据动态化**（station_minetral.getMiningPolicy）：`mine = 矿价 > 能量价/2`
+  （价格源与市场模块同源：StrategyMarketPrice.getResTypeHistory 14 天均价，缺价默认
+  采）。**废除**静态 U/K/Z 永不采黑名单与 20k 存量停采线——按当日 shard3 快照，
+  七种基础矿均价（U 10.2 / K 16.3 / Z 18.7 / O 22.1 / H 36.5 / L 135 / X 304）全部
+  高于能量均价 16.0 的一半（8.0）⇒ 当前七种全采（此前 U/K/Z 三种完全不采 = 漏采）；
+  某矿价跌破线（如 U < 8）自动回到「只买不采」。
+- **采集侧不再设存量上限**（stop 默认 Infinity，有矿就采）；Memory.mineralSettings
+  [resType].stop 仍可应急设上限。
+- **多余矿物 >2 万直接挂卖单**（strategy_market.autoSellMineral）：mineralKeep
+  150000 → **20000**，单房存量超 2 万的部分直接出 surplus 挂卖单。全局存量买入线
+  （每房 6000+1 万）滞回保留——全局不足买入线时不卖，防 autoBuyMineral 自买自卖；
+  矿量累积越线后自然开卖。
+- 泄压链完整：矿价 > 线 ⇒ 无限采 → 单房 >2 万挂卖单 → 收入 credits；矿价 ≤ 线 ⇒
+  停采只买。
+- 测试：新增 `test/mining-policy.test.cjs`（①价格闸七矿全过 ②缺价默认采 ③上限
+  默认 Infinity/可覆盖 ④源码 pin「孵化/动作只看 policy.mine、黑名单与 mineStop 必须删除」
+  ⑤autoSell keep=20000 + 全局滞回保留）。
+
 ## v0.78.216 — 修墙阈值改管「生产」不管「动作」：要么别 spawn，生了就正常工作
 
 用户指示（2026-11-07）：「修墙的阈值你应该控制 worker 的生产而不是动作」。

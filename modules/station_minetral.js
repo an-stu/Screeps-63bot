@@ -58,7 +58,6 @@ Creep.prototype.harvestMineralKeeper = function () {
             return;
         }
         let policy = pro.getMiningPolicy(station.resType);
-        let stock = pro.getMineralStock(this.room, station);
         if (this.ticksToLive % 6 == 0) {
             if (container && container.store.getFreeCapacity(station.resType) > 80) {
                 // Mineral 的属性是 mineralAmount（amount 是 Deposit 的，
@@ -73,8 +72,9 @@ Creep.prototype.harvestMineralKeeper = function () {
                     }
                     return;
                 }
-                // 单房存量达到上限，或该矿物改为市场采购：暂停采集。
-                if (!policy.mine || stock >= policy.stop) return;
+                // 该矿物判为不值得采（矿价 ≤ 能量价一半）：暂停采集。
+                // 存量上限已移除（0.78.217 有矿就采），多余部分由 autoSellMineral 挂卖单。
+                if (!policy.mine) return;
                 this.harvest(mineral);
             }
         }
@@ -84,16 +84,29 @@ Creep.prototype.harvestMineralKeeper = function () {
 
 let pro = {
     stationName: "stationMineral",
-    // 单房矿物存量达到此值即暂停采集；必须低于 StrategyMarket 的
-    // autoSellMineral 卖单起点 keep=30000，避免“边采边卖”。
-    mineStop: 20000,
-    // 市场价太低、挖矿 spawn 能量成本不划算的基础矿物改为直接买入。
-    buyOnlyMinerals: [RESOURCE_UTRIUM, RESOURCE_KEANIUM, RESOURCE_ZYNTHIUM],
+    /**
+     * 采集判据（用户 2026-11-07）：**单价 > 能量单价一半** 的矿就采，有矿就采。
+     *
+     *  · 价格源与市场模块同源（StrategyMarketPrice.getResTypeHistory，14 天成交均价，
+     *    缺价退 DEFAULT_PRICE）；能量单价一半 = 采矿 spawn 能量成本的经济红线。
+     *  · 取消静态 U/K/Z 黑名单与 20k 存量停采线（2026-10 月旧政策）。按 2026-11-07
+     *    shard3 快照，七种基础矿均价（U 10.2 / K 16.3 / Z 18.7 / O 22.1 / H 36.5 /
+     *    L 135 / X 304）全部高于能量均价 16.0 的一半（8.0）⇒ 当前全采；某矿价跌破
+     *    线（如 U < 8）时自动回到「只买不采」。
+     *  · 采集侧**不再设存量上限**（stop 默认 Infinity）：多余矿物由
+     *    StrategyMarket.autoSellMineral 直接挂卖单（mineralKeep 默认 2 万，0.78.217）。
+     *  · Memory.mineralSettings[resType].stop 仍可显式设上限应急。
+     */
     getMiningPolicy(resType) {
-        if (this.buyOnlyMinerals.includes(resType)) return { mine: false, stop: 0 };
+        let energyPrice = Number(StrategyMarketPrice
+            && StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)) || 0;
+        let mineralPrice = Number(StrategyMarketPrice
+            && StrategyMarketPrice.getResTypeHistory(resType)) || 0;
+        // 没有价格数据（新矿种/市场冷启动）→ 默认采（有矿就采）
+        let mine = energyPrice <= 0 || mineralPrice > energyPrice / 2;
         let custom = Memory.mineralSettings && Memory.mineralSettings[resType];
-        let stop = Number(custom && custom.stop) || this.mineStop;
-        return { mine: true, stop: stop };
+        let stop = Number(custom && custom.stop) || Infinity;
+        return { mine: mine, stop: stop };
     },
     getMineralStock(room, data) {
         if (!data || !data.resType) return 0;
@@ -163,11 +176,10 @@ let pro = {
         // 清理死掉的creeps
         data["creeps"] = data["creeps"].filter(e => Game.getObjectById(e))
         let container = Game.getObjectById(data["container"]) // change by an_w
-        // 采集上限：单房存量（storage+terminal+container）达到 policy.stop 就暂停；
-        // U/K/Z 市场价太低，直接买入，不再为它们消耗 spawn 能量。
+        // 采集判据（0.78.217）：矿价 > 能量价一半才采（详见 getMiningPolicy）；
+        // 存量上限默认不设（有矿就采），多余部分由 autoSellMineral >2 万挂卖单。
         let policy = pro.getMiningPolicy(data.resType);
-        let stock = pro.getMineralStock(room, data);
-        if (!policy.mine || stock >= policy.stop) return;
+        if (!policy.mine) return;
         if (container && room.extractor && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
             // log("Mineral" + room.name)
             let harBody = StationMineral.getHarvesterBodyConfig(room.getEnergyCapacityAvailable(room))

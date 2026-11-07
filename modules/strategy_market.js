@@ -1114,13 +1114,15 @@ let pro = {
         // 按房间错开每 100 tick 检查一次：矿物产量低、卖单成交慢，
         // 每 80 tick 更新一次价格与数量足够（见 marketSlowPass 的说明）
         if (!marketSlowPass(room)) return;
-        // 基础矿物：采集由 station_minetral 控制在单房 2 万以内；这里只处理
-        // 已有库存超过保留量的部分，避免“边采边卖”。
+        // 基础矿物：采集侧已无存量上限（0.78.217 station_minetral 改「矿价>能量价一半
+        // 就采，有矿就采」），多余的矿物在这里直接挂卖单。
         let sellable = ["U", "L", "K", "Z", "X", "O", "H"];
-        // 每房间保留量：只有「矿物过多」才卖。原来是 30000，太容易触发，
-        // 结果每个房间都在边采边卖；改成 150000 后单房要攒到 15 万以上才出 surplus。
-        // 可用 Memory.marketSettings.mineralKeep 调整。
-        let keep = Number((Memory.marketSettings && Memory.marketSettings.mineralKeep) || 150000);
+        // 每房间保留量（用户 2026-11-07：「多余的 mineral 直接挂卖单售卖 >20k」）：
+        // 单房存量 >2 万的部分直接出 surplus 挂单。历史：30000（太容易边采边卖）
+        // → 150000（当时采集侧有 20k 上限）→ 20000（采集侧已不限量，卖单线接管泄压）。
+        // 全局闸（下方 _resCnt ≥ 每房 6000+1 万）仍保留：全局存量不足买入线时不卖，
+        // 防止与 autoBuyMineral 自买自卖。可用 Memory.marketSettings.mineralKeep 调整。
+        let keep = Number((Memory.marketSettings && Memory.marketSettings.mineralKeep) || 20000);
         for (let resType of sellable) {
             let storeCnt = room.storage.store[resType] || 0;
             let termCnt = room.terminal.store[resType] || 0;
