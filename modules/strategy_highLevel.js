@@ -299,7 +299,19 @@ let pro = {
                     // repair 任务一起压栈 —— 栈 LIFO，先压修墙（栈底）、再压取能
                     // （栈顶）⇒ 取能完成当 tick 无缝接修墙，省掉「取完等下个
                     // 经济 pass（bucket<5000 时长达 14 tick）才派修墙」的可见空窗。
-                    let wallRepairTask = StationDefense.needBuildWallWorkerFree(room) && !room.isDownGrade()
+                    //
+                    // ⚠️ **有工地时不许配对**（0.78.221）：工地是**有限**消费，
+                    // 修墙是**无底洞**（RCL7 目标 5M 血 / RCL8 150~300M）。一旦把
+                    // repairWall 压在栈底，worker 每趟取能都会被重新配上修墙，
+                    // 永远走不到 loaded 分支的 build —— 2026-11-07 18:5x 实测
+                    // W26N58：唯一 worker 抱着 369,921/100,000,000 的 rampart 连续
+                    // 修了 450+ tick，6 个工地（spawn/tower/3×lab/factory，合计 26.5
+                    // 万进度）**一丝不动**。修好后空手只取能，装货后由 loaded 分支的
+                    // `constructionNeedBuild → generatorBuildTask` 接走（该分支本来
+                    // 就把工地排在修墙之前，这里只是让空手侧与它同序）。
+                    let buildRoom = (creep.mainRoom ? creep.mainRoom() : room) || room;
+                    let wallRepairTask = !StationWork.constructionNeedBuild(buildRoom)
+                        && StationDefense.needBuildWallWorkerFree(room) && !room.isDownGrade()
                         ? StationDefense.generatorRepairTask(room) : [];
                     if (wallRepairTask.length) creep.addTask(wallRepairTask);
                     creep.addTask(StorageCarryEnergyTasks)

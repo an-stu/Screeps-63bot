@@ -248,6 +248,24 @@ function mkRoom({ workers, carriers = [], storageEnergy = 98671, fillTowerTasks,
     assert.equal(w.memory.tasks[1].taskName, "carryRes", "栈顶是取能（LIFO 先执行）");
 }
 
+{   // ── ⑪ 有工地时不许配对修墙（0.78.221）：工地优先，无底洞让位 ─────────
+    // 现场 W26N58（2026-11-07 18:5x）：唯一 worker 抱着 369,921/100,000,000 的
+    // rampart 连续修 450+ tick，6 个工地（26.5 万进度）一丝不动。修墙是无限下沉、
+    // 工地是有限消费 —— 空手侧必须与 loaded 分支同序（工地在前）。
+    const High = load();
+    const w = mkCreep({});
+    const room = mkRoom({ workers: [w], carriers: [mkCreep({})], fillTowerTasks: [] });
+    room._hasBuild = true;   // 有工地
+    room._wallFree = true;   // 同时墙也缺口
+    High.workerManagerAfterCarrier(room);
+    assert.equal(w.memory.tasks.length, 1,
+        "有工地时只取能（不配对修墙），装货后由 loaded 分支派 build，实得 "
+        + JSON.stringify(w.memory.tasks));
+    assert.equal(w.memory.tasks[0].taskName, "carryRes");
+    assert.ok(!w.memory.tasks.some(t => t.taskName === "repairWall"),
+        "有工地时压 repairWall 会把 worker 永久锁在无底洞上（每趟取能都重新配上）");
+}
+
 {   // ── ⑨ 源码 pin：出口链顺序、栈配对、迟滞、豁免、carrier 缓存 ──────────
     const code = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     const iFetch = code.indexOf("pro.workerHasConsumer(room, creep)");
@@ -260,6 +278,8 @@ function mkRoom({ workers, carriers = [], storageEnergy = 98671, fillTowerTasks,
     const towerBranch = code.slice(iTower, iTower + 240);
     assert.ok(towerBranch.indexOf("creep.addTask(StorageCarryEnergyTasks)") > 0,
         "填塔兜底必须配对取能任务（先压填塔、后压取能 ⇒ 栈顶先取能）");
+    assert.ok(code.includes("!StationWork.constructionNeedBuild(buildRoom)"),
+        "修墙配对必须先排除工地（工地有限、修墙无底洞，0.78.221）");
     assert.ok(code.includes("room._fillTowerTasks = fillTowerTasks"),
         "carrierManager 必须把塔任务缓存到 room._fillTowerTasks 供 worker 复用");
     assert.ok(code.includes("Game.time - creep.memory.idleSince < 850"),

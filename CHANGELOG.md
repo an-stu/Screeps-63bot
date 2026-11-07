@@ -1,3 +1,24 @@
+## v0.78.222 — 修墙配对把唯一 worker 锁死在无底洞上：有工地时不配对
+
+0.78.220 上线 4 分钟后的巡检实测（W26N58，RCL7）：**6 个工地合计 26.5 万进度，
+连续 450+ tick 一丝不动**，而同房唯一那只 50 部件 worker 正在修一面
+`rampart 369,921 / 100,000,000` 血。`room.find(FIND_CONSTRUCTION_SITES)`、缓存、
+`StationWork.constructionNeedBuild()` 三项都对（6 / 6 / true），瓶颈不在工地侧。
+
+根因：0.78.220 的空手配对把 `repairWall` 压在栈底、取能压在栈顶。`repairWall`
+只在**能量归零**或 `hits >= hitsMax` 时弹栈，而本房 rampart 的 `hitsMax` 是 1 亿、
+`levelWallHits[7]` 只有 500 万 ⇒ 弹栈后又是空手 ⇒ 又命中配对 ⇒ 又压一层
+`repairWall`，**每趟循环都被重新绑回墙**，永远走不到 loaded 分支的
+`constructionNeedBuild → generatorBuildTask`。修墙是无限下沉、工地是有限消费，
+这正是「先满足有限上限的，再给无限下沉的」被破掉的情形。
+
+修复：空手侧的修墙配对加 `!StationWork.constructionNeedBuild(buildRoom)` 前置 ——
+有工地就只取能，装货后由 loaded 分支接走 build（该分支 **本来** 就把工地排在
+修墙之前，这里只是让空手侧与它同序）。无工地时配对照旧，0.78.220 要消的
+「取完等下个 pass」空窗不受影响。
+测试：worker-full-employment ⑪ 新增（工地 + 墙缺口同时成立 ⇒ 只有 carryRes、
+无 repairWall；负对照去掉闸门即失败），⑨ 加源码 pin，①⑧⑩ 原钉不破。
+
 ## v0.78.221 — PB 被打自动升阶：玩家袭击 ⇒ 一直派更高一级小队（L2 不再受白名单锁）
 
 用户报告（2026-11-07）：任务 `powerBank_E49S31_E46S30_30_23` 的小队被玩家 **Apple**
