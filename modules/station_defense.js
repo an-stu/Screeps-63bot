@@ -71,11 +71,16 @@ let pro = {
     },
     // wallListMap:{},
     /**
-     * 「本房有墙要修」—— **且本房修得起**。
+     * 「本房有墙要修」。
      *
-     * 这两个谓词是修墙的**全部入口**：`workerManager` 用它决定要不要出修墙 worker，
-     * `workerManagerAfterCarrier` 用它决定要不要把空闲 worker 派去修墙。
-     * 所以能量闸放在这里，两条路一起管住（`getRepairWorkerLimit` 里那个 0 是第二层）。
+     * ⚠️ 修墙阈值（repairWallAffordable）**只控制生产、不控制动作**（用户 2026-11-07：
+     * 「要么别 spawn 要么正常工作」）：
+     *   · `needBuildWall`（出兵/生产侧）**保留能量闸** —— 穷房不许开启修墙战役；
+     *   · `needBuildWallWorkerFree`（动作/派工侧）**不设能量闸** —— 已经出生的
+     *     worker 只看「墙是否低于目标」，storage 中途跌穿 10 万也不再打断它
+     *     （每次 trip 只取 ~1.5k，缺口本身有界；防无底洞的责任在生产侧的
+     *     needBuildWall / getRepairWorkerLimit 两个闸）。
+     * 否则就是 E41S23 那种「出生时修得起、干到一半闸关了 ⇒ 原地站桩」的挂机循环。
      */
     needBuildWall(room) {
         if (!pro.repairWallAffordable(room)) return false;
@@ -85,7 +90,7 @@ let pro = {
             || (isSaveCpu && Game.cpu.bucket > 8000 && room.level == 8 && wall && wall.hits < pro.HitsCPUSave);
     },
     needBuildWallWorkerFree(room) {
-        if (!pro.repairWallAffordable(room)) return false;
+        // 动作侧：**没有能量闸**（见上方 2026-11-07 说明）——阈值管生产不管动作
         if (!pro.needRepairWallMap[room.name]) return false;
         let wall = Game.getObjectById(pro.needRepairWallMap[room.name].head());
         return wall && wall.hits < pro.levelWallHits[room.level];

@@ -1,3 +1,25 @@
+## v0.78.216 — 修墙阈值改管「生产」不管「动作」：要么别 spawn，生了就正常工作
+
+用户指示（2026-11-07）：「修墙的阈值你应该控制 worker 的生产而不是动作」。
+
+旧语义（10-13 引入、0.78.213-215 沿用）：`needBuildWall`（出兵）和
+`needBuildWallWorkerFree`（把空闲 worker 派去修墙）**都**挂 `repairWallAffordable`
+能量闸 —— 于是 worker 出生时修得起、干到一半 storage 跌穿 10 万闸就关，动作被打断
+⇒ 原地站桩（E41S23 挂机循环的动作侧根源）。
+
+新语义：
+- **生产侧保留闸**：`needBuildWall`（出兵）与 `getRepairWorkerLimit`（编制 → 0）
+  仍看 `repairWallAffordable` —— 穷房不许开启修墙战役（E53S21 教训防复发）；
+- **动作侧拆闸**：`needBuildWallWorkerFree` 只看「墙是否低于目标」（< levelWallHits），
+  已出生的 worker 每次 trip 只取 ~1.5k 能量，缺口本身有界（0.97M 缺口 ≈ 7 个 trip ≈
+  1 万能量），storage 中途跌穿 10 万不再打断它 —— 防无底洞的责任收敛到生产侧。
+
+配套闭环：worker 全程工作直至缺口关闭（< 300M 的判据在动作侧）→ 缺口关闭后无活
+→ 850 tick 回收 → decay 跌回 299.7M 且 storage ≥10 万时生产闸重开再孵 ——
+「要么别生，生了必须全程工作」在修墙这条主线上完整成立。
+测试：`repair-wall.test.cjs` ⑥⑦ 随语义更新（穷房动作侧必须放行 + 源码 pin
+「动作侧不得挂闸、生产侧必须挂闸」）。
+
 ## v0.78.215 — 非试点房烧制开闸线 15 万（滞回）：10~15 万恢复带归修墙独占
 
 0.78.214 上线后的现场复核（E41S23，41 tick 采样）：`processPowerSpawn` 已停，但

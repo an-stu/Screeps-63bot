@@ -5,6 +5,12 @@
  * 于是「storage 只有几万」的房照样永远保留一只修墙 worker。修墙是纯消耗
  *（1 能量换 100 血，RCL8 满血 3 亿 ⇒ 单墙约 300 万能量，是一房 storage 的几十倍），
  * 所以能量不足时应该**一只都不派**。
+ *
+ * 2026-11-07 语义收窄（用户：「阈值控制生产而不是动作，要么别 spawn 要么正常工作」）：
+ * 能量闸只管**生产侧**（needBuildWall 出兵 / getRepairWorkerLimit 编制）；
+ * **动作侧**（needBuildWallWorkerFree，把空闲 worker 派去修墙）不再看能量 ——
+ * 已出生的 worker 只看「墙是否低于目标」，storage 中途跌穿 10 万也不打断
+ * （否则就是 E41S23 那种出生时修得起、干到一半闸关了 ⇒ 原地站桩的挂机循环）。
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -93,17 +99,19 @@ function makeRoom(ctx, { name = "E53S21", level = 8, storageEnergy = 50000, hasS
 }
 
 {
-    // ⑥ 两个谓词（修墙的**全部入口**）也必须带能量闸：
-    //    needBuildWall → 出兵；needBuildWallWorkerFree → 把空闲 worker 派去修墙。
-    //    只堵 getRepairWorkerLimit 的话，房里有 worker 就还会被派去修墙。
+    // ⑥ 两个入口的**分工**（2026-11-07 语义）：
+    //    needBuildWall（生产侧）保留能量闸 —— 穷房不许开启修墙战役；
+    //    needBuildWallWorkerFree（动作侧）**不设能量闸** —— 已出生的 worker 只看
+    //    「墙是否低于目标」，穷房也不能把它拦下来（否则就是 E41S23 的站桩循环）。
     const ctx = load({ wallHits: 100000000 });     // 墙远低于 RCL8 目标 3 亿
     const S = ctx.StationDefense;
     S.needRepairWallMap["E53S21"] = ["wall1"];
 
     const poor = makeRoom(ctx, { name: "E53S21", storageEnergy: 46019 });
-    assert.equal(S.getRepairWorkerLimit(poor), 0, "穷房编制 0");
-    assert.equal(S.needBuildWall(poor), false, "穷房：不该出兵修墙");
-    assert.equal(S.needBuildWallWorkerFree(poor), false, "穷房：也不该把空闲 worker 派去修墙");
+    assert.equal(S.getRepairWorkerLimit(poor), 0, "穷房编制 0（生产闸）");
+    assert.equal(S.needBuildWall(poor), false, "穷房：不该出兵修墙（生产闸）");
+    assert.equal(S.needBuildWallWorkerFree(poor), true,
+        "穷房：已出生的 worker 照常派去修墙（动作不受阈值控制，否则干到一半闸关 ⇒ 站桩）");
 
     const rich = makeRoom(ctx, { name: "E53S21", storageEnergy: 500000 });
     assert.equal(S.needBuildWall(rich), true, "有钱的房墙有缺口 → 照常修");
@@ -115,8 +123,13 @@ function makeRoom(ctx, { name = "E53S21", level = 8, storageEnergy = 50000, hasS
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     assert.ok(/if \(!pro\.repairWallAffordable\(room\)\) return 0;/.test(codeOnly),
         "getRepairWorkerLimit 必须先过能量闸");
-    assert.equal((codeOnly.match(/if \(!pro\.repairWallAffordable\(room\)\) return false;/g) || []).length, 2,
-        "needBuildWall / needBuildWallWorkerFree 两个入口都要挂能量闸");
+    assert.equal((codeOnly.match(/if \(!pro\.repairWallAffordable\(room\)\) return false;/g) || []).length, 1,
+        "只有生产侧 needBuildWall 挂能量闸；动作侧 needBuildWallWorkerFree 必须无闸（2026-11-07）");
+    // 动作侧必须保留「墙低于目标」判据本身（不能把动作闸整个删成 true）
+    const fn = codeOnly.slice(codeOnly.indexOf("needBuildWallWorkerFree(room)"),
+        codeOnly.indexOf("generatorRepairTask(room)"));
+    assert.ok(fn.includes("levelWallHits"), "needBuildWallWorkerFree 仍要判断墙缺口");
+    assert.ok(!fn.includes("repairWallAffordable"), "needBuildWallWorkerFree 不得再挂能量闸");
 }
 
 console.log("rampart repair energy-floor checks passed");
