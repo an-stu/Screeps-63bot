@@ -18,7 +18,7 @@ const src = fs.readFileSync(path.join(root, "modules", "station_minetral.js"), "
 const marketSrc = fs.readFileSync(path.join(root, "modules", "strategy_market.js"), "utf8")
     .replace(/\r\n/g, "\n");
 
-function load(priceMap, mineralSettings) {
+function load(priceMap, mineralSettings, historyMap) {
     const ctx = {
         console: { log() {} },
         Creep: function () {},
@@ -42,6 +42,7 @@ function load(priceMap, mineralSettings) {
         StationCarry: { roomMassStoreCnt: () => 0 },
         StrategyMarketPrice: {
             getResTypeHistory: (r) => (priceMap && priceMap[r]) || 0,
+            getHistory: (r) => (historyMap && historyMap[r]) || [],
         },
     };
     ctx.global = ctx;
@@ -69,6 +70,22 @@ function load(priceMap, mineralSettings) {
     const S = load({});
     assert.equal(S.getMiningPolicy("U").mine, true, "无价格数据默认采");
     assert.equal(S.getMiningPolicy("X").mine, true, "能量无价也默认采");
+}
+
+{
+    // ②b 波动矿兜底（0.78.218）：价格地图把 stddev>avg 的波动日全滤掉后，
+    //    H 掉回 DEFAULT_PRICE（1.1）⇒ 误判「不值一采」。政策用**原始** 14 天
+    //    历史成交量加权价兜底取 max —— 只有所有信号都说便宜才停采。
+    //    线上现场：H 挂单 100+ / 14 天均价 36+，地图却只有默认值 1.1。
+    const H_HISTORY = [
+        { avgPrice: 30, volume: 5000 }, { avgPrice: 40, volume: 6000 }, { avgPrice: 39, volume: 4000 },
+    ];
+    const S = load({ energy: 17.9, H: 1.1 }, null, { H: H_HISTORY });
+    assert.equal(S.getMiningPolicy("H").mine, true,
+        "H 地图价 1.1（默认值）但原始历史 36+ ⇒ 必须采（36.5 > 17.9/2）");
+    // 所有信号都说便宜（原始历史也是 1.x）⇒ 才停采
+    const S2 = load({ energy: 17.9, H: 1.1 }, null, { H: [{ avgPrice: 1.2, volume: 100 }] });
+    assert.equal(S2.getMiningPolicy("H").mine, false, "地图 1.1 + 原始历史 1.2 都低于线 ⇒ 停采");
 }
 
 {

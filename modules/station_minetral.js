@@ -100,9 +100,23 @@ let pro = {
     getMiningPolicy(resType) {
         let energyPrice = Number(StrategyMarketPrice
             && StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY)) || 0;
+        // ⚠️ 价格口径：getResTypeHistory 的价格地图会**过滤掉 stddev>avg 的波动日**，
+        // 波动大的矿（如 H：挂单 100+、14 天均价 36+，但整天窗波动 ⇒ 全被滤空）会
+        // 掉回 DEFAULT_PRICE（H=1.1），与真实行情严重脱节 ⇒ 政策误判「不值一采」。
+        // 这里用**原始** 14 天历史做成交量加权均价兜底取 max——只有所有信号都说
+        // 「便宜」时才停采（缺价默认采，有矿就采）。
         let mineralPrice = Number(StrategyMarketPrice
             && StrategyMarketPrice.getResTypeHistory(resType)) || 0;
-        // 没有价格数据（新矿种/市场冷启动）→ 默认采（有矿就采）
+        let hist = (StrategyMarketPrice && StrategyMarketPrice.getHistory
+            ? StrategyMarketPrice.getHistory(resType) : []) || [];
+        let tw = 0, tv = 0;
+        hist.forEach(e => {
+            if (!e || !(e.avgPrice > 0)) return;
+            let v = Math.max(1, e.volume || 0);
+            tw += e.avgPrice * v;
+            tv += v;
+        });
+        mineralPrice = Math.max(mineralPrice, tv > 0 ? tw / tv : 0);
         let mine = energyPrice <= 0 || mineralPrice > energyPrice / 2;
         let custom = Memory.mineralSettings && Memory.mineralSettings[resType];
         let stop = Number(custom && custom.stop) || Infinity;
