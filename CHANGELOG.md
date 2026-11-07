@@ -1,3 +1,29 @@
+## v0.78.212 — worker「要么别生，生了必须全程工作」：空手出口链补全 + 长时空闲回收
+
+2026-11-07 用户报告：E41S23 `shard3_84111958_1`（满 boost 30W 高级 worker）tasks 恒 []、
+0 能量、原地站桩 600+ tick。四条出路全关：hive 满 12,900/12,900、0 工地、RCL8 不能升、
+修墙被 storage 98,671 < 100,000 地板闸挡住（差 1,329）。取能侧又被 `workerHasConsumer`
+挡住（取了没下家，0.78.205 语义）——于是从出生闲到老死，满 boost 化合物跟着陪跑。
+
+出口链补全（`workerManagerAfterCarrier` 空手分支，优先级从高到低）：
+
+- ① storage 取能（`workerHasConsumer` 有下家，原样不动）
+- ② 无 carrier 时挖源（lowEnergyCarry，原样不动）
+- ③ **填塔兜底**：塔 <600 有缺口 → `[fillRes, carryRes]` 配对。任务栈 LIFO，先压填塔
+  再压取能 ⇒ 先取能、到塔再 fillRes（与 carrierManager 给 carrier 的配对一致）；
+  塔任务复用 carrierManager 同 pass 的 `room._fillTowerTasks` 缓存，不算两遍
+- ④ **源容器直运兜底**：容器 >1200（显式传参，与 carrier 派车的容量×75% 门槛互补，
+  `room.used` 每 tick 去重不撞车）→ 取回后走 loaded 分支的 `fillAllMainRoomStorage`
+  自动倒库
+- ⑤ **终极兜底：长时空闲回收**：连续 850 tick 无任何出口 → `recycleCreep` 回收
+  （动作自带 ttl<700 先 unboost 回收化合物，再返还将部分孵化能量）。迟滞 850 保证
+  从出生就闲的爬 ttl=650<700 必命中 unboost；豁免 repair 旗编制（用户明确要人）与
+  「无 carrier 独苗」（空房 bootstrap）；拿到活即清 `idleSince` 计时。
+
+效果：worker 要么有活干、要么被回收腾 spawn 位等真需求重孵；运行期条件漂移
+（storage 跌穿修墙地板闸等）不再产生「从出生站到老死」的永久闲爬。
+测试：`test/worker-full-employment.test.cjs`（①~⑨），`worker-no-consumer` 原钉不破。
+
 ## v0.78.211 — 「snapshot reconcile」把两个已修好的补员闸门退回旧版（keeper 550 下限 / PB 波次闩锁）
 
 2026-11-07 01:14 巡检：主脚本两档皆空，但 `node test/*.cjs` 三红。前两条不是测试坏了，

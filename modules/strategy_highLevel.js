@@ -233,10 +233,41 @@ let pro = {
         if (mainRoom && StationWork.constructionNeedBuild(mainRoom)) return true;
         return !!StationDefense.needBuildWallWorkerFree(room);
     },
+    /**
+     * 「要么别生，生了必须全程工作」（用户 2026-11-07）—— 空闲 worker 回收判据。
+     *
+     * workerManagerAfterCarrier 的空手出口链（storage 取能 / 无 carrier 挖源 /
+     * 填塔 / 源容器直运）全不成立时，空手 worker 会从出生站到老死（E41S23
+     * shard3_84111958_1 实测：满 boost 高级 worker、tasks 恒 []、storage 卡在
+     * 修墙地板闸下方 1,329）。与其养一只终生不干活的爬，不如退回 spawn：
+     * recycleCreep 动作自带 ttl<700 先 unboost 回收化合物，再 recycle 返还部分
+     * 孵化能量；等真有活（工地/修墙越过能量闸/塔 <600/容器积压）时
+     * workerManager 的既有闸门会重新孵化。
+     *
+     * 850 tick 迟滞：既给「storage 在地板闸附近震荡」留出回升窗口（防
+     * 回收→重孵抖动），又保证从出生就闲置的爬到回收时 ttl = 1500-850 = 650 < 700，
+     * recycleCreep 里的 unboost 门槛必然命中，化合物不浪费。
+     * 两类豁免：repair 旗（旗子编制是用户明确要人，回收会与孵化互相打架）；
+     * 无 carrier 且这是唯一 worker（空房 bootstrap 独苗，回收等于杀经济）。
+     */
+    shouldRecycleIdleWorker(room, creep) {
+        if (!creep.memory.idleSince) return false;
+        if (Game.time - creep.memory.idleSince < 850) return false;
+        if (room.flags("repair").length) return false;
+        if (!room.creeps("carrier").length && room.creeps("worker").length <= 1) return false;
+        return true;
+    },
     workerManagerAfterCarrier(room) {
         // worker 核心工作
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
         let lowEnergyCarry = !room.creeps("carrier").length && StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 500)
+        // 空手 worker 的两个兜底出口任务源。塔任务由同 pass 的 carrierManager
+        // 算好存在 room._fillTowerTasks（room 对象每 tick 重建，无脏缓存）；
+        // 直运门槛 1200 与 carrierManager 派车门槛（容量×0.75）互补，容器
+        // 1200~75% 区间归 worker，靠 room.used 每 tick 去重不撞车。
+        let towerFillTasks = room._fillTowerTasks !== undefined ? room._fillTowerTasks
+            : (global.StationTower ? StationTower.generatorFillEnergyTasks(room) : []);
+        let idleShuttleTasks = StationSources.generatorCarryEnergyTask(room, 1200);
         room.creeps("worker").filter(e => e.memory.tasks.length <= 1).forEach(creep => { // 优先 unboost 回收t2
             if (creep.ticksToLive < 80 && creep.memory.needUnboost === undefined)
                 pro.unboostWorker(room, creep)
@@ -250,6 +281,22 @@ let pro = {
                     creep.addTask(StorageCarryEnergyTasks)
                 } else if (lowEnergyCarry && lowEnergyCarry.length) {
                     creep.addTask(lowEnergyCarry.pop())
+                } else if (towerFillTasks.length && StorageCarryEnergyTasks.length) {
+                    // 填塔兜底：塔 <600 有真实缺口。任务栈是 LIFO（后 add 先执行），
+                    // 先压填塔、再压取能 ⇒ 先取能、到塔再 fillRes（与 carrierManager
+                    // 给 carrier 的配对完全一致）。
+                    creep.addTask(towerFillTasks.shift());
+                    creep.addTask(StorageCarryEnergyTasks);
+                } else if (idleShuttleTasks.length) {
+                    // 源容器直运兜底：容器积压且本 tick 没被 carrier 认领。
+                    // 取回后 loaded 分支四条出路全不成立 ⇒ fillAllMainRoomStorage 自动倒库
+                    creep.addTask(idleShuttleTasks.pop())
+                } else {
+                    // 终极兜底（用户 2026-11-07「要么别生，生了必须全程工作」）：
+                    // 所有出口全关的空手 worker，空闲满 850 tick 回收（见
+                    // shouldRecycleIdleWorker 的迟滞与豁免说明）。
+                    if (!creep.memory.idleSince) creep.memory.idleSince = Game.time;
+                    if (pro.shouldRecycleIdleWorker(room, creep)) creep.addTask([UtilsTask.taskData("recycleCreep")]);
                 }
             } else {
                 // hive 需要能量时 worker 自己优先填 spawn/extension（不依赖 carrier）
@@ -269,6 +316,7 @@ let pro = {
                 // 取货侧已被 workerHasConsumer 挡住，所以不会「取—倒」来回打乒乓。
                 if (creep.isFree() && !creep.storeEmpty()) creep.fillAllMainRoomStorage();
             }
+            if (!creep.isFree()) delete creep.memory.idleSince; // 拿到活就清空闲计时
         })
     },
     /**
@@ -367,6 +415,7 @@ let pro = {
         // tower 空能量、rampart 掉血无人修（E53S21 教训）。
         let freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
         let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
+        room._fillTowerTasks = fillTowerTasks; // 同 pass 的 workerManagerAfterCarrier 复用，免得算两遍
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
 
         if (StationHive.HiveNeedToFill(room)) {
