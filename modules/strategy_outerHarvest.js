@@ -151,6 +151,12 @@ let pro = {
      * 塔伤 600 - 自奶 120 = 净 -480/tick，4000 血能站 ~8 tick，够拆完。
      * 复用 coreBuster 处理器（taskName 相同，含跨房 -7 / 无部件 -12 的修正），
      * 拆完自回收。
+     *
+     * **inactive 塔（无主废墟）不拆**（用户 2026-11-08：「inactive 的 tower 等建筑
+     * 不用拆，没用的」）：W26N59 是玩家 skyfox 弃坑的房——controller 无主，他的
+     * spawn/塔/extension 全部**失效**（塔没有主人的控制器就开不了火）。原逻辑用
+     * FIND_HOSTILE_STRUCTURES 抓塔，把这种废墟也当成威胁派 buster 白跑一趟。
+     * 只有**塔的主人还控制着房**（能开火）才算真威胁。
      */
     spawnTowerBuster(targetRoomName, spawnRoom) {
         if (spawnRoom.spawnFailure) return;
@@ -159,6 +165,9 @@ let pro = {
         let tower = harRoom.find(FIND_HOSTILE_STRUCTURES)
             .filter(e => e.structureType == STRUCTURE_TOWER).head();
         if (!tower) return;
+        // 房间 controller 无主（弃坑废墟）⇒ 塔开不了火 ⇒ 不拆、不再派
+        if (!harRoom.controller || !harRoom.controller.owner
+            || harRoom.controller.owner.username != tower.owner.username) return;
         let busting = spawnRoom.creeps("towerBuster", false).filter(e => {
             let t = e.headTask && e.headTask();
             return t && t.roomName == targetRoomName;

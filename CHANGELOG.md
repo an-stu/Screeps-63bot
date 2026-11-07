@@ -1,3 +1,42 @@
+## v0.78.224 — 外矿边境不再用裸 move(exit) + 弃坑废墟塔不拆
+
+用户两项指示（2026-11-08）：
+
+1. **「inactive 的 tower 等建筑不用拆，没用的」**：W26N59 是玩家 skyfox 弃坑的房
+   （controller 无主），他的 spawn/塔/extension 全部失效（塔没有主人的控制器就
+   开不了火）。但 `spawnTowerBuster` 用 `FIND_HOSTILE_STRUCTURES` 抓塔——把这种
+   废墟塔当成 invader 塔派了只 [A15,H10,M15] 白跑。修复：只有**塔的主人还控制着
+   房**（`controller.owner == tower.owner`，能开火）才算真威胁；弃坑废墟直接跳过。
+   线上那只已派出的 towerBuster 经控制台撤任务转回收。
+2. **「外矿 carrier 在对应 container 能量不足的时候也靠近 container，不要卡在
+   边界堵路」**：边境跨房的裸 `move(exit)` 在**对面落点格被占**时返回 OK 但移动被
+   引擎静默取消（与单格 move 同一个坑，边境分支漏改）——W26N59 重启实测
+   carrier 84131356_1 在出口格 (13,0) 趴了 500+ tick，把 reserver 84131510_2
+   （卡死计数满格 + dontPullMe）和整条走廊堵死。修复：`moveToOuterRoadPoint` 与
+   `stepFromOuterRoadPoint` 的跨房分支全部改 `moveTo(路点)`——BetterMove 处理
+   落点占用（对穿/让位/等待）；空车进矿后由房内既有 hold 逻辑接管，自动停在
+   container 附近的路线外待命位。
+测试：sticky-spawn-failure ⑥ 重写（inactive 不派 / active+付不起不派 /
+active+付得起照常派），core-profile 新增「边境不得裸 move(exit)」源码 pin。
+
+## v0.78.223 — 被打房永久记账：收过攻击的 PB 目标房直接 T2，不再等检测
+
+用户指示（2026-11-07）：「补太慢了来不及，你直接检查收过攻击的房间，然后直接这些
+房间都用 T2 强化就行」。
+
+0.78.221 的检测依赖**当下视野**——PB 房只在 observer 扫到时可见，袭击瞬间常常无
+视野，等看到再补波已经来不及。改为**记账制**：
+
+- 检测到玩家袭击时，目标房写入 `Memory.powerBankAttackedRooms`（{user, tick}，
+  永久，不设过期）；
+- 每 pass 对每个 PB 旗检查目标房是否在账上：在 ⇒ `beingAttack` 强制置真 +
+  `lastSpawnTime=0` 立即补波 ⇒ 走 0.78.221 的被打分支（L2 > L1 > DAMAGE，波次
+  不设限），**从第一波起就是 T2**，不再从 L1 爬坡。
+- 存量任务同步生效：`powerBank_E49S31_E46S30_30_23`（被 Apple 打过）部署时经
+  控制台把 E46S30 记入账本，下一 pass 即 T2 补波。
+测试：power-bank-respawn ⑤c 源码 pin（记账写入、每 pass 查账、beingAttack 强制、
+lastSpawnTime 归零）。
+
 ## v0.78.222 — 修墙配对把唯一 worker 锁死在无底洞上：有工地时不配对
 
 0.78.220 上线 4 分钟后的巡检实测（W26N58，RCL7）：**6 个工地合计 26.5 万进度，
@@ -18,24 +57,6 @@
 「取完等下个 pass」空窗不受影响。
 测试：worker-full-employment ⑪ 新增（工地 + 墙缺口同时成立 ⇒ 只有 carryRes、
 无 repairWall；负对照去掉闸门即失败），⑨ 加源码 pin，①⑧⑩ 原钉不破。
-
-## v0.78.223 — 被打房永久记账：收过攻击的 PB 目标房直接 T2，不再等检测
-
-用户指示（2026-11-07）：「补太慢了来不及，你直接检查收过攻击的房间，然后直接这些
-房间都用 T2 强化就行」。
-
-0.78.221 的检测依赖**当下视野**——PB 房只在 observer 扫到时可见，袭击瞬间常常无
-视野，等看到再补波已经来不及。改为**记账制**：
-
-- 检测到玩家袭击时，目标房写入 `Memory.powerBankAttackedRooms`（{user, tick}，
-  永久，不设过期）；
-- 每 pass 对每个 PB 旗检查目标房是否在账上：在 ⇒ `beingAttack` 强制置真 +
-  `lastSpawnTime=0` 立即补波 ⇒ 走 0.78.221 的被打分支（L2 > L1 > DAMAGE，波次
-  不设限），**从第一波起就是 T2**，不再从 L1 爬坡。
-- 存量任务同步生效：`powerBank_E49S31_E46S30_30_23`（被 Apple 打过）部署时经
-  控制台把 E46S30 记入账本，下一 pass 即 T2 补波。
-测试：power-bank-respawn ⑤c 源码 pin（记账写入、每 pass 查账、beingAttack 强制、
-lastSpawnTime 归零）。
 
 ## v0.78.221 — PB 被打自动升阶：玩家袭击 ⇒ 一直派更高一级小队（L2 不再受白名单锁）
 

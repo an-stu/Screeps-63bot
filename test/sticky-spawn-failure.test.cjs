@@ -105,10 +105,13 @@ vm.runInNewContext("Array.prototype.head = function(){ return this.length ? this
     + "var pro = {" + tb[0] + "\n};", tbCtx, { filename: "spawnTowerBuster.js" });
 Array.prototype.head = function () { return this.length ? this[0] : undefined; };
 
-const tower = { structureType: "tower", id: "tw" };
-const harRoom = () => ({
+// 弃坑房（W26N59 实测：skyfox 走了，controller 无主，塔/spawn 全部失效）
+// —— inactive 塔**不拆**（用户 2026-11-08），也不许占孵化位
+const tower = { structureType: "tower", id: "tw", owner: { username: "skyfox" } };
+const harRoom = owned => ({
     name: "W26N59",
     find: () => [tower],
+    controller: owned ? { owner: { username: "skyfox" } } : null,   // null = 弃坑无主
 });
 tbCtx.pro.creeps = () => [];
 
@@ -119,13 +122,20 @@ const makeRoom = cap => ({
     getEnergyCapacityAvailable: () => cap,
 });
 
-tbCtx.Game.rooms.W26N59 = harRoom();
+// inactive：controller 无主 ⇒ 塔开不了火 ⇒ 一次都不试
+tbCtx.Game.rooms.W26N59 = harRoom(false);
+tbCtx.pro.spawnTowerBuster("W26N59", makeRoom(12900));
+assert.deepEqual(tbCtx.__calls, [],
+    "弃坑房的失效塔（controller 无主）不拆不派（用户 2026-11-08）");
+
+// active：塔的主人还控制着房（能开火）⇒ 才是真威胁
+tbCtx.Game.rooms.W26N59 = harRoom(true);
 tbCtx.pro.spawnTowerBuster("W26N59", makeRoom(2300));
 assert.deepEqual(tbCtx.__calls, [],
     "容量 2,300 的房付不起 4,450 的 towerBuster ⇒ 一次都不许试（否则会毒化整 tick）");
 
 tbCtx.__calls = [];
 tbCtx.pro.spawnTowerBuster("W26N59", makeRoom(12900));
-assert.deepEqual(tbCtx.__calls, ["towerBuster"], "付得起（RCL8 12,900）时照常派（负对照）");
+assert.deepEqual(tbCtx.__calls, ["towerBuster"], "付得起（RCL8 12,900）且塔有主时照常派（负对照）");
 
 console.log("sticky spawnFailure: OK");

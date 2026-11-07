@@ -159,6 +159,8 @@ assert.ok(stationSources.includes("moveToOuterRoadPoint")
     && !stationSources.includes("creep.move(creep.pos.getDirectionTo(point))"),
     "external carriers must advance between cached road points via the movement optimiser, not a raw creep.move that reports OK while the engine cancels it");
 assert.ok(stationSources.includes("if (dist > 1)") && stationSources.includes("if (range > 1)"), "an external carrier that leaves its route must reacquire the nearest cached point immediately");
+assert.ok(!stationSources.includes("creep.move(exit)"),
+    "border crossings must not use a raw creep.move(exit): when the opposite landing tile is occupied the engine silently cancels it (reports OK) and the carrier parks on the exit tile for hundreds of ticks, blocking the whole corridor (W26N59 restart, 84131356_1 stuck 500+ ticks)");
 assert.ok(stationSources.includes("stepFromOuterRoadPoint") && stationSources.includes("this.pos.isBorder() && borderIndex.dist == 0"), "cached border waypoints must advance rather than repeatedly target themselves");
 assert.ok(stationSources.includes("let nextIndex = borderIndex.index + roadDir") && stationSources.includes("task.pathIndex = nextIndex"), "a boundary move must persist its next cached waypoint index");
 assert.ok(main.includes("Game.flags.showBlueprint") && main.includes("ManagerAutoPlanner.showRoom()"), "a requested blueprint visual must render every tick rather than only with planner work");

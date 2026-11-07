@@ -2576,18 +2576,16 @@ let pro = {
             // 偏离路径：强行 moveTo 回到最近缓存路点，绕开墙体/建筑
             return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
         }
-        // 跨房：边界格每 tick 持续 move(exit) 向目标房间位移（用户验证：
-        // 一直朝目标方向移动就能通过；不验证位置、不退回、不等待——
-        // 退回会造成边界来回弹跳，等待会与对面爬互相传送死锁）。
+        // 跨房：边界格持续向目标房间位移。**不要用裸 move(exit)**（0.78.224，
+        // 用户：「外矿 carrier 路被卡了」实测 W26N59 重启时 shard3_84131356_1 在
+        // (13,0) 趴了 500+ tick）——落点格被别的爬占住时裸 move 返回 OK 但移动被
+        // 引擎静默取消（与上面单格 move 同一个坑），车在出口格一动不动，把
+        // reserver/keeper 的必经走廊整个堵死（reserver 84131510_2 卡死计数满格、
+        // dontPullMe 拉不动）。改 moveTo(对面路点)：BetterMove 处理落点占用
+        // （对穿 / 让位 / 等待）；路点固定朝矿房方向，不会有「退回造成边界来回
+        // 弹跳」的旧问题——旧写法注释里担心的两个死法都只属于「退回/等待」型。
         if (creep.pos.isBorder()) {
-            let exit = Game.map.findExit(creep.pos.roomName, point.roomName);
-            if (exit >= TOP && exit <= TOP_LEFT) {
-                let code = creep.move(exit);
-                if (code == OK) {
-                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, roomName: creep.pos.roomName, time: Game.time };
-                }
-                return OK;
-            }
+            return creep.moveTo(point, { reusePath: 3, visualizePathStyle: { stroke: '#fffa00' } });
         }
         return creep.moveTo(point, { range: 0, reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
     },
@@ -2600,8 +2598,9 @@ let pro = {
             // 被静默取消，且无法对穿/拉人），交给 BetterMove。
             return creep.moveTo(next, { range: 0, reusePath: 3 });
         }
-        let exit = Game.map.findExit(creep.pos.roomName, next.roomName);
-        return exit >= TOP && exit <= TOP_LEFT ? creep.move(exit) : ERR_NO_PATH;
+        // 跨房同理（0.78.224）：裸 move(exit) 的落点格被占时被引擎静默取消——
+        // 一趴几百 tick 堵走廊。moveTo(下一路点) 让 BetterMove 处理落点占用。
+        return creep.moveTo(next, { reusePath: 3 });
     },
     /**
      * Return the closest route-bound road construction site in the creep's
