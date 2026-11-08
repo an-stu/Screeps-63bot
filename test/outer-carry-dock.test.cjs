@@ -20,6 +20,20 @@ const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
 const raw = fs.readFileSync(path.join(root, "modules", "station_sources.js"), "utf8");
+// 宿主 realm 的数组扩展：⑤ 动态平衡用例的 creep.memory.tasks 在宿主创建，
+// 而 headTask() 在 VM 里执行 —— 两边都要有 .head/.last（与 sticky 测试同一做法）
+if (!Array.prototype.head) {
+    Object.defineProperty(Array.prototype, "head", {
+        value: function () { return this.length ? this[0] : undefined; },
+        enumerable: false, configurable: true, writable: true,
+    });
+}
+if (!Array.prototype.last) {
+    Object.defineProperty(Array.prototype, "last", {
+        value: function () { return this.length ? this[this.length - 1] : undefined; },
+        enumerable: false, configurable: true, writable: true,
+    });
+}
 // 断言前剥注释：注释里会原样引用被删的表达式（本仓库既有踩坑）
 const code = raw
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -185,6 +199,95 @@ function makeContext(src) {
     assert.ok(/moveTo\(new RoomPosition\([^)]*\), \{ reusePath: \d+ \}\)/.test(body),
         "待命移动的目标是静态格，必须传 reusePath");
     assert.ok(/memory\.holdPos/.test(body), "待命格要缓存，不能每 tick 重扫一片区域");
+}
+
+// ── ⑤ 动态平衡（0.78.225，用户：「carrier 有点不平衡，动态平衡」）────────────
+// 车与源静态绑死，负载不均/重启期会摆出「一个容器 1896 满仓、另一个 16 空仓」
+// 的错位（W26N59 实测 2026-11-08）。空手 + 绑定容器 <400 + 同房另一容器 ≥800
+// ⇒ 任务就地换绑（id/x/y/stationId 一起改，returnPathIndex 作废）；两边都低
+// 时不动（防两辆空车互相倒腾抖动）。
+{
+    const C = makeContext(raw);
+    const ctA = { id: "ctA", store: { energy: 100 }, pos: { x: 29, y: 5, roomName: "W26N59" } };
+    const ctB = { id: "ctB", store: { energy: 1200 }, pos: { x: 28, y: 30, roomName: "W26N59" } };
+    const srcA = { id: "srcA", container: "ctA", roomName: "W26N59", x: 29, y: 4 };
+    const srcB = { id: "srcB", container: "ctB", roomName: "W26N59", x: 27, y: 29 };
+    C.Memory.rooms.W26N59 = { stationSources: { srcA: srcA, srcB: srcB } };
+    C.Game.getObjectById = id => (id == "ctA" ? ctA : id == "ctB" ? ctB : null);
+
+    const creep = new C.Creep();
+    Object.assign(creep, {
+        memory: { tasks: [
+            { taskName: "harvestEnergyOuterCarry", id: "srcA", roomName: "W26N59", x: 29, y: 4 },
+            { taskName: "harvestEnergyOuterCarryRoadBuilder", mineRoom: "W26N59", stationId: "srcA", roadDir: 1 },
+        ] },
+        store: { getUsedCapacity: () => 0, getFreeCapacity: () => 1600 },
+        storeEmpty() { return this.store.getUsedCapacity() == 0; },
+        room: { name: "W26N59" },
+        pos: { x: 29, y: 5, roomName: "W26N59", findInRange: () => [], isNearTo: () => false },
+        headTask() { return this.memory.tasks.head(); },
+        lastTask() { return this.memory.tasks.last(); },
+        popTask() { this.memory.tasks.pop(); return this; },
+        addTask(t) { [].concat(t).forEach(x => this.memory.tasks.push(x)); return this; },
+        execLastTask() { this.__exec = (this.__exec || 0) + 1; return this; },
+        moveTo() { return 0; },
+        goTo() { return 0; },
+        withdraw() { return 0; },
+        pickup() { return 0; },
+        say() {},
+    });
+    C.Game.creeps = { c1: creep };
+    creep.room.find = () => [];
+
+    C.StationSources && C.StationSources;   // no-op
+    const S = C.StationSources;
+    creep.harvestEnergyOuterCarry();
+
+    const carryTask = creep.memory.tasks[0];
+    const roadTask = creep.memory.tasks[1];
+    assert.equal(carryTask.id, "srcB", "绑定容器没货而另一容器 ≥800 ⇒ carry 任务换绑到有货矿点");
+    assert.equal(carryTask.x, 27, "换绑必须连坐标一起改（goTo/路线用 x/y）");
+    assert.equal(roadTask.stationId, "srcB", "roadBuilder 子任务的 stationId 也要同步换绑");
+    assert.ok(!("returnPathIndex" in carryTask), "换绑后旧路线缓存索引必须作废");
+    assert.ok(creep.__exec >= 1, "换绑后立即按新绑点行动");
+}
+
+// ── ⑤b 防抖负对照：两边容器都低（<800）⇒ 不换绑（防两辆空车互相倒腾）──────
+{
+    const C = makeContext(raw);
+    const ctA = { id: "ctA", store: { energy: 100 }, pos: { x: 29, y: 5, roomName: "W26N59" } };
+    const ctB = { id: "ctB", store: { energy: 300 }, pos: { x: 28, y: 30, roomName: "W26N59" } };
+    const srcA = { id: "srcA", container: "ctA", roomName: "W26N59", x: 29, y: 4 };
+    const srcB = { id: "srcB", container: "ctB", roomName: "W26N59", x: 27, y: 29 };
+    C.Memory.rooms.W26N59 = { stationSources: { srcA: srcA, srcB: srcB } };
+    C.Game.getObjectById = id => (id == "ctA" ? ctA : id == "ctB" ? ctB : null);
+
+    const creep = new C.Creep();
+    Object.assign(creep, {
+        memory: { tasks: [
+            { taskName: "harvestEnergyOuterCarry", id: "srcA", roomName: "W26N59", x: 29, y: 4 },
+        ] },
+        store: { getUsedCapacity: () => 0, getFreeCapacity: () => 1600 },
+        storeEmpty() { return true; },
+        room: { name: "W26N59" },
+        pos: { x: 29, y: 5, roomName: "W26N59", findInRange: () => [], isNearTo: () => false },
+        headTask() { return this.memory.tasks.head(); },
+        lastTask() { return this.memory.tasks.last(); },
+        popTask() { this.memory.tasks.pop(); return this; },
+        addTask(t) { [].concat(t).forEach(x => this.memory.tasks.push(x)); return this; },
+        execLastTask() { return this; },
+        moveTo() { return 0; },
+        goTo() { return 0; },
+        withdraw() { return 0; },
+        pickup() { return 0; },
+        say() {},
+    });
+    C.Game.creeps = { c1: creep };
+    creep.room.find = () => [];
+
+    creep.harvestEnergyOuterCarry();
+    assert.equal(creep.memory.tasks[0].id, "srcA",
+        "另一容器只有 300（<800 防抖线）⇒ 不许换绑，否则两辆空车互相倒腾");
 }
 
 console.log("outer-carry-dock: OK");

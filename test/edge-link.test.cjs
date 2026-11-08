@@ -488,6 +488,7 @@ function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBui
         //（见 harvestEnergyOuterCarry 的「装满再走」）。本用例只验证回程任务栈，
         // 所以直接把爬设成满仓。
         store: makeStore({ energy: 1700 }, 1700),
+        storeEmpty() { return this.store.getUsedCapacity() == 0; },
         pos: { isNearTo: () => true, findInRange: () => [] },
         headTask: () => task,
         lastTask: () => task,
@@ -902,6 +903,7 @@ function defenceGateFixture(defenders) {
         const creep = {
             room: { name: "W34N55" }, memory: { carryWait: wait },
             store: makeStore({ energy: storeEnergy }, 1700),
+            storeEmpty() { return this.store.getUsedCapacity() == 0; },
             ticksToLive: 1000,
             pos: { x: 32, y: 31, roomName: "W34N55", isNearTo: () => true, isEqualTo: () => false,
                    isBorder: () => false, lookFor: () => [],

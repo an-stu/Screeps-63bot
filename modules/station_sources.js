@@ -1456,6 +1456,42 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
     let task = this.headTask();
     let rm = Memory.rooms[this.headTask().roomName];
     if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
+        // ── 动态平衡（0.78.225，用户 2026-11-08「carrier 有点不平衡，动态平衡」）──
+        // 车与源**静态绑死**（生成时 taskOutView 写死源 id），负载不均或重启期会
+        // 摆出「一个容器 1896 满仓压着 keeper 停采、另一个 16 空仓养着闲车」的
+        // 错位（W26N59 实测 2026-11-08）。空手且绑定的容器没货时，改绑到同房
+        // 另一个 ≥800（≥半整车）有货的矿点——阈值防抖：两边都低时不动，两辆
+        // 空车不会互相倒腾。改写是**就地**的（task 对象直接换 id/x/y/stationId），
+        // 保留栈位与下方 roadBuilder 子任务；returnPathIndex 作废走新路。
+        if (this.storeEmpty()) {
+            let pinnedId = task.id;   // 先捕获：carry 任务就地改写后 task.id 会变
+            let myData = rm[pro.stationName][pinnedId];
+            let myCt = myData && myData[STRUCTURE_CONTAINER] ? Game.getObjectById(myData[STRUCTURE_CONTAINER]) : null;
+            if (!myCt || (myCt.store[RESOURCE_ENERGY] || 0) < 400) {
+                let best = null, bestE = 800;
+                for (let sid in rm[pro.stationName]) {
+                    if (sid == pinnedId) continue;
+                    let d = rm[pro.stationName][sid];
+                    if (!d || !d[STRUCTURE_CONTAINER] || d.roomName != task.roomName) continue;
+                    let c2 = Game.getObjectById(d[STRUCTURE_CONTAINER]);
+                    let e2 = c2 ? (c2.store[RESOURCE_ENERGY] || 0) : 0;
+                    if (e2 >= bestE) { best = d; bestE = e2; }
+                }
+                if (best) {
+                    (this.memory.tasks || []).forEach(function (t) {
+                        if ((t.taskName == 'harvestEnergyOuterCarry' && t.id == pinnedId)
+                            || (t.taskName == 'harvestEnergyOuterCarryRoadBuilder' && t.stationId == pinnedId)) {
+                            t.id = best.id;
+                            t.x = best.x;
+                            t.y = best.y;
+                            if (t.stationId !== undefined) t.stationId = best.id;
+                            if (t.returnPathIndex !== undefined) delete t.returnPathIndex;
+                        }
+                    });
+                    return this.execLastTask();
+                }
+            }
+        }
         if (task.roomName != this.room.name) {
             let data = rm[pro.stationName][task.id];
             // Return trips use the same cached road in reverse. Apart from
