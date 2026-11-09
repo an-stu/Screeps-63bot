@@ -1,3 +1,24 @@
+## v0.78.227 — upgrader 数量闸门补「换代提前量」：即将老死的那只不再占用配额
+
+巡检实测（2026-11-09 23:0x，W26N58 RCL7、双 spawn、hive 满 5,600）：两只 upgrader
+的 `ticksToLive` 分别是 **152** 和 936，storage 能量 ~85,000 ⇒ 数量闸门
+`(85,000 - 35,000) / 30,000 = 1.67` 对**裸计数 2** 判成「够了，不补」。
+
+于是那只 ttl 152 的老死后裸计数才变 1、才放行，而孵一只 50 部件（30 WORK）要
+`50 × 3 = 150` tick —— 这 150 tick 里整房只有一只 upgrader 在产（实测控制器速率
+从 ~115/tick 掉到 ~55/tick）。外矿 carrier 早就用
+`ttl > body.length*3 + pathTime + PRESPAWN` 的口径（0.78.x 换代替换），upgrader 漏了。
+
+修复：新增 `StationUpgrade.upgraderCoverageCount(room)`，
+`ttl > body.length*3 + 50` 才算有效在岗（孵化中的算、缺字段的桩保守算），
+RCL<8 的数量闸门四处（0 只兜底 / 必产 flag / 盈余配额 / storage 富余必产）
+全部改用这个计数。判据只提前「该派的时刻」，**不改调用顺序**
+（keeper → carrier → 外矿 → upgrader）；稳态下仍是同一只替换同一只，不增加净能量消耗，
+storage 配额为负时照旧不许硬抽（有测试兜底）。
+
+测试：`test/upgrader-replace-coverage.test.cjs`（7 组，含负对照 —— 换回裸计数时
+现场必须孵不出来）。
+
 ## v0.78.225 — 外矿「卡住计数」自锁：搬运爬在边境弹跳 450 tick 后永久不走缓存路线
 
 巡检实测（2026-11-08 01:5x，W26N59 刚重启）：唯一的外矿搬运爬

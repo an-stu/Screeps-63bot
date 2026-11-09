@@ -3,6 +3,12 @@
  */
 
 let MAX_GCL = 150;
+/**
+ * upgrader 换代提前量（tick）：剩余寿命必须还够「孵完替补 + 走到 controller 就位」，
+ * 否则不再算作有效在岗（见 upgraderCoverageCount）。房内升级爬不需要跨房路径时间，
+ * 50 够覆盖孵出来的爬从 spawn 走到控制器 + 落位选格。
+ */
+let UPGRADER_REPLACE_PRESPAWN = 50;
 let CONTROLLER_SIGN_VERSION = 2;
 let CONTROLLER_SIGNS = [
     "明月松间照，清泉石上流。",
@@ -451,6 +457,32 @@ let pro = {
             creep.registerStationUpgrade();
         }
     },
+    /**
+     * 「有效在岗」的 upgrader 个数：**剩余寿命不足以撑到替补孵完的不算**。
+     *
+     * 数量闸门一直用 `room.creeps("upgrader", false).length` —— 把「还剩 150 tick
+     * 就要老死」的那只和刚出生的那只当成等价的 1 只。RCL<8 房的闸门是
+     * `(storage 能量 - (level-3.5)*1e4) / 30000 > 只数`，W26N58（RCL7、storage
+     * 能量 ~85k）算出来 1.6 ⇒「2 只」判成够用、不补；等那只老死只剩 1 只才放行，
+     * 而孵一只 50 部件（30 WORK）要 `body.length × 3 = 150` tick —— 这 150 tick
+     * 升级进度直接掉一半。
+     *
+     * 外矿搬运早就是这个口径（`e.ticksToLive > e.body.length*3 + pathTime + PRESPAWN`，
+     * 见 station_sources.js），upgrader 这条漏了。判据对「谁优先吃 spawn」没有任何影响：
+     * 调用顺序不变（keeper → carrier → 外矿 → upgrader），只是把「该派的时刻」提前
+     * 一只的孵化时长，稳态下仍是同一只替换同一只，不增加净能量消耗。
+     */
+    upgraderCoverageCount(room) {
+        return room.creeps("upgrader", false).filter(e => {
+            if (!e) return false;
+            // 孵化中的（ttl undefined）必然是有生力量
+            if (e.spawning) return true;
+            // 桩对象 / 老记忆缺字段时保守算在岗，宁可少孵一只
+            if (!e.ticksToLive || !e.body) return true;
+            // 3 = CREEP_SPAWN_TIME（每个部件 3 tick）
+            return e.ticksToLive > e.body.length * 3 + UPGRADER_REPLACE_PRESPAWN;
+        }).length;
+    },
     spawnUpgrader(room) {
         let sm = room.memory[pro.stationName];
         // 先救「在位的爬」再做孵化决策：这道闸门只该管「要不要再派一只」。
@@ -496,6 +528,9 @@ let pro = {
         // RCL8 仍走下面那条 1M 分支（行为不变）。
         // trySpawnUpgrader 会把体型收缩到本 tick 付得起，不会抽干 hive。
         let upgradeDivisor = room.level < 8 ? 30000 : 1000000;
+        // 数量闸门一律按「有效在岗」算（见 upgraderCoverageCount：即将老死的不计）。
+        // 下面所有 RCL<8 的分支都用它，别再用 room.creeps(...).length 的裸计数。
+        let liveUpgraderCnt = pro.upgraderCoverageCount(room);
         if (room.level < 8 || !room.storage) {
             let minUpgraderCnt = 0;
             if (upgradeFlag || (upgradeFlag && room.terminal && room.terminal.my)) {
@@ -522,15 +557,15 @@ let pro = {
             let zeroUpgraderNeedEnergy = Math.min(room.getEnergyCapacityAvailable() * 0.4, 4000)
             if (!room.storage || room.controller.progress >= room.controller.progressTotal)
                 spawn()
-            else if (room.creeps("upgrader", false).length == 0
+            else if (liveUpgraderCnt == 0
                 && room.energyAvailable >= zeroUpgraderNeedEnergy
                 && (room.controller.ticksToDowngrade < 100000 || room.controller.progress < room.controller.progressTotal))
                 spawn()
-            else if (WHO_AM_I == "an_w" && minUpgraderCnt > room.creeps("upgrader", false).length)
+            else if (WHO_AM_I == "an_w" && minUpgraderCnt > liveUpgraderCnt)
                 spawn()
-            else if (((room.storage.store[RESOURCE_ENERGY] - (room.level - 3.5) * 10000) / upgradeDivisor > room.creeps("upgrader", false).length)
+            else if (((room.storage.store[RESOURCE_ENERGY] - (room.level - 3.5) * 10000) / upgradeDivisor > liveUpgraderCnt)
                 || room.controller.ticksToDowngrade < 500
-                || (room.storage.store[RESOURCE_ENERGY] > 10000 && minUpgraderCnt > room.creeps("upgrader", false).length))
+                || (room.storage.store[RESOURCE_ENERGY] > 10000 && minUpgraderCnt > liveUpgraderCnt))
                 spawn()
         }
         // 这里是**唯一**的 upgrader 数量闸门（main.js 的 shouldRunCreep 已不再节流在职者，
