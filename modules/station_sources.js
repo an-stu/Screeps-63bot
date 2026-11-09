@@ -3409,7 +3409,17 @@ let pro = {
                 // 「本 tick 有过一次失败尝试」—— 本房 keeper 付不起 1,800 的体型也会置真，
                 // 于是外矿这只更便宜的 keeper 连试都不试（与 carrier 同一处病根，见 2026-10-29）。
                 spawnRoom.spawnFailure = false;
-                spawnRoom.currentEnergyAvailable = undefined;
+                // **只解粘滞标记，绝不清 `currentEnergyAvailable`。**（2026-11-10）
+                //
+                // 这一行是 2026-10-30（06fc3725）从 carrier 路径照抄的「两个缓存一起清」，
+                // 而 2026-11-05（9542722）已经证伪了清预算那半边：`currentEnergyAvailable`
+                // 是本 tick 的孵化预算缓存（首个 trySpawn 初始化、每次成功孵化扣减），
+                // 而 `room.energyAvailable` 在同一 tick 内**不反映刚花掉的能量**。
+                // 清掉它 ⇒ trySpawn 用旧满格值重新初始化 ⇒ 同一 pass 里排在 keeper 后面的
+                // 角色（carrier / upgrader 走 `spawnTickBudget = min(energyAvailable,
+                // currentEnergyAvailable)`）都按虚高的预算定体型 ⇒ spawnCreep 被引擎以
+                // ERR_NOT_ENOUGH_ENERGY 拒绝、spawnFailure 置真 ⇒ 白丢一个 spawn pass。
+                // 结论与 station_upgrade.js / strategy_highLevel.js 同一处完全一致。
                 if (StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)) {
                     // 派成功了才打标记：接班人在路上，其余的在岗爬不用再补
                     mine.forEach(e => { if (e.memory && !e.spawning) e.memory.successorSpawned = true; });

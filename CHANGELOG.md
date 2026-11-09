@@ -1,3 +1,26 @@
+## v0.78.228 — keeper 补员不再清掉本 tick 的孵化预算缓存（spawn 白丢一个 pass）
+
+巡检复盘 `trySpawnOuterHarKeeper` 时发现：`trySpawn` 前留着一行
+`spawnRoom.currentEnergyAvailable = undefined;`。它是 2026-10-30（06fc3725）
+从 carrier 路径照抄的「两个缓存一起清」，而 2026-11-05（9542722）已经证伪了清预算
+那半边并删掉了 carrier / 外矿搬运两条路径的同一行 —— **keeper 这条漏了**。
+
+`currentEnergyAvailable` 是本 tick 的孵化预算缓存（首个 `trySpawn` 初始化、每次成功
+孵化扣减），而 `room.energyAvailable` 在**同一 tick 内不反映刚花掉的能量**
+（9542722 实测：孵完 2,200 的 worker 后读回仍是 2,300）。清掉它 ⇒ `trySpawn` 用旧
+满格值重新初始化 ⇒ 同一 economy pass 里排在 keeper 后面的角色（carrier / upgrader 走
+`spawnTickBudget = min(energyAvailable, currentEnergyAvailable)`）都按**虚高**预算定体型
+⇒ `spawnCreep` 被引擎以 ERR_NOT_ENOUGH_ENERGY 拒绝、`spawnFailure` 置真 ⇒ 该角色白丢
+一个 pass。keeper 补员（每只 keeper 每 1,500 tick 一次、全场 ~28 只）正是这条路径，
+所以它一直在稳定地给 carrier/upgrader 制造一次性失败。
+
+修复：keeper 补员只解粘滞的 `spawnFailure`，**不清** `currentEnergyAvailable`
+（与 `station_upgrade.js` / `strategy_highLevel.js` 同一结论，也回到 MEMORY 第 6 条）。
+调用顺序（keeper → carrier → 外矿 → upgrader）与任何优先级都没动。
+
+测试：`test/keeper-spawn-budget-cache.test.cjs`（源码断言 + 行为断言 + 内建负对照：
+把那一行加回去时，后续角色读到的预算 2,600 vs 真实余量 400，必须虚高）。
+
 ## v0.78.227 — upgrader 数量闸门补「换代提前量」：即将老死的那只不再占用配额
 
 巡检实测（2026-11-09 23:0x，W26N58 RCL7、双 spawn、hive 满 5,600）：两只 upgrader
