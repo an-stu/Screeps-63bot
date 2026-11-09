@@ -355,9 +355,28 @@ let pro = {
         let highC = Number(msC.powerSpawnHigh) > 0 ? Number(msC.powerSpawnHigh) : 500;
         let floorC = Number(msC.powerSpawnEnergy) > 0 ? Number(msC.powerSpawnEnergy) : 100000;
         let wantBurn = burnRoom && (!!msC.powerBurning || (powerCnt >= highC && energyCnt >= floorC));
+        // **灌料闸门必须与烧制闸门同源**（2026-11-10，0.78.229）。
+        //
+        // `tryProcessPower` 的开闸线是 `powerSpawnOpenEnergy`（缺省 floor+50000 = 15 万），
+        // 而这里的非试点分支写死过 `energyCnt > 170000`：两道闸之间留着 15~17 万的
+        // **死区**，落进去的房间会「被授权烧制、却不给补料」——
+        //   · powerSpawn 的 5,000 能量缓冲（100 tick）烧完就归零；
+        //   · processPower 需要 ≥50 能量，于是从此每 tick 白调、返回错误；
+        //   · storage 卡在闸门正下方不再上涨（本房既没烧掉、也没攒起来），
+        //     再也翻不过 17 万 ⇒ **两只闸互锁，永久停摆**（MEMORY 第 3 条）。
+        // 实测 2026-11-10：W33N53 storage 168,694 / powerSpawn 能量 31→1181 反复，
+        // W33N55 storage 168,762 / powerSpawn 能量 **1**、power 59 —— 两个房的
+        // `roomMassStoreCnt(power)` 都是 5,9xx（差 100 不到 6000），能量差 1.3k 不到 17 万，
+        // 两条非试点分支同时擦边落空。烧掉的 5,000 缓冲就是它们「确实在烧」的铁证。
+        //
+        // 修法只统一口径，**不动任何阈值本身**：非试点房的补料线 = 烧制开闸线
+        // （`powerSpawnOpenEnergy` 或 floor+50000）。用户 2026-10-21 定的
+        // 「10 万以下不烧 / 15 万以上才烧」原封不动；试点房（`powerSpawnRoom`）走
+        // 自己的 `energyCnt > 30000` 分支，也不动。
+        let openC = Number(msC.powerSpawnOpenEnergy) > 0 ? Number(msC.powerSpawnOpenEnergy) : floorC + 50000;
         let fillGate = wantBurn
             ? (energyCnt > 30000 && powerCnt > 0)
-            : (energyCnt > 170000 && powerCnt > 1000 || energyCnt > 100000 && powerCnt > 6000
+            : (energyCnt >= openC && powerCnt > 1000 || energyCnt > 100000 && powerCnt > 6000
                 // fillGate 在下面 powerSpawn 存在性检查**之前**求值：RCL<8 或
                 // powerSpawn 被拆时 room.powerSpawn 为 undefined，裸取 .effects
                 // 会抛 TypeError 打断整个派发 pass。

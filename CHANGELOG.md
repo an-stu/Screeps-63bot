@@ -1,3 +1,22 @@
+## v0.78.229 — powerSpawn 灌料闸与烧制闸同源（15~17 万死区互锁）
+
+巡检发现两个非试点房的 power spawn 长期空转：W33N53 storage 能量 168,694、
+powerSpawn 能量 31↔1,181 反复；W33N55 storage 168,762、powerSpawn 能量 **1**、power 59。
+两房的 `roomMassStoreCnt(power)` 都是 5,9xx，都恰好落在闸门内侧一点。
+
+根因是**同一决策的两层阈值不同源**：
+`tryProcessPower` 的开闸线是 `powerSpawnOpenEnergy`（缺省 `floor+50000` = 15 万），
+而 `generatorFillPowerSpawnTask` 的非试点分支写死 `energyCnt > 170000`。
+15~17 万之间的房间于是「被授权烧制、却不给补料」：powerSpawn 的 5,000 能量缓冲
+（100 tick × 50/tick）烧完就归零 → `processPower` 需要 ≥50 能量，从此每 tick 白调；
+而 storage 又再也翻不过 17 万 ⇒ **两只闸互锁、永久停摆**（MEMORY 第 3 条）。
+烧掉的那 5,000 缓冲正是「它确实曾经在烧」的铁证。
+
+修复：灌料线改用与烧制闸同源的 `openC`（`powerSpawnOpenEnergy` 或 `floorC + 50000`）。
+**阈值本身一个都没动**（10 万停烧 / 15 万开烧原封不动），试点房 W32N56 的
+`energyCnt > 30000` 分支也不动。测试 `test/power-spawn-fill-gate.test.cjs`：
+死区 16.8 万必须补料（复现即题）、14.5 万负对照必须空表、旋钮同源双向验证、
+试点房不受影响、源码禁止再写死 170000。
 ## v0.78.228 — keeper 补员不再清掉本 tick 的孵化预算缓存（spawn 白丢一个 pass）
 
 巡检复盘 `trySpawnOuterHarKeeper` 时发现：`trySpawn` 前留着一行
