@@ -138,6 +138,19 @@ function loadHarvest(memory) {
     const calm = { name: "W35N55", find: () => [] };
     assert.equal(ctx.StrategyOuterHarvest.roomNeedsDefense(calm, flag), false,
         "a neutral room with no threats must not require defense");
+
+    // The visible-room decision must use the shared cache, including a cached empty creep list.
+    const cached = {
+        name: "W35N55",
+        getHostileCreeps: () => [],
+        getHostileStructures: () => [{ structureType: CONSTANTS.STRUCTURE_KEEPER_LAIR }],
+        find: () => assert.fail("shared hostile caches must prevent another native scan"),
+    };
+    assert.equal(ctx.StrategyOuterHarvest.roomNeedsDefense(cached, flag), true);
+    cached.getHostileCreeps = () => [{}];
+    cached.getHostileStructures = () => assert.fail("visible hostiles already decide defense");
+    assert.equal(ctx.StrategyOuterHarvest.roomNeedsDefense(cached, flag), true);
+    assert.equal(ctx.Memory.rooms.W35N55.lastHostileSeen, 100000);
 }
 
 function loadStation(extra) {

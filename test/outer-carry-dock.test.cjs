@@ -210,13 +210,17 @@ function makeContext(src) {
     const C = makeContext(raw);
     const ctA = { id: "ctA", store: { energy: 100 }, pos: { x: 29, y: 5, roomName: "W26N59" } };
     const ctB = { id: "ctB", store: { energy: 1200 }, pos: { x: 28, y: 30, roomName: "W26N59" } };
-    const srcA = { id: "srcA", container: "ctA", roomName: "W26N59", x: 29, y: 4 };
-    const srcB = { id: "srcB", container: "ctB", roomName: "W26N59", x: 27, y: 29 };
+    // Duplicate stale registration models memory written before retasking began
+    // migrating carryCreeps. Stale copies at the pinned source and destination are
+    // cleaned immediately; older target registrations are pruned during quota reads.
+    const srcA = { id: "srcA", container: "ctA", roomName: "W26N59", x: 29, y: 4, carryCreeps: ["c1", "c1"] };
+    const srcB = { id: "srcB", container: "ctB", roomName: "W26N59", x: 27, y: 29, carryCreeps: ["c1", "c1"] };
     C.Memory.rooms.W26N59 = { stationSources: { srcA: srcA, srcB: srcB } };
     C.Game.getObjectById = id => (id == "ctA" ? ctA : id == "ctB" ? ctB : null);
 
     const creep = new C.Creep();
     Object.assign(creep, {
+        id: "c1",
         memory: { tasks: [
             { taskName: "harvestEnergyOuterCarry", id: "srcA", roomName: "W26N59", x: 29, y: 4 },
             { taskName: "harvestEnergyOuterCarryRoadBuilder", mineRoom: "W26N59", stationId: "srcA", roadDir: 1 },
@@ -249,6 +253,9 @@ function makeContext(src) {
     assert.equal(carryTask.x, 27, "换绑必须连坐标一起改（goTo/路线用 x/y）");
     assert.equal(roadTask.stationId, "srcB", "roadBuilder 子任务的 stationId 也要同步换绑");
     assert.ok(!("returnPathIndex" in carryTask), "换绑后旧路线缓存索引必须作废");
+    assert.equal(srcA.carryCreeps.length, 0, "动态换绑必须清除旧源的全部 stale 重复登记，避免压住旧源补员");
+    assert.equal(srcB.carryCreeps.length, 1, "新源必须恰好登记一次，不因已有 stale 重复而重复计车");
+    assert.equal(srcB.carryCreeps[0], "c1", "新源保留当前 creep 的唯一登记");
     assert.ok(creep.__exec >= 1, "换绑后立即按新绑点行动");
 }
 

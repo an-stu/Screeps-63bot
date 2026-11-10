@@ -1177,10 +1177,21 @@ function defenceGateFixture(defenders) {
     }
     stations.s1.pathTime = 100;
     stations.s1.container = "c1";
-    stations.s1.carryCreeps = ["dead1"];           // 死 id：这个矿点实际一只都没有
+    const staleSameRoom = {
+        id: "staleSameRoom", memory: { tasks: [{ id: "s2", roomName: "W35N55" }] },
+        headTask() { return this.memory.tasks[0]; },
+        body: new Array(50), ticksToLive: 1300,
+        getPartCnt: part => part === "carry" ? 33 : 0,
+    };
+    const staleWrongRoom = {
+        ...staleSameRoom,
+        id: "staleWrongRoom", memory: { tasks: [{ id: "s1", roomName: "W34N55" }] },
+    };
+    stations.s1.carryCreeps = ["staleSameRoom", "staleSameRoom", "staleWrongRoom"];
     ctx2.Memory.rooms = { W35N55: { stationSources: stations } };
     ctx2.Game.rooms.W35N55 = { name: "W35N55", memory: ctx2.Memory.rooms.W35N55 };
-    ctx2.Game.getObjectById = id => (id === "c1" ? container : id === "s1" ? source : null);
+    ctx2.Game.getObjectById = id => (id === "c1" ? container : id === "s1" ? source
+        : id === "staleSameRoom" ? staleSameRoom : id === "staleWrongRoom" ? staleWrongRoom : null);
     S2.ensureOuterRoadPath = () => {};
     S2.placeOuterRoadSites = () => {};
     S2.cleanupOuterRoadSites = () => {};
@@ -1198,7 +1209,9 @@ function defenceGateFixture(defenders) {
     };
     S2.trySpawnOuterHarCarrier("W35N55", spawnRoom);
     assert.equal(spawned.length, 1,
-        "总数 8、但该矿点 0 只 live carrier → 上限按矿点数算（12），必须补员（实测 W35N55 两点 carryCreeps 全死）");
+        "总数 8、但 live 登记都服务其他矿点/房间 → 按该矿点 0 只 carrier 计数，必须补员");
+    assert.equal(stations.s1.carryCreeps.length, 0,
+        "补员配额读取前必须删除同房错源、错房及重复的 live 登记");
 }
 
 // ── 14) 防守爬的「岗位」要记下来，接替兵继承 —— 分工明确（用户 10-04 指出） ──

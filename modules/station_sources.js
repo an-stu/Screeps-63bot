@@ -1488,6 +1488,12 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                             if (t.returnPathIndex !== undefined) delete t.returnPathIndex;
                         }
                     });
+                    // The registration is the source of truth for replacement demand.
+                    // Move it with the task now (not when the carrier next enters the
+                    // mine), removing every stale copy from the old source and ensuring
+                    // there is exactly one registration at the new source. Older copies
+                    // at still earlier targets are pruned in the quota-time validation.
+                    pro.migrateOuterCarrierRegistration(myData, best, this.id);
                     return this.execLastTask();
                 }
             }
@@ -1955,6 +1961,36 @@ let pro = {
         return [
             UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestEnergyOuterCarry", "registerStationSourcesCarryOutRoom")
         ]
+    },
+    /**
+     * Move one carrier's source registration while keeping it unique at the target.
+     * Dynamic retasking and the empty-task recovery path both use this: stale copies
+     * left by older retasks must not keep the old mine's replacement count inflated.
+     */
+    migrateOuterCarrierRegistration(fromData, toData, creepId) {
+        if (!toData || creepId === undefined || creepId === null) return;
+        if (fromData && fromData !== toData && Array.isArray(fromData.carryCreeps)) {
+            let oldList = fromData.carryCreeps;
+            let nextList = oldList.filter(id => id !== creepId);
+            if (nextList.length !== oldList.length) fromData.carryCreeps = nextList;
+        }
+
+        let targetList = toData.carryCreeps || [];
+        let found = false;
+        let changed = !toData.carryCreeps;
+        let uniqueList = [];
+        for (let id of targetList) {
+            if (id === creepId) {
+                if (found) { changed = true; continue; }
+                found = true;
+            }
+            uniqueList.push(id);
+        }
+        if (!found) {
+            uniqueList.push(creepId);
+            changed = true;
+        }
+        if (changed) toData.carryCreeps = uniqueList;
     },
     /**
      * 蓝图位置归一化：structMap 值为编码字符串或 [[x,y]] 数组
@@ -3929,9 +3965,7 @@ let pro = {
                             if (e2 > best) { best = e2; target = d2; }
                         });
                         if (target != data) {
-                            data.carryCreeps = (data.carryCreeps || []).filter(id => id != e.id);
-                            target.carryCreeps = target.carryCreeps || [];
-                            if (!target.carryCreeps.includes(e.id)) target.carryCreeps.push(e.id);
+                            pro.migrateOuterCarrierRegistration(data, target, e.id);
                         }
                         e.memory.tasks = pro.generatorOuterHarCarryTask(target);
                     });
@@ -4044,20 +4078,37 @@ let pro = {
             // container 不可见时仍可按缓存 ID / 坐标孵化；carrier 抵达矿区后
             // 再解析对象即可。否则 keeper 死后失去视野会再次把外矿锁死。
             if (pathTime && data["container"]) {
-                data["carryCreeps"] = data["carryCreeps"] || []
-                data["carryCreeps"] = data["carryCreeps"].filter(e => Game.getObjectById(e))
+                let storedCarryCreeps = data.carryCreeps || [];
+                // Validate registrations against the live assignment before using them
+                // for replacement demand. This prunes duplicates and stale source IDs
+                // left by older dynamic retasks, including entries at mines the carrier
+                // no longer serves. Resolve each registered ID once and only write the
+                // normalized array when a stale/dead/duplicate entry was removed.
+                let registeredIds = Object.create(null);
+                let normalizedCarryCreeps = [];
+                let carrierCreeps = [];
+                for (let id of storedCarryCreeps) {
+                    if (registeredIds[id]) continue;
+                    registeredIds[id] = true;
+                    let creep = Game.getObjectById(id);
+                    if (!creep) continue;
+                    if (typeof creep.headTask == "function") {
+                        let task = creep.headTask();
+                        if (!task || task.id != data["id"] || task.roomName != targetName) continue;
+                    }
+                    normalizedCarryCreeps.push(id);
+                    if (!creep.ticksToLive || creep.ticksToLive > creep.body.length * 3 + (pathTime || 0) + OUTER_CARRIER_PRESPAWN) {
+                        carrierCreeps.push(creep);
+                    }
+                }
+                if (normalizedCarryCreeps.length != storedCarryCreeps.length) data.carryCreeps = normalizedCarryCreeps;
                 // **换代提前量**（Overmind Overlord.ts:273 的计数公式
                 // `ttl > CREEP_SPAWN_TIME × body.length + spawnDistance + prespawn`）：
                 // 剩余寿命不足以「再孵一只 + 走到矿点」的老车不再计入覆盖运力，
                 // 缺口立刻回填 → 接替车在老车退役前就出发，交接零空档。
                 // 原来只减生成时间（body×3），换代必然掉产一拍（pathTime 的缺口
                 // 就是车队「团灭震荡」的节拍器）。
-                let carrierCreeps = data["carryCreeps"].map(e => Game.getObjectById(e)).filter(e => {
-                    if (!e) return false;
-                    if (!e.ticksToLive) return true;
-                    return e.ticksToLive > e.body.length * 3 + (pathTime || 0) + OUTER_CARRIER_PRESPAWN;
-                })
-                let carrierBuildCreep = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).head()
+                let carrierBuildCreep = carrierCreeps.find(e => e.getPartCnt(WORK) > 0);
                 // 产出速率：**动态算**，不能写死。
                 //
                 // 原来这里是个常量 `EnergyPerTick = 10`，与实际产出脱节，于是 carrier

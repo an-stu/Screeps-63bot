@@ -19,7 +19,7 @@ const vm = require("node:vm");
 const root = path.resolve(__dirname, "..");
 const src = fs.readFileSync(path.join(root, "modules/strategy_powerBank.js"), "utf8");
 
-function load({ time = 1000, alive = [] } = {}) {
+function load({ time = 1000, alive = [], overrides = {} } = {}) {
     const live = new Set(alive);
     const ctx = {
         console: { log() {} },
@@ -45,6 +45,7 @@ function load({ time = 1000, alive = [] } = {}) {
         WORK: "work",
         global: null,
     };
+    Object.assign(ctx, overrides);
     ctx.global = ctx;
     vm.runInNewContext(src, ctx, { filename: "strategy_powerBank.js" });
     return ctx.StrategyPowerBank;
@@ -89,43 +90,99 @@ function flag(memory) {
     assert.equal(S.pbWaveBlocked(f), false, "L2 闩锁也不能永久置真");
 }
 
-// ⑤ 非 L1/L2 的 4 波硬上限保持原样（不看死活）
+// ⑤ L1 之外的四波上限保持原样（不看死活）
 {
     const S = load({ alive: [] });
     assert.equal(S.pbWaveBlocked(flag({ index: 5, boostModel: 0 })), true, "index>3 仍然停派");
+    assert.equal(S.pbWaveBlocked(flag({ index: 5, boostModel: 3, beingAttack: true })), true,
+        "旧版遗留的 beingAttack 不允许解除 L2 上限");
     assert.equal(S.pbWaveBlocked(flag({ index: 3, boostModel: 1 })), false, "index<=3 照常派");
 }
 
-// ⑤b 被打（beingAttack）⇒ 波次上限全解除（用户 2026-11-07：PB 小队被玩家 Apple
-//    打了要「直接一直派更高一级的小队」，防止被打）——4 波硬上限、L1/L2 单波
-//    闩锁在被打态全部失效；同时检测代码必须真的在 exec 里跑（不再整段注释）。
+// ⑤b 当前确有威胁，才允许绕过普通波次约束。
 {
     const S = load({ alive: ["a0"] });
-    assert.equal(S.pbWaveBlocked(flag({ index: 5, boostModel: 0, beingAttack: true })), false,
+    assert.equal(S.pbWaveBlocked(flag({ index: 5, boostModel: 0 }), true), false,
         "被打时 4 波硬上限解除：一波接一波地派");
-    assert.equal(S.pbWaveBlocked(flag({ index: 2, boostModel: 3, L2Boosted: true, attacker: { 0: "a0" }, beingAttack: true })), false,
+    assert.equal(S.pbWaveBlocked(flag({ index: 2, boostModel: 3, L2Boosted: true, attacker: { 0: "a0" } }), true), false,
         "被打时 L2 单波闩锁解除：打的人还在也继续补波");
-    const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
-    assert.ok(/h\.owner\.username != "Invader"/.test(codeOnly),
-        "被打检测必须在 exec 里生效（只认玩家袭击者，Invader 不触发升级）");
-    assert.ok(/mem\.beingAttack\) return false;/.test(codeOnly),
-        "pbWaveBlocked 必须有 beingAttack 直通分支");
 }
 
-// ⑤c 被打房永久记账（0.78.222，用户：「补太慢了来不及，直接检查收过攻击的房间，
-//     直接这些房间都用 T2 强化」）——检测需要视野、常常来不及；凡被袭击过的目标房
-//     写进 Memory.powerBankAttackedRooms，之后打这房的任务从第一波起 T2 + 波次不设限。
+function mission({ history = true, l2Available = true, l1Available = true, memory = {} } = {}) {
+    const target = "E57S40";
+    const f = flag({ id: "bank", roomName: target, power: 7000, disappearTime: 12000, ...memory });
+    f.pos = { roomName: target };
+    f.remove = () => { f.removed = true; };
+    const spawns = [];
+    const Memory = { creeps: {}, powerBankAttackedRooms: history ? { [target]: { user: "OldRaider", tick: 10 } } : {} };
+    const live = new Set();
+    const Game = { time: 3000, rooms: {}, getObjectById: id => id === "bank" ? { hits: 2000000 } : live.has(id) ? { id } : null };
+    const S = load({ overrides: {
+        Game, Memory, isSaveCpu: true,
+        BOOST_RES: { damage: ["d0", "d1", "d2"], attack: ["a0", "a1"], heal: ["h0", "h1"], rangedAttack: ["r0"] },
+        ManagerFlags: { getFlagsByPrefixAndRoom: () => [f] },
+        StationHive: { spawnAble: () => true },
+        StationLab: { boostAble: (_, res) => res.d2 ? l2Available : l1Available, boostAbleLevel: () => 1 },
+    } });
+    S.cleanFlag = () => {};
+    S.spawnPBTeam = (_, _flag, boost) => { spawns.push(boost); return true; };
+    let queueActive = false;
+    S.dispatchPBSpawnQueue = () => queueActive;
+    const exec = (time, hostiles, queue = false) => {
+        Game.time = time;
+        queueActive = queue;
+        if (hostiles === undefined) delete Game.rooms[target];
+        else Game.rooms[target] = { getHostileCreeps: () => hostiles, find: () => hostiles };
+        S.exec({ name: "E55S39", hashCode: () => 0 });
+    };
+    return { f, spawns, Memory, target, live, exec };
+}
+
+// 历史只决定首波强化。后续无威胁时，仍遵守存活和补员时间限制。
 {
-    const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
-    assert.ok(/Memory\.powerBankAttackedRooms\[flag\.memory\.roomName\] = \{ user: raider\.owner\.username, tick: Game\.time \}/.test(codeOnly),
-        "检测到玩家袭击必须把目标房写进 powerBankAttackedRooms 永久记账");
-    // 有被打史的房：任务直接按被打处理（beingAttack 强制 + lastSpawnTime=0 立即补波）
-    assert.ok(/Memory\.powerBankAttackedRooms\s*&&\s*Memory\.powerBankAttackedRooms\[flag\.memory\.roomName\]\)/.test(codeOnly),
-        "exec 必须在每 pass 检查目标房的被打史");
-    assert.ok((codeOnly.match(/flag\.memory\.beingAttack = true;/g) || []).length >= 2,
-        "被打史 ⇒ beingAttack 强制置真（检测 + 强制两处，T2 + 波次不设限从第一波生效）");
-    assert.ok((codeOnly.match(/flag\.memory\.lastSpawnTime = 0;/g) || []).length >= 2,
-        "被打史 ⇒ lastSpawnTime 归零立即补波（不等 respawnTime）");
+    const m = mission({ memory: { beingAttack: true } });
+    m.exec(3000, []);
+    assert.deepEqual(m.spawns, [3], "quiet historical room starts at L2");
+    assert.equal(m.f.memory.beingAttack, undefined);
+    m.exec(3003, []);
+    m.f.memory.attacker = { 0: "fighter" };
+    m.live.add("fighter");
+    m.exec(4500, []);
+    assert.deepEqual(m.spawns, [3], "neither cooldown nor live fighters may be bypassed by history");
+    m.live.delete("fighter");
+    m.exec(4503, []);
+    assert.deepEqual(m.spawns, [3, 2], "a normal replacement uses the normal boost selection");
+}
+
+{
+    const m = mission({ l2Available: false });
+    m.exec(3000);
+    assert.deepEqual(m.spawns, [2], "unseen historical room can fall back without L2");
+    assert.equal(m.f.removed, undefined);
+}
+
+{
+    const m = mission({ l2Available: false, l1Available: false });
+    m.exec(3000, []);
+    assert.deepEqual(m.spawns, [1], "quiet historical room still starts without enough minerals for L1 or L2");
+    assert.equal(m.f.removed, undefined);
+}
+
+// 当前威胁允许补波，已排队的搭档先孵化。视野丢失或对手离开即恢复常规限制。
+{
+    const m = mission({ history: false, memory: { index: 5, lastSpawnTime: 2999 } });
+    const raider = { owner: { username: "Player" }, pos: { inRangeTo: () => true }, body: [{ type: "attack", hits: 100 }] };
+    m.exec(3000, [raider], true);
+    assert.deepEqual(m.spawns, [], "must not start another wave while a queue is dispatching");
+    m.exec(3003, [raider]);
+    assert.deepEqual(m.spawns, [3], "current threat overrides cooldown and wave cap");
+    assert.equal(m.Memory.powerBankAttackedRooms[m.target].user, "Player");
+    assert.equal(m.f.memory.hostileTick, 3003);
+    m.exec(3006, []);
+    m.exec(3009);
+    m.exec(3012, [{ ...raider, owner: { username: "Invader" } }]);
+    m.exec(3015, [{ ...raider, body: [{ type: "attack", hits: 0 }] }]);
+    assert.deepEqual(m.spawns, [3], "past sighting, NPC or destroyed attack parts cannot bypass the cap");
 }
 
 // ⑥ carrier 必须数活的，不数派过的
@@ -139,7 +196,7 @@ function flag(memory) {
 // ⑦ 调用点：闸门与 carrier 计数必须真的被 exec 用上（只测 helper 抓不到「helper 在、没人调」）
 {
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
-    assert.ok(/if \(pro\.pbWaveBlocked\(flag\)\)/.test(codeOnly), "exec 必须用 pbWaveBlocked 判波次");
+    assert.ok(/pro\.pbWaveBlocked\(flag, underAttack\)/.test(codeOnly), "exec 必须用当前威胁判波次");
     assert.ok(/pro\.pbLiveCarrierCnt\(flag\)/.test(codeOnly), "exec 必须用活的 carrier 数判补员");
     assert.ok(!/boostModel == BOOST_L1 && flag\.memory\.L1Boosted\)/.test(codeOnly),
         "旧的永久闩锁表达式必须已经删掉");

@@ -179,9 +179,10 @@ assert.ok(code.indexOf("cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1)") >= 0
     const maintSrc = code.slice(anchor - 800, anchor + 120);
     assert.ok(maintSrc.includes("e2 > best") && maintSrc.includes("target = d2"),
         "空车重派必须选存货最满的容器");
-    assert.ok(maintSrc.includes("carryCreeps = (data.carryCreeps || []).filter(id => id != e.id)")
-        && maintSrc.includes("target.carryCreeps.push(e.id)"),
-        "换矿点时必须迁移 carryCreeps 注册（配额/缺口统计口径真实）");
+    assert.ok(maintSrc.includes("pro.migrateOuterCarrierRegistration(data, target, e.id)"),
+        "换矿点时必须通过共享 helper 迁移 carryCreeps 注册（配额/缺口统计口径真实）");
+    assert.ok(/migrateOuterCarrierRegistration\(fromData, toData, creepId\)[\s\S]*?oldList\.filter\(id => id !== creepId\)[\s\S]*?toData\.carryCreeps = uniqueList/.test(code),
+        "共享 migration 必须清旧源全部副本，并保证目标源至多一份登记");
 }
 }
 
@@ -191,7 +192,7 @@ assert.ok(code.indexOf("cm.get(p.x, p.y) < 254) cm.set(p.x, p.y, 1)") >= 0
 // 缺口就是车队「团灭震荡」的节拍器）。
 assert.ok(/OUTER_CARRIER_PRESPAWN = 100/.test(code),
     "必须有换代缓冲常量（覆盖 spawn 排队等待）");
-assert.ok(/e\.ticksToLive > e\.body\.length \* 3 \+ \(pathTime \|\| 0\) \+ OUTER_CARRIER_PRESPAWN/.test(code),
+assert.ok(/creep\.ticksToLive > creep\.body\.length \* 3 \+ \(pathTime \|\| 0\) \+ OUTER_CARRIER_PRESPAWN/.test(code),
     "换代判定必须 = 生成时间 + 行军(pathTime) + 缓冲，缺行军项则换代必掉产一拍");
 
 console.log("outer carrier spawn checks passed");

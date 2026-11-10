@@ -47,12 +47,14 @@ let pro = {
                 || !!(mem && mem.lastHostileSeen
                     && Game.time - mem.lastHostileSeen < OUTER_HOSTILE_MEMORY_TICKS);
         }
-        if (room.find(FIND_HOSTILE_CREEPS).length) {
+        let hostiles = room.getHostileCreeps?.() ?? room.find(FIND_HOSTILE_CREEPS);
+        if (hostiles.length) {
             let mem = Memory.rooms[room.name] || (Memory.rooms[room.name] = {});
             mem.lastHostileSeen = Game.time;
             return true;
         }
-        return room.find(FIND_HOSTILE_STRUCTURES).some(e =>
+        let hostileStructures = room.getHostileStructures?.() ?? room.find(FIND_HOSTILE_STRUCTURES);
+        return hostileStructures.some(e =>
             e.structureType == STRUCTURE_KEEPER_LAIR || e.structureType == STRUCTURE_INVADER_CORE);
     },
     /**
@@ -100,8 +102,8 @@ let pro = {
         if (spawnRoom.spawnFailure) return;
         let harRoom = Game.rooms[targetRoomName];
         if (!harRoom) return;   // 没视野就无从判断，也不该盲派
-        let core = harRoom.find(FIND_HOSTILE_STRUCTURES)
-            .filter(e => e.structureType == STRUCTURE_INVADER_CORE).head();
+        let hostileStructures = harRoom.getHostileStructures?.() ?? harRoom.find(FIND_HOSTILE_STRUCTURES);
+        let core = hostileStructures.find(e => e.structureType == STRUCTURE_INVADER_CORE);
         if (!core) return;
         // 未部署的 core 打不动（见 CORE_BUSTER_DEPLOY_LEAD 注释），等它临近破防再派。
         // 已破防（被打掉过血）后不受此闸限制，接替兵随时能补。
@@ -162,8 +164,8 @@ let pro = {
         if (spawnRoom.spawnFailure) return;
         let harRoom = Game.rooms[targetRoomName];
         if (!harRoom) return;
-        let tower = harRoom.find(FIND_HOSTILE_STRUCTURES)
-            .filter(e => e.structureType == STRUCTURE_TOWER).head();
+        let hostileStructures = harRoom.getHostileStructures?.() ?? harRoom.find(FIND_HOSTILE_STRUCTURES);
+        let tower = hostileStructures.find(e => e.structureType == STRUCTURE_TOWER);
         if (!tower) return;
         // 房间 controller 无主（弃坑废墟）⇒ 塔开不了火 ⇒ 不拆、不再派
         if (!harRoom.controller || !harRoom.controller.owner

@@ -165,8 +165,8 @@ const TWO_SRC_ONE_DEAD = {
     assert.ok(gateAt > 0 && loopAt > 0 && gateAt < loopAt, "让位闸必须在 trySpawn 循环**之前**");
     assert.ok(!/flag\.remove\(\);\s*return;\s*\}\s*if \(pro\.spawnRoomMiningBroken/.test(codeOnly),
         "让位不许删旗");
-    assert.ok(/if \(flag\.memory\.beingAttack\) needSpawn = true;/.test(codeOnly),
-        "被打就补波的策略原封不动（让位只加一条状态闸，不改上限）");
+    assert.ok(/let needSpawn = !queueActive && \(underAttack \|\|/.test(codeOnly),
+        "当前遇袭可以跳过补员间隔，但仍须经过本房矿点让位闸");
 }
 
 console.log("power-bank mining-yield checks passed");
