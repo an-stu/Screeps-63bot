@@ -274,6 +274,52 @@ let pro = {
         return n;
     },
     /**
+     * 出兵房自己的矿点还缺采集者吗？（PB 的让位闸）
+     *
+     * 2026-11-10 线上实测的死锁（E53S21，3 个 spawn、2 个矿点）：
+     *   · `dispatchPBSpawnQueue` 跑在 exec 的 `%3` 闸门**之前**，每 tick 一次 ——
+     *     任何一个 spawn 空出来就立刻被 PB 队伍填走（实测 26 tick × 10 次采样，
+     *     `idle=0` **一次都没有空过**，三只全在孵 PBer）；
+     *   · 主房 keeper 补员却只在 economy pass（`%7`，bucket<5000 时 `%14`）里试一次，
+     *     永远抢不到空位 ⇒ 实测第 2 个矿点（bc20）`spawnTime=84177216` 之后
+     *     `creeps: []`，**~740 tick 一只 keeper 都没有**；
+     *   · 结果：那个矿点容器 2,000/2,000 顶满、矿点 link 800/800、keeper 把能量
+     *     往地上倒（地面 2,502→3,427 在涨）、storage 一路掉。
+     * 这就是 MEMORY 第 3 条「闸门不许自锁」：**PB 波次不设限 ⇒ spawn 全被占 ⇒
+     * keeper 永远补不上 ⇒ 矿点永远无人 ⇒ 没有任何机制让 PB 让位**。
+     *
+     * 判据读登记表（`Memory.rooms[name].stationSources`）而不是 `find(FIND_SOURCES)`：
+     * 它在每 tick 的队列派发路径上，不能为一个闸门扫全房。
+     * **两个条件同时成立**才算破：① 登记矿点里有一个没有任何活着的采集者；
+     * ② 本房在岗+在孵的 keeper 数少于登记矿点数。② 的存在是为了让正常换代
+     * （接班人在孵 ⇒ creeps 里那只 `spawning=true`）不算破。
+     */
+    spawnRoomMiningBroken(room) {
+        if (!room || !room.name) return false;
+        let SS = typeof StationSources != "undefined" ? StationSources : (global && global.StationSources);
+        let stationName = (SS && SS.stationName) || "stationSources";
+        let mem = (room.memory && room.memory[stationName])
+            || (Memory.rooms && Memory.rooms[room.name] && Memory.rooms[room.name][stationName]);
+        if (!mem) return false;
+        let srcCnt = 0;
+        let unmanned = false;
+        for (let key in mem) {
+            let data = mem[key];
+            if (!data || typeof data != "object" || !data.id) continue;
+            srcCnt++;
+            let manned = (data.creeps || []).some(id => {
+                let c = id && Game.getObjectById(id);
+                // 正在孵化的爬 `ticksToLive` 是 undefined，但它马上就要到岗 ⇒ 算有人
+                return !!c && (c.spawning || c.ticksToLive > 0);
+            });
+            if (!manned) unmanned = true;
+        }
+        if (!srcCnt || !unmanned) return false;
+        let keepers = (typeof room.creeps == "function")
+            ? room.creeps("harvestEnergyKeeper", false).length : 0;
+        return keepers < srcCnt;
+    },
+    /**
      * 这一 tick 还该不该派新的攻击波次。
      *
      * **被打（beingAttack）⇒ 永不阻塞**（用户 2026-11-07「直接一直派更高一级的
@@ -492,6 +538,10 @@ let pro = {
             delete flag.memory.directSpawnQueue;
             return false;
         }
+        // 出兵房自己的矿点无人 ⇒ 队列**原地等**（不删队列），把 spawn 让给 keeper。
+        // 这条路径每 tick 跑、且跑在 exec 的 `%3` 闸门之前，是抢 spawn 的主力：
+        // 只闸住「新建波次」拦不住已经排好的队列（见 spawnRoomMiningBroken 的实测）。
+        if (pro.spawnRoomMiningBroken(room)) return false;
         // Spawn both halves in the same tick when the room has two idle
         // spawns. With only one spawn, retry on the very next tick instead of
         // waiting for the three-tick PB strategy cadence.
@@ -585,6 +635,11 @@ let pro = {
             if (flag.memory.beingAttack) needSpawn = true; // 如果是t2 出1队，否则出3队
             if (pro.pbWaveBlocked(flag))
                 needSpawn = false;// 如果超过上限就不生了
+            // 出兵房自己的矿点无人 ⇒ 这一波让位（被打时也一样：先把矿挖回来）。
+            // **不删旗、不动波次上限、不动任何优先级**，只是在「本房有矿点没人挖」
+            // 这一种状态下不生新队伍；keeper 一到岗，下一 pass 照常恢复（见
+            // spawnRoomMiningBroken 的死锁实测）。
+            if (needSpawn && pro.spawnRoomMiningBroken(room)) needSpawn = false;
 
             // log(flag.name,needSpawn,(flag.memory.lastSpawnTime||0)+respawnTime-Game.time,flag.memory.beingAttack ,flag.memory.beingAttack&&flag.memory.boostModel != BOOST_L1)
             if (StationHive.spawnAble(room) && needSpawn) {

@@ -1,3 +1,29 @@
+## v0.78.230 — PB 让位闸：出兵房自己的矿点没人挖时不许再抢 spawn
+
+巡检发现 E53S21 的**第 2 个矿点（bc20）已经 ~740 tick 没有 keeper**（`spawnTime=84177216`
+之后 `creeps: []`），矿点容器 2,000/2,000 顶满、矿点 link 800/800（bc1e 那一侧）、
+keeper 把能量往地上倒（地面 2,502→3,427 在涨），而该房 storage 只有 3~5 万还在掉。
+
+根因不是 keeper 判据，而是 **PB 把 spawn 100% 吃掉造成的自锁**（MEMORY 第 3 条）：
+`dispatchPBSpawnQueue` 跑在 `exec` 的 `%3` 闸门**之前**、每 tick 一次 ⇒ 任何一个 spawn
+空出来就立刻被 PB 填走；而主房 keeper 补员只在 economy pass（`%7`，bucket<5000 时 `%14`）
+里试一次 ⇒ 永远抢不到。实测 26 tick × 10 次采样，E53S21 的 3 个 spawn `idle=0`
+**一次都没空过**，全是 PBer；keeper 恒为 1。触发条件是 `Memory.powerBankAttackedRooms`
+（永久记账，0.78.222）把 E52S20 整场标成被打 ⇒ `needSpawn` 恒真 ⇒ 波次不设限，
+而此刻目标房**已经没有袭击者**（0 hostiles，窝还剩 242,858/2,000,000 血）。
+
+修复：新增 `spawnRoomMiningBroken(room)`，在**两处**让位（`exec` 的 `needSpawn`、
+以及每 tick 的 `dispatchPBSpawnQueue` 派发前）。判据读登记表而非 `find(FIND_SOURCES)`
+（在每 tick 路径上，不扫全房），**两个条件同时成立**才算破：① 登记矿点里有一个没有
+任何活着的采集者（在孵的接班人也算有人）；② 本房在岗+在孵 keeper 数 < 登记矿点数。
+keeper 一到岗，下一 pass 自动恢复。**波次上限、T2 强化、被打就补的策略、spawn 优先级
+一律没动**，只是多了一条状态闸 —— 不让可选的军事支出把本房的挖矿饿死。
+
+测试 `test/pb-yield-to-unmanned-source.test.cjs`：线上那一幕必须让位；keeper 数已够
+（负对照，只判「某矿点 creeps 空」的实现在这里挂）、在孵接班人、死 id、无登记表、
+单矿点房不误报、两处调用点与顺序（闸在 `trySpawn` 循环之前）、不许删旗/改上限。
+变异验证：判据改成 `return true` 与去掉「无人」条件，两种改法都被测试咬住。
+
 ## v0.78.229 — powerSpawn 灌料闸与烧制闸同源（15~17 万死区互锁）
 
 巡检发现两个非试点房的 power spawn 长期空转：W33N53 storage 能量 168,694、
