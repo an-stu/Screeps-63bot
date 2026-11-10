@@ -18,7 +18,7 @@ const src = fs.readFileSync(path.join(root, "modules", "station_minetral.js"), "
 const marketSrc = fs.readFileSync(path.join(root, "modules", "strategy_market.js"), "utf8")
     .replace(/\r\n/g, "\n");
 
-function load(priceMap, mineralSettings, historyMap) {
+function load(priceMap, mineralSettings, historyMap, overrides) {
     const ctx = {
         console: { log() {} },
         Creep: function () {},
@@ -31,6 +31,7 @@ function load(priceMap, mineralSettings, historyMap) {
         RESOURCE_CATALYST: "X",
         STRUCTURE_CONTAINER: "container", STRUCTURE_EXTRACTOR: "extractor",
         WORK: "work", MOVE: "move", CARRY: "carry",
+        BODYPART_COST: { work: 100, move: 50, carry: 50 },
         FIND_CONSTRUCTION_SITES: 3,
         UtilsTask: {
             task: (obj, name, reg) => ({ taskName: name, id: obj && obj.id }),
@@ -45,6 +46,7 @@ function load(priceMap, mineralSettings, historyMap) {
             getHistory: (r) => (historyMap && historyMap[r]) || [],
         },
     };
+    Object.assign(ctx, overrides);
     ctx.global = ctx;
     vm.runInNewContext(src, ctx, { filename: "station_minetral.js" });
     assert.ok(ctx.global.StationMineral, "StationMineral 未导出");
@@ -97,14 +99,42 @@ function load(priceMap, mineralSettings, historyMap) {
 }
 
 {
-    // ④ 源码 pin：孵化与 keeper 动作都只看 policy.mine（无存量闸）
+    // ④ 孵化和在岗矿工都遵守显式应急上限，库存下降后能自动恢复。
+    const Creep = function () {};
+    const mineral = { id: "mine", mineralAmount: 10000, ticksToRegeneration: 0 };
+    const container = { id: "box", pos: { isEqualTo: () => true }, store: { U: 200, getFreeCapacity: () => 1800 } };
+    const station = { id: mineral.id, container: container.id, resType: "U", roomName: "E53S21", creeps: [], spawnTime: 0 };
+    const room = { name: "E53S21", memory: { stationMineral: station }, mineral, extractor: {}, getEnergyCapacityAvailable: () => 800 };
+    const creep = { room, ticksToLive: 600, headTask: () => ({ id: mineral.id, roomName: room.name }) };
+    let spawnCalls = 0;
+    let harvestCalls = 0;
+    let stock = 4800;
+    creep.harvest = target => { assert.equal(target, mineral); harvestCalls++; };
+    const overrides = {
+        Creep,
+        Game: { time: 100000, getObjectById: id => ({ mine: mineral, box: container })[id] },
+        StationHive: { trySpawn: () => { spawnCalls++; } },
+        StationCarry: { roomMassStoreCnt: () => stock },
+    };
+    const attempt = (settings, expected) => {
+        const S = load({ energy: 16, U: 10 }, settings, null, overrides);
+        spawnCalls = harvestCalls = 0;
+        S.trySpawnHarKeeper(room);
+        Creep.prototype.harvestMineralKeeper.call(creep);
+        assert.deepEqual([spawnCalls, harvestCalls], [expected, expected]);
+    };
+    const cap = { U: { stop: 5000 } };
+    attempt(cap, 0); // 仓储 + 容器正好到上限
+    stock++;
+    attempt(cap, 0);
+    stock -= 2;
+    attempt(cap, 1);
+    attempt({ U: { stop: 0 } }, 0);
+    stock = 50000;
+    attempt({}, 1);
+    attempt({ U: { stop: "" } }, 1);
+
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
-    const spawnFn = code.slice(code.indexOf("trySpawnHarKeeper(room)"), code.indexOf("update(room)"));
-    assert.ok(spawnFn.includes("if (!policy.mine) return;"), "孵化闸只剩价格判据");
-    assert.ok(!spawnFn.includes("policy.stop"), "孵化不得再挂存量停采线（有矿就采）");
-    const keeperFn = code.slice(code.indexOf("harvestMineralKeeper"), code.indexOf("let pro ="));
-    assert.ok(keeperFn.includes("if (!policy.mine) return;"), "keeper 动作闸只剩价格判据");
-    assert.ok(!keeperFn.includes("stock >= policy.stop"), "keeper 动作不得再挂存量停采线");
     assert.ok(!code.includes("buyOnlyMinerals"), "静态 U/K/Z 黑名单必须删除");
     assert.ok(!code.includes("mineStop"), "静态 mineStop 必须删除");
 }

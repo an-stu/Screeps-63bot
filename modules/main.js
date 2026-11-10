@@ -297,6 +297,7 @@ let updateCodeHealth = function () {
     });
     Memory.codeHealth = Object.assign(previousHealth, {
         time: Game.time,
+        version: RUNTIME_PROFILE.version,
         cpu: Game.cpu.getUsed(),
         averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),
         bucket: Game.cpu.bucket,

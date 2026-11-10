@@ -1418,7 +1418,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
                             let wpAhead = roadPath[i];
                             if (!wpAhead || wpAhead.roomName != this.room.name) break;
                             let roadAhead = this.room.lookForAt(LOOK_STRUCTURES, wpAhead.x, wpAhead.y)
-                                .filter(s => s.structureType == STRUCTURE_ROAD && s.my).head();
+                                .filter(s => s.structureType == STRUCTURE_ROAD).head();
                             if (roadAhead && roadAhead.hits < roadAhead.hitsMax / 4) {
                                 this.$repair(roadAhead);
                                 break;

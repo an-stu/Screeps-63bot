@@ -31,6 +31,7 @@ const src = fs.readFileSync(path.join(root, "modules/strategy_powerBank.js"), "u
 function load({ time = 1000, alive = [], spawning = [], rooms = {} } = {}) {
     const live = new Set(alive);
     const hatch = new Set(spawning);
+    const spawnCalls = [];
     const ctx = {
         console: { log() {} },
         Creep: function () {},
@@ -45,6 +46,7 @@ function load({ time = 1000, alive = [], spawning = [], rooms = {} } = {}) {
             },
         },
         Memory: { creeps: {}, rooms },
+        StationHive: { trySpawn: (...args) => { spawnCalls.push(args); return true; } },
         FIND_HOSTILE_CREEPS: "hostile",
         FIND_RUINS: "ruins",
         FIND_DROPPED_RESOURCES: "drop",
@@ -62,6 +64,7 @@ function load({ time = 1000, alive = [], spawning = [], rooms = {} } = {}) {
     ctx.global = ctx;
     vm.runInNewContext(src, ctx, { filename: "strategy_powerBank.js" });
     const S = ctx.StrategyPowerBank;
+    S.__spawnCalls = spawnCalls;
     /** 房间桩：`creeps(role, false)` 与真 `prototype_room.js` 同形。 */
     S.__room = (name, { mem = {}, keepersN = 0 } = {}) => ({
         name,
@@ -88,14 +91,24 @@ const TWO_SRC_ONE_DEAD = {
         "srcB 的 creeps 空 + keeper 1 < 矿点 2 ⇒ 本房挖矿已破，PB 必须让位");
 }
 
-// ② 负对照：同样的 creeps 数据，但 keeper 数已经够（2）⇒ **不许**误报。
-//    只判「某矿点 creeps 空」的实现会在这里报警，把正常 PB 全部停掉。
+// ② 老 keeper 和接班人都登记在 A，房间总数够，但 B 无人。现有队列要让位。
 {
-    const S = load({ alive: ["k1"] });
-    assert.equal(
-        S.spawnRoomMiningBroken(S.__room("E53S21", { mem: TWO_SRC_ONE_DEAD, keepersN: 2 })),
-        false,
-        "负对照：keeper 数 == 矿点数时不能报破（否则 PB 被永久停派）");
+    const S = load({ alive: ["k1"], spawning: ["hatch1", "hatch2"] });
+    const mem = {
+        srcA: { ...TWO_SRC_ONE_DEAD.srcA, creeps: ["k1", "hatch1"] },
+        srcB: { ...TWO_SRC_ONE_DEAD.srcB, creeps: [] },
+    };
+    const room = S.__room("E53S21", { mem, keepersN: 2 });
+    const queue = { createdAt: 1000, spawnList: [{ body: ["attack"], tasks: [] }] };
+    const flag = { memory: { directSpawnQueue: queue } };
+    assert.equal(S.spawnRoomMiningBroken(room), true);
+    assert.equal(S.dispatchPBSpawnQueue(room, flag), false);
+    assert.equal(S.__spawnCalls.length, 0);
+    assert.equal(flag.memory.directSpawnQueue, queue, "让位期间保留现有队列");
+    mem.srcB.creeps = ["hatch2"];
+    assert.equal(S.dispatchPBSpawnQueue(room, flag), true, "B 的接班人开始孵化即恢复派发");
+    assert.equal(S.__spawnCalls.length, 1);
+    assert.equal(flag.memory.directSpawnQueue, undefined);
 }
 
 // ③ 换代窗口：接手的是**在孵**的 keeper（ttl undefined、spawning=true）⇒ 算有人
@@ -128,14 +141,14 @@ const TWO_SRC_ONE_DEAD = {
     assert.equal(S.spawnRoomMiningBroken(null), false, "room 为空也不能抛");
 }
 
-// ⑥ 单矿点房：keeper 已经 1 只 ⇒ 不破（把比较写反成 `>` 会在这里挂）
+// ⑥ 单矿点房也看登记，跳过站点记录里的辅助字段。
 {
-    const srcs = { srcA: { id: "srcA", x: 10, y: 10, creeps: [] } };
-    const S = load({});
+    const srcs = { srcA: { id: "srcA", x: 10, y: 10, creeps: ["k1"] }, meta: { time: 1 } };
+    const S = load({ alive: ["k1"] });
     assert.equal(
         S.spawnRoomMiningBroken(S.__room("E41S32", { mem: srcs, keepersN: 1 })),
         false,
-        "keeper 数 == 矿点数 ⇒ 不破，哪怕该矿点的 creeps 列表是空的");
+        "唯一矿点已有 keeper，辅助字段不应触发让位");
 }
 
 // ⑦ 调用点：两处闸门都必须真的存在，且顺序正确

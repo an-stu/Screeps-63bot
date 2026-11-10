@@ -57,7 +57,6 @@ Creep.prototype.harvestMineralKeeper = function () {
             this.addTaskAndExec(UtilsTask.task(container, "goToPop"));
             return;
         }
-        let policy = pro.getMiningPolicy(station.resType);
         if (this.ticksToLive % 6 == 0) {
             if (container && container.store.getFreeCapacity(station.resType) > 80) {
                 // Mineral 的属性是 mineralAmount（amount 是 Deposit 的，
@@ -72,9 +71,7 @@ Creep.prototype.harvestMineralKeeper = function () {
                     }
                     return;
                 }
-                // 该矿物判为不值得采（矿价 ≤ 能量价一半）：暂停采集。
-                // 存量上限已移除（0.78.217 有矿就采），多余部分由 autoSellMineral 挂卖单。
-                if (!policy.mine) return;
+                if (!pro.canMine(this.room, station)) return;
                 this.harvest(mineral);
             }
         }
@@ -93,7 +90,7 @@ let pro = {
      *    shard3 快照，七种基础矿均价（U 10.2 / K 16.3 / Z 18.7 / O 22.1 / H 36.5 /
      *    L 135 / X 304）全部高于能量均价 16.0 的一半（8.0）⇒ 当前全采；某矿价跌破
      *    线（如 U < 8）时自动回到「只买不采」。
-     *  · 采集侧**不再设存量上限**（stop 默认 Infinity）：多余矿物由
+     *  · 采集侧默认不设存量上限（stop 默认 Infinity）：多余矿物由
      *    StrategyMarket.autoSellMineral 直接挂卖单（mineralKeep 默认 2 万，0.78.217）。
      *  · Memory.mineralSettings[resType].stop 仍可显式设上限应急。
      */
@@ -119,8 +116,15 @@ let pro = {
         mineralPrice = Math.max(mineralPrice, tv > 0 ? tw / tv : 0);
         let mine = energyPrice <= 0 || mineralPrice > energyPrice / 2;
         let custom = Memory.mineralSettings && Memory.mineralSettings[resType];
-        let stop = Number(custom && custom.stop) || Infinity;
+        let configuredStop = custom && custom.stop;
+        let stop = typeof configuredStop == "number" || (typeof configuredStop == "string" && configuredStop.trim())
+            ? Number(configuredStop) : Infinity;
+        if (!Number.isFinite(stop) || stop < 0) stop = Infinity;
         return { mine: mine, stop: stop };
+    },
+    canMine(room, data) {
+        let policy = pro.getMiningPolicy(data.resType);
+        return policy.mine && (policy.stop == Infinity || pro.getMineralStock(room, data) < policy.stop);
     },
     getMineralStock(room, data) {
         if (!data || !data.resType) return 0;
@@ -190,11 +194,8 @@ let pro = {
         // 清理死掉的creeps
         data["creeps"] = data["creeps"].filter(e => Game.getObjectById(e))
         let container = Game.getObjectById(data["container"]) // change by an_w
-        // 采集判据（0.78.217）：矿价 > 能量价一半才采（详见 getMiningPolicy）；
-        // 存量上限默认不设（有矿就采），多余部分由 autoSellMineral >2 万挂卖单。
-        let policy = pro.getMiningPolicy(data.resType);
-        if (!policy.mine) return;
-        if (container && room.extractor && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)) {
+        if (container && room.extractor && (Game.time - data["spawnTime"] > 1500 || data["creeps"].length == 0)
+            && pro.canMine(room, data)) {
             // log("Mineral" + room.name)
             let harBody = StationMineral.getHarvesterBodyConfig(room.getEnergyCapacityAvailable(room))
             let tasks = (StationMineral.generatorHarTask(data))

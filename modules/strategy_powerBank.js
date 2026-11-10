@@ -290,9 +290,7 @@ let pro = {
      *
      * 判据读登记表（`Memory.rooms[name].stationSources`）而不是 `find(FIND_SOURCES)`：
      * 它在每 tick 的队列派发路径上，不能为一个闸门扫全房。
-     * **两个条件同时成立**才算破：① 登记矿点里有一个没有任何活着的采集者；
-     * ② 本房在岗+在孵的 keeper 数少于登记矿点数。② 的存在是为了让正常换代
-     * （接班人在孵 ⇒ creeps 里那只 `spawning=true`）不算破。
+     * 每个矿点独立判断。接班人在孵也覆盖它登记的矿点，但不能覆盖另一个矿点。
      */
     spawnRoomMiningBroken(room) {
         if (!room || !room.name) return false;
@@ -301,23 +299,16 @@ let pro = {
         let mem = (room.memory && room.memory[stationName])
             || (Memory.rooms && Memory.rooms[room.name] && Memory.rooms[room.name][stationName]);
         if (!mem) return false;
-        let srcCnt = 0;
-        let unmanned = false;
         for (let key in mem) {
             let data = mem[key];
             if (!data || typeof data != "object" || !data.id) continue;
-            srcCnt++;
-            let manned = (data.creeps || []).some(id => {
+            let manned = Array.isArray(data.creeps) && data.creeps.some(id => {
                 let c = id && Game.getObjectById(id);
-                // 正在孵化的爬 `ticksToLive` 是 undefined，但它马上就要到岗 ⇒ 算有人
                 return !!c && (c.spawning || c.ticksToLive > 0);
             });
-            if (!manned) unmanned = true;
+            if (!manned) return true;
         }
-        if (!srcCnt || !unmanned) return false;
-        let keepers = (typeof room.creeps == "function")
-            ? room.creeps("harvestEnergyKeeper", false).length : 0;
-        return keepers < srcCnt;
+        return false;
     },
     /**
      * 这一 tick 还该不该派新的攻击波次。
