@@ -136,8 +136,13 @@ async function consoleEval(expression, { attempts = 6, wait = 2000, tries = 4 } 
         await sleep(wait);
         for (let t = 0; t < tries; t++) {
             const got = await api("/api/user/memory", { query: { path: key, shard: SHARD } });
-            let data = got && got.data !== undefined ? got.data : got;
-            data = decodeMemoryValue(data);
+            // **必须要求 got.data 存在**：写还没落到 Memory 时接口返回的是 {ok:1} 壳对象，
+            // 把它当结果会静默返回 {"ok":1}（2026-11-10 实测踩到），必须继续轮询。
+            if (!got || got.data === undefined || got.data === null) {
+                await sleep(700);
+                continue;
+            }
+            const data = decodeMemoryValue(got.data);
             if (data !== undefined && data !== null && data !== "") {
                 lastSeen = data;
                 await api("/api/user/console", {
