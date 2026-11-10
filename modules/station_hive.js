@@ -40,16 +40,25 @@ Creep.prototype.fillHive = function () {
         this.addTask(UtilsTask.task(this.room.storage, "carryRes", undefined, { resType: RESOURCE_ENERGY }));
         return this.execLastTask();
     }
-    //这里只在自己的房间
-    let room = Game.rooms[this.memory["roomName"]]
-    room.hiveEnergySendingUsed = room.hiveEnergySendingUsed || {}
-    // Owned spawn/extension targets are already cached by room. Range
-    // selection is sufficient here because BetterMove handles the actual
-    // route, avoiding a PathFinder search every time a carrier gets work.
-    if(!room._hiveTargetsCache)room._hiveTargetsCache = room.spawn.concat(room.extension).filter(e =>
-        e.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
-    let targets = room._hiveTargetsCache.filter(e => !room.hiveEnergySendingUsed[e.id]);
-    let target = this.pos.findClosestByRange(targets);
+    let room = Game.rooms[this.memory.roomName];
+    if (!room || this.pos.roomName !== room.name) return this.popTask();
+    room.hiveEnergySendingUsed = room.hiveEnergySendingUsed || {};
+    // 房间缓存只放缺能建筑；一次循环过滤预约并比较同房 Chebyshev 距离，
+    // 保持原有的距离和同距顺序，实际移动仍交给 fillRes。
+    if (!room._hiveTargetsCache) {
+        room._hiveTargetsCache = room.spawn.concat(room.extension).filter(e => e.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+    }
+    let { x, y } = this.pos;
+    let target, closestRange = Infinity;
+    for (let candidate of room._hiveTargetsCache) {
+        if (room.hiveEnergySendingUsed[candidate.id]) continue;
+        let pos = candidate.pos;
+        let range = Math.max(Math.abs(pos.x - x), Math.abs(pos.y - y));
+        if (range < closestRange) {
+            target = candidate;
+            closestRange = range;
+        }
+    }
     if (target) {
         room.hiveEnergySendingUsed[target.id] = true
         this.addTask(UtilsTask.task(target, "fillRes", undefined, { resType: RESOURCE_ENERGY }))

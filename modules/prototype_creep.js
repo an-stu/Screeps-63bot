@@ -526,9 +526,6 @@ Creep.prototype.carryRes = function () {
         this.execLastTask();
         return;
     }
-    if (!this.pos.isNearTo(obj)) {
-        this.moveTo(task, { reusePath: 20, visualizePathStyle: { stroke: '#67ffed' } })
-    }
     if (obj.store[task.resType] == 0 || this.storeFull()) {
         this.popTask();
         this.execLastTask();
@@ -554,9 +551,16 @@ Creep.prototype.carryRes = function () {
         this.execLastTask();
         return;
     }
+    if (task.resType == undefined) throw new Error("resType no found:" + task)
+    // Validate the source before routing, then stop after issuing movement.
+    // Calling withdraw while out of range only returns ERR_NOT_IN_RANGE; the
+    // old fall-through repeated that no-op for every travel tick.
+    if (!this.pos.isNearTo(obj)) {
+        this.moveTo(task, { reusePath: 20, visualizePathStyle: { stroke: '#67ffed' } });
+        return;
+    }
     if (this._move_res_active) return;
     this._move_res_active = true
-    if (task.resType == undefined) throw new Error("resType no found:" + task)
 
     // `Math.min(undefined)` is NaN. When resCount is absent, withdraw as much
     // as possible instead of passing a NaN amount to the engine (which no-ops
@@ -592,6 +596,14 @@ Creep.prototype.carryEnergyAuto = function () {
         this.execLastTask();
         return;
     }
+    // A degenerate carrier with no energy capacity cannot make progress. Do
+    // not leave its auto-haul task alive to rescan the same sources forever.
+    let load = this.store.getFreeCapacity(RESOURCE_ENERGY);
+    if (load <= 0) {
+        this.popTask();
+        this.execLastTask();
+        return;
+    }
     let room = this.room;
     if (!room) { this.popTask(); this.execLastTask(); return; }
     room.used = room.used || {};
@@ -616,7 +628,6 @@ Creep.prototype.carryEnergyAuto = function () {
             });
         }
         candidates.sort((a, b) => b.available - a.available);
-        let load = this.store.getFreeCapacity(RESOURCE_ENERGY);
         // Source containers retain one full carrier load as keeper buffer;
         // terminal excess may be drained partially down to its reserve.
         let selected = candidates.find(item => item.type == "terminal" ? item.available > 0 : item.available > load);
@@ -634,7 +645,7 @@ Creep.prototype.carryEnergyAuto = function () {
         this.moveTo(target, { reusePath: 10, visualizePathStyle: { stroke: '#67ffed' } });
         return;
     }
-    let amount = Math.min(target.store[RESOURCE_ENERGY] - reserve, this.store.getFreeCapacity(RESOURCE_ENERGY));
+    let amount = Math.min(target.store[RESOURCE_ENERGY] - reserve, load);
     if (amount <= 0 || this.withdraw(target, RESOURCE_ENERGY, amount) != OK) {
         delete task.sourceId;
         delete task.sourceType;

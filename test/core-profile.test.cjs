@@ -201,7 +201,7 @@ assert.ok(utilsTask.includes("roomName:obj.pos.roomName"), "task targets must us
 assert.ok(stationTower.includes("pro.lastUpdateMap[room.name]=3"), "peaceful tower repair must be throttled");
 assert.ok(stationTower.includes("WarDefenseCore.checkNeedDefense(room, hostiles)"), "tower and advanced defense must share one hostile scan");
 assert.ok(stationTower.includes("let injured = undefined"), "tower healing target must be shared across towers");
-assert.ok(stationHive.includes("this.pos.findClosestByRange(targets)"), "hive filling must avoid a PathFinder call per assignment");
+assert.ok(stationHive.includes("for (let candidate of room._hiveTargetsCache)") && !stationHive.includes("findClosestByPath"), "hive filling must select directly from cached targets without a path search");
 assert.ok(!stationHive.includes("this.pos.findClosestByPath(FIND_MY_STRUCTURES"), "legacy hive target path search must stay removed");
 assert.ok(!managerRooms.includes("room.find(FIND_FLAGS)"), "room manager must use the per-tick flag index");
 assert.ok(managerFlags.includes("let prefixMap = Game._flagPerfixMap = {}"), "flag prefixes must be indexed during initialization");

@@ -324,7 +324,7 @@ let pro = {
             || (mem.boostModel == BOOST_L2 && mem.L2Boosted)) ? pro.pbFightersAlive(flag) : false;
     },
     getPBBoostLevel(room, targetRoomName, preferStrongBoost) {
-        // 历史遇袭只在首波走这个优先级；正常补波沿用常规强化策略。
+        // 历史遇袭永久提高该目标房的强化优先级，补波限制独立判断。
         let l2 = hostileRoom.includes(targetRoomName);
         if ((preferStrongBoost || (isSaveCpu && l2)) && StationLab.boostAble(room,
             { [BOOST_RES.damage[2]]: 150, [BOOST_RES.attack[1]]: 600, [BOOST_RES.heal[1]]: 750 })) return BOOST_L2;
@@ -607,7 +607,7 @@ let pro = {
             if (needSpawn && pro.spawnRoomMiningBroken(room)) needSpawn = false;
 
             if (needSpawn && StationHive.spawnAble(room)) {
-                let preferStrongBoost = underAttack || (memory.index == 0 && !!history?.[memory.roomName]);
+                let preferStrongBoost = underAttack || !!history?.[memory.roomName];
                 let boostLevel = pro.getPBBoostLevel(room, memory.roomName, preferStrongBoost);
                 if (underAttack && boostLevel != BOOST_L1 && boostLevel != BOOST_L2) {
                     // 被打了又出不了 T2：**只有确定没人可派时才撤掉任务**。

@@ -539,7 +539,11 @@ let pro = {
             for (let creep of emptyPool) {
                 if (!availableLoads.length) break;
                 let capacity = creep.store.getCapacity(RESOURCE_ENERGY);
-                let sourceIndex = availableLoads.findIndex(source => source.partial ? source.amount > 0 : source.amount > capacity * 0.75);
+                // Match carryEnergyAuto's source-container gate: it deliberately
+                // leaves one full carrier load as the keeper buffer. A 75% test
+                // here dispatched tasks that the creep would immediately reject.
+                if (capacity <= 0) continue;
+                let sourceIndex = availableLoads.findIndex(source => source.partial ? source.amount > 0 : source.amount > capacity);
                 if (sourceIndex < 0) continue;
                 availableLoads.splice(sourceIndex, 1);
                 creep.addTask(UtilsTask.task(creep, "carryEnergyAuto"));

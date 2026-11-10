@@ -639,20 +639,34 @@ Creep.prototype.buildOuterMineralContainer = function () {
     this.build(site);
 };
 
+// 同房间同一 tick 的 keeper 可能都没看到工地。把「空房」结果只保留到
+// 当前 tick，避免每只爬都重新读取/扫描空列表；下一 tick 必定重查，不在 Memory 留负缓存。
+let keeperEmptyConstructionRoomsTick = -1;
+let keeperEmptyConstructionRooms = Object.create(null);
+
+function getKeeperConstructionSites(room) {
+    if (keeperEmptyConstructionRoomsTick !== Game.time) {
+        keeperEmptyConstructionRoomsTick = Game.time;
+        keeperEmptyConstructionRooms = Object.create(null);
+    }
+    if (keeperEmptyConstructionRooms[room.name]) return undefined;
+
+    let sites = room.constructionSite;
+    if (!sites || sites.length == 0) {
+        keeperEmptyConstructionRooms[room.name] = true;
+        return undefined;
+    }
+    return sites;
+}
+
 Creep.prototype.harvestEnergyKeeper = function () {
     let task = this.headTask();
     if (task.roomName != this.room.name) {
         this.goTo(task);
     } else {
-        let source = Game.getObjectById(task.id);
         let station = Memory.rooms[task.roomName][pro.stationName][task.id];
         let container = Game.getObjectById(station["container"]);
 
-        let link = Game.getObjectById(station["link"]);
-        // link2 是双 link 房间才有的（少数），缺失时跳过查询省 getObjectById
-        let link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
-        if (!link && link2) link = link2;
-        if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
         if (container && !container.pos.isEqualTo(this)) {
             let occupied = container.pos.lookFor(LOOK_CREEPS).length > 0
                 || container.pos.lookFor(LOOK_POWER_CREEPS).length > 0;
@@ -662,19 +676,21 @@ Creep.prototype.harvestEnergyKeeper = function () {
                 this.moveTo(container, { range: 0, reusePath: 15, visualizePathStyle: { stroke: '#67ffed' } });
                 return;
             }
-            // 容器被占（worker 顶替挖矿/carrier 站脚）时不能只满足"挨着容器"——
-            // 那可能离 source 太远挖不到（(10,5) 卡死事件）。改为直接站到
-            // source 相邻格，保证能挖矿。
-            if (source && !source.pos.isNearTo(this)) {
-                this.moveTo(source, { range: 1, reusePath: 15, visualizePathStyle: { stroke: '#67ffed' } });
-                return;
-            }
-        } else if (source && !source.pos.isNearTo(this)) {
-            // keeper 必须站到 source 相邻格才能挖矿+transfer。用 range:1 的
-            // moveTo 直接找 source 周边空格，避免 goToNearPop 反复压栈任务
+        }
+        // 容器被占或不在采矿范围时，仍按矿点位置决定站位。
+        let source = Game.getObjectById(task.id);
+        if (!source) return;
+        if (!source.pos.isNearTo(this)) {
             this.moveTo(source, { range: 1, reusePath: 15, visualizePathStyle: { stroke: '#67ffed' } });
             return;
         }
+        // 搬到作业位前不需要 link 状态；把这些对象查询挪到抵达分支之后，避免
+        // 每 tick 行进时都解析 link/link2（双 link 房尤其多一次 getObjectById）。
+        let link = station.link ? Game.getObjectById(station.link) : undefined;
+        // link2 是双 link 房间才有的（少数），缺失时跳过查询省 getObjectById
+        let link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
+        if (!link && link2) link = link2;
+        if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
         if ((source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
             // bucket 吃紧时挖矿降频（每 2 tick 一次），能量产量略降但守住 CPU
             if (Game.cpu.bucket < 5000 && this.ticksToLive % 2 != 0) {
@@ -690,7 +706,8 @@ Creep.prototype.harvestEnergyKeeper = function () {
             if (nearFull) {
                 // 工地扫描按 9 tick 节流（附近工地几乎不变），避免每 tick filter 全房工地
                 if (this.ticksToLive % 9 == 0 || !this.memory.keeperCsId) {
-                    let cs = this.room.constructionSite ? this.room.constructionSite.filter(e => e.pos.isNearTo(this)).head() : undefined;
+                    let sites = getKeeperConstructionSites(this.room);
+                    let cs = sites ? sites.find(e => e.pos.isNearTo(this)) : undefined;
                     this.memory.keeperCsId = cs ? cs.id : undefined;
                 }
                 let constructionSite = this.memory.keeperCsId ? Game.getObjectById(this.memory.keeperCsId) : undefined;

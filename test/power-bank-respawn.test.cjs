@@ -138,7 +138,7 @@ function mission({ history = true, l2Available = true, l1Available = true, memor
     return { f, spawns, Memory, target, live, exec };
 }
 
-// 历史只决定首波强化。后续无威胁时，仍遵守存活和补员时间限制。
+// 历史永久提高该房的强化优先级。无威胁时仍遵守存活、补员间隔和波次上限。
 {
     const m = mission({ memory: { beingAttack: true } });
     m.exec(3000, []);
@@ -151,7 +151,10 @@ function mission({ history = true, l2Available = true, l1Available = true, memor
     assert.deepEqual(m.spawns, [3], "neither cooldown nor live fighters may be bypassed by history");
     m.live.delete("fighter");
     m.exec(4503, []);
-    assert.deepEqual(m.spawns, [3, 2], "a normal replacement uses the normal boost selection");
+    assert.deepEqual(m.spawns, [3, 3], "later waves in the same historical room still prefer L2");
+    m.f.memory.index = 4;
+    m.exec(6000, []);
+    assert.deepEqual(m.spawns, [3, 3], "history cannot bypass the quiet L2 wave cap");
 }
 
 {
