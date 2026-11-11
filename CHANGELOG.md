@@ -1,3 +1,11 @@
+## v0.78.237 — powerSpawn 灌料闸的 power 下限与烧制侧同源（0.78.229 漏掉的那一半）
+
+- 0.78.229 只统一了**能量**口径（灌料 17 万 / 烧制 15 万 → 同一个 `openC`），power 口径仍留叉子：灌料要「全房 power > 1000」，而 `tryProcessPower` 只要 `> powerSpawnLow`（默认 100）、`StrategyHighLevel.processPowerSpawn`（第二条烧制路径）只要 ps 里有 ≥1 power。
+- 后果：storage ≥ 15 万而全房 power 落在 1~1000 的房「被烧、不给补」——ps 的 100 power 库存 100 tick 烧空后 `processPower` 恒 ERR，5,000 能量缓冲一起晾在泵里，直到全房 power 重新 > 1000 才解冻。
+- 现场（2026-11-11 19:50）：W32N56 6,079 / W33N55 6,048 / W34N52 6,001 / W33N53 5,953 power，四房都在往下烧，掉进 1000 以下只是时间问题。
+- 改法只把 `fillGate` clause1 的 power 下限 `> 1000` 降为 `> 0`（有 power 就灌），能量闸、`powerSpawnLow`、`powerSpawnOpenEnergy`、试点房分支与烧制节奏一律未动。
+- 回归：`power-spawn-fill-gate` 新增三组 —— storage 20 万 + power 500 必须有补料任务、power 0 必须空表（行为负对照）、源码断言 clause1 不许再出现 `powerCnt > 1000`；退回旧门槛时用例 ⑥ 如实失败，已逐条验证。
+
 ## v0.78.236 — RawMemory 段遥测镜像，Grafana Cloud 直读无需本地进程
 
 - 新增 `helper_telemetrySegment`：每 10 tick 把运行遥测写入 RawMemory 段 90，供 Grafana Cloud 的 Infinity 数据源直接读取 `/api/user/memory-segment`（Memory API 全量 gz 压缩，Infinity 无法解压；段接口返回原始字符串）。

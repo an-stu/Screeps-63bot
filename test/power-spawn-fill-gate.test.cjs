@@ -91,13 +91,13 @@ function mkStore(obj, cap) {
  * 非试点房（W33N53）：powerSpawn 能量缓冲已烧掉大半，power 还剩 57。
  * storagePower 2,905 + terminalPower 3,000 = 5,905 —— 与现场一致。
  */
-function mkOuterRoom({ storageEnergy, spawnEnergy = 100, spawnPower = 57 }) {
+function mkOuterRoom({ storageEnergy, spawnEnergy = 100, spawnPower = 57, storagePower = 2905, terminalPower = 3000 }) {
     const room = {
         name: "W33N53",
         level: 8,
         used: {},
-        storage: { id: "stor1", store: mkStore({ energy: storageEnergy, power: 2905 }, 5000000) },
-        terminal: { id: "term1", store: mkStore({ energy: 50000, power: 3000 }, 300000) },
+        storage: { id: "stor1", store: mkStore({ energy: storageEnergy, power: storagePower }, 5000000) },
+        terminal: { id: "term1", store: mkStore({ energy: 50000, power: terminalPower }, 300000) },
         powerSpawn: {
             id: "ps1",
             store: mkStore({ energy: spawnEnergy, power: spawnPower }, 5000),
@@ -176,6 +176,38 @@ const names = list => flatten(list).map(t => t && t.taskName);
     assert.ok(
         code.includes("floorC + 50000"),
         "openC 的缺省值必须与 tryProcessPower 的 floor+50000 一致"
+    );
+}
+
+{
+    // ── ⑥ power 口径同源（0.78.237）：storage 20 万、全房 power 只剩 500。
+    //   烧制侧照样烧（`tryProcessPower` 只要 power > powerSpawnLow=100，
+    //   `StrategyHighLevel.processPowerSpawn` 只要 ps 里有 ≥1 power），
+    //   旧灌料闸却写死 `powerCnt > 1000` ⇒ 烧空 100 power 库存后永久饿死。
+    const ctx = makeCtx({});
+    const lowPower = mkOuterRoom({ storageEnergy: 200000, storagePower: 500, terminalPower: 0 });
+    const n = names(ctx.StationCarry.generatorFillPowerSpawnTask(lowPower, true));
+    assert.ok(
+        n.includes("fillAllTask") && n.includes("carryRes"),
+        "storage 20 万 + 全房 power 500：烧制闸开着就必须给 powerSpawn 补料：" + JSON.stringify(n)
+    );
+
+    // ── ⑦ 负对照（行为，不是源码）：全房 power = 0 ⇒ 没有可烧的东西，不许灌料
+    const noPower = mkOuterRoom({ storageEnergy: 200000, storagePower: 0, terminalPower: 0, spawnPower: 0 });
+    assert.deepEqual(
+        names(ctx.StationCarry.generatorFillPowerSpawnTask(noPower, true)), [],
+        "全房 power = 0 时灌料毫无意义（负对照必须因行为失败）"
+    );
+
+    // ── ⑧ 源码断言：clause1 不许再把 power 下限写死在 1000
+    const code2 = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    assert.ok(
+        !/powerCnt\s*>\s*1000/.test(code2),
+        "灌料闸门的 power 下限不许高于烧制闸（0.78.229 的能量叉子换个字段又长出来了）"
+    );
+    assert.ok(
+        code2.includes("energyCnt >= openC && powerCnt > 0"),
+        "能烧 ⇒ 必能补：clause1 必须是 energyCnt >= openC && powerCnt > 0"
     );
 }
 

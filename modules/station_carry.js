@@ -374,9 +374,20 @@ let pro = {
         // 「10 万以下不烧 / 15 万以上才烧」原封不动；试点房（`powerSpawnRoom`）走
         // 自己的 `energyCnt > 30000` 分支，也不动。
         let openC = Number(msC.powerSpawnOpenEnergy) > 0 ? Number(msC.powerSpawnOpenEnergy) : floorC + 50000;
+        // ★ 2026-11-11（0.78.237）：`powerCnt` 的下限也必须与烧制侧同源 ——
+        // 0.78.229 只统一了**能量**口径，power 口径仍留着「灌料要 > 1000、烧制只要
+        // > powerSpawnLow(100)」的叉子。而 `StrategyHighLevel.processPowerSpawn`
+        // （第二条烧制路径，每房每 tick 都跑）更宽松：ps 里有 ≥1 power 就烧。
+        // ⇒ storage ≥ 15 万、全房 power 落在 **1~1000** 的房会「被烧、不给补」：
+        //   ps 的 100 power 库存 100 tick 烧空，此后 processPower 恒 ERR、
+        //   5,000 能量缓冲一起晾在泵里，直到全房 power 重新 > 1000 才解冻。
+        // 现场（19:50）：W32N56 6,079 / W33N55 6,048 / W34N52 6,001 / W33N53 5,953
+        // 正在往下烧，四房都在 6,000 这条线上，掉进 1000 以下只是时间问题。
+        // 改法只把 clause1 的 power 下限降到 0（「有 power 就灌」），能量闸一个没动：
+        // 能烧 ⇒ 必能补，这是 MEMORY 第 3 条「同一决策的两层阈值必须同源」的直接要求。
         let fillGate = wantBurn
             ? (energyCnt > 30000 && powerCnt > 0)
-            : (energyCnt >= openC && powerCnt > 1000 || energyCnt > 100000 && powerCnt > 6000
+            : (energyCnt >= openC && powerCnt > 0 || energyCnt > 100000 && powerCnt > 6000
                 // fillGate 在下面 powerSpawn 存在性检查**之前**求值：RCL<8 或
                 // powerSpawn 被拆时 room.powerSpawn 为 undefined，裸取 .effects
                 // 会抛 TypeError 打断整个派发 pass。
