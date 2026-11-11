@@ -691,7 +691,23 @@ Creep.prototype.harvestEnergyKeeper = function () {
         let link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
         if (!link && link2) link = link2;
         if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
-        if ((source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
+        let freeEnergyCapacity = this.store.getFreeCapacity(RESOURCE_ENERGY);
+        let notLinkFull = link && link.store[RESOURCE_ENERGY] != 800;
+        // **满仓且无处可倒就别挖**（2026-11-11，E53S21 实测 26/tick 掉地衰减）。
+        //
+        // keeper 站在矿点容器上挖矿，自己 store 满后的溢出会先进入脚下容器；容器
+        // 也满了就直接掉在地上衰减。RCL8 房 0 只 upgrader 时 link 链条是死胡同
+        // （升级 link 没人抽 → hub link 永不清空 → 矿点 link 恒 800），只要容器被
+        // 顶满，此后每一 tick 的产量都是纯损失：E53S21 容器 2000/2000 + link 800/800
+        // 时地面 26/tick 稳定上涨。
+        //
+        // 判据只看「这一 tick 的溢出有没有地方去」：自己身上有余量、矿点 link 没满、
+        // 或脚下容器还有余量，三者任一成立就照常挖（能量被接住，不是浪费）。
+        // 三处全满时停手——源里的能量留着不会烂，等容器/link 被抽空后自动恢复。
+        let harvestSinkFree = freeEnergyCapacity > 0
+            || (notLinkFull && !!container)
+            || !!(container && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+        if (harvestSinkFree && (source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
             // bucket 吃紧时挖矿降频（每 2 tick 一次），能量产量略降但守住 CPU
             if (Game.cpu.bucket < 5000 && this.ticksToLive % 2 != 0) {
                 // 不挖，但保留 harvest 节奏
@@ -699,8 +715,6 @@ Creep.prototype.harvestEnergyKeeper = function () {
                 this.harvest(source);
             }
         }
-        let freeEnergyCapacity = this.store.getFreeCapacity(RESOURCE_ENERGY);
-        let notLinkFull = link && link.store[RESOURCE_ENERGY] != 800;
         if (this.ticksToLive % 3 == 0 || freeEnergyCapacity <= 0) {
             let nearFull = freeEnergyCapacity < this.getPartCnt(WORK) * 2;
             if (nearFull) {

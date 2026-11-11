@@ -77,6 +77,7 @@ function makeFixture({
     x = 10, y = 10, ttl = 90, freeCapacity = 0, energy = 100,
     bucket = 10000, containerEnergy = 0, containerHits = 1000, linkEnergy = 800,
     linkHits = 1000, link2Energy, containerOccupied = false, sites = [], sourceX = 11, sourceY = 10,
+    containerCap = 2000,
 } = {}) {
     const { ctx, objects } = makeContext();
     ctx.Game.cpu.bucket = bucket;
@@ -101,6 +102,7 @@ function makeFixture({
         store: {
             energy: containerEnergy,
             getUsedCapacity(res) { return res === "energy" ? this.energy : 0; },
+            getFreeCapacity(res) { return res === "energy" ? Math.max(0, containerCap - this.energy) : 0; },
         },
     };
     const link = {
@@ -256,6 +258,42 @@ function makeFixture({
     linkFallback.run();
     assert.ok(linkFallback.creepActions.some(a => a[0] === "repair" && a[1] === "link"),
         "link repair remains fallback when container is healthy");
+}
+
+// A saturated mine must not keep harvesting: a keeper standing on its container
+// spills what it cannot hold into that container, and once the container is full
+// the spill lands on the ground and decays (E53S21 measured a steady 26/tick).
+// The gate is deliberately narrow: any single free sink keeps the harvest going.
+{
+    const saturated = makeFixture({
+        ttl: 90, freeCapacity: 0, containerEnergy: 2000, containerCap: 2000, linkEnergy: 800,
+    });
+    saturated.run();
+    assert.ok(!saturated.creepActions.some(a => a[0] === "harvest"),
+        "full keeper stops harvesting when its store, the container and the source link are all full");
+    assert.ok(!saturated.creepActions.some(a => a[0] === "transfer"),
+        "no transfer is attempted into a full source link");
+
+    const containerRoom = makeFixture({
+        ttl: 90, freeCapacity: 0, containerEnergy: 1500, containerCap: 2000, linkEnergy: 800,
+    });
+    containerRoom.run();
+    assert.ok(containerRoom.creepActions.some(a => a[0] === "harvest"),
+        "container headroom absorbs the spill, so harvesting continues");
+
+    const linkRoom = makeFixture({
+        ttl: 90, freeCapacity: 0, containerEnergy: 2000, containerCap: 2000, linkEnergy: 700,
+    });
+    linkRoom.run();
+    assert.ok(linkRoom.creepActions.some(a => a[0] === "harvest"),
+        "a non-full source link keeps harvesting alive even with a full container");
+
+    const storeRoom = makeFixture({
+        ttl: 90, freeCapacity: 50, containerEnergy: 2000, containerCap: 2000, linkEnergy: 800,
+    });
+    storeRoom.run();
+    assert.ok(storeRoom.creepActions.some(a => a[0] === "harvest"),
+        "the keeper's own free capacity is a valid sink: the gate must not fire early");
 }
 
 console.log("keeper cpu checks passed");
