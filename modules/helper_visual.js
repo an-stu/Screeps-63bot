@@ -55,10 +55,18 @@ let pro = {
         return out
     },
     roomMap: {},
+    roomMapTick: -1,
     getRoomVisual(roomNameOrObj) {
         let roomName = roomNameOrObj.name || roomNameOrObj
+        // RoomVisual 只在**创建当 tick** 有效，跨 tick 复用旧实例画什么都不渲染。
+        // 原来 roomMap 是永久缓存 ⇒ 每个房间第一次之后的可视化全部静默不显示；
+        // 改按 tick 缓存：同 tick 内复用（省 CPU），跨 tick 重建。
+        if (pro.roomMapTick !== Game.time) {
+            pro.roomMapTick = Game.time
+            pro.roomMap = {}
+        }
         if (!pro.roomMap[roomName]) {
-            pro.roomMap[roomName] = new RoomVisual(roomNameOrObj.name || roomNameOrObj)
+            pro.roomMap[roomName] = new RoomVisual(roomName)
         }
         return pro.roomMap[roomName]
     },

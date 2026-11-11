@@ -1,3 +1,20 @@
+## v0.78.240 — RoomVisual 缓存按 tick 失效 + MODULES.tsv 重新生成（两项低风险清理）
+
+- **helper_visual.getRoomVisual 跨 tick 静默不渲染**（CODE_REVIEW 4-2  flagged，9 月审查遗留）：
+  `roomMap` 是模块级永久缓存，`new RoomVisual(...)` 只在房间名第一次出现时创建。引擎的
+  RoomVisual 只收集**创建当 tick** 的绘制指令，复用上一 tick 的实例画什么都不显示 ⇒
+  每个房间第一次之后的塔伤面板 / showText / showLine / showPath 全部静默失效。
+  目前线上 `cpuFeatures.visual=false` 所以休眠，一开可视化就会踩到。
+  改法：缓存按 tick 失效（`roomMapTick !== Game.time` 时重建）——同 tick 复用省 CPU，
+  跨 tick 重建保渲染。showRoomStructures 本来就每次 new，不受影响。
+- **MODULES.tsv 过期**（同审查条目）：原索引是 7 月快照，列着磁盘/线上都不存在的
+  `调用栈分析器.js`，缺 helper_consoleLogger / helper_consoleDashboard / helper_telemetrySegment
+  等新模块。按当前部署 payload（73 模块，与线上 default 分支一致）重新生成，
+  口径沿用「模块名 + 部署内容长度」，WASM 二进制模块按 binary 串长度计。
+- 回归：新增 `visual-room-cache`（同 tick 复用 / 跨 tick 重建 / 对象与房名归一 /
+  showText 端到端 / 永久缓存变异负对照）；72 个既有测试全绿。
+- 运行时影响面：visual 开关关闭时零行为变化；开启后可视化恢复渲染。TSV 纯文档。
+
 ## v0.78.239 — 外矿运力动态平衡：修路编制按工地派 + 在途车占编制（5 只车对 2 只需求）
 
 - 现场（2026-11-12，用户报「外矿运力过剩」）：W26N58 → W26N59 两个矿点，运输需求按公式
