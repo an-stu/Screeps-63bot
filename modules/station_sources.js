@@ -660,6 +660,47 @@ function getKeeperConstructionSites(room) {
     return sites;
 }
 
+// 每房每 tick「tile → 最早列表序号工地」索引。旧实现在没有邻接工地时
+// keeperCsId 恒 undefined，导致每 tick 对全房工地 .find(isNearTo)；改为
+// O(9) 邻格查表。必须保留 .find 语义：多个邻接工地取列表序号最早者
+// （同格多个工地也取最早），房间边缘外无工地、不得越界。
+let keeperSiteIndexTick = -1;
+let keeperSiteIndexRooms = Object.create(null);
+
+function getKeeperSiteTileIndex(room) {
+    if (keeperSiteIndexTick !== Game.time) {
+        keeperSiteIndexTick = Game.time;
+        keeperSiteIndexRooms = Object.create(null);
+    }
+    if (room.name in keeperSiteIndexRooms) return keeperSiteIndexRooms[room.name];
+    let sites = getKeeperConstructionSites(room);
+    if (!sites) return keeperSiteIndexRooms[room.name] = null;
+    let index = Object.create(null);
+    for (let i = 0; i < sites.length; i++) {
+        let p = sites[i].pos;
+        let key = p.x * 50 + p.y;
+        if (index[key] === undefined) index[key] = i;
+    }
+    return keeperSiteIndexRooms[room.name] = { sites, index };
+}
+
+function keeperNearestSite(room, pos) {
+    let entry = getKeeperSiteTileIndex(room);
+    if (!entry) return undefined;
+    let best;
+    for (let dx = -1; dx <= 1; dx++) {
+        let x = pos.x + dx;
+        if (x < 0 || x > 49) continue;
+        for (let dy = -1; dy <= 1; dy++) {
+            let y = pos.y + dy;
+            if (y < 0 || y > 49) continue;
+            let i = entry.index[x * 50 + y];
+            if (i !== undefined && (best === undefined || i < best)) best = i;
+        }
+    }
+    return best === undefined ? undefined : entry.sites[best];
+}
+
 Creep.prototype.harvestEnergyKeeper = function () {
     let task = this.headTask();
     if (task.roomName != this.room.name) {
@@ -721,9 +762,9 @@ Creep.prototype.harvestEnergyKeeper = function () {
             if (nearFull) {
                 // 工地扫描按 9 tick 节流（附近工地几乎不变），避免每 tick filter 全房工地
                 if (this.ticksToLive % 9 == 0 || !this.memory.keeperCsId) {
-                    let sites = getKeeperConstructionSites(this.room);
-                    let cs = sites ? sites.find(e => e.pos.isNearTo(this)) : undefined;
-                    this.memory.keeperCsId = cs ? cs.id : undefined;
+                    let cs = keeperNearestSite(this.room, this.pos);
+                    let csId = cs ? cs.id : undefined;
+                    if (this.memory.keeperCsId != csId) this.memory.keeperCsId = csId;
                 }
                 let constructionSite = this.memory.keeperCsId ? Game.getObjectById(this.memory.keeperCsId) : undefined;
                 if (constructionSite) {

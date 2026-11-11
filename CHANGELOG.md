@@ -1,3 +1,14 @@
+## v0.78.235 — CPU 第一批：可证等价减负 + keeper 工地查表
+
+- 任务栈访问器（headTask/lastTask/lastTaskObj/headTaskObj/headTaskFlag）与数组 head/last 改直接下标，空栈/稀疏/含假值元素与 lodash 语义逐例一致；find/sum/contains 覆盖本批未动（动态谓词/thisArg/稀疏审计未完成）。
+- PC 策略每 pass 只求值一次 `StationFactory.needPower`（纯读；会改任务栈的停车抢占分支要么提前 return 要么不进 isFree 链，复用安全），停车抢占顺序保留；needOpTower 与 PC 待命敌情改用房级 tick 缓存 `getHostileCreeps`，敌对 PowerCreep 仍单独查询。
+- registerStationSources / registerStationSourcesDefenseOutRoom 的三次 headTask() 合为局部变量，空栈抛错语义不变。
+- 极致建筑缓存的 resolved map 与 Hub 复用 `room.getStructures()` tick 缓存，不再自行 find(FIND_STRUCTURES)；structure-cache 测试夹具按生产契约补 getStructures。
+- 外矿修路爬非边界格不再做全路径边界扫描（core-profile 锁定字面量 `this.pos.isBorder() && borderIndex.dist == 0` 原样保留）。
+- keeper 工地查找改每房每 tick「tile→最早列表序号」索引，O(9) 邻格查表替代无邻接工地时每 tick 的全房 `.find(isNearTo)`；多工地/同格/房间边缘均取列表最早者，与 .find 完全同果；keeperCsId 值变才写，9 tick 重扫节奏与 build>修容器>修 link 优先级不变。
+- 新增 cpu-batch1-equivalence 与 keeper-site-index 两组回归：旧/新实现同输入差分（含 500 轮随机布局）、扫描计数、逐项负对照（改回旧实现或破坏排序必须 fail，已逐条验证）。70 测试全过，audit 77 生成点/211 处理器。
+- 收益为方向性估计，待上线后按同 schema 同 startTick 的 24-48h 遥测增量核验（见 qoder.md v2 验收口径）。
+
 ## v0.78.234 — 主房 keeper 满仓无处倒料时停手，不再把矿倒在地上衰减
 
 - 主房 keeper 站在矿点容器上挖矿时，自己满仓后的溢出先进脚下容器，容器也满就直接掉在地上衰减。RCL8 房 0 只 upgrader 时 link 链条是死胡同（升级 link 没人抽 → hub link 永不清空 → 矿点 link 恒 800），容器一旦被顶满，此后每 tick 的产量都是纯损失：E53S21 容器 2000/2000 + link 800/800 时地面 26/tick 稳定上涨。
