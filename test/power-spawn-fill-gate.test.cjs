@@ -149,15 +149,32 @@ const names = list => flatten(list).map(t => t && t.taskName);
         "开闸线降到 16 万后，16.5 万就该灌料"
     );
 
-    // ── ④ 试点房分支不受影响：wantBurn（powerBurning 运行时状态）走自己的 30k 门槛
-    const burnCtx = makeCtx({ powerBurning: true });
-    const burn = mkOuterRoom({ storageEnergy: 40000, spawnEnergy: 0, spawnPower: 0 });
+    // ── ④ 试点房分支不受影响：真实烧制窗口（有 OPERATE_POWER 效果）内，
+    //      storage 落在 10 万~15 万恢复带也照灌（走自己的 30k 门槛，非 15 万开闸线）。
+    //      0.78.238 起**不许**再用 `powerBurning` 残值伪造这个窗口：无效果时
+    //      `tryProcessPower` 会把它清零（见 §⑥）。
+    const burnCtx = makeCtx({});
+    const burn = mkOuterRoom({ storageEnergy: 120000, spawnEnergy: 0, spawnPower: 0 });
     burn.name = "W32N56";
+    const fx = [{ power: 5, effect: 5, level: 1, ticksRemaining: 500 }];
+    fx.head = function () { return this[0]; };
+    burn.powerSpawn.effects = fx;
     const nb = names(burnCtx.StationCarry.generatorFillPowerSpawnTask(burn, true));
     assert.ok(
         nb.includes("fillAllTask") && nb.includes("carryRes"),
-        "试点房（W32N56）烧制窗口内 4 万能量仍要补料：" + JSON.stringify(nb)
+        "试点房（W32N56）烧制窗口内 12 万能量仍要补料：" + JSON.stringify(nb)
     );
+
+    // ── ⑥ 负对照（0.78.238）：**残值不再有权开闸** —— 无效果 + 4 万能量 + 旧
+    //      `powerBurning=true` ⇒ 必须空表，否则试点房会长期给一个不被授权烧的 ps 灌料。
+    const staleCtx = makeCtx({ powerBurning: true, powerBurnCredit: 8112 });
+    const stale = mkOuterRoom({ storageEnergy: 40000, spawnEnergy: 0, spawnPower: 0 });
+    stale.name = "W32N56";
+    assert.deepEqual(
+        names(staleCtx.StationCarry.generatorFillPowerSpawnTask(stale, true)), [],
+        "无 OPERATE_POWER 效果时，powerBurning 残值不许把 30k 分支撑开"
+    );
+    assert.equal(staleCtx.Memory.marketSettings.powerBurning, false, "残值必须被清掉");
 }
 
 {

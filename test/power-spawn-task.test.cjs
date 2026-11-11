@@ -116,8 +116,10 @@ const names = list => flatten(list).map(t => t && t.taskName);
 
 {
     // ── ① 退化输入：缺 70 power（= fastCarry）+ 缺 200 能量 → 什么都不该生成
-    const ctx = makeCtx({ powerBurning: true });
-    const room = mkRoom({ spawnEnergy: 4800, spawnPower: 30, storageEnergy: 49123 });
+    const ctx = makeCtx({});
+    // 闸门用「storage ≥ 开闸线 15 万」打开，**不靠 powerBurning 残值**（0.78.238 起
+    // 无 OPERATE_POWER 效果时该状态必被清零）——这几组只验任务表形态。
+    const room = mkRoom({ spawnEnergy: 4800, spawnPower: 30, storageEnergy: 168000 });
     const out = ctx.StationCarry.generatorFillPowerSpawnTask(room, true);
     assert.deepEqual(
         names(out), [],
@@ -125,7 +127,7 @@ const names = list => flatten(list).map(t => t && t.taskName);
     );
 
     // ── ② 真缺口：缺 100 power + 缺 3000 能量 → 必须有取货任务 + fillAllTask
-    const room2 = mkRoom({ spawnEnergy: 2000, spawnPower: 0, storageEnergy: 49123 });
+    const room2 = mkRoom({ spawnEnergy: 2000, spawnPower: 0, storageEnergy: 168000 });
     const out2 = ctx.StationCarry.generatorFillPowerSpawnTask(room2, true);
     const n2 = names(out2);
     assert.ok(n2.includes("fillAllTask"), "真缺口时仍然要派 fillAllTask：" + JSON.stringify(n2));
@@ -137,7 +139,7 @@ const names = list => flatten(list).map(t => t && t.taskName);
 
     // ── ③ 不变量：fillAllTask ⇒ 至少一条 carryRes（就是这次的退化形态）
     [[4800, 30], [2000, 0], [4990, 99], [4200, 40]].forEach(([e, p]) => {
-        const r = mkRoom({ spawnEnergy: e, spawnPower: p, storageEnergy: 49123 });
+        const r = mkRoom({ spawnEnergy: e, spawnPower: p, storageEnergy: 168000 });
         const n = names(ctx.StationCarry.generatorFillPowerSpawnTask(r, true));
         if (n.includes("fillAllTask")) {
             assert.ok(

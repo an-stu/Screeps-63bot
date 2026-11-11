@@ -298,6 +298,22 @@ let pro = {
         // 只受本房 power/能量下限约束，避免把房抽干；可用 powerSpawnOtherRooms=false 关掉。
         let fx0 = s.effects && s.effects.find(e => e.power == PWR_OPERATE_POWER);
         if (!fx0) {
+            // ★ 2026-11-11（0.78.238）：**没有效果窗口就不许留着窗口状态**。
+            //
+            // `powerBurning` / `powerBurnCredit` 只在下面的 `fx` 分支里写，效果一过期就
+            // 从这个 `return` 溜走 ⇒ Memory 里长期挂着上一次窗口的残值。实测 21:00：
+            // 全账号 13 个 powerSpawn **一个 OPERATE_POWER 都没有**，而
+            // `Memory.marketSettings` 仍是 `powerBurning=true, powerBurnCredit=8112`。
+            //
+            // 两个后果都正好违背这套闸的设计意图：
+            //   1. `generatorFillPowerSpawnTask` 的 `wantBurn` 直接吃这个 true ⇒ 试点房
+            //      永远走「30k 就灌料」分支，哪怕它此刻根本不被授权烧（storage < 15 万）；
+            //   2. 下一个窗口开局 credit 已经够 ~32 发满速 ⇒ 「把一次效果摊到整个
+            //      duration」的配速在最需要它的时刻失效，一次窗口开局就按满速抽水。
+            // 改法只清状态，阈值、节奏公式、开关一律不动（MEMORY 第 3 条：同一决策的
+            // 每个输入都要同源；这里的输入是「窗口在不在」，状态必须跟着它走）。
+            ms.powerBurning = false;
+            ms.powerBurnCredit = 0;
             if (!isTarget && ms.powerSpawnOtherRooms === false) return;
             if (power <= low) return;
             // 非试点房开闸线 = 停烧线 + 5 万恢复带（滞回，与 strategy_highLevel 的

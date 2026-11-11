@@ -1,3 +1,14 @@
+## v0.78.238 — 无 OPERATE_POWER 效果时复位烧制窗口状态（powerBurning / powerBurnCredit 残值）
+
+- `tryProcessPower` 的 `!fx0` 分支（没有 OPERATE_POWER 效果 ⇒ 按普通速率烧）直接 `return`，从不清理**只在 `fx` 分支里写**的 `Memory.marketSettings.powerBurning` / `powerBurnCredit`。效果一过期，这两个值就永久挂在 Memory 里。
+- 现场（2026-11-11 21:00，`check-status` 两档全绿之后的深探）：13 个 powerSpawn **一个效果都没有**，Memory 仍是 `powerBurning=true, powerBurnCredit=8112`。
+- 两个后果都正好抵消这套闸的设计意图：
+  1. `generatorFillPowerSpawnTask` 的 `wantBurn` 吃 `!!msC.powerBurning` ⇒ 试点房（W32N56）永远走「30k 就灌料」分支，哪怕它此刻不被授权烧（storage < 15 万开闸线）；
+  2. 下一个窗口开局 credit 已有 8,112（≈32 发满速）⇒ 「把一次效果摊到整个 duration」的配速在最需要它的时刻失效，一开窗就按满速抽水。
+- 改法只清状态：`!fx0` 分支入口先 `ms.powerBurning = false; ms.powerBurnCredit = 0;`，且放在**所有** return 之前（含 `powerSpawnOtherRooms=false` 的房 —— 状态属于窗口、不属于房）。阈值、配速公式、开闸线、试点房分支一律未动。
+- 一致性：真实窗口内 `tryProcessPower` 先跑并置 `powerBurning=true`，`wantBurn` 随后才读，所以 10 万~15 万恢复带内的试点房照旧灌料；窗口外残值不再有权开闸。
+- 回归：`power-spawn-burn` 新增 3 组（无效果必须复位 / 关闭开关的房也要复位 / 新窗口首 tick 不许沿用旧 credit 满速），`power-spawn-fill-gate` ④ 改为真实效果窗口、新增 ⑥ 残值负对照；去掉这两行复位，三处用例如实失败（已逐条验证）。71 测试 + audit 77/211 全绿。
+
 ## v0.78.237 — powerSpawn 灌料闸的 power 下限与烧制侧同源（0.78.229 漏掉的那一半）
 
 - 0.78.229 只统一了**能量**口径（灌料 17 万 / 烧制 15 万 → 同一个 `openC`），power 口径仍留叉子：灌料要「全房 power > 1000」，而 `tryProcessPower` 只要 `> powerSpawnLow`（默认 100）、`StrategyHighLevel.processPowerSpawn`（第二条烧制路径）只要 ps 里有 ≥1 power。

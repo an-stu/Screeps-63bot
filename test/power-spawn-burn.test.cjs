@@ -181,4 +181,45 @@ function makeRoom(power, energy, effects) {
     assert.equal(ctx.__burn, 3, "预算充足 ⇒ 每 tick 都烧");
 }
 
+// ⑪ 0.78.238：**没有 OPERATE_POWER 效果 ⇒ 窗口状态必须复位**
+//    现场（2026-11-11 21:00）：13 个 powerSpawn 全无效果，Memory 仍挂着
+//    powerBurning=true / powerBurnCredit=8112（上一窗口的残值，从 !fx0 的 return 溜走）。
+{
+    const room = makeRoom(5000, 500000, []);
+    room.name = "E53S21";
+    const ms = { powerBurning: true, powerBurnCredit: 8112.1 };
+    const ctx = load(ms, room);
+    ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ms.powerBurning, false, "无效果窗口 ⇒ powerBurning 必须复位（否则试点房永远走 30k 灌料分支）");
+    assert.equal(ms.powerBurnCredit, 0, "无效果窗口 ⇒ 上一窗口的配速 credit 必须清零");
+}
+
+// ⑪-b 负对照：复位必须发生在**所有** return 之前（含关闭开关的房）
+{
+    const room = makeRoom(5000, 500000, []);
+    room.name = "E53S21";
+    const ms = { powerBurning: true, powerBurnCredit: 900, powerSpawnOtherRooms: false };
+    const ctx = load(ms, room);
+    ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ctx.__burn, 0, "powerSpawnOtherRooms=false 不烧");
+    assert.equal(ms.powerBurning, false, "即使这房不烧，窗口状态也要清（状态属于窗口，不属于房）");
+}
+
+// ⑫ 新窗口开局**不许**沿用上次窗口的 credit 满速烧
+//    预算 (140000-100000)/500 = 80 < 一次 250 ⇒ 首 tick 必须不烧；旧代码带着 8112
+//    的残值会立刻满速，一次窗口在开局几十 tick 内被抽干，配速形同不存在。
+{
+    const room = makeRoom(5000, 140000, []);
+    room.name = "E53S21";
+    const ms = { powerBurning: true, powerBurnCredit: 8112.1 };
+    const ctx = load(ms, room);
+    ctx.StationCarry.tryProcessPower(room);     // 无效果 tick：清状态（且 14 万 < 开门线不烧）
+    assert.equal(ms.powerBurnCredit, 0, "过渡 tick 之后 credit 归零");
+    room.powerSpawn.effects = OP_EFFECT;        // 新窗口开始
+    ctx.__burn = 0;
+    ctx.StationCarry.tryProcessPower(room);
+    assert.equal(ctx.__burn, 0, "新窗口首 tick 按预算摊薄（80 < 250），不许满速");
+    assert.ok(ms.powerBurnCredit > 0 && ms.powerBurnCredit < 250, "credit 从 0 起算，单 tick 只攒预算");
+}
+
 console.log("power spawn burn checks passed");
