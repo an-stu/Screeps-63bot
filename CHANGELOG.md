@@ -1,3 +1,31 @@
+## v0.78.239 — 外矿运力动态平衡：修路编制按工地派 + 在途车占编制（5 只车对 2 只需求）
+
+- 现场（2026-11-12，用户报「外矿运力过剩」）：W26N58 → W26N59 两个矿点，运输需求按公式
+  `ceil(pathTime×2×产出/50)` = 32 + 26 = 58 CARRY ≈ **2 只** 32 CARRY 的车；实际车队 **5 只**
+  （160 CARRY，全是 2WORK+32CARRY 修路体型）。容器 272/360 近空、地面无掉落、源 1592/2024 健康
+  —— 车在等货，不是货等车。`__outerWhy=noFreeSpawn` 说明补员还在试图加车。
+- 根因两条，都在 `trySpawnOuterHarCarrier` 的修路分支：
+  1. **编制盲点**：`builderCnt < OUTER_ROAD_BUILDER_CNT(2)` 只数已登记（carryCreeps）且寿命够的
+     WORK 车。登记发生在爬抵达矿房执行任务时，而孵化 150 tick + 赶路 ~80 tick 的窗口里新车不可见
+     ⇒ 每个 economy pass 都判「不足 2」继续派。2026-10-30 给运输路径修过的「在途扣减」
+     （`roomCarriers` 按 headTask 目标矿点折算）这条分支漏了。
+  2. **阈值不同源**（MEMORY 第 3 条）：修路编制拿 `outerRoadComplete`（50% 血线）当判据，而沿途
+     维修的触发线是 25%（前瞻）/90%（本格）。路线 95% 完工、只剩主房出口 3~4 个高流量格落在
+     26~47% 衰减带、**没有任何工地**时，roadComplete 恒假 ⇒ 每矿点永久要 2 只专职修路爬。
+     而这些衰减格本来就有在岗 WORK 车沿途修（运输补员的体型选择保证每矿点 ≥1 只 WORK）。
+- 改法（阈值、运输需求公式、让位闸、优先级一律未动）：
+  1. 新增 `outerRoadSiteCount(data)`：只数缓存路线路点格上的 road 工地（与 nearestOuterRoadSite
+     同口径）；任一路线房无视野返回 -1，调用方退回旧判据，盲飞行为不变。
+  2. 修路编制 `builderNeed = 有工地 ? OUTER_ROAD_BUILDER_CNT : 0`；`builderCnt` 增加在途/在孵
+     WORK 车计数（headTask 目标矿点键，与运输路径在途扣减同源）。
+  3. 运输补员的体型选择 `carrierBuildCreep` 同样把在途 WORK 车算作「已有修路覆盖」，
+     有 WORK 在途时造普通体型，不再重复造修路体型。
+- 收敛路径：不杀在役车（避免浪费已投孵化能量），超编车自然老死、补员只按真实缺口派 ⇒
+  车队在 ≤1500 tick 内收敛到运输需求（~2 只，每矿点 ≥1 只 WORK 负责沿途修路）。
+  路格烂穿出现工地时编制自动恢复 2 只/矿点，修完即回落 —— 自纠正闭环。
+- 回归：新增 `outer-builder-balance`（无工地不派专职修路爬 / 有工地恢复编制 / 在途 WORK 占编制 /
+  在途 WORK 使运输补员造普通体型 / 无视野退回旧判据 / 负对照逐条验证）；71 个既有测试全绿。
+
 ## v0.78.238 — 无 OPERATE_POWER 效果时复位烧制窗口状态（powerBurning / powerBurnCredit 残值）
 
 - `tryProcessPower` 的 `!fx0` 分支（没有 OPERATE_POWER 效果 ⇒ 按普通速率烧）直接 `return`，从不清理**只在 `fx` 分支里写**的 `Memory.marketSettings.powerBurning` / `powerBurnCredit`。效果一过期，这两个值就永久挂在 Memory 里。

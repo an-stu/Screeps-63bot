@@ -2837,6 +2837,31 @@ let pro = {
         data.roadComplete = true;
         return true;
     },
+    /**
+     * 缓存路线上的修路工地数量（修路编制动态平衡的判据，见 trySpawnOuterHarCarrier）。
+     * 只数落在路点格上的 road 工地（与 nearestOuterRoadSite 同口径）——房间里
+     * 别处的工地不是这条路线的活。任一路线房无视野时返回 -1：调用方退回旧判据
+     * （路未完成就派修路爬），盲飞期不误停修路（同 outerRoadComplete 的
+     * 「没视野 ≠ 路没了」原则）。
+     */
+    outerRoadSiteCount(data) {
+        let path = pro.getOuterRoadPath(data);
+        if (!path || !path.length) return -1;
+        let routeTiles = {};
+        path.forEach(p => {
+            (routeTiles[p.roomName] = routeTiles[p.roomName] || {})[p.x + ":" + p.y] = true;
+        });
+        let cnt = 0;
+        for (let roomName in routeTiles) {
+            let room = Game.rooms[roomName];
+            if (!room) return -1;
+            room.find(FIND_MY_CONSTRUCTION_SITES).forEach(site => {
+                if (site.structureType != STRUCTURE_ROAD) return;
+                if (routeTiles[roomName][site.pos.x + ":" + site.pos.y]) cnt++;
+            });
+        }
+        return cnt;
+    },
     /** 蓝图保护：该位置规划了非道路建筑则不修路 */
     roadBlockedByBlueprint(pos) {
         let room = Game.rooms[pos.roomName];
@@ -4183,6 +4208,17 @@ let pro = {
                 // 原来只减生成时间（body×3），换代必然掉产一拍（pathTime 的缺口
                 // 就是车队「团灭震荡」的节拍器）。
                 let carrierBuildCreep = carrierCreeps.find(e => e.getPartCnt(WORK) > 0);
+                // 在途/在孵的 WORK 车也算「已有修路覆盖」：carryCreeps 要等爬抵达矿房
+                // 执行任务才登记，新车还在孵化/赶路时这里看不见它，于是每轮运输补员
+                // 都再造一只修路体型 —— 与下面修路编制盲点同根因（2026-11-12 W26N59
+                // 实测 5 只修路体型车对 ~2 只的运输需求）。有 WORK 在途就造普通体型。
+                if (!carrierBuildCreep) {
+                    carrierBuildCreep = roomCarriers.find(c => {
+                        let t = c.headTask && c.headTask();
+                        if (!t || t.roomName != targetName || t.id != data["id"]) return false;
+                        return c.getPartCnt(WORK) > 0;
+                    });
+                }
                 // 产出速率：**动态算**，不能写死。
                 //
                 // 原来这里是个常量 `EnergyPerTick = 10`，与实际产出脱节，于是 carrier
@@ -4329,10 +4365,33 @@ let pro = {
                 // W34N55 实测只有 1 只 carrier 带 WORK:2，好几天过去路还停在 34 条。
                 // 路修完后 outerRoadComplete 为真，这里自然就不再补了。
                 if (!pro.outerRoadComplete(data)) {
+                    // **修路编制动态平衡**（2026-11-12，W26N59 实测）：专职修路爬只按
+                    // 「路线上真有修路工地」派。路面衰减由在岗 WORK 车的沿途维修负责
+                    // （本格 <90% / 前瞻 <25%，见 harvestEnergyOuterCarryRoadBuilder），
+                    // 而上面的运输补员按体型选择保证每矿点至少 1 只 WORK 车。原来拿
+                    // roadComplete（50% 血线）当编制判据，几个高流量格落在 25~50%
+                    // 衰减带就永久按每矿点 2 只专职修路爬要 spawn —— 实测运输需求
+                    // ~2 只、容器 272/360 近空，却养着 5 只修路体型车在等货。
+                    // 无视野（-1）退回旧判据，盲飞期行为不变（同 outerRoadComplete）。
+                    let siteCnt = pro.outerRoadSiteCount(data);
+                    let builderNeed = siteCnt == 0 ? 0 : OUTER_ROAD_BUILDER_CNT;
                     let builderCnt = carrierCreeps.filter(e => e.getPartCnt(WORK) > 0).length;
+                    // **在途/在孵的修路爬也占编制**：carryCreeps 只在爬抵达矿房执行
+                    // 任务时登记，孵化 150 tick + 赶路 ~80 tick 的窗口里 builderCnt
+                    // 看不见新车 ⇒ 每个 pass 都判 <2 一直派（2026-10-30 给运输路径
+                    // 修过的「在途扣减」盲点，这条分支漏了）。计数键与运输路径同源：
+                    // headTask 的目标矿点（t.id），不是房间。
+                    let builderIds = {};
+                    carrierCreeps.forEach(e => { if (e.getPartCnt(WORK) > 0) builderIds[e.id] = true; });
+                    roomCarriers.forEach(c => {
+                        if (builderIds[c.id]) return;
+                        let t = c.headTask && c.headTask();
+                        if (!t || t.roomName != targetName || t.id != data["id"]) return;
+                        if (c.getPartCnt(WORK) > 0) { builderCnt++; builderIds[c.id] = true; }
+                    });
                     // 同主补员路径：spawnFailure 是本房任何一次孵化失败都会置位的粘滞标记，
                     // 用它挡修路爬会误伤（真机 room.spawn 一定有）。
-                    if (builderCnt < OUTER_ROAD_BUILDER_CNT
+                    if (builderCnt < builderNeed
                         && (!spawnRoom.spawn || spawnRoom.spawn.some(e => !e.spawning && e.isActive()))) {
                         let body = pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart)
                         let tasks = pro.generatorOuterHarCarryTask(data)
