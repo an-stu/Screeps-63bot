@@ -429,12 +429,29 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
             this.addTaskAndExec(UtilsTask.task(source, "goToNearPop"));
             return;
         }
-        if ((source.energy + 100) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
+        // **容器满了就别挖**（2026-11-12，与主房 harvestEnergyKeeper 的
+        // harvestSinkFree 同源 —— 那条闸 0.78.234 只加在主房，外矿这条漏了）。
+        //
+        // 外矿 keeper 站在矿点容器上挖矿，产出先落进脚下容器；容器顶满之后
+        // 每一 tick 的产量直接掉在地上按 0.5%/tick 衰减。实测 W26N59 (29,5)：
+        // 容器 2000/2000 期间（tick 84215307~84215323 三次采样全满），源 (29,4)
+        // 仍以 10.3/tick 下降（584→296/28 tick），同格地面堆 2,728→2,840 上涨
+        // —— 这段产量是纯损失。等搬运把容器抽空、地面堆被捡回去才恢复。
+        //
+        // 判据只看「这一 tick 的溢出有没有地方去」：自己身上有余量、或脚下容器
+        // 还有余量，任一成立就照常挖（能量被接住，不是浪费）。外矿不判 link：
+        // 外矿房没有 stationUpgrade 记忆，link 永不转出，把「link 没满」算成
+        // sink 等于恒真（W26N59 三个 link 常年 0 能量且从不接收）。
+        let harvestSinkFree = this.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            || !!(container && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+        if (source && harvestSinkFree
+            && (source.energy + 100) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
             this.harvest(source);
         }
         // 站在容器上挖矿：store 满后的溢出能量自动进入脚下容器（Screeps
-        // 机制），无需 transfer。若容器被占只能站旁边，则仍手动 transfer
-        // 兜底，避免能量滞留 keeper 身上/掉地上
+        // 机制），无需 transfer；**容器也满时溢出直接掉地**（所以上面那道闸
+        // 必须存在）。若容器被占只能站旁边，则仍手动 transfer 兜底，
+        // 避免能量滞留 keeper 身上/掉地上
         if (container && this.store[RESOURCE_ENERGY] > 0) {
             if (container.hits < container.hitsMax * 0.95 && this.ticksToLive % 3 == 0) {
                 this.repair(container);
