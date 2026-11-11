@@ -75,12 +75,38 @@ PowerCreep.prototype.needOpSource = function () {
     return false;
 }
 
+/**
+ * 「容量悬崖」线：storage 用到这条线以上时，OP_STORAGE 一旦断档就再也回不来。
+ *
+ * OP_STORAGE 的效果只是**临时**扩容（4 级 5M / 5 级 8M），效果一过期容量立刻掉回
+ * 基础 1M，而仓里已有的资源**不会消失** ⇒ `store.getFreeCapacity()` 变成**负数**，
+ * 整仓彻底失去入货能力（11-12 实测 W31N55：4,741,167 / 1,000,000 ⇒ 余量 -3,741,167）。
+ *
+ * 这个状态没有任何自动出口：容量不会自己恢复，只能等 PC 攒够 100 ops 重放效果，
+ * 而 PC 的 ops 收入只有 ~0.11/tick（GENERATE_OPS 4 级 = 6 点 / 50 tick）。
+ * 所以**这条线以上的房，那 100 ops 是硬预算**，见 needOpSpawn 的预留判据。
+ */
+let OPS_STORAGE_CLIFF_CNT = 950000
+
+PowerCreep.prototype.storageOnCapacityCliff = function () {
+    if (!this.powers[PWR_OPERATE_STORAGE]) return false
+    let room = this.mainRoom()
+    let storage = room && room.storage
+    return !!(storage && storage.store.getUsedCapacity() > OPS_STORAGE_CLIFF_CNT)
+}
+
 PowerCreep.prototype.needOpStorage = function (storage) {
     let pcPower = this.powers[PWR_OPERATE_STORAGE]//
     if (!storage) return false;
     let effect = storage.effects && storage.effects.find(e => e.power == PWR_OPERATE_STORAGE);
+    // **付不起就别挂任务**（2026-11-12 W31N55）：usePower 的 ops 成本是 100，
+    // 而 OpStorage 对 ERR_NOT_ENOUGH_RESOURCES 是「弹栈交给别人」—— 不在这里拦，
+    // 就会每 3 tick 挂一次、下一 tick 必然失败弹掉，PC 整个周期都耗在这条注定
+    // 失败的重试上（实测 P7 ops=40 时 tasks 恒为空、效果已断档 1 天以上）。
+    // 拦掉之后 PC 会继续用 GENERATE_OPS 自己慢慢攒，攒到 100 自然重新开闸。
+    if ((this.store[RESOURCE_OPS] || 0) < POWER_INFO[PWR_OPERATE_STORAGE].ops) return false;
     let shouldOperate = pcPower && !pcPower.cooldown && pcPower.level >= 1 &&
-        storage.store.getUsedCapacity() > 950000 &&
+        storage.store.getUsedCapacity() > OPS_STORAGE_CLIFF_CNT &&
         (!effect || effect.ticksRemaining < 100);
     return shouldOperate ? storage : false;
 }
@@ -171,6 +197,13 @@ PowerCreep.prototype.needOpSpawn = function () {
     if (!pcPower || pcPower.cooldown > 0) return false;
     // ops 很贵：至少保留 200 ops（两次效果）。
     if ((this.store[RESOURCE_OPS] || 0) < 200) return false;
+    // **容量悬崖上的房，OP_STORAGE 的 100 ops 要先扣出来**（2026-11-12 W31N55）：
+    // 一次 OP_SPAWN 花 100 ops ≈ 这只 PC 900 tick 的全部 ops 收入，换来的只是
+    // 缩短 10~40% 孵化时间；而同房 OP_STORAGE 断档 = storage 永久卡死（见
+    // storageOnCapacityCliff 的说明）。所以悬崖边上必须留出 200 + 100 才允许花。
+    // 不是给 spawn 排队重新排优先级，只是给一个**只提速**的技能加预算上限。
+    if (this.storageOnCapacityCliff()
+        && (this.store[RESOURCE_OPS] || 0) < 200 + POWER_INFO[PWR_OPERATE_STORAGE].ops) return false;
     let room = this.mainRoom();
     if (!room || !room.my) return false;
     // 什么时候值得花这笔 ops：

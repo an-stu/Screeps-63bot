@@ -326,9 +326,14 @@ let pro = {
             if(room&&room.my&&!room.controller.isPowerEnabled){
                 if(upgraderCnt<=6||room.level>=5)pc.addTask(UtilsTask.task(room.controller,"roomPowerEnable"))
             }
-            else if(room.controller.isPowerEnabled&&room.level>=6&&room.storage&&room.terminal&&room.storage.store[RESOURCE_ENERGY]>900000
-                &&pc.powers[PWR_OPERATE_STORAGE]&&pc.powers[PWR_OPERATE_STORAGE].cooldown==0
-                &&pc.store[RESOURCE_OPS]>=100){
+            else if(room.controller.isPowerEnabled&&room.level>=6&&room.storage&&room.terminal
+                &&pc.needOpStorage(room.storage)){
+                // 判据统一到 needOpStorage（2026-11-12）：这里原来另写一套
+                // 「storage 能量 > 90 万 + ops >= 100」，和 OPF 那条链的
+                // 「已用容量 > 95 万」是同一个决策的两个阈值。对 T3 储备房
+                // （storage 里 4.7M 化合物、能量只有 14 万）第一套**恒假**，
+                // 于是效果断档后容量掉回 1M 就再没人扩回来 —— 自锁。
+                // 现在两处共用同一判据（含付得起 100 ops 的检查）。
                 pc.addTask(UtilsTask.task(pc.mainRoom().storage,"goToNearPop"))
                 pc.addTask(UtilsTask.task(room.storage,"OpStorage"))
             }

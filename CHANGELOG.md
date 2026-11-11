@@ -1,3 +1,34 @@
+## v0.78.241 — OP_STORAGE 容量悬崖：付不起就不挂任务 + OP_SPAWN 让出预算 + 阈值同源
+
+- **现场（2026-11-12 巡检「必须处理」）**：W31N55 storage `4,741,167 / 1,000,000`，
+  `getFreeCapacity()` = **-3,741,167** —— 效果过期后容量从 5M 掉回基础 1M，仓里 4.7M
+  资源（7 种 T3 强化化合物 + 33854 power）不会消失，于是整仓**再也进不了货**。
+  该房唯一的 PC `P7` 只有 46~52 ops，而 `usePower(PWR_OPERATE_STORAGE)` 成本是 **100**。
+- **根因（两层）**：
+  1. `needOpStorage` 只看「用满 95 万 + 效果快没了」，**不看付不付得起**。OpStorage 对
+     `ERR_NOT_ENOUGH_RESOURCES` 是弹栈 → 每 3 tick 挂一次、下一 tick 必然失败弹掉，
+     PC 整个周期耗在这条注定失败的重试上（实测 tasks 恒空）。
+  2. 同一个决策有两个阈值：`strategy_GCLRoom` 写的是「storage **能量** > 90 万 + ops >= 100」，
+     `needOpStorage` 写的是「**已用容量** > 95 万」。对 T3 储备房（能量 14 万、化合物 4.7M）
+     第一套**恒假** ⇒ 断档后再没人扩容量 = 自锁。
+- **改法**：
+  - `needOpStorage` 增加 `store[ops] >= POWER_INFO[PWR_OPERATE_STORAGE].ops` 的前置检查；
+    拦掉后 PC 继续用 `GENERATE_OPS` 自产（4 级 6 点 / 50 tick），攒够 100 自动重开闸。
+  - 新增 `storageOnCapacityCliff()`（`getUsedCapacity() > OPS_STORAGE_CLIFF_CNT=950000`），
+    `needOpSpawn` 在悬崖边上要求 `200 + 100`：一次 OP_SPAWN 花掉的 100 ops ≈ 该 PC
+    900 tick 的全部收入，换来的只是孵化提速 10~40%，不能挤掉容量悬崖的刷新预算。
+  - `strategy_GCLRoom` 的 OP_STORAGE 分支改为复用 `pc.needOpStorage(room.storage)`，
+    删掉「能量 > 90 万 / ops >= 100」两处重复判据。
+- **未改**：`needOpPowerSpawn`（用户指定的烧 power 链，另有 400 ops + 600 库存双重门槛）、
+  任何 spawn / 外矿的优先级顺序。
+- **回归**：新增 `op-storage-cliff`（付不起拦停 / 边界 100 / 无悬崖不放宽 / **剥掉判据的
+  变异负对照** / 95 万只出现一次 / OP_SPAWN 预留 250-300 边界 / GCL 旧阈值已删），
+  74 个测试 + core task audit（77 任务 / 212 handler）全绿。
+- 待决策（沿用）：W31N55 缺 ops 的**供给**问题本身没修 —— 该房 terminal ops=0，而
+  `RESOURCE_OPS=3000` 的平衡阀要求发送端 terminal 满格且运费够，实测没发过来。
+  要不要给 OPF 房做一条「PC 施法预算」专用补 ops 线（powerSpawn.process 或定向 send），
+  属于战略选择，先报用户。
+
 ## v0.78.240 — RoomVisual 缓存按 tick 失效 + MODULES.tsv 重新生成（两项低风险清理）
 
 - **helper_visual.getRoomVisual 跨 tick 静默不渲染**（CODE_REVIEW 4-2  flagged，9 月审查遗留）：
