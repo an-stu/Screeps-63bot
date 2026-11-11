@@ -44,6 +44,9 @@ function makeContext(roomSpecs, time) {
         const room = new ctx.Room(spec.name);
         room.storage = spec.storage;
         room.find = type => type == ctx.FIND_STRUCTURES ? [spec.storage] : []; // 供 mass_stores 解析 id
+        // 生产环境由 prototype_room.js 提供 getStructures()（每 tick 实例缓存）；
+        // 建筑缓存模块现在复用它，夹具按同一契约委托到 find。
+        room.getStructures = () => room.find(ctx.FIND_STRUCTURES);
         room.lookForAtArea = () => [];   // LOOK_* 扫描空结果
         ctx.Room.prototype.update.call(room); // 预热缓存 = new Hub(room)
         return room;

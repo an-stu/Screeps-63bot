@@ -214,7 +214,7 @@ PowerCreep.prototype.needOpTower = function () {
     if ((this.store[RESOURCE_OPS] || 0) < 100) return false;
     let room = this.mainRoom();
     if (!room || !room.my || !room.tower || !room.tower.length) return false;
-    let hostile = room.find(FIND_HOSTILE_CREEPS);
+    let hostile = room.getHostileCreeps();
     if (!hostile.length && room.find(FIND_HOSTILE_POWER_CREEPS).length == 0) return false;
     let tower = room.tower.find(t => (t.energy || 0) >= 10
         && (!t.effects || !t.effects.some(e => e.power == PWR_OPERATE_TOWER)));

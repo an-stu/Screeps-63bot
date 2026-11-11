@@ -52,11 +52,13 @@ let pro = {
         if (pc.needGenerateOps()) pc.generateOps();
         let mainRoom = pc.mainRoom();
         if (!mainRoom) return;
+        // needPower 纯读；会改任务栈的停车抢占分支要么提前 return 要么不进 isFree 链，两处可安全复用同一结果。
+        let factoryNeedsPower = !!(global.StationFactory && mainRoom.factory
+            && pc.powers[PWR_OPERATE_FACTORY] && StationFactory.needPower(mainRoom));
         // 工厂卡在 produce + !powered 时，PC 可能正停在 goToNearPop（停车）上，
         // 导致 needPower 永远轮不到。停车可以稍后再做，先把工厂的电补上。
         // （E53S21 hydraulics 曾因此 16k tick 不推进；2026-10-18）
-        if (global.StationFactory && mainRoom.factory && pc.powers[PWR_OPERATE_FACTORY]
-            && StationFactory.needPower(mainRoom)) {
+        if (factoryNeedsPower) {
             let head = pc.headTask && pc.headTask();
             if (head && head.taskName == "goToNearPop") {
                 pc.popTask();
@@ -75,12 +77,12 @@ let pro = {
             else if (obj = pc.needOpSource()) pc.addTask(UtilsTask.task(obj, "OpSource"))
             else if (obj = pc.needOpSpawn()) pc.addTask(UtilsTask.task(obj, "OpSpawn"))
             else if (obj = pc.needOpTower()) pc.addTask(UtilsTask.task(obj, "OpTower"))
-            else if (global.StationFactory && mainRoom.factory && pc.powers[PWR_OPERATE_FACTORY] && StationFactory.needPower(mainRoom)) pc.addTask(UtilsTask.task(mainRoom.factory, "OpFactory"))
+            else if (factoryNeedsPower) pc.addTask(UtilsTask.task(mainRoom.factory, "OpFactory"))
             else if (obj = pc.needOpPowerSpawn()) pc.addTask(UtilsTask.task(obj, "OpPowerSpawn"))
             // else if (obj = pc.needOpLab()) pc.addTask(UtilsTask.task(obj, "OpLab"))
             else if (obj = pc.needOpMineral()) pc.addTask(UtilsTask.task(obj, "OpMineral"))
             else if (pc.needSaveOps()) pc.saveRoomOps();
-            else if (Game.time % 60 == 0 || pc.room.find(FIND_HOSTILE_CREEPS).length) {
+            else if (Game.time % 60 == 0 || pc.room.getHostileCreeps().length) {
                 let obj = mainRoom.storage || mainRoom.terminal || mainRoom.powerSpawn
                 if (obj) pc.addTask(UtilsTask.task(obj, "goToNearPop"));
             }

@@ -150,14 +150,15 @@ for (let i = 0; i < global.RES_PRIORITY_LIST.length; i++) {
 
 
 Creep.prototype.sayHeadTask = function () {
-    let head = this.memory.tasks.head();
+    let head = this.memory.tasks[0];
     if (head) {
         HelperVisual.showText(this, head.taskName)
         // this.say(head.taskName)
     }
 };
 Creep.prototype.sayLastTask = function () {
-    let head = this.memory.tasks.last();
+    let tasks = this.memory.tasks;
+    let head = tasks[tasks.length - 1];
     if (head) {
         HelperVisual.showText(this, head.taskName)
         // this.say(head.taskName)
@@ -193,23 +194,25 @@ Creep.prototype.popTask = function () {
 };
 
 Creep.prototype.lastTask = function () {
-    return this.memory.tasks.last()
+    let tasks = this.memory.tasks;
+    return tasks[tasks.length - 1]
 };
 Creep.prototype.headTask = function () {
-    return this.memory.tasks.head()
+    return this.memory.tasks[0]
 };
 
 Creep.prototype.lastTaskObj = function () {
-    let last = this.memory.tasks.last();
+    let tasks = this.memory.tasks;
+    let last = tasks[tasks.length - 1];
     if (last) return Game.getObjectById(last.id)
 };
 Creep.prototype.headTaskObj = function () {
-    let head = this.memory.tasks.head();
+    let head = this.memory.tasks[0];
     if (head) return Game.getObjectById(head.id)
 };
 
 Creep.prototype.headTaskFlag = function () {
-    let head = this.memory.tasks.head();
+    let head = this.memory.tasks[0];
     if (head) return Game.flags[head.id] || Game.flags[head.flagName];
 };
 

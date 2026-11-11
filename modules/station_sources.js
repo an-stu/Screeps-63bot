@@ -280,9 +280,10 @@ const SOURCE_REGEN_TICKS = 300;
 
 Creep.prototype.registerStationSources = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
-    let rm = Memory.rooms[this.headTask().roomName];
-    if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
-        let source = rm[pro.stationName][this.headTask().id];
+    let head = this.headTask();
+    let rm = Memory.rooms[head.roomName];
+    if (rm && rm[pro.stationName] && rm[pro.stationName][head.id]) {
+        let source = rm[pro.stationName][head.id];
         if (this.spawning) {
             source["spawnTime"] = Game.time
         }
@@ -1246,9 +1247,10 @@ Creep.prototype.outerDefense = function () {
 };
 Creep.prototype.registerStationSourcesDefenseOutRoom = function () {
     // let rm = Memory.rooms[this.memory["roomName"]];
-    let rm = Memory.rooms[this.headTask().roomName];
-    if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
-        let source = rm[pro.stationName][this.headTask().id];
+    let head = this.headTask();
+    let rm = Memory.rooms[head.roomName];
+    if (rm && rm[pro.stationName] && rm[pro.stationName][head.id]) {
+        let source = rm[pro.stationName][head.id];
         let rmHarList = source["defenseCreeps"] || [];
         // 同 registerStationSourcesCarryOutRoom：内容变化才写回
         let changed = false;
@@ -1392,7 +1394,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         // while its task index still names that same point. Force one exact
         // cached step immediately, otherwise it can repeatedly select the
         // border as its own movement target and never enter the next tile.
-        let borderIndex = pro.nextRoadPathIndex(roadPath, this.pos);
+        let borderIndex = this.pos.isBorder() ? pro.nextRoadPathIndex(roadPath, this.pos) : undefined;
         if (this.pos.isBorder() && borderIndex.dist == 0) {
             let nextIndex = borderIndex.index + roadDir;
             if (nextIndex >= 0 && nextIndex < roadPath.length) task.pathIndex = nextIndex;
