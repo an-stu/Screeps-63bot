@@ -1,3 +1,11 @@
+## v0.78.236 — RawMemory 段遥测镜像，Grafana Cloud 直读无需本地进程
+
+- 新增 `helper_telemetrySegment`：每 10 tick 把运行遥测写入 RawMemory 段 90，供 Grafana Cloud 的 Infinity 数据源直接读取 `/api/user/memory-segment`（Memory API 全量 gz 压缩，Infinity 无法解压；段接口返回原始字符串）。
+- 段内容：`latest` 快照（tick、CPU/均值、bucket、爬数/power creep、错误数、GCL/GPL 百分比与等级、阶段/角色/分房 CPU、storage+terminal+factory+lab 资源汇总）+ `rows` 环形历史（600 行 × 7 列，约 6000 tick）。
+- 成本控制：只在 `Game.time % 10 == 0` 写入，整段约 30-40KB；资源汇总只扫核心库存建筑；写段异常全部吞掉，不影响主循环。首个 tick 先 `setActiveSegments([90])`，避免首周期丢写。
+- 新增回归：段激活时机、10 tick 节奏、latest 字段与资源聚合、环形上限裁剪、global 重置后从段恢复、异常不冒泡。
+- 面板侧：Grafana Cloud 仪表盘改用 Infinity 直读段数据（本地面板进程仅作参考，可停用）。
+
 ## v0.78.235 — CPU 第一批：可证等价减负 + keeper 工地查表
 
 - 任务栈访问器（headTask/lastTask/lastTaskObj/headTaskObj/headTaskFlag）与数组 head/last 改直接下标，空栈/稀疏/含假值元素与 lodash 语义逐例一致；find/sum/contains 覆盖本批未动（动态谓词/thisArg/稀疏审计未完成）。

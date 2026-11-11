@@ -356,6 +356,7 @@ let main = function () {
     HelperCpuUsed.exec();
     HelperCpuUsed.recordLongTerm(Game.cpu.getUsed());
     updateCodeHealth();
+    HelperTelemetrySegment.exec();
     if (Game.time % 20) return;
   
     if (!Memory.stats) Memory.stats = {}
