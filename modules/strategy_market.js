@@ -721,32 +721,48 @@ let pro = {
             results.push({ product, margin, recipe, totalCost, revenue, salePrice });
         }
 
-        // 按利润率降序，只处理 > marginPct% 的
+        // 按利润率降序；两条上限分开算：
+        //  - capByComp（建新单）：保持该合成链利润率 ≥ marginPct 时的最高原料价；
+        //  - beCapByComp（维护已有单）：盈亏平衡价（利润率 0 时的最高原料价）。
+        // 用户 11-12：卖方不挂卖单也会直接 deal 最高买价 ⇒ 已有单必须持续保持最高价；
+        // 但「新挂单」仍要有足够利润（marginPct）。已有单只在盈亏平衡价以内追价，
+        // 链利润跌破门槛时也不至于买亏。
         results.sort((a, b) => b.margin - a.margin);
-        // 汇总每个 T0/T1 原料的「链上限价」：保持该合成链利润率 ≥ marginPct 时
-        // 原料能出的最高价。同一原料可能出现在多条链里，取最高上限。
         let capByComp = {};
+        let beCapByComp = {};
         let marginByComp = {};
         for (let r of results) {
-            if (r.margin < marginPct) break;
             let budget = r.revenue * (1 - marginPct / 100);
             for (let comp in r.recipe.components) {
                 if (!t0Set.has(comp) && !t1Set.has(comp)) continue;
                 let n = r.recipe.components[comp];
                 let hist = StrategyMarketPrice.getResTypeHistory(comp) || 0.01;
-                let cap = (budget - (r.totalCost - n * hist)) / n;
+                let otherCost = r.totalCost - n * hist;
+                let beCap = (r.revenue - otherCost) / n;
+                if (beCap > (beCapByComp[comp] || 0)) beCapByComp[comp] = beCap;
+                if (r.margin < marginPct) continue;
+                let cap = (budget - otherCost) / n;
                 if (cap > (capByComp[comp] || 0)) {
                     capByComp[comp] = cap;
                     marginByComp[comp] = r.margin;
                 }
             }
         }
-        // 逐原料建单/调价：被市场买价超越时，在链上限内追价（目标价比现价高 2%
-        // 以上才撤单重挂，避免为 1% 价差反复付 5% 创建费）。
-        for (let comp in capByComp) {
-            let cap = capByComp[comp];
+        // 逐原料建单/调价：新建要求利润率达标；已有单即使链利润跌破门槛，也在
+        // 盈亏平衡价以内保持最高买价（被超越后追价，目标价比现价高 2% 以上才
+        // 撤单重挂，避免为 1% 价差反复付 5% 创建费）。
+        let scanComps = {};
+        for (let comp in capByComp) scanComps[comp] = true;
+        _.values(Game.market.orders).forEach(o => {
+            if (o.type == ORDER_BUY && o.remainingAmount > 0 && beCapByComp[o.resourceType]) {
+                scanComps[o.resourceType] = true;
+            }
+        });
+        for (let comp in scanComps) {
             let our = _.values(Game.market.orders).find(o => o.remainingAmount > 0
                 && o.resourceType == comp && o.type == ORDER_BUY);
+            let cap = our ? beCapByComp[comp] : capByComp[comp];
+            if (!(cap > 0)) continue;
             // 竞争对手最高买价（排除自家单，否则会自己跟自己加价）
             let buyList = pro.getAllOrdersCacheList(comp, ORDER_BUY).filter(o => !our || o.id != our.id);
             let buyHigh = buyList.length ? buyList.maxBy(o => o.price).price : 0;
@@ -755,7 +771,7 @@ let pro = {
             if (decision.action == "none") continue;
             if (decision.action == "reprice") {
                 Game.market.cancelOrder(our.id);
-                console.log(`[scanUnderpriced] reprice ${comp} ${our.price.toFixed(2)} -> ${decision.price.toFixed(2)} (chain margin ${Math.round(marginByComp[comp])}%)`);
+                console.log(`[scanUnderpriced] reprice ${comp} ${our.price.toFixed(2)} -> ${decision.price.toFixed(2)} (margin ${Math.round(marginByComp[comp] || 0)}%, break-even cap ${beCapByComp[comp].toFixed(2)})`);
             }
             Game.market.createOrder({
                 type: ORDER_BUY,
