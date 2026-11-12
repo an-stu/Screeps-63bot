@@ -70,4 +70,13 @@ for (let i = 1; i < dueHits.length; i++) {
     assert.deepEqual([d.action, d.price], ["create", 0.01]);
 }
 
+// ③ 口径钉子：默认利润率 200%，且 margin 必须按「利润/成本」计算（与
+//    StrategyMarketPrice.calculateAllCommoditiesProfit 的 profitMargin 同源）。
+assert.ok(source.includes("scanMarginPct) || 200"),
+    "default scan margin must be 200% (profit/cost)");
+assert.ok(source.includes("(revenue - totalCost) / Math.max(totalCost, 1) * 100"),
+    "chain margin must be profit/cost, not profit/revenue");
+assert.ok(source.includes("r.revenue / (1 + marginPct / 100)"),
+    "new-order cost budget must use revenue / (1 + margin) for profit/cost semantics");
+
 console.log("market reprice checks passed");

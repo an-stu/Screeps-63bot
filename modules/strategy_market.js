@@ -686,7 +686,9 @@ let pro = {
         if (!scanUnderpricedDue()) return;
         if (Game.market.credits < 1000000) return;
 
-        let marginPct = Number(Memory.marketSettings && Memory.marketSettings.scanMarginPct) || 50;
+        // 利润率口径 = 利润 / 成本（与 StrategyMarketPrice.calculateAllCommoditiesProfit
+        // 的 profitMargin 同源）。用户 11-12：门槛 50 太少，改为默认 200%（利润 ≥ 成本 2 倍）。
+        let marginPct = Number(Memory.marketSettings && Memory.marketSettings.scanMarginPct) || 200;
         let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY) || 0.05;
 
         // 从 COMMODITIES 动态构建合成链：找所有「产出的商品在市场上有买单价」
@@ -717,7 +719,7 @@ let pro = {
             if (salePrice <= 0) continue;
 
             let revenue = recipe.amount * salePrice;
-            let margin = (revenue - totalCost) / Math.max(revenue, 1) * 100;
+            let margin = (revenue - totalCost) / Math.max(totalCost, 1) * 100;
             results.push({ product, margin, recipe, totalCost, revenue, salePrice });
         }
 
@@ -732,7 +734,8 @@ let pro = {
         let beCapByComp = {};
         let marginByComp = {};
         for (let r of results) {
-            let budget = r.revenue * (1 - marginPct / 100);
+            // 利润率 = 利润/成本 ⇒ 允许的总成本 = revenue / (1 + marginPct%)
+            let budget = r.revenue / (1 + marginPct / 100);
             for (let comp in r.recipe.components) {
                 if (!t0Set.has(comp) && !t1Set.has(comp)) continue;
                 let n = r.recipe.components[comp];
