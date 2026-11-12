@@ -1,3 +1,11 @@
+## v0.78.246 — T0/T1 扫货：门槛 1000%、成本计入 ops、只买 T0/T1 原料
+
+- 用户 11-12：利润率门槛改为 **1000%**（利润 ≥ 成本 10 倍），`Memory.marketSettings.scanMarginPct` 可覆盖。
+- 成本核算补全：`COMMODITIES.components` 只含原料与能量，**不含 ops**；现在按 `100/floor(1000/cooldown)` 计入每轮 ops 成本（按 ops 历史均价估值），避免高估利润。能量本来就在 components 里，一并计入。
+- 明确购买范围：**只买 T0/T1 原料** —— T0 = silicon/metal/biomass/mist（deposit），T1 = wire/alloy/cell/condensate；switch/tube 等更高等级中间品不直接买入，由工厂合成。
+- 已有买单的追价逻辑不变（盈亏平衡价内保持最高买价）；新单只在链利润率 ≥ 1000% 时建。
+- 回归更新：默认 1000、利润/成本公式、成本预算公式、ops 计入成本四条钉子。
+
 ## v0.78.245 — T0/T1 扫货利润门槛改为 200%（利润/成本口径）
 
 - 用户 11-12：50% 门槛太低，改为默认 **200%**（利润 ≥ 成本 2 倍），可用 `Memory.marketSettings.scanMarginPct` 覆盖。

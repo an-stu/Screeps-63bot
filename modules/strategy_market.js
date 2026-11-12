@@ -687,12 +687,19 @@ let pro = {
         if (Game.market.credits < 1000000) return;
 
         // 利润率口径 = 利润 / 成本（与 StrategyMarketPrice.calculateAllCommoditiesProfit
-        // 的 profitMargin 同源）。用户 11-12：门槛 50 太少，改为默认 200%（利润 ≥ 成本 2 倍）。
-        let marginPct = Number(Memory.marketSettings && Memory.marketSettings.scanMarginPct) || 200;
+        // 的 profitMargin 同源）。用户 11-12：门槛改为默认 1000%（利润 ≥ 成本 10 倍）。
+        let marginPct = Number(Memory.marketSettings && Memory.marketSettings.scanMarginPct) || 1000;
         let energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY) || 0.05;
+        // ops 也是成本：工厂每轮生产消耗 100/floor(1000/cooldown) 点 ops。
+        // COMMODITIES.components 只含能量与原料，不含 ops —— 不计入会高估利润。
+        let opsPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_OPS) || 0;
 
         // 从 COMMODITIES 动态构建合成链：找所有「产出的商品在市场上有买单价」
-        // 且「原料包含 T0 deposit 或 T1 商品」的配方
+        // 且「原料包含 T0 deposit 或 T1 商品」的配方。
+        // 用户 11-12：**只买 T0/T1 原料** —— T0 = 四种 deposit（silicon/metal/
+        // biomass/mist），T1 = wire/alloy/cell/condensate；更高等级的中间品
+        // （switch/tube/...）不直接买入，由工厂逐级合成。链利润率按完整配方核算
+        // （含 energy 与 ops）。
         let t0Set = new Set(["silicon", "metal", "biomass", "mist"]);
         let t1Set = new Set(["wire", "alloy", "cell", "condensate"]);
         let results = [];
@@ -703,7 +710,7 @@ let pro = {
             let hasT0orT1 = Object.keys(recipe.components).some(c => t0Set.has(c) || t1Set.has(c));
             if (!hasT0orT1) continue;
 
-            // 原料总成本（按历史均价算，实际买入按市场价）
+            // 原料总成本 = 全部 components（含 energy，按历史均价）+ 本轮消耗的 ops
             let totalCost = 0;
             for (let comp in recipe.components) {
                 let price = StrategyMarketPrice.getResTypeHistory(comp);
@@ -711,6 +718,9 @@ let pro = {
                 totalCost += recipe.components[comp] * price;
             }
             if (totalCost <= 0) continue;
+            if (recipe.level > 0 && recipe.cooldown && opsPrice > 0) {
+                totalCost += 100 / Math.max(1, Math.floor(1000 / recipe.cooldown)) * opsPrice;
+            }
 
             // 产品收入（按当前最高买价或历史均价）
             let buyList = pro.getAllOrdersCacheList(product, ORDER_BUY);

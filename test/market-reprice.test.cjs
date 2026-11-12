@@ -70,13 +70,18 @@ for (let i = 1; i < dueHits.length; i++) {
     assert.deepEqual([d.action, d.price], ["create", 0.01]);
 }
 
-// ③ 口径钉子：默认利润率 200%，且 margin 必须按「利润/成本」计算（与
-//    StrategyMarketPrice.calculateAllCommoditiesProfit 的 profitMargin 同源）。
-assert.ok(source.includes("scanMarginPct) || 200"),
-    "default scan margin must be 200% (profit/cost)");
+// ③ 口径钉子：默认利润率 1000%，margin 按「利润/成本」计算（与
+//    StrategyMarketPrice.calculateAllCommoditiesProfit 的 profitMargin 同源），
+//    且成本必须计入 ops（COMMODITIES.components 不含 ops）。
+assert.ok(source.includes("scanMarginPct) || 1000"),
+    "default scan margin must be 1000% (profit/cost)");
 assert.ok(source.includes("(revenue - totalCost) / Math.max(totalCost, 1) * 100"),
     "chain margin must be profit/cost, not profit/revenue");
 assert.ok(source.includes("r.revenue / (1 + marginPct / 100)"),
     "new-order cost budget must use revenue / (1 + margin) for profit/cost semantics");
+assert.ok(source.includes("getResTypeHistory(RESOURCE_OPS)"),
+    "ops must be included in the chain cost");
+assert.ok(source.includes("recipe.cooldown && opsPrice > 0"),
+    "ops cost is charged once per production run based on cooldown");
 
 console.log("market reprice checks passed");
