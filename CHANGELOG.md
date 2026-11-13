@@ -1,3 +1,23 @@
+## v0.78.248 — 回避 W31N59（Daozen RCL8 塔房），deposit 队伍不再走最短路送死
+
+- **根因**：`avoidRooms`（BetterMove 的「永不踏入」名单）是一份手写常量，漏了 W31N59。而
+  `strategy_deposits` 的跨房走位只靠 `moveTo(flag)`，路线完全由 `routeCallback` 按这份名单裁剪
+  —— 名单缺房就等于没人拦。W31N55 → W31N60 的**最短路必经** W31N59（Daozen 的 RCL8 房，
+  2 座塔 + 42 面墙/rampart），进去就是死。
+- **线上实证**（11-13 shard3）：W31N59 内 3 座我方墓碑 —— 2 只 `harDeposits`（22WORK/6CARRY/22MOVE）
+  + 1 只 `carrierDeposits`（23CARRY/23MOVE），全部停在 (17,48) 南入口，墓碑 ttd 167/176/189
+  ⇒ 同批团灭；`deposit_W31N55_W31N60_22_33`（silicon、`lastCooldown` 0、`beAttackTime` 74 tick 前
+  又刷新）⇒ 替换爬正在往同一个坑里走。单只采集爬 ≈ 3,600 能量，已白扔 ≈ 1.1 万能量。
+- **修法**：把 `W31N59` 加进 `modules/超级移动优化hotfix 0.9.4.js` 的 `avoidRooms` 常量（发版后
+  载入即生效，且代码更新会重置模块级 path 缓存 ⇒ 在途爬当 tick 重算路线）。不改任何优先级、不动
+  deposit 派兵节奏与门槛。
+- **可达性已验证**：`Game.map.findRoute("W31N55","W31N60")` 原 5 房
+  `W31N56,57,58,59,60`；回避后 7 房 `W31N56,57,58,W30N58,W30N59,W30N60,W31N60`（可达，多 2 房）。
+- 回归：`test/deposit-route-avoid.test.cjs` —— 剥注释后解析 `avoidRooms` 字面量断言 W31N59 在列；
+  负对照：① 只在注释里出现的 `W19N13` 不得被当成成员（防「剥注释」退化）；② deposit 目标房
+  `W31N60` 不得被拉黑；③ 运行时 `Memory.betterMoveAvoidRooms` 追加通道与载入时建 map 必须保留。
+  已验证「只留注释、删掉条目」时该测试按行为失败。
+
 ## v0.78.247 — PB 奶妈在任务结束后回主房回收（不再搁浅到老死）
 
 - **根因**：`StrategyPowerBank.exec` 在 `powerBank` 被打掉/过期时 `flag.remove()`（唯一删旗路径）。活下来的

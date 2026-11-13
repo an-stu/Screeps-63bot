@@ -84,7 +84,13 @@ let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路�
 let hostileCostMatrixClearDelay = 500; // 自动清理相应时间前创建的其他玩家房间的costMatrix
 let coreLayoutRange = 3; // 核心布局半径，在离storage这个范围内频繁检查对穿（减少堵路的等待
 let avoidRooms = [
-    "W35N51", "W33N51", "W32N52", "W31N53", "W29N56", "W28N56", "E55S33", "E56S33", "E56S38", "W21N54", 'E59S29', 'E47S29', 'W36N52'
+    "W35N51", "W33N51", "W32N52", "W31N53", "W29N56", "W28N56", "E55S33", "E56S33", "E56S38", "W21N54", 'E59S29', 'E47S29', 'W36N52',
+    // W31N59：Daozen 的 RCL8 塔房，W31N55 → W31N60(silicon deposit) 的**最短路必经**。
+    // 2026-11-13 实测：3 只 deposit 爬（2×22WORK 采集 + 1×23CARRY 搬运）在 (17,48) 南入口
+    // 被塔打死（墓碑 ttd 167/176/189，约同 tick 团灭），18,875 能量车白扔；
+    // `deposit_W31N55_W31N60_22_33` 的 beAttackTime 随后又刷新 74 tick ⇒ 替换爬正在往里走。
+    // 回避后仍有路：W31N56,57,58 → W30N58,59,60 → W31N60（7 房 vs 原 5 房，已验证 findRoute 可达）。
+    "W31N59"
 ]      // 永不踏入这些房间 ,'E8N19','E8N18','W19N13'
 let avoidExits = {
     'fromRoom': 'toRoom'
