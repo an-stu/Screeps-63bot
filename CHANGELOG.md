@@ -1,3 +1,17 @@
+## v0.78.247 — PB 奶妈在任务结束后回主房回收（不再搁浅到老死）
+
+- **根因**：`StrategyPowerBank.exec` 在 `powerBank` 被打掉/过期时 `flag.remove()`（唯一删旗路径）。活下来的
+  `HealerPB` 从此 `Game.flags[task.flagName]` 为 undefined ⇒ `HealerPB` 里所有 `flag && ...` 条件全部短路 ⇒
+  只剩结尾的 `heal(this)`，奶妈在外矿房**原地站到老死**。
+- **线上实证**（11-13 E60S39）：`shard3_84237650_2`（PBer，boost 过）flag 已删、`memory.attacker` 已死、
+  `task.id` 指向的 powerBank `getObjectById` = null、ttl 447、零位移；是全账号 55 条任务里**唯一**的死 id。
+- **修法**：`HealerPB` 开头判任务旗 —— 旗没了 = 任务结束 ⇒ `popTask()` + `recycleCreep`（`recycleCreep` 自带跨房
+  走位，ttl<700 时先 unboost，**回收化合物**）；没有主房可回时按 `AttackerPB` 的老做法 `suicide()`，不留永动闲爬。
+- 与用户 10-10 的「任务要么不做、要么做完」一致：只是任务真的结束了（bank 没了）才回收，旗在时一路照旧
+  （负对照测试锁死「旗还在时任务链不许被动」）。
+- 回归：`test/pb-healer-orphan-recycle.test.cjs`（旗删 ⇒ 转 recycle 并当 tick 执行 / 无主房 ⇒ suicide /
+  旗在 ⇒ 不动任务链 / 源码钉子：判旗必须在找敌对之前）。负对照已验：去掉修复后该测试按**行为**失败。
+
 ## v0.78.246 — T0/T1 扫货：门槛 1000%、成本计入 ops、只买 T0/T1 原料
 
 - 用户 11-12：利润率门槛改为 **1000%**（利润 ≥ 成本 10 倍），`Memory.marketSettings.scanMarginPct` 可覆盖。

@@ -124,6 +124,19 @@ Creep.prototype.PBAttackBorder = function () {
 Creep.prototype.HealerPB = function () {
     let task = this.headTask();
 
+    // 旗没了 = 任务结束。exec 里删旗只有一条路径：`powerBank` 已被打掉/过期
+    // （`flag.remove()`）。原来这里不判，直接往下走：`Game.flags[task.flagName]`
+    // 为 undefined ⇒ 下面所有 `flag && ...` 全部短路 ⇒ 只剩结尾的 `heal(this)`，
+    // 奶妈在外矿房原地站到老死（11-13 线上 E60S39 实测 shard3_84237650_2：
+    // flag 已删、attacker 已死、task.id 指向的 powerBank 也 null，ttl 447 无任何动作，
+    // 是死 id 探针唯一命中项）。按用户 10-10「任务要么不做、要么做完」：回主房回收。
+    // `recycleCreep` 自带跨房走位，且 ttl<700 时先 unboost 回收化合物（奶妈必带 boost）。
+    let missionFlag = Game.flags[task.flagName];
+    if (!missionFlag) {
+        if (!this.mainRoom()) return this.suicide();
+        return this.popTask().addTask(UtilsTask.taskData("recycleCreep")).execLastTask();
+    }
+
     let hc = this.getActiveBodyparts(RANGED_ATTACK) && this.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
     if (hc && this.pos.isNearTo(hc)) this.rangedMassAttack();
     else if (hc) this.rangedAttack(hc);
