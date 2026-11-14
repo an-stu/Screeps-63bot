@@ -30,8 +30,11 @@ let pro={
     // c=closedMyRoom, cl=closedMyRoomLastUpdate, p=priorityVisibleTick,
     // pb=lastPowerBank。迁移在首次 update 时执行一次。
     watchRoom (roomName) {
-        Memory.observerWatch = Memory.observerWatch || {};
-        return Memory.observerWatch[roomName] = Memory.observerWatch[roomName] || {};
+        // 只在创建时写 Memory：原来每次调用都无条件赋值（值没变也写），
+        // 每 tick 把整份 Memory 标脏加重序列化（P2-10，2026-11-13 batch-2）。
+        let watch = Memory.observerWatch;
+        if (!watch) watch = Memory.observerWatch = {};
+        return watch[roomName] || (watch[roomName] = {});
     },
     migrateWatchMemory () {
         if (Memory.observerWatchMigratedV2) return;

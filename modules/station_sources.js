@@ -746,8 +746,14 @@ Creep.prototype.harvestEnergyKeeper = function () {
         // 搬到作业位前不需要 link 状态；把这些对象查询挪到抵达分支之后，避免
         // 每 tick 行进时都解析 link/link2（双 link 房尤其多一次 getObjectById）。
         let link = station.link ? Game.getObjectById(station.link) : undefined;
-        // link2 是双 link 房间才有的（少数），缺失时跳过查询省 getObjectById
-        let link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
+        // link2 是双 link 房间才有的（少数），缺失时跳过查询省 getObjectById。
+        // link2 只可能在两种情况被选用：主 link 缺失，或主 link 能量满（==800）
+        // 且比 link2 多（见下方选择条件）——主 link 不满时查了也是白查，省掉那次
+        // getObjectById（2026-11-13 batch-2，可证等价：选择条件要求 ==800）。
+        let link2;
+        if (!link || link.store[RESOURCE_ENERGY] == 800) {
+            link2 = station["link2"] ? Game.getObjectById(station["link2"]) : undefined;
+        }
         if (!link && link2) link = link2;
         if (link && link2 && (link.store.getUsedCapacity(RESOURCE_ENERGY) > link2.store.getUsedCapacity(RESOURCE_ENERGY)) && link.store[RESOURCE_ENERGY] == 800) link = link2
         let freeEnergyCapacity = this.store.getFreeCapacity(RESOURCE_ENERGY);

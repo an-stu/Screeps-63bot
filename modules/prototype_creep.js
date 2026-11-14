@@ -622,14 +622,27 @@ Creep.prototype.carryEnergyAuto = function () {
         if (room.terminal && room.terminal.store[RESOURCE_ENERGY] > terminalReserve && !room.used[room.terminal.id]) {
             candidates.push({object:room.terminal, available:room.terminal.store[RESOURCE_ENERGY] - terminalReserve, type:"terminal"});
         }
-        if (room.memory[StationSources.stationName]) {
-            _.values(room.memory[StationSources.stationName]).forEach(data => {
-                let container = data && Game.getObjectById(data.container);
-                if (container && !room.used[container.id]) {
-                    candidates.push({object:container, available:container.store[RESOURCE_ENERGY] || 0, type:"container"});
-                }
-            });
+        // 房级 tick 缓存：源容器原始库存（与预约无关）。原来每只空车每 tick 对每个
+        // 源重做 getObjectById + 建数组，同房 5-10 只车做完全相同的扫描（P2-5）。
+        // 引擎 store 同 tick 内不变（见下方 withdraw 注释），每 tick 读一次与每爬
+        // 读逐例等价；各车仍按自己的 room.used / terminalReserve 过滤并排序，
+        // 选择结果不变。缓存对象只读共享，排序发生在每车自己的新数组上。
+        let scan = room._carryAutoScan;
+        if (!scan || scan.tick !== Game.time) {
+            let containers = [];
+            if (room.memory[StationSources.stationName]) {
+                _.values(room.memory[StationSources.stationName]).forEach(data => {
+                    let container = data && Game.getObjectById(data.container);
+                    if (container) {
+                        containers.push({object:container, available:container.store[RESOURCE_ENERGY] || 0, type:"container"});
+                    }
+                });
+            }
+            scan = room._carryAutoScan = { tick: Game.time, containers: containers };
         }
+        scan.containers.forEach(item => {
+            if (!room.used[item.object.id]) candidates.push(item);
+        });
         candidates.sort((a, b) => b.available - a.available);
         // Source containers retain one full carrier load as keeper buffer;
         // terminal excess may be drained partially down to its reserve.

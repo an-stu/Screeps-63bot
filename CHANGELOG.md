@@ -1,3 +1,29 @@
+## v0.78.249 — CPU batch-2 低风险三项：carrying 扫描房级缓存 + keeper link2 条件查询 + observer 脏写守卫
+
+- 背景（2026-11-13 CPU 分析）：均值 ~18.4/上限 20，bucket 稳 ~5000（真实均值贴近上限），
+  unitTasks ~10（keeper 3.66 + carrier 3.30 占 65%），rooms ~6.2。审查 P2 清单逐条核实后，
+  本批只做**可证等价**的三项（lodash find/sum 税属中风险，另批审计）：
+  1. **carryEnergyAuto 房级 tick 缓存**（P2-5，prototype_creep.js）：原来每只空车每 tick
+     对每个源重做 getObjectById + 建候选数组，同房 5-10 只车完全重复。改房级 tick 缓存
+     原始库存列表（引擎 store 同 tick 内不变，读一次与每爬读逐例等价）；各车仍按自己的
+     room.used / terminalReserve 过滤排序，选择结果不变。缓存只读共享，排序在每车新数组上。
+  2. **keeper link2 条件查询**（station_sources.js harvestEnergyKeeper）：link2 只可能在
+     「主 link 缺失」或「主 link 能量 ==800 且比 link2 多」时被选用（选择条件本身要求 ==800），
+     主 link 不满时那次 getObjectById 是白查 —— 条件化跳过。双 link 房每 tick 省 1 次查询。
+  3. **observer watchRoom 脏写守卫**（P2-10，station_observer.js）：原来每次调用无条件赋值
+     Memory.observerWatch（值没变也写），每 tick 标脏整份 Memory；改只在创建时写。
+- **核实后不做**：P2-8 hasActiveBodypart 已有 `_hasMovePart` 每爬每 tick 一次缓存，且健康
+  身体从尾部 1-3 次迭代即短路返回，审查「每次 moveTo 全量扫」的前提已过时；P2-2 dontPullMe、
+  P2-3 register 回写、P2-1 rest/ops 克隆均已在 earlier 批次修掉。
+- 回归：新增 `cpu-batch2-equivalence`（新旧实现随机布局差分 500 轮 / 缓存 tick 失效 /
+  预约与 allowStorage 语义不变 / link2 三态选择等价 / watchRoom 存在即不写 / 变异负对照）；
+  既有 78 测试全绿，audit 77/212。
+- **监测基线（部署前，tick ~84264100，cpuModuleTelemetry samples 23738）**：
+  roles avg：harvestEnergyKeeper 3.662 / carrier 3.296 / outerHarvestEnergyCarrier 1.177 /
+  power:OPF 1.163 / upgrader 0.882；phases：unitTasks ~10.87 / rooms ~5.88；
+  last1000 avg 18.41 overLimit 185/1000。验收口径：部署后 24-48h 同 schema 对比
+  carrier / harvestEnergyKeeper 均值与 overLimit 率（预期 carrier 降幅最明显）。
+
 ## v0.78.248 — 回避 W31N59（Daozen RCL8 塔房），deposit 队伍不再走最短路送死
 
 - **根因**：`avoidRooms`（BetterMove 的「永不踏入」名单）是一份手写常量，漏了 W31N59。而
