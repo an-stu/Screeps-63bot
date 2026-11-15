@@ -171,13 +171,19 @@ function runTicks(setupResult) {
     assert.equal(s.stat(), "clear", "放行的那一 tick 必须能进状态机并清掉死 id 的反应态");
 }
 
-// ④ 定点对照：奇数周期下同一 tick 必须已经跑过（旧代码在这里会红）
+// ④ 定点对照：奇数周期下，被跳过的那一 tick 的下一个放行 tick 必须补上
+//    RT=5、hashCode=1：t=4 时 (t+1)=5 是触发点但奇偶被跳过；t=5 时 (t+1)=6，
+//    余数 1 —— 只有「余数 <= 1」的容差才会在这里补跑。旧代码（余数 == 0）会漏掉。
 {
     const s = setup("G", { deadCenter: true });
-    s.ctx.Game.time = 2;                 // (2 + 1) % 2 != 0，旧代码会在这里 return
+    s.ctx.Game.time = 4;                 // 触发点 (4+1)%5==0，但 (4+1)%2!=0 ⇒ 缓冲跳过
+    s.ctx.StationLab.exec(s.room);
+    assert.equal(s.stat(), "reacting", "被缓冲跳过的这一 tick 状态机不该动（缓冲仍在）");
+    s.ctx.Game.time = 5;                 // 下一个放行 tick，(5+1)%5==1 ⇒ 容差窗口
     s.ctx.StationLab.exec(s.room);
     assert.equal(s.stat(), "clear",
-        "RT=5 的奇数周期反应不能套奇偶缓冲：奇数奇偶的 tick 也必须评估状态机");
+        "RT=5 时触发点落在被跳过的奇偶上，下一个放行 tick 的余数是 1，必须靠容差补跑；" +
+        "否则这个反应永远按 2*RT 跑");
 }
 
 console.log("lab reaction parity buffer checks passed");

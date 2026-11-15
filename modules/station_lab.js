@@ -652,19 +652,7 @@ let pro={
             // 合成中的 lab 每 tick 要检查状态，但 12 次 getObjectById 开销大。
             // 缓冲 2 tick：合成（REACTION_TIME 分钟级）状态变化慢，2 tick
             // 延迟无影响，却能省一半的 map + getObjectById。
-            //
-            // ⚠️ **奇数周期的反应不能套这个缓冲**（0.78.252 修）。
-            // 触发判据在下面的 'reacting' 分支：
-            //   `(Game.time + hashCode) % REACTION_TIME[res] == 0`
-            // 而缓冲只放行**一半奇偶**的 tick ⇒ RT 为奇数时，每 2*RT 里必有
-            // 一半的触发点落在被跳过的奇偶上，反应实际按 2*RT 跑 = 吞吐打对折。
-            // 实测 REACTION_TIME 里 12 个是奇数：G/ZK/UL/LHO2/ZHO2/UHO2/KHO2/
-            // UH2O/KH2O = 5、LH/GH2O = 15、XLH2O = 65 —— 恰好覆盖 T3 化合物的
-            // 主链条（GH2O/LHO2/ZHO2/UHO2/KHO2/XLH2O）。
-            // 偶数 RT 的任何倍数都是偶数，永远撞不上这条缓冲，行为不变。
-            // 与 MEMORY 第 3 条「同一决策的两层阈值必须同源」同型。
-            let reactRt = obj["reacting"] ? (REACTION_TIME[obj["reacting"]] || 0) : 0;
-            if (reactRt % 2 == 0 && (Game.time + room.hashCode()) % 2 != 0) return;
+            if ((Game.time + room.hashCode()) % 2 != 0) return;
             let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
             let centerLabs = obj.centerLabs.map(id => Game.getObjectById(id))
             // lab 被拆后 centerLabs 里有死 id（30 tick 缓存窗口内）：null 裸取
@@ -699,11 +687,24 @@ let pro={
                 }
                 // HelperVisual.showText(Game.getObjectById(obj["centerLabs"][0]),(centerLabs[0].store.getLabReactionCnt()+room.storage.store[a]<3000))
                 // HelperVisual.showText(Game.getObjectById(obj["centerLabs"][1]),(centerLabs[1].store.getLabReactionCnt()+room.storage.store[b]<3000))
-            }if (obj["stat"] == 'reacting' && (!obj["reacting"]||
+            }
+            // 触发点容差（0.78.252）：上面的 2 tick 缓冲只放行一半奇偶的 tick，
+            // 而触发判据是 `(Game.time+hashCode) % REACTION_TIME[res] == 0`。
+            // **RT 为奇数时两者会互相打脸**：每 2*RT 里必有一半的触发点正好落在
+            // 被跳过的奇偶上 ⇒ 反应按 2*RT 跑，吞吐打对折。实测 REACTION_TIME
+            // 有 12 个是奇数（G/ZK/UL/LHO2/ZHO2/UHO2/KHO2/UH2O/KH2O=5、
+            // LH/GH2O=15、XLH2O=65），正好覆盖 T3 化合物的主链条。
+            // 修法：把窗口从「余数 == 0」放宽到「余数 <= 1」——被跳过的那一 tick
+            // 的下一个放行 tick 余数恰好是 1，一 tick 的延迟在分钟级反应里可忽略。
+            // 偶数 RT 下余数 1 是奇数，永远不可能落在放行的偶数 tick 上 ⇒ 行为不变。
+            // 不放开缓冲本身：bucket 正贴着闸门，多花 CPU 不划算。
+            let reactRt = REACTION_TIME[obj["reacting"]] || 0;
+            let reactHit = reactRt ? (Game.time + room.hashCode()) % reactRt : 99;
+            if (obj["stat"] == 'reacting' && (!obj["reacting"]||
                 (centerLabs[0].store.getLabReactionResType()||LAB_REACTIONS[obj["reacting"]][0])!=LAB_REACTIONS[obj["reacting"]][0]||
                 (centerLabs[1].store.getLabReactionResType()||LAB_REACTIONS[obj["reacting"]][1])!=LAB_REACTIONS[obj["reacting"]][1])){
                 obj["stat"] = 'clear'
-            }else if(obj["stat"] == 'reacting'&& (Game.time+room.hashCode())%(REACTION_TIME[obj["reacting"]]) == 0){
+            }else if(obj["stat"] == 'reacting' && reactHit <= (reactRt % 2 ? 1 : 0)){
                 // CPU 保护开关：bucket < 8000 时不执行反应（反应物保留在
                 // centerLabs，bucket 恢复后自动继续）
                 if(Game.cpu.bucket < 8000) return;
