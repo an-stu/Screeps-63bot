@@ -373,8 +373,15 @@ let main = function () {
     if (!Memory.stats.RCL) Memory.stats.RCL = {};
     // 统计RCL的的百分比；只保留仍拥有的房间，清掉易主后的陈旧条目
     // （stats 写入只增不删，丢掉的房间会在 Memory 里留Forever）
+    //
+    // **RCL8 必须写 100，不能「跳过」**（2026-11-15）：旧写法把 `level < 8` 放在
+    // filter 里，房间一旦满级就不再被写，但下面的清理只删「不再是我们的房」，
+    // 于是**最后那个 sub-100 的旧值永久冻结**在 Memory 里。实测 14 个房全是
+    // RCL8、`Memory.stats.RCL` 里却是 14 条 99.99x% 的僵尸数据，看板
+    // `renderRooms()` 拿它画进度条 ⇒ 满级房永远显示「99.99% 差一点」。
+    // RCL8 的 `progressTotal` 是 0，直接相除会得 NaN，所以用三元写 100。
     let rclStats = Memory.stats.RCL;
-    getTickObjects().rooms.filter(e => e.my && e.level < 8).forEach(room => rclStats[room.name] = room.controller.progress / room.controller.progressTotal * 100);
+    getTickObjects().rooms.filter(e => e.my).forEach(room => rclStats[room.name] = room.level >= 8 ? 100 : room.controller.progress / room.controller.progressTotal * 100);
     for (let name in rclStats) {
         let room = Game.rooms[name];
         if (!room || !room.my) delete rclStats[name];
