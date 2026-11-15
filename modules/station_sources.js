@@ -1564,35 +1564,52 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
             let pinnedId = task.id;   // 先捕获：carry 任务就地改写后 task.id 会变
             let myData = rm[pro.stationName][pinnedId];
             let myCt = myData && myData[STRUCTURE_CONTAINER] ? Game.getObjectById(myData[STRUCTURE_CONTAINER]) : null;
-            if (!myCt || (myCt.store[RESOURCE_ENERGY] || 0) < 400) {
-                let best = null, bestE = 800;
-                for (let sid in rm[pro.stationName]) {
-                    if (sid == pinnedId) continue;
-                    let d = rm[pro.stationName][sid];
-                    if (!d || !d[STRUCTURE_CONTAINER] || d.roomName != task.roomName) continue;
-                    let c2 = Game.getObjectById(d[STRUCTURE_CONTAINER]);
-                    let e2 = c2 ? (c2.store[RESOURCE_ENERGY] || 0) : 0;
-                    if (e2 >= bestE) { best = d; bestE = e2; }
-                }
-                if (best) {
-                    (this.memory.tasks || []).forEach(function (t) {
-                        if ((t.taskName == 'harvestEnergyOuterCarry' && t.id == pinnedId)
-                            || (t.taskName == 'harvestEnergyOuterCarryRoadBuilder' && t.stationId == pinnedId)) {
-                            t.id = best.id;
-                            t.x = best.x;
-                            t.y = best.y;
-                            if (t.stationId !== undefined) t.stationId = best.id;
-                            if (t.returnPathIndex !== undefined) delete t.returnPathIndex;
-                        }
-                    });
-                    // The registration is the source of truth for replacement demand.
-                    // Move it with the task now (not when the carrier next enters the
-                    // mine), removing every stale copy from the old source and ensuring
-                    // there is exactly one registration at the new source. Older copies
-                    // at still earlier targets are pruned in the quota-time validation.
-                    pro.migrateOuterCarrierRegistration(myData, best, this.id);
-                    return this.execLastTask();
-                }
+            let myE = myCt ? (myCt.store[RESOURCE_ENERGY] || 0) : 0;
+            // ── 改绑条件必须是**双向**的（0.78.251）──────────────────────────
+            // 0.78.225 只写了「我没货、别人有货」这一个方向（本矿点 < 400 才去找
+            // ≥800 的另一矿点）。反向的错位它看不见：**别人顶格了**（keeper 已经被
+            // 满容器顶死、那面源在空转），而自己这一侧还在正常循环 ⇒ 车永远不换边。
+            //
+            // 实测 2026-11-15 W26N59（连续 3 次采样、跨度 445 tick）：
+            //   矿点 (29,4)  容器 **2000/2000 一直满**、keeper 满仓站桩、
+            //                源 2,680 → 2,940 → 3,000（回满 = 这面源 100% 空转）；
+            //   矿点 (27,29) 容器 440 → 1,082 正常循环，1 只 1,600 容量的车往返这一侧。
+            // 车的静态绑定是 (27,29)，`storeEmpty()` 那一刻它**总是 ≥ 400**
+            // ⇒ 旧分支结构上不可达，(29,4) 那 2,000 永远没人搬。
+            //
+            // 阈值：顶格线取容器容量 2,000 的 95% = 1,900（留 100 的余量吸收
+            // keeper 一个交接周期的抖动）；并要求比本矿点明显更满（+200），
+            // 否则两个都接近顶格时会每趟来回倒腾。
+            let lowMine = !myCt || myE < 400;
+            let best = null, bestE = lowMine ? 800 : 1900;
+            for (let sid in rm[pro.stationName]) {
+                if (sid == pinnedId) continue;
+                let d = rm[pro.stationName][sid];
+                if (!d || !d[STRUCTURE_CONTAINER] || d.roomName != task.roomName) continue;
+                let c2 = Game.getObjectById(d[STRUCTURE_CONTAINER]);
+                let e2 = c2 ? (c2.store[RESOURCE_ENERGY] || 0) : 0;
+                if (e2 >= bestE) { best = d; bestE = e2; }
+            }
+            // 反方向追加滞回：只有「明显更满」才值得改绑（本矿点见底时不受此限）。
+            if (best && !lowMine && bestE < myE + 200) best = null;
+            if (best) {
+                (this.memory.tasks || []).forEach(function (t) {
+                    if ((t.taskName == 'harvestEnergyOuterCarry' && t.id == pinnedId)
+                        || (t.taskName == 'harvestEnergyOuterCarryRoadBuilder' && t.stationId == pinnedId)) {
+                        t.id = best.id;
+                        t.x = best.x;
+                        t.y = best.y;
+                        if (t.stationId !== undefined) t.stationId = best.id;
+                        if (t.returnPathIndex !== undefined) delete t.returnPathIndex;
+                    }
+                });
+                // The registration is the source of truth for replacement demand.
+                // Move it with the task now (not when the carrier next enters the
+                // mine), removing every stale copy from the old source and ensuring
+                // there is exactly one registration at the new source. Older copies
+                // at still earlier targets are pruned in the quota-time validation.
+                pro.migrateOuterCarrierRegistration(myData, best, this.id);
+                return this.execLastTask();
             }
         }
         if (task.roomName != this.room.name) {
