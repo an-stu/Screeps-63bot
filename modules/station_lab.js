@@ -651,8 +651,20 @@ let pro={
         if(resType){
             // 合成中的 lab 每 tick 要检查状态，但 12 次 getObjectById 开销大。
             // 缓冲 2 tick：合成（REACTION_TIME 分钟级）状态变化慢，2 tick
-            // 延迟无影响，却能省一半的 map + getObjectById
-            if ((Game.time + room.hashCode()) % 2 != 0) return;
+            // 延迟无影响，却能省一半的 map + getObjectById。
+            //
+            // ⚠️ **奇数周期的反应不能套这个缓冲**（0.78.252 修）。
+            // 触发判据在下面的 'reacting' 分支：
+            //   `(Game.time + hashCode) % REACTION_TIME[res] == 0`
+            // 而缓冲只放行**一半奇偶**的 tick ⇒ RT 为奇数时，每 2*RT 里必有
+            // 一半的触发点落在被跳过的奇偶上，反应实际按 2*RT 跑 = 吞吐打对折。
+            // 实测 REACTION_TIME 里 12 个是奇数：G/ZK/UL/LHO2/ZHO2/UHO2/KHO2/
+            // UH2O/KH2O = 5、LH/GH2O = 15、XLH2O = 65 —— 恰好覆盖 T3 化合物的
+            // 主链条（GH2O/LHO2/ZHO2/UHO2/KHO2/XLH2O）。
+            // 偶数 RT 的任何倍数都是偶数，永远撞不上这条缓冲，行为不变。
+            // 与 MEMORY 第 3 条「同一决策的两层阈值必须同源」同型。
+            let reactRt = obj["reacting"] ? (REACTION_TIME[obj["reacting"]] || 0) : 0;
+            if (reactRt % 2 == 0 && (Game.time + room.hashCode()) % 2 != 0) return;
             let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
             let centerLabs = obj.centerLabs.map(id => Game.getObjectById(id))
             // lab 被拆后 centerLabs 里有死 id（30 tick 缓存窗口内）：null 裸取
