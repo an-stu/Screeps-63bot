@@ -1,3 +1,12 @@
+## v0.78.256 — 全链核算修正：官方配方核实、可逆配方防循环、level 门槛修正
+
+- 用户 11-12 指出采购利润表「绝对有问题」。核对官方 COMMODITIES（从官方文档 API 页提取，45 条）后确认两处硬错误：
+  1. **T2+ 真实配方不是「10+10」**：高阶商品大量使用 oxidant / reductant / purifier / ghodium_melt / composite / crystal / liquid 等昂贵原料（例：switch ×5 = wire×40 + oxidant×95 + utrium_bar×35 + energy×20，冷却 70；circuit ×1 需 oxidant×115，冷却 800），漏算这些原料会把利润放大几十倍；
+  2. **官方 COMMODITIES 里 bar↔矿物、energy↔battery 是互为配方的（可逆压缩）**，v0.78.255 的递归展开会在矿物与 bar 之间循环、成本变垃圾（guard 截断后数量也失真）。
+- 修复：展开在**基础资源集**（U/L/K/Z/O/H/X/G + energy + ops + power）处终止，并加环检测（触发 guard 即整链作废）；官方 `level` 从 1 开始，扫描门槛由 `level ≥ 2` 修正为 `level ≥ 1`（不再漏掉 switch/tube/phlegm/concentrate 这些一级商品链）。
+- 用官方配方重算：当前盘口 + 我们的挂单价 + 双边 5% 费 + 每级 ops + CPU 10% 下，**没有任何一条链达到 1000%**——最佳链为 microchip 608%（wire）、tube 519%（alloy）、fixtures 408%、spirit 314%（condensate）、transistor 217%、circuit 202%、frame 185%、extract 150%、concentrate 128%；cell 的最优链为负（phlegm -10%）。因此 1000% 门槛下不会新建 T0/T1 买单；已有单保持不动（不追价、不重挂）。
+- 新增回归：可逆配方（bar↔矿物、energy↔battery）必须在基础资源处终止、成本只算一次；环检测触发即标记缺价。
+
 ## v0.78.255 — T0/T1 采购改为完整生产链核算（T2→T6，含每级 ops 与 CPU 加成）
 
 - 用户 11-12：不能只看原料自产成本，要看**合成高级商品（T3/T4/T5…）的整条链利润**。扫货不再按「单步配方」评估，而是对每个终端商品（level ≥ 2）递归展开整条链到可采购的 T0/T1 原料：

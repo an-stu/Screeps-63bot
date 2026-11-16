@@ -183,10 +183,15 @@ let DEFAULT_CHAIN_CPU_PREMIUM = 0.1;
 /**
  * 把商品递归展开到「可采购的 T0/T1 原料 + 其他成本」：
  * - t01：链上需要的 T0/T1 原料数量（wire/alloy/cell/condensate 与四种 deposit）
- * - otherCost：其余原料（矿石/压缩 bar/能量）按 priceOf 计价的总和
+ * - otherCost：其余原料（基础矿物/能量，按 priceOf 计价）的总和
  * - opsCost：**每一级**合成消耗的 ops 之和（完整链，不只最终产品）
- * 返回 { t01, otherCost, opsCost }。
+ *
+ * **必须在基础资源处终止**：官方 COMMODITIES 里 bar↔矿物、energy↔battery 是
+ * 互为配方的（可逆压缩），不设终止集会在矿物与 bar 之间无限循环，成本变垃圾。
+ * 基础资源集 = 八种矿物（U/L/K/Z/O/H/X/G）+ energy + ops + power。
+ * 返回 { t01, otherCost, opsCost, missing }。
  */
+let BASE_TERMINAL_SET = new Set(["energy", "ops", "power", "U", "L", "K", "Z", "O", "H", "X", "G"]);
 let expandCommodityChain = function (COMMODITIES, product, amount, priceOf, opsPrice, t01Set) {
     let t01 = {};
     let otherCost = 0;
@@ -201,7 +206,7 @@ let expandCommodityChain = function (COMMODITIES, product, amount, priceOf, opsP
             t01[cur.res] = (t01[cur.res] || 0) + cur.amount;
             continue;
         }
-        if (!recipe || !recipe.components) {
+        if (BASE_TERMINAL_SET.has(cur.res) || !recipe || !recipe.components) {
             let p = priceOf(cur.res) || 0;
             if (!(p > 0)) missing = true;   // 缺价：宁可跳过整条链，也不能按 0 算成本
             otherCost += cur.amount * p;
@@ -215,6 +220,7 @@ let expandCommodityChain = function (COMMODITIES, product, amount, priceOf, opsP
             stack.push({ res: comp, amount: recipe.components[comp] * cycles });
         }
     }
+    if (guard >= 300) missing = true;       // 异常配方/环：整条链作废
     return { t01: t01, otherCost: otherCost, opsCost: opsCost, missing: missing };
 };
 // ==== end ====
@@ -758,7 +764,9 @@ let pro = {
         for (let product in COMMODITIES) {
             let recipe = COMMODITIES[product];
             if (!recipe.components) continue;
-            if (!(recipe.level >= 2)) continue;   // T0/T1 直接买，不作为终端产品评估
+            // 官方 COMMODITIES 里 level 从 1 开始（bar/T1 为 undefined）：
+            // level ≥ 1 才是「工厂合成出来的商品」，都要参与完整链核算。
+            if (!(recipe.level >= 1)) continue;
 
             // 产品收入取保守值：min(当前最高买价, 历史均价)，再扣 5% 卖出费。
             let buyList = pro.getAllOrdersCacheList(product, ORDER_BUY);
