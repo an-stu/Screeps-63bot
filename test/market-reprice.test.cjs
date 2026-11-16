@@ -19,10 +19,10 @@ const context = { Game: { time: 0 }, Math };
 context.global = context;
 // 块内是 let 声明，不会挂到全局对象上；追加一行导出到 global 供测试取用
 vm.runInNewContext(
-    source.slice(start, end) + ";global.__scanHelpers = { scanUnderpricedDue, commodityBuyDecision, DEFAULT_COMMODITY_BUY_CAP };",
+    source.slice(start, end) + ";global.__scanHelpers = { scanUnderpricedDue, commodityBuyDecision, DEFAULT_COMMODITY_BUY_CAP, DEFAULT_CHAIN_CPU_PREMIUM, expandCommodityChain };",
     context,
     { filename: "market-scan-helpers.js" });
-const { scanUnderpricedDue, commodityBuyDecision, DEFAULT_COMMODITY_BUY_CAP } = context.__scanHelpers;
+const { scanUnderpricedDue, commodityBuyDecision, DEFAULT_COMMODITY_BUY_CAP, DEFAULT_CHAIN_CPU_PREMIUM, expandCommodityChain } = context.__scanHelpers;
 
 // ① 节拍：autoBuy 的调用 tick = 81 + 100k
 const autoBuyTicks = [];
@@ -66,18 +66,38 @@ for (let i = 1; i < dueHits.length; i++) {
     assert.deepEqual([d.action, d.price], ["create", 0.01]);
 }
 
+// ④ 完整生产链展开：逐级累计 ops，只把 T0/T1 原料记为待采购量
+{
+    const COMMODITIES = {
+        wire: { amount: 20, level: 1, cooldown: 8, components: { utrium_bar: 20, silicon: 100, energy: 40 } },
+        switch: { amount: 10, level: 2, cooldown: 20, components: { wire: 10, utrium_bar: 10 } },
+        transistor: { amount: 10, level: 3, cooldown: 40, components: { switch: 10, wire: 10 } },
+    };
+    const t01 = new Set(["silicon", "metal", "biomass", "mist", "wire", "alloy", "cell", "condensate"]);
+    const priceOf = r => ({ utrium_bar: 200, energy: 30 }[r] || 0);
+    const exp = expandCommodityChain(COMMODITIES, "transistor", 10, priceOf, 100, t01);
+    assert.equal(exp.t01.wire, 20, "链上两处 wire（transistor 直配 10 + switch 消耗 10）都要计入");
+    assert.equal(exp.otherCost, 2000, "utrium_bar 10 × 200 计入其他原料成本");
+    assert.equal(exp.opsCost, 600, "每一级 ops 都要计入（transistor 4 + switch 2 = 6 ops × 100）");
+}
+
 // ③ 默认硬上限与成本口径钉子
 assert.equal(DEFAULT_COMMODITY_BUY_CAP.alloy, 10, "alloy 默认出价上限必须 ≤ 10");
+assert.equal(DEFAULT_CHAIN_CPU_PREMIUM, 0.1, "完整链 CPU 开销默认按成本 10% 计");
 assert.ok(source.includes("scanMarginPct) || 1000"),
     "default scan margin must be 1000% (profit/cost)");
-assert.ok(source.includes("(revenue - totalCost) / Math.max(totalCost, 1) * 100"),
+assert.ok(source.includes("(revenue - totalCost) / totalCost * 100"),
     "chain margin must be profit/cost, not profit/revenue");
 assert.ok(source.includes("r.revenue / (1 + marginPct / 100)"),
     "new-order cost budget must use revenue / (1 + margin) for profit/cost semantics");
 assert.ok(source.includes("getResTypeHistory(RESOURCE_OPS)"),
     "ops must be included in the chain cost");
-assert.ok(source.includes("recipe.components[comp] * price * 1.05"),
-    "component cost must include the 5% buy-side market fee");
+assert.ok(source.includes("expandCommodityChain(COMMODITIES"),
+    "scan must evaluate full production chains, not single recipes");
+assert.ok(source.includes("chainCpuPremium"),
+    "CPU overhead must be configurable and applied to the chain cost");
+assert.ok(source.includes("* (1 + cpuPremium)"),
+    "chain cost must include the CPU premium");
 assert.ok(source.includes("Math.min(buyHigh, histSale)"),
     "revenue must use the conservative min(top buy, history) price");
 assert.ok(source.includes("recipe.amount * salePrice * 0.95"),

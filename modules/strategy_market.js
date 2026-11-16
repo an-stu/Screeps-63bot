@@ -174,6 +174,49 @@ let commodityBuyDecision = function (ourPrice, buyHigh, histPrice, cap) {
  * `Memory.marketSettings.commodityBuyCap` 可按资源覆盖/扩展，例如 { alloy: 8 }。
  */
 let DEFAULT_COMMODITY_BUY_CAP = { alloy: 10 };
+/**
+ * 完整生产链的 CPU 开销加成（用户 11-12：不能只看原料自产成本，要把整条
+ * 生产链和 CPU 消耗算进去）。默认按链成本的 10% 计，可用
+ * `Memory.marketSettings.chainCpuPremium` 覆盖（0 表示不计）。
+ */
+let DEFAULT_CHAIN_CPU_PREMIUM = 0.1;
+/**
+ * 把商品递归展开到「可采购的 T0/T1 原料 + 其他成本」：
+ * - t01：链上需要的 T0/T1 原料数量（wire/alloy/cell/condensate 与四种 deposit）
+ * - otherCost：其余原料（矿石/压缩 bar/能量）按 priceOf 计价的总和
+ * - opsCost：**每一级**合成消耗的 ops 之和（完整链，不只最终产品）
+ * 返回 { t01, otherCost, opsCost }。
+ */
+let expandCommodityChain = function (COMMODITIES, product, amount, priceOf, opsPrice, t01Set) {
+    let t01 = {};
+    let otherCost = 0;
+    let opsCost = 0;
+    let missing = false;
+    let stack = [{ res: product, amount: amount }];
+    let guard = 0;
+    while (stack.length && guard++ < 300) {
+        let cur = stack.pop();
+        let recipe = COMMODITIES[cur.res];
+        if (t01Set.has(cur.res)) {
+            t01[cur.res] = (t01[cur.res] || 0) + cur.amount;
+            continue;
+        }
+        if (!recipe || !recipe.components) {
+            let p = priceOf(cur.res) || 0;
+            if (!(p > 0)) missing = true;   // 缺价：宁可跳过整条链，也不能按 0 算成本
+            otherCost += cur.amount * p;
+            continue;
+        }
+        let cycles = cur.amount / (recipe.amount || 1);
+        if (recipe.level > 0 && recipe.cooldown && opsPrice > 0) {
+            opsCost += cycles * 100 / Math.max(1, Math.floor(1000 / recipe.cooldown)) * opsPrice;
+        }
+        for (let comp in recipe.components) {
+            stack.push({ res: comp, amount: recipe.components[comp] * cycles });
+        }
+    }
+    return { t01: t01, otherCost: otherCost, opsCost: opsCost, missing: missing };
+};
 // ==== end ====
 
 let pro = {
@@ -698,53 +741,51 @@ let pro = {
         // COMMODITIES.components 只含能量与原料，不含 ops —— 不计入会高估利润。
         let opsPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_OPS) || 0;
 
-        // 从 COMMODITIES 动态构建合成链：找所有「产出的商品在市场上有买单价」
-        // 且「原料包含 T0 deposit 或 T1 商品」的配方。
-        // 用户 11-12：**只买 T0/T1 原料** —— T0 = 四种 deposit（silicon/metal/
-        // biomass/mist），T1 = wire/alloy/cell/condensate；更高等级的中间品
-        // （switch/tube/...）不直接买入，由工厂逐级合成。链利润率按完整配方核算
-        // （含 energy 与 ops）。
+        // 完整生产链核算（用户 11-12）：不看「单步配方」，而是把每个终端商品
+        // （level ≥ 2）递归展开到可采购的 T0/T1 原料，链上**每一级**的 ops、
+        // 原料、能量、买入/卖出市场费、以及 CPU 开销全部计入，再按链利润是否
+        // ≥ marginPct 决定要不要为它买原料、以及原料能出的最高价。
+        // 只买 T0/T1 原料：T0 = silicon/metal/biomass/mist，T1 = wire/alloy/cell/condensate。
         let t0Set = new Set(["silicon", "metal", "biomass", "mist"]);
         let t1Set = new Set(["wire", "alloy", "cell", "condensate"]);
+        let t01Set = new Set([...t0Set, ...t1Set]);
+        let cpuPremium = Number(Memory.marketSettings && Memory.marketSettings.chainCpuPremium);
+        if (!(cpuPremium >= 0)) cpuPremium = DEFAULT_CHAIN_CPU_PREMIUM;
+        let priceOf = r => StrategyMarketPrice.getResTypeHistory(r) || 0;
+        let histOf = r => StrategyMarketPrice.getResTypeHistory(r) || 0.01;
         let results = [];
 
         for (let product in COMMODITIES) {
             let recipe = COMMODITIES[product];
             if (!recipe.components) continue;
-            let hasT0orT1 = Object.keys(recipe.components).some(c => t0Set.has(c) || t1Set.has(c));
-            if (!hasT0orT1) continue;
+            if (!(recipe.level >= 2)) continue;   // T0/T1 直接买，不作为终端产品评估
 
-            // 原料总成本 = 全部 components（含 energy，按历史均价）× 1.05（买入 5% 市场费）
-            // + 本轮消耗的 ops（用户 11-12：成本要算足、压得足够低）
-            let totalCost = 0;
-            for (let comp in recipe.components) {
-                let price = StrategyMarketPrice.getResTypeHistory(comp);
-                if (!price || price <= 0) { totalCost = 0; break; }
-                totalCost += recipe.components[comp] * price * 1.05;
-            }
-            if (totalCost <= 0) continue;
-            if (recipe.level > 0 && recipe.cooldown && opsPrice > 0) {
-                totalCost += 100 / Math.max(1, Math.floor(1000 / recipe.cooldown)) * opsPrice;
-            }
-
-            // 产品收入取**保守值**：min(当前最高买价, 历史均价)，再扣 5% 卖出费。
-            // 只用最高买价会被薄盘/操纵价放大利润与上限（用户 11-12：利润要足够高
-            // 才算数，不能靠一笔 1,500 量的假买盘）。
+            // 产品收入取保守值：min(当前最高买价, 历史均价)，再扣 5% 卖出费。
             let buyList = pro.getAllOrdersCacheList(product, ORDER_BUY);
             let buyHigh = buyList.length ? buyList.maxBy(o => o.price).price : 0;
-            let histSale = StrategyMarketPrice.getResTypeHistory(product) || 0;
+            let histSale = histOf(product);
             let salePrice = buyHigh ? (histSale ? Math.min(buyHigh, histSale) : buyHigh) : histSale;
             if (salePrice <= 0) continue;
-
             let revenue = recipe.amount * salePrice * 0.95;
-            let margin = (revenue - totalCost) / Math.max(totalCost, 1) * 100;
-            results.push({ product, margin, recipe, totalCost, revenue, salePrice });
+            if (revenue <= 0) continue;
+
+            // 一条命令递归展开整条链：T0/T1 原料数量 + 其余原料成本 + 每一级的 ops
+            let exp = expandCommodityChain(COMMODITIES, product, recipe.amount, priceOf, opsPrice, t01Set);
+            if (exp.missing) continue;                     // 链上有缺价原料：利润不可信，跳过
+            if (!Object.keys(exp.t01).length) continue;   // 链里没有 T0/T1 原料
+            let otherCost = exp.otherCost * 1.05;          // 其余原料含 5% 买入费
+            let opsCost = exp.opsCost;
+            let t01Cost = 0;
+            for (let m in exp.t01) t01Cost += exp.t01[m] * histOf(m) * 1.05;
+            let totalCost = (otherCost + t01Cost + opsCost) * (1 + cpuPremium);
+            if (!(totalCost > 0)) continue;
+            let margin = (revenue - totalCost) / totalCost * 100;
+            results.push({ product, margin, revenue, otherCost, opsCost, t01: exp.t01, t01Cost });
         }
 
         // 按利润率降序；两条上限分开算：
-        //  - capByComp（建新单）：保持该合成链利润率 ≥ marginPct 时的最高原料价；
+        //  - capByComp（建新单）：保持**整条链**利润率 ≥ marginPct 时的最高原料价；
         //  - beCapByComp（已有单允许的最高价）：盈亏平衡价（利润率 0）。
-        // 用户 11-12：**不追价、不反复重挂**，两套上限只用于「建单/纠偏」判定；
         // 另有按资源的硬上限 commodityBuyCap（默认 alloy ≤ 10）。
         let buyCaps = Object.assign({}, DEFAULT_COMMODITY_BUY_CAP,
             (Memory.marketSettings && Memory.marketSettings.commodityBuyCap) || {});
@@ -753,20 +794,22 @@ let pro = {
         let beCapByComp = {};
         let marginByComp = {};
         for (let r of results) {
-            // 利润率 = 利润/成本 ⇒ 允许的总成本 = revenue / (1 + marginPct%)
-            let budget = r.revenue / (1 + marginPct / 100);
-            for (let comp in r.recipe.components) {
-                if (!t0Set.has(comp) && !t1Set.has(comp)) continue;
-                let n = r.recipe.components[comp];
-                let hist = StrategyMarketPrice.getResTypeHistory(comp) || 0.01;
-                let otherCost = r.totalCost - n * hist * 1.05;
-                let beCap = (r.revenue - otherCost) / n;
-                if (beCap > (beCapByComp[comp] || 0)) beCapByComp[comp] = beCap;
+            // 允许的「原料总成本（含买入费）」：revenue/(1+margin) 为含 CPU 的总成本上限
+            let allowedMat = r.revenue / (1 + marginPct / 100) / (1 + cpuPremium) - r.opsCost;
+            let beMat = r.revenue / (1 + cpuPremium) - r.opsCost;
+            let allMat = r.otherCost + r.t01Cost;
+            for (let m in r.t01) {
+                let q = r.t01[m];
+                if (!(q > 0)) continue;
+                let feeUnit = 1.05;
+                // 该原料的历史成本从总成本里扣掉，反推它自己的上限
+                let beCap = (beMat - (allMat - q * histOf(m) * feeUnit)) / (q * feeUnit);
+                if (beCap > (beCapByComp[m] || 0)) beCapByComp[m] = beCap;
                 if (r.margin < marginPct) continue;
-                let cap = (budget - otherCost) / n;
-                if (cap > (capByComp[comp] || 0)) {
-                    capByComp[comp] = cap;
-                    marginByComp[comp] = r.margin;
+                let cap = (allowedMat - (allMat - q * histOf(m) * feeUnit)) / (q * feeUnit);
+                if (cap > (capByComp[m] || 0)) {
+                    capByComp[m] = cap;
+                    marginByComp[m] = r.margin;
                 }
             }
         }
