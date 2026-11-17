@@ -16,6 +16,9 @@ const SOURCE_RECEIPT_TTL_TICKS = 25000;
 const SOURCE_RECEIPT_LIMIT = 200;
 const MAX_BUILDERS = 4;
 const DOWNGRADE_PROTECTION_TICKS = 5000;
+// A full body needs up to 150 spawn ticks, followed by the portal route. Old
+// workers keep building while the next pair is spawned and travels here.
+const BUILDER_REPLACEMENT_LEAD_TICKS = 350;
 
 function copyPath(pathData) {
     if (!pathData || !Array.isArray(pathData.path) || !pathData.path.length) return null;
@@ -251,10 +254,13 @@ let pro = {
                 cfg.pending.splice(index, 1);
             }
         }
-        let workers = pro.countLocalBuilders(cfg.roomName);
+        let workers = pro.countLocalBuilders(cfg.roomName, BUILDER_REPLACEMENT_LEAD_TICKS);
         let want = normalizeBuilderCount(cfg.builders, 2);
         if (workers + cfg.pending.length >= want) {
-            pro.recordOperation(cfg, "BUILDERS_IN_FLIGHT", {workers:workers, pending:cfg.pending.length, target:want});
+            pro.recordOperation(cfg, "BUILDERS_IN_FLIGHT", {
+                workers:pro.countLocalBuilders(cfg.roomName), coveringWorkers:workers,
+                pending:cfg.pending.length, target:want,
+            });
             return;
         }
         if (!cfg.path && cfg.legacy && !cfg.legacyPathChecked) {
@@ -301,11 +307,13 @@ let pro = {
         cfg.pending = cfg.pending.filter(pending => !present[pending.slotId]);
     },
 
-    countLocalBuilders(roomName) {
+    countLocalBuilders(roomName, minimumTtl = 0) {
         return Object.keys(Game.creeps || {}).filter(name => {
-            let memory = Game.creeps[name] && Game.creeps[name].memory || {};
+            let creep = Game.creeps[name];
+            let memory = creep && creep.memory || {};
             return memory.roomName == roomName
-                && (memory.role == "crossShardBuilder" || memory.crossShardBuildRoom == roomName);
+                && (memory.role == "crossShardBuilder" || memory.crossShardBuildRoom == roomName)
+                && (!Number.isFinite(creep.ticksToLive) || creep.ticksToLive > minimumTtl);
         }).length;
     },
 
@@ -324,7 +332,9 @@ let pro = {
                 shard:point.shard, roomName:point.roomName, x:point.x, y:point.y,
             })), index:0},
         ];
-        let body = ManagerCreeps.calcBodyPart({[WORK]:6, [CARRY]:6, [MOVE]:12});
+        // Describe the ideal worker on the target shard. The source handler
+        // replaces this with the largest affordable variant at spawn time.
+        let body = pro.preferredBuilderBody();
         let mission = {
             func:"spawnCrossShardBuilder",
             data:{
@@ -368,24 +378,60 @@ let pro = {
         if (!room || room.name != data.spawnRoom || !room.my || !room.find(FIND_MY_SPAWNS).length) return false;
         if (!global.StationHive || typeof StationHive.trySpawn != "function") return false;
 
-        let spawnCost = pro.bodyCost(data.body);
+        // Requests from older target shards carry a smaller body. Always
+        // select against the source room's real remaining tick budget instead
+        // of letting that stale request cap the reinforcement size.
+        let energyBudget = pro.sourceSpawnEnergyBudget(room);
+        let spawnBody = pro.affordableBuilderBody(energyBudget);
+        if (!spawnBody.length) return false;
+        let spawnCost = pro.bodyCost(spawnBody);
+        if (spawnCost > energyBudget) return false;
         if (room.spawnFailure) return false;
-        let availableEnergy = room.currentEnergyAvailable === undefined
-            ? (room.getEnergyAvailable ? room.getEnergyAvailable() : room.energyAvailable)
-            : Math.min(room.currentEnergyAvailable,
-                room.getEnergyAvailable ? room.getEnergyAvailable() : room.energyAvailable);
-        if (typeof availableEnergy == "number" && availableEnergy < spawnCost) return false;
         let freeSpawns = room.find(FIND_MY_SPAWNS).filter(spawn => !spawn.spawning
             && !(room.spawnedMap && room.spawnedMap[spawn.id])
             && (room.level == 8 || !spawn.isActive || spawn.isActive()));
         if (!freeSpawns.length) return false;
 
-        let creepName = StationHive.trySpawn(room, data.targetRoomName, data.body, data.role, data.tasks);
+        let creepName = StationHive.trySpawn(room, data.targetRoomName, spawnBody, data.role, data.tasks);
         if (!creepName) return false;
         let receipt = {creepName:String(creepName), createdAt:now(), createdTick:Game.time};
         receipts[receiptKey] = receipt;
         pro.cleanupSourceReceipts();
         return pro.sendSpawnReceipt(data, receipt);
+    },
+
+    /** Preferred 50-part body, advertised in every target-shard request. */
+    preferredBuilderBody() {
+        return ManagerCreeps.calcBodyPart({[WORK]:10, [CARRY]:15, [MOVE]:25});
+    },
+
+    /** Largest valid builder body affordable from the source room's budget. */
+    affordableBuilderBody(energyBudget) {
+        if (typeof energyBudget != "number" || energyBudget < 200) return [];
+        let body;
+        if (energyBudget >= 3000) {
+            body = pro.preferredBuilderBody();
+        } else if (energyBudget < 600) {
+            body = ManagerCreeps.calcBodyPart({[WORK]:1, [CARRY]:1, [MOVE]:energyBudget >= 250 ? 2 : 1});
+        } else {
+            let groups = Math.min(5, Math.floor(energyBudget / 600));
+            body = ManagerCreeps.calcBodyPart({[WORK]:groups * 2, [CARRY]:groups * 3, [MOVE]:groups * 5});
+        }
+        return pro.bodyCost(body) <= energyBudget ? body : [];
+    },
+
+    /** Clamp energy by live availability, the spawn manager's spent-this-tick cache, and hive capacity. */
+    sourceSpawnEnergyBudget(room) {
+        let available = room.getEnergyAvailable ? room.getEnergyAvailable() : room.energyAvailable;
+        if (typeof available != "number" || !isFinite(available)) return 0;
+        let budget = available;
+        if (typeof room.currentEnergyAvailable == "number" && isFinite(room.currentEnergyAvailable)) {
+            budget = Math.min(budget, room.currentEnergyAvailable);
+        }
+        let capacity = typeof room.getEnergyCapacityAvailable == "function"
+            ? room.getEnergyCapacityAvailable() : room.energyCapacityAvailable;
+        if (typeof capacity == "number" && isFinite(capacity)) budget = Math.min(budget, capacity);
+        return Math.max(0, budget);
     },
 
     bodyCost(body) {

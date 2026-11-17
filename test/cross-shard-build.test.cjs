@@ -97,6 +97,7 @@ function makeRoom(sb, name = "E51S29", opts = {}) {
         drops:opts.drops || [], tombstones:opts.tombstones || [], ruins:opts.ruins || [], structures:opts.structures || [],
         level:opts.level || 1,
         energyAvailable:opts.energyAvailable === undefined ? 5000 : opts.energyAvailable,
+        energyCapacityAvailable:opts.energyCapacityAvailable === undefined ? 5000 : opts.energyCapacityAvailable,
         currentEnergyAvailable:opts.currentEnergyAvailable,
         find(type) {
             if (type === FIND_MY_SPAWNS) return this.spawns;
@@ -108,7 +109,8 @@ function makeRoom(sb, name = "E51S29", opts = {}) {
             if (type === FIND_STRUCTURES) return this.structures;
             return [];
         },
-        getEnergyAvailable() { return this.currentEnergyAvailable === undefined ? this.energyAvailable : this.currentEnergyAvailable; },
+        getEnergyAvailable() { return this.energyAvailable; },
+        getEnergyCapacityAvailable() { return this.energyCapacityAvailable; },
     };
     sb.Game.rooms[name] = room;
     return room;
@@ -159,9 +161,11 @@ function runExec(sb, time) {
     assert.equal(tasks[0].taskName, "buildCrossShardRoom");
     assert.equal(tasks[0].roomName, "E51S29");
     assert.ok(tasks[0].slotId, "each builder task has a stable source-dedup slot");
-    assert.equal(request.mission.data.body.filter(part => part == "work").length, 6);
-    assert.equal(request.mission.data.body.filter(part => part == "carry").length, 6);
-    assert.equal(request.mission.data.body.filter(part => part == "move").length, 12);
+    assert.equal(request.mission.data.body.length, 50, "request advertises the preferred full-size worker");
+    assert.equal(sb.StrategyBuildCrossShard.bodyCost(request.mission.data.body), 3000);
+    assert.equal(request.mission.data.body.filter(part => part == "work").length, 10);
+    assert.equal(request.mission.data.body.filter(part => part == "carry").length, 15);
+    assert.equal(request.mission.data.body.filter(part => part == "move").length, 25);
 }
 
 // 2. start() is idempotent, copies the saved route, and honors explicitly
@@ -267,6 +271,36 @@ function runExec(sb, time) {
         "old receipt must not acknowledge a new operation's first worker without spawning it");
 }
 
+// Retiring builders keep working but no longer occupy replacement coverage.
+// Pending replacements and newly arrived healthy builders prevent extra waves.
+{
+    const sb = makeWorld({ensureCreatesSite:true});
+    const room = makeRoom(sb, "E51S29", {memory:{structMap:{spawn:"encoded"}}});
+    const cfg = sb.StrategyBuildCrossShard.start(room.name, {
+        originShard:"shard3", spawnRoom:"E49S31", builders:2,
+        path:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]},
+    });
+    const old1 = makeBuilder(sb, room.name, {name:"old1", slotId:"old-slot-1"});
+    const old2 = makeBuilder(sb, room.name, {name:"old2", slotId:"old-slot-2"});
+    old1.ticksToLive = 350;
+    old2.ticksToLive = 100;
+    sb.Game.creeps = {old1, old2};
+    assert.equal(sb.StrategyBuildCrossShard.countLocalBuilders(room.name), 2);
+    runExec(sb, 1000);
+    runExec(sb, 1005);
+    runExec(sb, 1010);
+    assert.equal(world.missions.length, 2, "two retiring workers request exactly two replacements");
+    assert.equal(old1.memory.role, "crossShardBuilder", "old workers must continue contributing");
+    assert.equal(old2.memory.tasks[0].taskName, "buildCrossShardRoom");
+    assert.ok(world.missions.every(m => m.mission.data.body.length === 50));
+    const next = makeBuilder(sb, room.name, {name:"next", slotId:cfg.pending[0].slotId});
+    next.ticksToLive = 1200;
+    sb.Game.creeps.next = next;
+    runExec(sb, 1015);
+    assert.equal(cfg.pending.length, 1);
+    assert.equal(world.missions.length, 2, "healthy arrivals and remaining transit slots still fill coverage");
+}
+
 // 4. Failed heavy planning is throttled and there is no random-placement path.
 {
     const sb = makeWorld({planSucceeds:false, ensureCreatesSite:true});
@@ -305,9 +339,14 @@ function runExec(sb, time) {
     world.spawnResult = undefined;
     assert.equal(sb.missionFunc.spawnCrossShardBuilder(data), false, "busy spawn leaves mission retryable");
     assert.equal(world.spawnCalls, 1);
+    assert.equal(world.missions.length, 0, "a failed spawn is not acknowledged to the target");
     world.spawnResult = "shard3_1001_1";
     assert.equal(sb.missionFunc.spawnCrossShardBuilder(data), true, "successful spawn acknowledges request");
     assert.equal(world.spawnCalls, 2);
+    assert.equal(world.lastSpawn.body.length, 50, "an old small-body request still spawns the preferred body when affordable");
+    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 10);
+    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 15);
+    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 25);
     assert.equal(world.missions.at(-1).mission.func, "crossShardBuilderSpawned");
     assert.equal(world.missions.at(-1).mission.data.creepName, "shard3_1001_1");
 
@@ -341,6 +380,51 @@ function runExec(sb, time) {
 
     const receiptMemory = sb.Memory.crossShardBuilderReceipts;
     assert.ok(Object.keys(receiptMemory).length <= 200, "source dedup memory stays bounded");
+}
+
+// The source derives a body from live availability, the spent-this-tick cache,
+// and room capacity. Scaled bodies keep the requested WORK:CARRY:MOVE ratio.
+{
+    const cases = [
+        {label:"capacity limit", available:5000, cached:5000, capacity:1800, cost:1800, work:6, carry:9, move:15},
+        {label:"spent-this-tick cache", available:3000, cached:1200, capacity:5000, cost:1200, work:4, carry:6, move:10},
+        {label:"small affordable body", available:5000, cached:5000, capacity:250, cost:250, work:1, carry:1, move:2},
+    ];
+    for (const sample of cases) {
+        const sb = makeWorld();
+        sb.Game.shard.name = "shard3";
+        makeRoom(sb, "E49S31", {level:8, energyAvailable:sample.available,
+            currentEnergyAvailable:sample.cached, energyCapacityAvailable:sample.capacity,
+            spawns:[{id:"spawn1"}]});
+        world.spawnResult = "spawned-" + sample.label;
+        const data = {
+            requestId:"request-" + sample.label, slotId:"slot-" + sample.label,
+            expiresAt:world.now + 10000, targetShard:"shard2", targetRoomName:"E51S29",
+            originShard:"shard3", spawnRoom:"E49S31", body:["work", "carry", "move"],
+            role:"crossShardBuilder", tasks:[{taskName:"buildCrossShardRoom", roomName:"E51S29"}],
+        };
+        assert.equal(sb.missionFunc.spawnCrossShardBuilder(data), true, sample.label + " body spawns successfully");
+        const body = world.lastSpawn.body;
+        assert.equal(body.length, sample.work + sample.carry + sample.move, sample.label + " body stays within budget/capacity");
+        assert.ok(sb.StrategyBuildCrossShard.bodyCost(body) <= Math.min(sample.available, sample.cached, sample.capacity));
+        assert.equal(body.filter(part => part == "work").length, sample.work);
+        assert.equal(body.filter(part => part == "carry").length, sample.carry);
+        assert.equal(body.filter(part => part == "move").length, sample.move);
+    }
+
+    const sb = makeWorld();
+    sb.Game.shard.name = "shard3";
+    makeRoom(sb, "E49S31", {level:8, energyAvailable:5000, currentEnergyAvailable:5000,
+        energyCapacityAvailable:199, spawns:[{id:"spawn1"}]});
+    const tooPoor = {
+        requestId:"request-too-poor", slotId:"slot-too-poor", expiresAt:world.now + 10000,
+        targetShard:"shard2", targetRoomName:"E51S29", originShard:"shard3", spawnRoom:"E49S31",
+        body:["work", "carry", "move"], role:"crossShardBuilder",
+        tasks:[{taskName:"buildCrossShardRoom", roomName:"E51S29"}],
+    };
+    assert.equal(sb.missionFunc.spawnCrossShardBuilder(tooPoor), false, "less than 200 energy cannot fund even the minimum body");
+    assert.equal(world.spawnCalls, 0);
+    assert.equal(world.missions.length, 0, "an unaffordable body is not acknowledged");
 }
 
 // 6. Creep task explicitly enters the target room even while it is visible.
