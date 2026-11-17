@@ -1,3 +1,19 @@
+## v0.78.270 — safe mode / 低 RCL 防守对 NPC 免疫（invader 不拆建筑）
+
+- 现场：E41S29（shard2 RCL2 援建房）的 safe mode 被打出来一次（sfAvail 0、冷却中），
+  用户强调「不要被 invader 打出 safe mode，invader 不会拆建筑」。
+- 加固（station_defense.checkSafeMode）：
+  1. **显式跳过所有 NPC**：原来只跳 `Invader`，现把 `Source Keeper` 一并跳过，并对
+     `hostile.owner` 做空值保护——NPC 永不触发 safe mode。
+  2. **援建中的低级跨 shard 房不自动开 safe mode**：`Memory.crossShardBuilds[room]`
+     存在即直接 return（远程援建房被 NPC 打不值得消耗 safe mode；用户政策低 RCL 少反应）。
+     玩家带 >=5 强化 HEAL 拆房的正当防卫对**非援建房**保留不变。
+- 低 RCL 防守爬（strategy_lowLevel.exec）：援建房的防守触发敌情**过滤掉 Invader /
+  Source Keeper**，只对玩家攻击产 lowLevelDefense（用户：低 RCL 只对被袭防守，或不生产）。
+- 回归：新增 `safe-mode-npc-guard`（Invader/Source Keeper 满强化奶妈+废墟仍不开、玩家
+  强化奶妈拆房开、无废墟不开、援建房不开、<5 强化不开、lowLevel NPC 闸源码断言）；
+  86 测试全绿，audit 77/213。
+
 ## v0.78.269 — RCL<3 跨 shard 房持续援建、不自产（用户政策）
 
 - 政策：跨 shard 认领房在 **RCL<3 期间一直靠跨 shard 建筑爬援建，不本地自产**；低级房
