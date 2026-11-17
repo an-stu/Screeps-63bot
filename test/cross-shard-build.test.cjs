@@ -427,6 +427,62 @@ function runExec(sb, time) {
     assert.equal(world.missions.length, 0, "an unaffordable body is not acknowledged");
 }
 
+// Full-size preference: a momentarily drained room that can afford the 50-part
+// body at capacity waits for energy instead of downgrading, until the request
+// deadline approaches. A room that can never afford it spawns the largest
+// affordable body immediately.
+{
+    function builderRequest(overrides) {
+        return Object.assign({
+            requestId:"request-full", slotId:"slot-full", expiresAt:world.now + 400000,
+            targetShard:"shard2", targetRoomName:"E51S29", originShard:"shard3", spawnRoom:"E49S31",
+            body:["work", "carry", "move"], role:"crossShardBuilder",
+            tasks:[{taskName:"buildCrossShardRoom", roomName:"E51S29"}],
+        }, overrides);
+    }
+
+    const waiting = makeWorld();
+    waiting.Game.shard.name = "shard3";
+    makeRoom(waiting, "E49S31", {level:8, energyAvailable:5000, currentEnergyAvailable:1200,
+        energyCapacityAvailable:5000, spawns:[{id:"spawn1"}]});
+    assert.equal(waiting.missionFunc.spawnCrossShardBuilder(builderRequest()), false,
+        "drained but capable room holds the request for a full-size worker");
+    assert.equal(world.spawnCalls, 0);
+    assert.equal(world.missions.length, 0, "a waiting request is not acknowledged");
+
+    const deadline = makeWorld();
+    deadline.Game.shard.name = "shard3";
+    makeRoom(deadline, "E49S31", {level:8, energyAvailable:5000, currentEnergyAvailable:1200,
+        energyCapacityAvailable:5000, spawns:[{id:"spawn1"}]});
+    world.spawnResult = "spawned-deadline";
+    assert.equal(deadline.missionFunc.spawnCrossShardBuilder(builderRequest({expiresAt:world.now + 10000})), true,
+        "near the deadline the largest affordable body spawns instead of stalling");
+    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 4);
+    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 6);
+    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 10);
+
+    const full = makeWorld();
+    full.Game.shard.name = "shard3";
+    makeRoom(full, "E49S31", {level:8, energyAvailable:5000, currentEnergyAvailable:5000,
+        energyCapacityAvailable:5000, spawns:[{id:"spawn1"}]});
+    world.spawnResult = "spawned-full";
+    assert.equal(full.missionFunc.spawnCrossShardBuilder(builderRequest()), true,
+        "a funded room spawns the full 50-part worker");
+    assert.equal(world.lastSpawn.body.length, 50);
+    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 10);
+    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 15);
+    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 25);
+
+    const poorRoom = makeWorld();
+    poorRoom.Game.shard.name = "shard3";
+    makeRoom(poorRoom, "E49S31", {level:8, energyAvailable:5000, currentEnergyAvailable:1200,
+        energyCapacityAvailable:1800, spawns:[{id:"spawn1"}]});
+    world.spawnResult = "spawned-poor-room";
+    assert.equal(poorRoom.missionFunc.spawnCrossShardBuilder(builderRequest()), true,
+        "a room that can never afford the full body does not wait");
+    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 4);
+}
+
 // 6. Creep task explicitly enters the target room even while it is visible.
 {
     const sb = makeWorld();

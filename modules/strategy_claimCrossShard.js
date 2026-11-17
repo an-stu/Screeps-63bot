@@ -75,11 +75,12 @@
  * 语义保持不变更稳。
  *
  * 可用 `Memory.claimCrossShardPath`（{ path: [...] }）覆盖，调整路线不必重传代码。
- * 当前默认：shard3 E50S30(15,5) 虫洞直达 shard2，落地后步行到目标房 claim。
+ * 当前默认：shard3 E40S30(14,8) 虫洞直达 shard2（落地 E40S30(30,37)），
+ * 跨过后步行到目标房 claim。E51S29 旧建设配置已冻结 E50S30 路径，不受此默认影响。
  */
 let DEFAULT_CLAIM_PATH = {
     path: [
-        { shard: 'shard3', roomName: 'E50S30', x: 15, y: 5 },
+        { shard: 'shard3', roomName: 'E40S30', x: 14, y: 8 },
     ],
 };
 let getClaimPath = function () {

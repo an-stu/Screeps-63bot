@@ -19,6 +19,10 @@ const DOWNGRADE_PROTECTION_TICKS = 5000;
 // A full body needs up to 150 spawn ticks, followed by the portal route. Old
 // workers keep building while the next pair is spawned and travels here.
 const BUILDER_REPLACEMENT_LEAD_TICKS = 350;
+// When the source room can afford the full body at capacity but is temporarily
+// drained, wait for energy to refill rather than spawning a downgraded worker.
+// Only the tail of the request window falls back to the largest affordable body.
+const FULL_BODY_WAIT_MS = 5 * 60 * 1000;
 
 function copyPath(pathData) {
     if (!pathData || !Array.isArray(pathData.path) || !pathData.path.length) return null;
@@ -382,6 +386,18 @@ let pro = {
         // select against the source room's real remaining tick budget instead
         // of letting that stale request cap the reinforcement size.
         let energyBudget = pro.sourceSpawnEnergyBudget(room);
+        let fullCost = pro.bodyCost(pro.preferredBuilderBody());
+        let capacity = typeof room.getEnergyCapacityAvailable == "function"
+            ? room.getEnergyCapacityAvailable() : room.energyCapacityAvailable;
+        // Prefer the full 50-part worker. If the room could afford it at
+        // capacity but is momentarily drained, hold the request (return false
+        // so the mission retries) until energy refills; near the deadline fall
+        // back to the largest affordable body so bootstrap never stalls.
+        if (fullCost > 0 && energyBudget < fullCost
+            && typeof capacity == "number" && capacity >= fullCost
+            && data.expiresAt - now() > FULL_BODY_WAIT_MS) {
+            return false;
+        }
         let spawnBody = pro.affordableBuilderBody(energyBudget);
         if (!spawnBody.length) return false;
         let spawnCost = pro.bodyCost(spawnBody);

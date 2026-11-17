@@ -53,7 +53,7 @@ assert.equal(claim.bootstrap.spawnRoom, "E49S31");
 assert.equal(claim.claimFlagShard, "shard3");
 assert.equal(claim.roomName, "E51S29");
 assert.equal(claim.x, 0);
-assert.equal(claim.bootstrap.path.path[0].roomName, "E50S30");
+assert.equal(claim.bootstrap.path.path[0].roomName, "E40S30");
 
 // Use the actual task handler, with unrelated prototype mounting left out.
 function loadHandler(name) {
@@ -95,7 +95,7 @@ const cfg = sandbox.Memory.crossShardBuilds?.E51S29;
 assert.ok(cfg, "confirmed ownership must persist build configuration before removing the source flag");
 assert.equal(cfg.originShard, "shard3");
 assert.equal(cfg.spawnRoom, "E49S31");
-assert.equal(cfg.path.path[0].roomName, "E50S30");
+assert.equal(cfg.path.path[0].roomName, "E40S30");
 assert.equal(creep.memory.tasks.length, 0);
 assert.equal(requests[0].toShard, "shard3");
 assert.equal(requests[0].mission.func, "removeFlag");
