@@ -358,15 +358,11 @@ let main = function () {
     updateCodeHealth();
     HelperTelemetrySegment.exec();
     // CPU 账户管理（每个 shard 独立执行）：
-    //  - 有 CPU unlock 券就续期（24h/张）。**必须记录上次成功时间**：unlock 生效最多
-    //    要等 5 分钟，等待期内重复调用会再扣券（实测已多耗 1 张）。按 12,000 tick
-    //    重试一次：仍生效时返回 ERR_FULL 不扣券，过期则 OK 续期。
-    //  - bucket 满了就把多余的 CPU 转成 pixel（10,000 bucket/个）
+    //  - 满桶转 pixel：bucket >= 10000 时 generatePixel（10,000 bucket/个）。
+    //  - **不自动续 CPU unlock**：实测每次 Game.cpu.unlock() 调用都会扣一张券
+    //    （不是文档暗示的"有效期内 ERR_FULL 不消耗"），而且代码在每个 shard 上
+    //    各跑一次 ⇒ 2026-11-16 10 张券被连扣到 6 张。unlock 续期改为手动/监控触发。
     if (Game.time % 100 == 0) {
-        if (Game.resources && Game.resources.cpuUnlock > 0 && typeof Game.cpu.unlock == "function"
-            && Game.time - (Memory._cpuUnlockTick || 0) > 12000) {
-            if (Game.cpu.unlock() == OK) Memory._cpuUnlockTick = Game.time;
-        }
         if (Game.cpu.bucket >= 10000 && typeof Game.cpu.generatePixel == "function") {
             Game.cpu.generatePixel();
         }

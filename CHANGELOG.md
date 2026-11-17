@@ -1,3 +1,10 @@
+## v0.78.260 — 事故修复：移除自动 unlock（每 shard 每 100 tick 扣券）
+
+- 事故：v0.78.258 的自动续 unlock 会**每次调用都扣一张券**（官方文档只写了 ERR_FULL 用于“已被订阅解锁”，实测非订阅账户重复调用仍扣券），且 tick 循环在**每个 shard 各跑一次** ⇒ 10 张券被连扣到 6 张（-4）。
+- 已立即止血：shard3/shard2 的 `Memory._cpuUnlockTick` 锁到未来 1e9 tick；v0.78.260 起**彻底移除自动 unlock 调用**，仅保留满桶 `generatePixel()`。unlock 续期改为手动/监控触发（每次调用都会扣券，必须谨慎）。
+- 影响：当前 6 张券 ≈ 6 天解锁；解锁仍有效（shard2 已获 250 CPU 分配、总量 270 说明解锁生效）。
+- 回归钉子改为断言 main 中**不存在** `Game.cpu.unlock()`。
+
 ## v0.78.259 — CPU 分配落地 + unlock 续期冷却（防止等待期重复扣券）
 
 - **CPU 分配**（用户 11-16）：解锁后总量 = 20 + GCL×10（GCL 25 → 270）。已执行 `Game.cpu.setShardLimits({ shard2: 250, shard3: 20 })`，实测生效：shard3 保持 20 CPU，shard2 获得 250（`Game.cpu.shardLimits` 已确认）。该方法有 12 小时冷却，后续调整需间隔。

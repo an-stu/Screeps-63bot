@@ -209,7 +209,7 @@ assert.ok(main.includes("Game._coreObjects"), "main loop must cache tick object 
 assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop must not serialize all Memory manually");
 assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache must only span consecutive ticks");
 assert.ok(main.includes("CPU_PROFILE_INTERVAL = 97"), "detailed CPU profiling must use a low-frequency prime interval to avoid aliasing");
-assert.ok(main.includes("Game.resources.cpuUnlock > 0") && main.includes("Game.cpu.unlock()") && main.includes("_cpuUnlockTick"), "CPU unlock tokens must be renewed automatically with a cooldown guard");
+assert.ok(!main.includes("Game.cpu.unlock()"), "CPU unlock must never be auto-called: every call spends a token, and the tick loop runs on every shard");
 assert.ok(main.includes("Game.cpu.bucket >= 10000") && main.includes("Game.cpu.generatePixel()"), "a full bucket must be converted to pixels");
 assert.ok(main.includes("OPTIONAL_CPU_OFFSETS") && main.includes("marketAutoBuy:19") && main.includes("autoPlanner:7") && main.includes("visual:3"), "optional jobs must use separate CPU schedule offsets");
 // 用户 2026-10-19：「在位肯定要工作；能量低/快降级是不**派** upgrader，不是**暂停**工作，不要浪费」
