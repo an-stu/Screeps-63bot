@@ -96,6 +96,8 @@ let pro = {
         if (global.StrategyTradeCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("crossShardTrade")) HelperError.catchError(() => StrategyTradeCrossShard.exec());
         if (global.StrategyClaim && isCpuFeatureEnabled("claim") && ManagerFlags.hasPrefix("claim")) HelperError.catchError(() => StrategyClaim.exec());
         if (global.StrategyClaimCrossShard && isCpuFeatureEnabled("crossShard") && isCpuFeatureEnabled("claimCrossShard") && ManagerFlags.hasPrefix("claimCrossShard")) HelperError.catchError(() => StrategyClaimCrossShard.exec());
+        // 跨 shard 建设：只在配置了 Memory.crossShardBuild 的 shard 上跑（其它 shard 零开销）
+        if (global.StrategyBuildCrossShard && isCpuFeatureEnabled("crossShard") && Memory.crossShardBuild) HelperError.catchError(() => StrategyBuildCrossShard.exec());
         if (global.StrategyScouter && isCpuFeatureEnabled("scouter") && ManagerFlags.hasPrefix("moveto")) HelperError.catchError(() => StrategyScouter.exec());
         if (global.StrategyFactoryPowerCreep) HelperError.catchError(() => StrategyFactoryPowerCreep.exec());
         if (global.StrategyCleanBuild && isCpuFeatureEnabled("cleanBuild") && ManagerFlags.hasPrefix("cleanBuild")) HelperError.catchError(() => StrategyCleanBuild.exec());

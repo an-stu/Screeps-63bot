@@ -1,3 +1,13 @@
+## v0.78.263 — 跨 shard 建设阶段：spawn 工地 + 派 builder 修工地
+
+- 新增 `strategy_buildCrossShard.js`（在**目标 shard** 上由 `Memory.crossShardBuild` 驱动，其它 shard 零开销）：
+  - 目标房无 spawn ⇒ 一次性生成 structMap（复用 `ManagerAutoPlanner.computeRoom`）并走 `StrategyClaim.ensureConstructionSites` 建 spawn 工地；规划失败时绕 controller 螺旋找空位兜底。
+  - 从 `originShard` 的 `spawnRoom` 派 `crossShardBuilder`（WORK6/CARRY6/MOVE12），任务链 `[buildCrossShardRoom, moveCrossShardByPath]`——任务栈**末尾先执行**，所以先跨虫洞再建造。路径复用 `StrategyClaimCrossShard.getPath()`（新增导出），不另存一份默认值。
+  - 派车间隔用真实时间 8 分钟（工人在路上时目标 shard 看不到它），`builders` 满员停派，累计上限 6；spawn 建成后自动删除配置。
+- 新增任务处理器 `buildCrossShardRoom`：无能量时到最近 source 采集（range 1），有能量时修最近的工地（range 3）；工地全完且 spawn 已建成 → 自杀收尾；工地被撤销但 spawn 未成 → 原地等待补建。
+- `main.js`：`StrategyBuildCrossShard` 仅在存在 `Memory.crossShardBuild` 的 shard 上调用。
+- 回归：`test/cross-shard-build.test.cjs`（工地创建/兜底、任务顺序与单段路径、8 分钟冷却、满员、完工摘配置、采集/建造/收尾、路径复用钉子）。
+
 ## v0.78.262 — 修复跨 shard 移动任务 index 死循环（claimer 原地不动）
 
 - 现象：claimer 已跨到 shard2，但站在虫洞格上不动，claim 任务永远不执行。

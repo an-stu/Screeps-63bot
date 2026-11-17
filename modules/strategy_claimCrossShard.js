@@ -101,6 +101,10 @@ let claimTaskFlag = function (flag) {
 // }
 
 let pro = {
+    /** 供其它跨 shard 策略复用同一份路径（含 Memory.claimCrossShardPath 覆盖）。 */
+    getPath() {
+        return getClaimPath();
+    },
     getClaimerBody(withAttack) {
         if (!withAttack) return ManagerCreeps.calcBodyPart({ [TOUGH]: 15, [MOVE]: 16, [CLAIM]: 1 });
         return ManagerCreeps.calcBodyPart({ [MOVE]: 34, [CLAIM]: 16 });
