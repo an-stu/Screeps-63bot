@@ -335,10 +335,11 @@ Creep.prototype.getUnBoostPartCnt = function (bodyPart) {
  * @param obj
  */
 Creep.prototype.goTo = function (obj) {
-    if (!obj) obj = this.goTo(this.memory.tasks.last());
+    if (!obj) obj = this.lastTask();
+    if (!obj) return;
     if (obj.pos)
         this.moveTo(obj.pos, { visualizePathStyle: { stroke: '#ff0374' } });
-    else if (obj.x)
+    else if (Number.isInteger(obj.x) && Number.isInteger(obj.y))
         this.moveTo(new RoomPosition(obj.x, obj.y, obj.roomName), { visualizePathStyle: { stroke: '#ff0374' } })
 };
 
@@ -356,7 +357,8 @@ Creep.prototype.scouterToRoom = function () {
 };
 
 Creep.prototype.claimRoom = function () {
-    let obj = this.lastTask();
+    let task = this.lastTask();
+    let obj = task;
     let flagName = obj.id;
     if (!obj.roomName && !obj.pos) {
         obj = Game.flags[obj.id];
@@ -381,8 +383,18 @@ Creep.prototype.claimRoom = function () {
                         this.memory.signed = true
                 }
             }
-            else this.notifyClaimDone(flagName);
         } else if (this.room.my) {
+            // 先看到控制器确实属于自己，再持久化建设配置。claimController 的
+            // OK 仅表示意图已提交，不能在同一 tick 提前结束占领流程。
+            let bootstrap = task.bootstrap;
+            if (!bootstrap && flagName && flagName.startsWith("claimCrossShard_")) {
+                let parts = flagName.split("_");
+                bootstrap = { originShard: parts[1], spawnRoom: parts[2], path: StrategyClaimCrossShard.getPath() };
+            }
+            if (bootstrap) {
+                if (!global.StrategyBuildCrossShard || !StrategyBuildCrossShard.start(this.room.name, bootstrap)) return;
+                this.notifyClaimDone(flagName, task.claimFlagShard || bootstrap.originShard);
+            }
             this.popTask();
         }
     } else {

@@ -59,9 +59,9 @@ Creep.prototype.testEnd = function(){
  * index 在 `len-1 ↔ len` 之间反复横跳，`index==path.length` 永不成立，
  * 任务永不弹出，claim 任务也永远轮不到执行。
  *
- * 现在：index 只向前推进（跨 shard 后落到新 shard 的下一段），越过末段
- * 立即弹任务；最后一段没有虫洞可踩也视为到达。站在回程虫洞上时不再把
- * creep memory 反向递回出发 shard（原实现每 tick 发一次，对端 retry 5000 tick）。
+ * 现在：index 只向前推进（跨 shard 后落到新 shard 的下一段），并在确认
+ * 实际换 shard 后才完成跳转。站在回程虫洞上时不把 memory 反向递回出发
+ * shard；旧双向路径的回程虫洞作为终点兼容处理。
  */
 Creep.prototype.moveCrossShardByPath = function(){
     this.autoHeal()
@@ -71,34 +71,128 @@ Creep.prototype.moveCrossShardByPath = function(){
 
     let task = this.lastTask()
     let path = task.path
-    if (!path || !path.length) return this.popTask().execLastTask();
-    task.index = task.index||0;
-    if (task.index >= path.length) return this.popTask().execLastTask();
+    if (!Array.isArray(path) || !path.length) return this.popTask().execLastTask();
+    task.index = Number.isFinite(task.index) ? Math.max(0, Math.floor(task.index)) : 0;
+
+    let shard = Game.shard.name
+    let getPortal = waypoint => {
+        if (Game.rooms && !Game.rooms[waypoint.roomName]) return undefined
+        let pos = new RoomPosition(waypoint.x,waypoint.y,waypoint.roomName)
+        return pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_PORTAL).head()
+    }
+
+    // New tasks carry the expected destination and source portal. Do not treat
+    // the incremented index as proof of arrival: movement can fail while the
+    // creep remains on the source shard for many ticks.
+    let pending = task.pendingTransition
+    if (pending) {
+        if (shard == pending.toShard) {
+            task.crossShardTransitionConfirmed = true
+            delete task.pendingTransition
+        } else if (shard == pending.fromShard) {
+            let departure = pending.departure
+            if (departure) {
+                let departurePos = new RoomPosition(departure.x,departure.y,departure.roomName)
+                if (Game.rooms && !Game.rooms[departure.roomName]) {
+                    this.goTo(departurePos)
+                    return
+                }
+                let portal = departurePos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_PORTAL).head()
+                let liveDestination = portal && portal.destination && portal.destination.shard
+                if (portal && liveDestination == pending.toShard) {
+                    // The original request already includes this task state;
+                    // keep retrying movement without enqueuing another copy.
+                    this.goTo(departurePos)
+                    return
+                }
+            }
+
+            // A vanished/retargeted portal cannot complete this hop. Roll back
+            // to its source waypoint and let the normal path handling keep the
+            // task alive until the route can be retried.
+            let departureIndex = Number.isFinite(pending.index) ? pending.index : task.index - 1
+            task.index = Math.max(0, Math.min(Math.floor(departureIndex), path.length - 1))
+            delete task.pendingTransition
+        } else {
+            // The creep is on neither endpoint of the pending hop. In
+            // particular, do not navigate to a same-named room on this shard.
+            return
+        }
+    }
+
+    if (task.index >= path.length) {
+        let last = path[path.length - 1]
+        if (shard != last.shard) {
+            // Legacy tasks did not remember the destination. A creep that has
+            // left the last source shard has completed its final hop.
+            return this.popTask().execLastTask();
+        }
+
+        // Legacy task saved after incrementing at the source. Retry its last
+        // departure portal; the destination shard is only accepted after an
+        // actual shard change. An old two-way path may instead end at the
+        // reverse portal on the landing shard, which is a terminal waypoint.
+        let lastPortal = getPortal(last)
+        let prev = path[path.length - 2]
+        let lastPos = new RoomPosition(last.x,last.y,last.roomName)
+        let reverseLanding = prev && prev.shard != shard && lastPortal
+            && lastPortal.destination && lastPortal.destination.shard == prev.shard
+        if (reverseLanding && lastPos.isNearTo(this)) {
+            return this.popTask().execLastTask();
+        }
+        task.index = path.length - 1
+    }
+
+    // Legacy in-flight tasks may have had their index incremented before the
+    // new pending-transition marker was introduced. If the next waypoint is
+    // on another shard but the previous departure is on this one, retry it.
+    if (task.index > 0 && task.index < path.length
+        && path[task.index].shard != shard && path[task.index - 1].shard == shard) {
+        task.index -= 1
+    }
+
     for(let i=task.index;i<path.length;i++){
         let e = path[i]
-        if(e.roomName == this.pos.roomName&& e.shard == Game.shard.name){
+        if(e.roomName == this.pos.roomName&& e.shard == shard){
             task.index = i ;
         }
     }
-    if (task.index >= path.length) return this.popTask().execLastTask();
+
+    // Never feed a waypoint from another shard to goTo: room names overlap
+    // across shards. This can happen with malformed or partially migrated tasks.
+    if (task.index >= path.length || path[task.index].shard != shard) return;
 
     let current = path[task.index];
     let pos = new RoomPosition(current.x,current.y,current.roomName)
     if(pos.isNearTo(this)){
         let portal = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_PORTAL).head()
         if(portal){
-            task.index += 1
-            // 只在「确实要跨到下一跳 shard」时递 memory：最后一段站在回程
-            // 虫洞上（目标就是上一段的出发 shard）不再反向递交。
-            let prev = path[task.index-2]
             let destShard = portal.destination&&portal.destination.shard
-            if(destShard&&!(task.index>=path.length&&prev&&prev.shard==destShard)){
+            let prev = path[task.index-1]
+            let reverseLanding = task.index == path.length - 1 && prev
+                && prev.shard != shard && destShard == prev.shard
+            if (reverseLanding) {
+                // Compatibility with older two-way paths that append the
+                // landing-side return portal as their final waypoint.
+                return this.popTask().execLastTask()
+            } else if(destShard && destShard != shard){
+                let departureIndex = task.index
+                task.pendingTransition = {
+                    fromShard: shard,
+                    toShard: destShard,
+                    departure: {shard: shard, roomName: current.roomName, x: current.x, y: current.y},
+                    index: departureIndex,
+                }
+                task.index = departureIndex + 1
                 this.submitCrossShardCreepMemory(destShard,this.memory)
             }
-        }
-        else if(task.index==path.length-1){
-            // 最后一段没有虫洞可踩 ⇒ 这里就是终点，直接弹任务
-            return this.popTask().execLastTask();
+        } else if (task.index == path.length - 1 && path.length > 1
+            && !task.crossShardTransitionConfirmed) {
+            // Pre-marker two-way routes sometimes appended the landing-side
+            // endpoint without a portal. Preserve that legacy completion only
+            // for markerless multi-entry tasks; a source-only missing portal
+            // (and any newly confirmed route) must remain queued.
+            return this.popTask().execLastTask()
         }
     }
     this.goTo(pos) //先交换内存再走路,防止cpu用完了
@@ -109,8 +203,8 @@ Creep.prototype.moveCrossShardByPath = function(){
  * 否则 StrategyClaimCrossShard 在源 shard 上看不到目标房（跨 shard 无视野），
  * 每 ~300 tick 继续派新 claimer，形成永远填不满的循环。
  */
-Creep.prototype.notifyClaimDone = function (flagName) {
-    let origin = (this.name||"").split("_")[0]
+Creep.prototype.notifyClaimDone = function (flagName, flagShard) {
+    let origin = flagShard || (this.name||"").split("_")[0]
     if (!origin || origin == Game.shard.name || !flagName) return
     ManagerCrossShard.addCrossShardRequest(origin, { func: "removeFlag", data: { name: flagName } })
 }

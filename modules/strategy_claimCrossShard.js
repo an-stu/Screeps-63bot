@@ -93,7 +93,15 @@ let getClaimPath = function () {
  * （实测 shard2 claimer 卡死在虫洞格）。claimRoom 本就支持 roomName/x/y。
  */
 let claimTaskFlag = function (flag) {
-    return { taskName: "claimRoom", id: flag.name, roomName: flag.pos.roomName, x: flag.pos.x, y: flag.pos.y };
+    let parts = flag.name.split("_");
+    return {
+        taskName: "claimRoom", id: flag.name, roomName: flag.pos.roomName, x: flag.pos.x, y: flag.pos.y,
+        claimFlagShard: Game.shard.name,
+        bootstrap: {
+            originShard: parts[1], spawnRoom: parts[2], builders: flag.memory.builders || 2,
+            path: JSON.parse(JSON.stringify(getClaimPath())),
+        },
+    };
 };
 
 // pathData = { path:

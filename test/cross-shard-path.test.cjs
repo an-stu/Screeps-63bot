@@ -1,6 +1,5 @@
-// 0.78.262 回归：moveCrossShardByPath 的 index 必须单调推进并在末段弹出。
-// 旧实现的负对照：每 tick 从 i=0 重扫房间名，会把到达对面的 index 拉回 len-1，
-// claimer 永远站在虫洞格上（线上实测卡死）。
+// Regression coverage for monotonic cross-shard path progress and confirmed
+// portal transitions. Room names are not unique across shards.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -43,7 +42,7 @@ function makeWorld(opts) {
     const sandbox = {
         Creep: function () {},
         RoomPosition,
-        Game: {shard: {name: opts.shard}},
+        Game: {shard: {name: opts.shard}, rooms: opts.portal ? {[opts.portal.roomName]: {}} : {}},
         FIND_HOSTILE_CREEPS: "hostile",
         LOOK_STRUCTURES: "structures",
         STRUCTURE_PORTAL: "portal",
@@ -70,7 +69,7 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     };
     // handler 里构造的 RoomPosition 会用真实 isNearTo；lookFor 由坐标决定
     RoomPosition.prototype.lookFor = function (type) {
-        if (type !== "structures" || !portal) return [];
+        if (type !== "structures" || !portal || portal.exists === false) return [];
         if (this.x === portal.x && this.y === portal.y && this.roomName === portal.roomName) {
             return [{ structureType: "portal", destination: {shard: portal.destinationShard}}];
         }
@@ -91,8 +90,8 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     return creep;
 }
 
-// 1) 线上实际数据：两段路径，index=1，已在 shard2 的终点（回程虫洞）上。
-//    旧代码这里 index 会被拉回 1，永远弹不掉；新代码下一 tick 必须 pop 并执行 claim。
+// 1) Legacy two-way path ending at the reverse portal must finish here,
+//    without sending memory back to the origin shard.
 {
     const portal = {x: 42, y: 27, roomName: "E50S30", destinationShard: "shard3"};
     const world = makeWorld({shard: "shard2", portal});
@@ -103,16 +102,14 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     ], index: 1};
     const creep = makeCreep(world.Creep, "shard2", 42, 27, "E50S30", [claim, move], portal);
     creep.moveCrossShardByPath();
-    assert.equal(move.index, 2, "到达末段虫洞后 index 必须推进到 path.length（不得被回扫拉回）");
+    assert.equal(creep.popped, 1, "落在回程虫洞上时应结束路径任务");
     assert.ok(!creep.submitted, "站在回程虫洞上不得把 memory 反向递回出发 shard");
-    assert.ok(!creep.popped, "弹出发生在下一 tick 的开头");
-    creep.moveCrossShardByPath();
-    assert.equal(creep.popped, 1, "越过末段后必须弹出移动任务");
     assert.equal(creep.exec, 1, "弹出后必须立刻执行 claim 任务");
     assert.equal(creep.memory.tasks.length, 1, "claim 任务应保留");
 }
 
-// 2) 单段路径（新默认）：在 shard3 踩虫洞 → 推进并递 memory 到 shard2。
+// 2) Failed first crossing: retain the transition and keep approaching the
+//    source portal without repeatedly enqueueing the creep memory.
 {
     const portal = {x: 15, y: 5, roomName: "E50S30", destinationShard: "shard2"};
     const world = makeWorld({shard: "shard3", portal});
@@ -120,10 +117,61 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     const creep = makeCreep(world.Creep, "shard3", 15, 6, "E50S30", [move], portal);
     creep.moveCrossShardByPath();
     assert.equal(move.index, 1, "踩到虫洞后 index 前进");
+    assert.equal(move.pendingTransition.toShard, "shard2", "递交前记录预期 destination");
+    assert.equal(move.pendingTransition.departure.x, 15, "递交前记录出发虫洞");
     assert.deepEqual(creep.submitted, ["shard2"], "最后一段的虫洞必须把 memory 递到目标 shard");
+    assert.equal(creep.popped, undefined, "尚未观察到换 shard 时不能完成路径");
+
+    delete world.sandbox.Game.rooms.E50S30; // departure room is temporarily not visible
+    creep.moveCrossShardByPath();
+    assert.equal(move.pendingTransition.toShard, "shard2", "保留不可见房间中的 pending hop");
+    assert.equal(creep.submitted.length, 1, "不可见期间不重复提交 Memory");
+    assert.equal(creep.goto.length, 2, "不可见时仍朝缓存的出发点移动");
+
+    world.sandbox.Game.rooms.E50S30 = {};
+    creep.moveCrossShardByPath(); // movement was blocked; Game.shard is still shard3
+    assert.equal(move.index, 1, "source shard 上保留已排队的 hop");
+    assert.equal(creep.submitted.length, 1, "等待期间不重复提交 Memory");
+    assert.equal(creep.goto.length, 3, "等待期间继续朝原出发虫洞移动");
+    assert.equal(creep.popped, undefined);
 }
 
-// 3) 多段路径的中间跳：到达 shard2 的下一段虫洞 → index 前进并把 memory 递到 shard1。
+// 3) The final hop completes only after the expected shard is observed.
+{
+    const portal = {x: 15, y: 5, roomName: "E50S30", destinationShard: "shard2"};
+    const world = makeWorld({shard: "shard3", portal});
+    const move = {taskName: "moveCrossShardByPath", path: [{shard: "shard3", roomName: "E50S30", x: 15, y: 5}], index: 0};
+    const creep = makeCreep(world.Creep, "shard3", 15, 6, "E50S30", [move], portal);
+    creep.moveCrossShardByPath();
+    world.sandbox.Game.shard.name = "shard2";
+    creep.moveCrossShardByPath();
+    assert.equal(creep.popped, 1, "观察到预期 destination 后弹出最后一跳");
+    assert.equal(creep.exec, 1);
+}
+
+// 4) Legacy source task with index==length retries its source portal.
+{
+    const portal = {x: 15, y: 5, roomName: "E50S30", destinationShard: "shard2"};
+    const world = makeWorld({shard: "shard3", portal});
+    const move = {taskName: "moveCrossShardByPath", path: [{shard: "shard3", roomName: "E50S30", x: 15, y: 5}], index: 1};
+    const creep = makeCreep(world.Creep, "shard3", 15, 6, "E50S30", [move], portal);
+    creep.moveCrossShardByPath();
+    assert.equal(creep.popped, undefined, "legacy source task must not be discarded");
+    assert.equal(move.index, 1, "retry establishes pending hop without a negative index");
+    assert.equal(move.pendingTransition.toShard, "shard2");
+    assert.deepEqual(creep.submitted, ["shard2"]);
+}
+
+// 5) Legacy single-segment task observed on another shard is complete.
+{
+    const world = makeWorld({shard: "shard2", portal: null});
+    const move = {taskName: "moveCrossShardByPath", path: [{shard: "shard3", roomName: "E50S30", x: 15, y: 5}], index: 1};
+    const creep = makeCreep(world.Creep, "shard2", 15, 6, "E50S30", [move], null);
+    creep.moveCrossShardByPath();
+    assert.equal(creep.popped, 1, "legacy destination-shard task should finish");
+}
+
+// 6) Multi-point path: reach the shard2 portal and schedule the shard1 hop.
 {
     const portal = {x: 41, y: 20, roomName: "W40S10", destinationShard: "shard1"};
     const world = makeWorld({shard: "shard2", portal});
@@ -136,23 +184,48 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     creep.moveCrossShardByPath();
     assert.equal(move.index, 2);
     assert.deepEqual(creep.submitted, ["shard1"]);
+    assert.equal(move.pendingTransition.fromShard, "shard2");
 }
 
-// 4) 末段没有虫洞（落地格不含传送门结构）→ 视为到达，直接弹出。
+// 7) A portal disappearing after submission cancels the stale pending hop,
+//    but does not discard the path or submit memory again.
 {
-    const world = makeWorld({shard: "shard2", portal: null});
-    const claim = {taskName: "claimRoom", id: "x", roomName: "E51S29", x: 25, y: 25};
-    const move = {taskName: "moveCrossShardByPath", path: [
+    const portal = {x: 15, y: 5, roomName: "E50S30", destinationShard: "shard2"};
+    const world = makeWorld({shard: "shard3", portal});
+    const move = {taskName: "moveCrossShardByPath", path: [{shard: "shard3", roomName: "E50S30", x: 15, y: 5}], index: 0};
+    const creep = makeCreep(world.Creep, "shard3", 15, 6, "E50S30", [move], portal);
+    creep.moveCrossShardByPath();
+    portal.exists = false;
+    creep.moveCrossShardByPath();
+    assert.equal(creep.popped, undefined, "portal disappearance must not finish the hop");
+    assert.equal(move.pendingTransition, undefined, "discard stale portal expectation");
+    assert.equal(move.index, 0, "retry source waypoint without negative index");
+    assert.equal(creep.submitted.length, 1, "do not resubmit while the portal is absent");
+    assert.equal(creep.goto.length, 2, "continue approaching the source waypoint");
+}
+
+// 8) A markerless old multi-entry path may end at a landing-side point without
+//    a portal; a source-only missing portal must not be treated as completion.
+{
+    const oldWorld = makeWorld({shard: "shard2", portal: null});
+    const oldMove = {taskName: "moveCrossShardByPath", path: [
         {shard: "shard3", roomName: "E50S30", x: 15, y: 5},
         {shard: "shard2", roomName: "E50S30", x: 42, y: 27},
     ], index: 1};
-    const creep = makeCreep(world.Creep, "shard2", 42, 27, "E50S30", [claim, move], null);
-    creep.moveCrossShardByPath();
-    assert.equal(creep.popped, 1, "末段无虫洞时立即弹出");
-    assert.equal(creep.exec, 1);
+    const oldCreep = makeCreep(oldWorld.Creep, "shard2", 42, 27, "E50S30", [oldMove], null);
+    oldCreep.moveCrossShardByPath();
+    assert.equal(oldCreep.popped, 1, "legacy landing endpoint remains completable");
+
+    const sourceWorld = makeWorld({shard: "shard3", portal: null});
+    const sourceMove = {taskName: "moveCrossShardByPath", path: [
+        {shard: "shard3", roomName: "E50S30", x: 15, y: 5},
+    ], index: 0};
+    const sourceCreep = makeCreep(sourceWorld.Creep, "shard3", 15, 6, "E50S30", [sourceMove], null);
+    sourceCreep.moveCrossShardByPath();
+    assert.equal(sourceCreep.popped, undefined, "missing source portal must not finish a route");
 }
 
-// 5) 旧实现负对照（源码级）：不得再出现「从 i=0 重扫」的回退循环。
+// 9) The handler must never restart its search at index zero.
 {
     const fn = extractFn(src, "Creep.prototype.moveCrossShardByPath");
     assert.ok(!/for\s*\(\s*let\s+i\s*=\s*0\s*;\s*i\s*<\s*path\.length/.test(fn),
@@ -160,7 +233,7 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     assert.ok(fn.includes("task.index >= path.length"), "必须按 >= 判定越过末段");
 }
 
-// 6) claim 成功通知源 shard 摘旗。
+// 10) claim 成功通知源 shard 摘旗。
 {
     const world = makeWorld({shard: "shard2", portal: null});
     const creep = makeCreep(world.Creep, "shard2", 25, 25, "E51S29", [], null);
@@ -176,7 +249,7 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     assert.equal((world.sandbox.requests || []).length, 1, "同 shard claim 不重复发跨 shard 请求");
 }
 
-// 7) mission 侧必须有幂等的 removeFlag 处理器。
+// 11) mission 侧必须有幂等的 removeFlag 处理器。
 {
     const missionSrc = fs.readFileSync(path.join(__dirname, "..", "modules", "manager_missions.js"), "utf8");
     const sandbox = {

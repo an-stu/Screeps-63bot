@@ -33,8 +33,8 @@ global.isCpuFeatureEnabled = name => {
 // the online cross-shard feature gate is temporarily disabled.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.78.263",
-    uploadedModules: 73,
+    version: "0.78.264",
+    uploadedModules: 74,
     restoredSnapshotModules: 69,
     intentionallyExcluded: []
 }
@@ -111,6 +111,7 @@ require('strategy_market');
 require('strategy_claim');
 require('strategy_tradeCrossShard');
 require('strategy_claimCrossShard');
+require('strategy_buildCrossShard');
 require('strategy_cleanBuild');
 require('strategy_blockRoom');
 require('strategy_pillage');
