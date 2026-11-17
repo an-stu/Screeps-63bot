@@ -64,29 +64,23 @@
 //   distance: 164,
 //   totalRooms: 22 }
 
-let pathData = {
-    path:
-        [{ shard: 'shard2', roomName: 'E10N20', x: 6, y: 39 },
-        { shard: 'shard1', roomName: 'E10N20', x: 34, y: 30 },
-        { shard: 'shard0', roomName: 'E10N31', x: 7, y: 48 },
-        { shard: 'shard0', roomName: 'W10N30', x: 22, y: 25 },
-        { shard: 'shard1', roomName: 'W10N20', x: 11, y: 35 },
-        { shard: 'shard0', roomName: 'W19N40', x: 1, y: 6 },
-        { shard: 'shard0', roomName: 'W20N50', x: 43, y: 29 },
-        { shard: 'shard1', roomName: 'W10N30', x: 10, y: 13 },
-        { shard: 'shard0', roomName: 'W19N60', x: 1, y: 4 },
-        { shard: 'shard0', roomName: 'W20N70', x: 39, y: 38 },
-        { shard: 'shard1', roomName: 'W10N40', x: 20, y: 39 }],
-    distance: 224,
-    totalRooms: 95
-}
-
-pathData = {
-    path:
-        [{ shard: 'shard3', roomName: 'W25N55', x: 21, y: 33 }],
-    startRoom: 'shard3_W25N57',
-    endRoom: 'shard3_E55S31'
-}
+/**
+ * 跨 shard 路径：waypoint 全是**虫洞格**。creep 踩到虫洞时，moveCrossShardByPath
+ * 把它的 memory 经 InterShardMemory 递到目标 shard，然后原地传送过去继续做后续任务。
+ * 可用 `Memory.claimCrossShardPath`（{ path: [...] }）覆盖，调整路线不必重传代码。
+ * 当前默认：shard3 E50S30(15,5) 虫洞 → shard2（对端虫洞同坐标），再步行到目标房 claim。
+ */
+let DEFAULT_CLAIM_PATH = {
+    path: [
+        { shard: 'shard3', roomName: 'E50S30', x: 15, y: 5 },
+        { shard: 'shard2', roomName: 'E50S30', x: 15, y: 5 },
+    ],
+};
+let getClaimPath = function () {
+    let p = Memory.claimCrossShardPath;
+    if (p && Array.isArray(p.path) && p.path.length) return p;
+    return DEFAULT_CLAIM_PATH;
+};
 
 // pathData = { path:
 //         [{ shard: 'shard2', roomName: 'E20N10', x: 38, y: 29 }]
@@ -120,7 +114,7 @@ let pro = {
                             role: "claimer",
                             tasks: [
                                 UtilsTask.taskFlag(flag, "claimRoom"),
-                                UtilsTask.taskData("moveCrossShardByPath", undefined, pathData)
+                                UtilsTask.taskData("moveCrossShardByPath", undefined, getClaimPath())
                             ],
                         }
                     }
@@ -142,7 +136,7 @@ let pro = {
                                 body: ManagerCreeps.calcBodyPart({ [WORK]: 16, [CARRY]: 18, [MOVE]: 16 }),// 这里写死了
                                 role: "worker",
                                 tasks: [
-                                    UtilsTask.taskData("moveCrossShardByPath", undefined, pathData)
+                                    UtilsTask.taskData("moveCrossShardByPath", undefined, getClaimPath())
                                 ],
                             }
                         }

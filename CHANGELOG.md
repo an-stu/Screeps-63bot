@@ -1,3 +1,11 @@
+## v0.78.257 — 跨 shard claim：路线可配置，默认走 E50S30 虫洞进 shard2
+
+- 用户 11-16：开始向其他 shard 扩展，第一个目标房 **shard2:E51S29**，通过 **E50S30(15,5) 的跨 shard 虫洞**进入（同坐标对端虫洞；E50S30(27,22) 通往 shardX，忽略）。
+- `strategy_claimCrossShard` 的路径改为 `Memory.claimCrossShardPath` 优先、内置默认值为 `shard3 E50S30(15,5) → shard2 E50S30(15,5)`；调整路线不必重传代码。mission 生成时读取一次。
+- 机制不变：旗子 `claimCrossShard_<出兵 shard>_<出兵房>_<n>` 放在目标房名上 → 本 shard 出兵（默认 TOUGH15+MOVE16+CLAIM1）→ 沿路径踩虫洞（memory 经 InterShardMemory 递交目标 shard）→ 抵达后 `claimRoom` 占领。
+- 使用前需开启 CPU 特性：`Memory.cpuFeatures.crossShard = true`、`Memory.cpuFeatures.claimCrossShard = true`（两者均为 opt-in）。
+- 注意：shard3 仍然 20 CPU 上限；其他 shard 的 bucket/Memory 各自独立，段遥测/面板只覆盖 shard3。
+
 ## v0.78.256 — 全链核算修正：官方配方核实、可逆配方防循环、level 门槛修正
 
 - 用户 11-12 指出采购利润表「绝对有问题」。核对官方 COMMODITIES（从官方文档 API 页提取，45 条）后确认两处硬错误：
