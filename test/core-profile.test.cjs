@@ -31,6 +31,7 @@ const warCache = fs.readFileSync(path.join(root, "modules/war_cache.js"), "utf8"
 const teamRaL1 = fs.readFileSync(path.join(root, "modules/team_raL1.js"), "utf8");
 const strategyAtkL2 = fs.readFileSync(path.join(root, "modules/strategy_atkL2.js"), "utf8");
 const strategyClaim = fs.readFileSync(path.join(root, "modules/strategy_claim.js"), "utf8");
+const strategyClaimCrossShard = fs.readFileSync(path.join(root, "modules/strategy_claimCrossShard.js"), "utf8");
 const strategyLowLevel = fs.readFileSync(path.join(root, "modules/strategy_lowLevel.js"), "utf8");
 const strategyHighLevel = fs.readFileSync(path.join(root, "modules/strategy_highLevel.js"), "utf8");
 const stationObserver = fs.readFileSync(path.join(root, "modules/station_observer.js"), "utf8");
@@ -206,6 +207,8 @@ assert.ok(!stationHive.includes("this.pos.findClosestByPath(FIND_MY_STRUCTURES")
 assert.ok(!managerRooms.includes("room.find(FIND_FLAGS)"), "room manager must use the per-tick flag index");
 assert.ok(managerFlags.includes("let prefixMap = Game._flagPerfixMap = {}"), "flag prefixes must be indexed during initialization");
 assert.ok(main.includes("Game._coreObjects"), "main loop must cache tick object arrays");
+assert.ok(strategyClaimCrossShard.includes("roomName: flag.pos.roomName") && strategyClaimCrossShard.includes("x: flag.pos.x"),
+    "cross-shard claim tasks must carry the flag position: flags live on the source shard only");
 assert.ok(!main.includes("RawMemory.set(JSON.stringify(Memory))"), "main loop must not serialize all Memory manually");
 assert.ok(main.includes("_global_memory_tick + 1 == Game.time"), "Memory cache must only span consecutive ticks");
 assert.ok(main.includes("CPU_PROFILE_INTERVAL = 97"), "detailed CPU profiling must use a low-frequency prime interval to avoid aliasing");

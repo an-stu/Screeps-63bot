@@ -81,6 +81,14 @@ let getClaimPath = function () {
     if (p && Array.isArray(p.path) && p.path.length) return p;
     return DEFAULT_CLAIM_PATH;
 };
+/**
+ * claim 任务必须**自带目标坐标**：旗子只存在于源 shard，目标 shard 上
+ * `Game.flags[flag.name]` 为空，claimRoom 处理器会解析不到目标直接 return
+ * （实测 shard2 claimer 卡死在虫洞格）。claimRoom 本就支持 roomName/x/y。
+ */
+let claimTaskFlag = function (flag) {
+    return { taskName: "claimRoom", id: flag.name, roomName: flag.pos.roomName, x: flag.pos.x, y: flag.pos.y };
+};
 
 // pathData = { path:
 //         [{ shard: 'shard2', roomName: 'E20N10', x: 38, y: 29 }]
@@ -113,7 +121,7 @@ let pro = {
                             body: pro.getClaimerBody(withAttack),
                             role: "claimer",
                             tasks: [
-                                UtilsTask.taskFlag(flag, "claimRoom"),
+                                claimTaskFlag(flag),
                                 UtilsTask.taskData("moveCrossShardByPath", undefined, getClaimPath())
                             ],
                         }

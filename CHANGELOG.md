@@ -1,3 +1,10 @@
+## v0.78.261 — 跨 shard claim 任务自带坐标（目标 shard 上没有旗子）
+
+- 实测 shard2 claimer 卡死在 E50S30(15,5)。根因：`taskFlag` 只存旗子名，`claimRoom` 处理器在目标 shard 上通过 `Game.flags[obj.id]` 解析目标，而旗子只存在于源 shard（shard3）⇒ obj 为 undefined，处理器直接 return，永远不 claim。
+- 修复：跨 shard claim 任务改为自带 `roomName/x/y`（`claimRoom` 处理器本就支持该路径），不再依赖目标 shard 的 Game.flags。顺带把 shard2 侧路径终点修正为回程虫洞 **(42,27)**（原写 15,5 是 shard3 侧坐标）。
+- 之前卡住的 claimer 已通过控制台补丁任务链（移动作业指向 42,27，claim 任务带坐标）。
+- 回归钉子：cross-shard claim 任务必须包含 `roomName: flag.pos.roomName` 与 `x: flag.pos.x`。
+
 ## v0.78.260 — 事故修复：移除自动 unlock（每 shard 每 100 tick 扣券）
 
 - 事故：v0.78.258 的自动续 unlock 会**每次调用都扣一张券**（官方文档只写了 ERR_FULL 用于“已被订阅解锁”，实测非订阅账户重复调用仍扣券），且 tick 循环在**每个 shard 各跑一次** ⇒ 10 张券被连扣到 6 张（-4）。
