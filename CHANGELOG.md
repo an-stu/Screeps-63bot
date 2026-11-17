@@ -1,3 +1,10 @@
+## v0.78.259 — CPU 分配落地 + unlock 续期冷却（防止等待期重复扣券）
+
+- **CPU 分配**（用户 11-16）：解锁后总量 = 20 + GCL×10（GCL 25 → 270）。已执行 `Game.cpu.setShardLimits({ shard2: 250, shard3: 20 })`，实测生效：shard3 保持 20 CPU，shard2 获得 250（`Game.cpu.shardLimits` 已确认）。该方法有 12 小时冷却，后续调整需间隔。
+- **unlock 续期冷却**：官方 unlock 生效最多需 5 分钟，等待期内每 100 tick 重复调用会**重复扣券**（实测 10 张被多扣 1 张，剩 8）。现在记录 `Memory._cpuUnlockTick`，仅当距上次成功超过 12,000 tick 才再次尝试；有效期内调用返回 ERR_FULL 不扣券，过期才续期。
+- 满桶转 pixel 不变（每 100 tick 检查 `bucket >= 10000`）。
+- 回归钉子更新：unlock 续期必须带冷却守卫。
+
 ## v0.78.258 — CPU 账户自动化：unlock 券自动续期 + bucket 满转 pixel
 
 - 用户 11-16：跨 shard 前先激活 CPU unlock；多余的 CPU 在 bucket 满时转 pixel。主循环每 100 tick：
