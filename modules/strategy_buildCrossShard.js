@@ -530,13 +530,14 @@ function chooseEnergyTarget(creep, room, task) {
 
 function gatherBootstrapEnergy(creep, room, task) {
     let target = chooseEnergyTarget(creep, room, task);
-    if (!target) return;
+    if (!target) return false;
     task.sourceId = target.object.id;
     let result;
     if (target.kind == "drop") result = creep.pickup(target.object);
     else if (target.kind == "store") result = creep.withdraw(target.object, RESOURCE_ENERGY);
     else result = creep.harvest(target.object);
     if (result == ERR_NOT_IN_RANGE) creep.moveTo(target.object, {range:1, reusePath:20});
+    return result == OK || result == ERR_NOT_IN_RANGE;
 }
 
 Creep.prototype.buildCrossShardRoom = function () {
@@ -573,6 +574,22 @@ Creep.prototype.buildCrossShardRoom = function () {
     let nearDowngrade = room.controller && room.controller.ticksToDowngrade !== undefined
         && room.controller.ticksToDowngrade < DOWNGRADE_PROTECTION_TICKS;
 
+    // Once an empty builder starts gathering, fill a complete load before
+    // walking back. One harvest intent is only 12 energy for this body, so
+    // switching to construction immediately would waste most of its lifetime
+    // commuting. Urgent controller upkeep still uses any carried energy.
+    let energy = this.store[RESOURCE_ENERGY] || 0;
+    if (energy == 0) task.gathering = true;
+    if (task.gathering && !(nearDowngrade && energy > 0)) {
+        if (this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            let gathering = gatherBootstrapEnergy(this, room, task);
+            if (gathering || energy == 0) return;
+        }
+        // Full, or temporarily no more energy available. Use the load already
+        // carried instead of waiting indefinitely on an exhausted source.
+        task.gathering = false;
+    }
+
     // Keep the controller alive first if it is at risk; otherwise only build
     // the first spawn blueprint. Never divert bootstrap builders to roads or
     // secondary sites before the room can spawn its own economy.
@@ -585,7 +602,7 @@ Creep.prototype.buildCrossShardRoom = function () {
         gatherBootstrapEnergy(this, room, task);
         return;
     }
-    if (this.store[RESOURCE_ENERGY] > 0) {
+    if (energy > 0) {
         if (this.build(spawnSite) == ERR_NOT_IN_RANGE) this.moveTo(spawnSite, {range:3, reusePath:20});
         return;
     }

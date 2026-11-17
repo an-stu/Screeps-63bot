@@ -120,7 +120,10 @@ function makeBuilder(sb, roomName, opts = {}) {
     creep.memory = opts.memory || {role:"crossShardBuilder", roomName:roomName,
         tasks:[{taskName:"buildCrossShardRoom", roomName:roomName, slotId:opts.slotId || "slot-1"}]};
     creep.pos = opts.pos || new RoomPosition(30, 16, roomName);
-    creep.store = {[RESOURCE_ENERGY]:opts.energy || 0};
+    creep.store = {
+        [RESOURCE_ENERGY]:opts.energy || 0,
+        getFreeCapacity() { return 300 - this[RESOURCE_ENERGY]; },
+    };
     creep.lastTask = function () { return this.memory.tasks[this.memory.tasks.length - 1]; };
     return creep;
 }
@@ -405,6 +408,37 @@ function runExec(sb, time) {
     creep.buildCrossShardRoom();
     assert.equal(upgraded, 1, "no-site builder helps upgrade the controller");
     assert.equal(world.created.length, 0, "creep logic never creates sites outside the blueprint");
+}
+
+// Gathering persists after one small harvest and ends at a full load. Urgent
+// controller upkeep may still use a partial load before the gathering finishes.
+{
+    const sb = makeWorld();
+    const room = makeRoom(sb, "E51S29", {
+        sites:[{id:"spawnSite", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(11, 15, "E51S29")}],
+        sources:[{id:"source", energy:3000, pos:new RoomPosition(9, 10, "E51S29")}],
+    });
+    const creep = makeBuilder(sb, room.name);
+    let harvests = 0, builds = 0, upgrades = 0;
+    creep.harvest = () => { harvests++; return OK; };
+    creep.build = () => { builds++; return OK; };
+    creep.upgradeController = () => { upgrades++; return OK; };
+    creep.buildCrossShardRoom();
+    creep.store[RESOURCE_ENERGY] = 12;
+    creep.buildCrossShardRoom();
+    assert.deepEqual([harvests, builds], [2, 0], "a partial load must not send the worker back after one harvest");
+    creep.store[RESOURCE_ENERGY] = 300;
+    creep.buildCrossShardRoom();
+    assert.equal(builds, 1, "a full builder must switch to construction immediately");
+    creep.lastTask().gathering = true;
+    creep.store[RESOURCE_ENERGY] = 12;
+    room.controller.ticksToDowngrade = 1000;
+    creep.buildCrossShardRoom();
+    assert.equal(upgrades, 1, "urgent controller upkeep takes a partial load");
+    room.controller.ticksToDowngrade = 20000;
+    room.sources = [];
+    creep.buildCrossShardRoom();
+    assert.equal(builds, 2, "temporarily exhausted sources must not strand energy already carried");
 }
 
 // 8. Energy caches are preferred when available, and completed spawns hand the
