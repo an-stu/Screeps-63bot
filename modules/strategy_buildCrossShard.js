@@ -157,6 +157,22 @@ let pro = {
             if (!cfg || cfg.roomName != roomName) return;
             pro.execRoom(cfg);
         });
+        pro.recoverBootstrapConfigs(builds);
+    },
+
+    /** RCL<3 的已占领跨 shard 房若丢了建设配置（旧版 spawn 建成即 COMPLETE 误删），
+     *  从 room.memory.crossShardBootstrap 恢复，保证援建持续到 RCL3。 */
+    recoverBootstrapConfigs(builds) {
+        Object.keys(Game.rooms || {}).forEach(roomName => {
+            let room = Game.rooms[roomName];
+            if (!room || !room.my || !room.controller) return;
+            if ((room.controller.level || 0) >= 3) return;
+            if (room.storage && room.storage.my) return;
+            if (builds[roomName]) return;
+            let bootstrap = room.memory && room.memory.crossShardBootstrap;
+            if (!bootstrap || !bootstrap.originShard || !bootstrap.spawnRoom) return;
+            pro.start(roomName, bootstrap);
+        });
     },
 
     execRoom(cfg) {
@@ -166,8 +182,11 @@ let pro = {
             return;
         }
         let spawns = room.find(FIND_MY_SPAWNS);
-        if (spawns.length) {
-            pro.recordOperation(cfg, "COMPLETE", {mySpawns:spawns.length});
+        let level = room.controller.level || 0;
+        // RCL<3 持续援建（用户政策）：spawn 建成也不转入本地自产，继续派跨 shard
+        // 建筑爬援建剩余工地，直到 RCL3 才 COMPLETE。低级房 spawn 只产防守爬。
+        if (spawns.length && level >= 3) {
+            pro.recordOperation(cfg, "COMPLETE", {mySpawns:spawns.length, level:level});
             delete ensureBuildMap()[cfg.roomName];
             if (Memory.crossShardBuild && (Memory.crossShardBuild.room == cfg.roomName
                 || Memory.crossShardBuild.roomName == cfg.roomName)) delete Memory.crossShardBuild;
@@ -178,6 +197,12 @@ let pro = {
         // in particular, neutral walls/roads/containers remain untouched.
         if (global.StrategyClaim && typeof StrategyClaim.destroyForeignStructures == "function") {
             try { StrategyClaim.destroyForeignStructures(room); } catch (e) { /* retry next pass */ }
+        }
+
+        if (spawns.length) {
+            // 已有 spawn 但 RCL<3：跳过蓝图/Spawn 工地逻辑，直接持续援建。
+            pro.dispatchBuilders(cfg);
+            return;
         }
 
         let roomMemory = getRoomMemory(room);
@@ -620,9 +645,9 @@ Creep.prototype.buildCrossShardRoom = function () {
         return;
     }
     let spawns = room.find(FIND_MY_SPAWNS);
-    if (spawns.length) {
-        // Do not suicide or discard cargo. The regular room worker manager will
-        // assign work once this bootstrap task is gone.
+    let level = room.controller ? (room.controller.level || 0) : 0;
+    if (spawns.length && level >= 3) {
+        // RCL3 起才转入本地经济。不 suicide、不丢货，常规 worker 管理器接手。
         this.memory.role = "worker";
         delete this.memory.crossShardBuildRoom;
         delete this.memory.crossShardBuildSlotId;
@@ -631,8 +656,11 @@ Creep.prototype.buildCrossShardRoom = function () {
     }
 
     let sites = room.find(FIND_MY_CONSTRUCTION_SITES);
-    let spawnSite = sites.filter(site => site.structureType == STRUCTURE_SPAWN)
-        .sort((left, right) => this.pos.getRangeTo(left) - this.pos.getRangeTo(right))[0];
+    let byRange = (left, right) => this.pos.getRangeTo(left) - this.pos.getRangeTo(right);
+    let spawnSite = sites.filter(site => site.structureType == STRUCTURE_SPAWN).sort(byRange)[0];
+    // RCL<3 持续援建：spawn 未建时优先 spawn；spawn 已建则援建任意工地
+    // （extensions/roads 等），不再只盯 spawn，也不转入本地自产。
+    let buildSite = spawnSite || (spawns.length ? sites.slice().sort(byRange)[0] : undefined);
     let nearDowngrade = room.controller && room.controller.ticksToDowngrade !== undefined
         && room.controller.ticksToDowngrade < DOWNGRADE_PROTECTION_TICKS;
 
@@ -652,10 +680,9 @@ Creep.prototype.buildCrossShardRoom = function () {
         task.gathering = false;
     }
 
-    // Keep the controller alive first if it is at risk; otherwise only build
-    // the first spawn blueprint. Never divert bootstrap builders to roads or
-    // secondary sites before the room can spawn its own economy.
-    if (!spawnSite || nearDowngrade) {
+    // Keep the controller alive first if it is at risk; otherwise build the
+    // current target site (spawn first, then any remaining site below RCL3).
+    if (!buildSite || nearDowngrade) {
         if (this.store[RESOURCE_ENERGY] > 0 && room.controller && !room.controller.upgradeBlocked) {
             let result = this.upgradeController(room.controller);
             if (result == ERR_NOT_IN_RANGE) this.moveTo(room.controller, {range:3, reusePath:20});
@@ -665,7 +692,7 @@ Creep.prototype.buildCrossShardRoom = function () {
         return;
     }
     if (energy > 0) {
-        if (this.build(spawnSite) == ERR_NOT_IN_RANGE) this.moveTo(spawnSite, {range:3, reusePath:20});
+        if (this.build(buildSite) == ERR_NOT_IN_RANGE) this.moveTo(buildSite, {range:3, reusePath:20});
         return;
     }
     gatherBootstrapEnergy(this, room, task);

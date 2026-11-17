@@ -75,7 +75,7 @@ loadHandler("claimRoom");
 loadHandler("goTo");
 sandbox.Game.shard.name = "shard2";
 sandbox.LOCAL_SHARD_NAME = "shard2";
-const room = { name: "E51S29", my: false, controller: {} };
+const room = { name: "E51S29", my: false, controller: {}, memory: {} };
 const creep = new sandbox.Creep();
 Object.assign(creep, {
     name: "shard3_3000_1", room, memory: { tasks: [claim] },

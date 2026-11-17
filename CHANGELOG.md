@@ -1,3 +1,24 @@
+## v0.78.269 — RCL<3 跨 shard 房持续援建、不自产（用户政策）
+
+- 政策：跨 shard 认领房在 **RCL<3 期间一直靠跨 shard 建筑爬援建，不本地自产**；低级房
+  spawn **只在被入侵时产防守爬**。原设计「spawn 建成即 COMPLETE 转本地经济」太早——
+  实测 E51S29（RCL2）已转成 16 个本地 worker 自产，E41S29（RCL1）还在援建。
+- 改动（四处，均围绕「援建持续到 RCL3」）：
+  1. `strategy_buildCrossShard.execRoom`：COMPLETE 门槛从「有 spawn」提到「有 spawn 且
+     RCL>=3」；RCL<3 已有 spawn 时跳过蓝图逻辑直接 `dispatchBuilders` 持续援建。
+  2. `buildCrossShardRoom` 处理器：转 worker 同样要 RCL>=3；RCL<3 时建筑爬援建**任意工地**
+     （spawn 未建优先 spawn，已建则 extensions/roads 等），不再只盯 spawn。
+  3. `strategy_lowLevel.exec`（RCL<3 即 capacity<800 分支）：援建房（`Memory.crossShardBuilds[room]`
+     存在）在自动立工地后**直接 return**，跳过本地 worker 生产/采集/升级；防守分支在其之前，
+     入侵时仍产 lowLevelDefense。RCL<3 房只走 lowLevel（manager_rooms:124），故覆盖全部本地产出口。
+  4. `claimRoom` 持久化 `room.memory.crossShardBootstrap`；`exec` 新增 `recoverBootstrapConfigs`：
+     RCL<3 已占领房若丢了建设配置（旧版 COMPLETE 误删）据此恢复，保证援建不断档。
+- 回归：cross-shard-build 新增 5 组（RCL<3 不转 worker/援建任意工地、RCL<3 不 COMPLETE 持续派、
+  RCL3 才 COMPLETE、配置丢失恢复、lowLevel 闸+claimRoom 持久化源码断言）；既有「spawn 建成转
+  worker」「完成后重启不重用收据槽」两用例改为 RCL3 模拟完成；claim-bootstrap-entry mock 补
+  room.memory（生产恒有）。85 测试全绿，audit 77/213。
+- 部署后需对 E51S29 恢复援建配置并写 crossShardBootstrap 标记（E41S29 配置仍在）。
+
 ## v0.78.268 — 援建等满配体型 + 默认虫洞改 E40S30
 
 - 援建孵化优先满配 50 部件 worker：源房容量供得起 3000 但当前能量暂时不足时，按住请求等能量回满（mission 每 5 tick 重试），不再立即缩小体型；请求 15 分钟窗口的最后 5 分钟才回退到最大可负担体型，保证建设不卡死。容量本就不足 3000 的低本房不等待，直接派最大可负担体型。

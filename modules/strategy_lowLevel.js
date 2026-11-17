@@ -50,6 +50,9 @@ let pro = {
             // maintenance, not the expensive auto-planning job. Keep this
             // active even when optional planner computation/visuals are off.
             if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel0(room);
+            // RCL<3 跨 shard 援建房：建设由跨 shard 建筑爬负责，本地 spawn 只产防守爬
+            // （上面入侵分支已处理），不本地产 worker / 采集 / 升级（用户政策：一直援建、不自产）。
+            if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) return;
             // if((Game.time+room.hashCode()) % 150 == 0  && Game.cpu.bucket>50 && room.memory.structMap){
             //     room.memory.structMap[STRUCTURE_SPAWN].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_SPAWN)})
             //     room.memory.structMap[STRUCTURE_EXTENSION].take(10).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_EXTENSION)})
