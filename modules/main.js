@@ -359,9 +359,9 @@ let main = function () {
     HelperTelemetrySegment.exec();
     // CPU 账户管理（每个 shard 独立执行）：
     //  - 满桶转 pixel：bucket >= 10000 时 generatePixel（10,000 bucket/个）。
-    //  - **不自动续 CPU unlock**：实测每次 Game.cpu.unlock() 调用都会扣一张券
-    //    （不是文档暗示的"有效期内 ERR_FULL 不消耗"），而且代码在每个 shard 上
-    //    各跑一次 ⇒ 2026-11-16 10 张券被连扣到 6 张。unlock 续期改为手动/监控触发。
+    //  - **不自动续 CPU unlock**：实测每次 unlock 调用都会扣一张券（不是文档
+    //    暗示的"有效期内 ERR_FULL 不消耗"），而且代码在每个 shard 上各跑一次
+    //    ⇒ 2026-11-16 10 张券被连扣到 6 张。unlock 续期改为手动/监控触发。
     if (Game.time % 100 == 0) {
         if (Game.cpu.bucket >= 10000 && typeof Game.cpu.generatePixel == "function") {
             Game.cpu.generatePixel();
