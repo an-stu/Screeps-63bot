@@ -273,7 +273,7 @@ let pro = {
             return;
         }
         let pending = {
-            slotId:Game.shard.name + ":" + cfg.roomName + ":" + cfg.nextSlotSeq++,
+            slotId:Game.shard.name + ":" + cfg.roomName + ":" + Game.time + ":" + cfg.nextSlotSeq++,
             state:"REQUESTED",
             attempts:0,
         };

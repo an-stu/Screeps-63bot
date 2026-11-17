@@ -244,6 +244,26 @@ function runExec(sb, time) {
     assert.notEqual(retry.requestId, original.requestId);
 }
 
+// Restarting construction for the same room must not reuse source-side receipt
+// slots from a previous completed operation.
+{
+    const sb = makeWorld({ensureCreatesSite:true});
+    const room = makeRoom(sb, "E51S29", {memory:{structMap:{spawn:"encoded"}}});
+    const options = {originShard:"shard3", spawnRoom:"E49S31", builders:1,
+        path:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]}};
+    sb.StrategyBuildCrossShard.start(room.name, options);
+    runExec(sb, 1000);
+    const originalSlot = world.missions[0].mission.data.slotId;
+    room.spawns = [{id:"spawn1"}];
+    runExec(sb, 1005);
+    assert.equal(sb.Memory.crossShardBuilds[room.name], undefined);
+    room.spawns = [];
+    sb.StrategyBuildCrossShard.start(room.name, options);
+    runExec(sb, 1010);
+    assert.notEqual(world.missions[1].mission.data.slotId, originalSlot,
+        "old receipt must not acknowledge a new operation's first worker without spawning it");
+}
+
 // 4. Failed heavy planning is throttled and there is no random-placement path.
 {
     const sb = makeWorld({planSucceeds:false, ensureCreatesSite:true});
