@@ -1,3 +1,12 @@
+## v0.78.262 — 修复跨 shard 移动任务 index 死循环（claimer 原地不动）
+
+- 现象：claimer 已跨到 shard2，但站在虫洞格上不动，claim 任务永远不执行。
+- 根因：`moveCrossShardByPath` **每 tick 从 i=0 重扫**，用当前房间名把 `task.index` 无条件改回最后一个匹配的 waypoint。到达最后一段（其坐标就是对面回程虫洞格）后，index 在 `len-1 ↔ len` 之间反复横跳，`index==path.length` 永不成立 ⇒ 任务永不弹出。此外站在回程虫洞上时每 tick 还会把 creep memory 反向递回出发 shard（对端 mission 重试 5000 tick）。
+- 修复：index 只向前推进（跨 shard 后匹配新 shard 的下一段），越过末段（`>= path.length`）立即弹任务；末段没有虫洞结构也视为到达；回程虫洞不再反向递 memory。
+- 路径语义澄清：waypoint 是**出发侧虫洞**，最后一项的 destination 即目标 shard；默认路径改回单段 `shard3 E50S30(15,5)`（线上 `Memory.claimCrossShardPath` 的两段式也能正常工作，无需再改）。
+- claim 成功后新增 `notifyClaimDone`：target shard 通过 InterShardMemory 通知出发 shard 执行 `removeFlag`，止住「源 shard 看不到目标房 ⇒ 每 300 tick 继续派 claimer」的循环。
+- 回归：新增 `test/cross-shard-path.test.cjs`（末段推进/弹任务、中间跳递 memory、回程不反递、无虫洞落地、旧实现负对照、removeFlag 幂等）。
+
 ## v0.78.261 — 跨 shard claim 任务自带坐标（目标 shard 上没有旗子）
 
 - 实测 shard2 claimer 卡死在 E50S30(15,5)。根因：`taskFlag` 只存旗子名，`claimRoom` 处理器在目标 shard 上通过 `Game.flags[obj.id]` 解析目标，而旗子只存在于源 shard（shard3）⇒ obj 为 undefined，处理器直接 return，永远不 claim。

@@ -357,6 +357,7 @@ Creep.prototype.scouterToRoom = function () {
 
 Creep.prototype.claimRoom = function () {
     let obj = this.lastTask();
+    let flagName = obj.id;
     if (!obj.roomName && !obj.pos) {
         obj = Game.flags[obj.id];
     }
@@ -380,6 +381,7 @@ Creep.prototype.claimRoom = function () {
                         this.memory.signed = true
                 }
             }
+            else this.notifyClaimDone(flagName);
         } else if (this.room.my) {
             this.popTask();
         }

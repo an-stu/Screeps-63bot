@@ -50,37 +50,69 @@ Creep.prototype.testEnd = function(){
     Memory.test.end+=1
     this.popTask().execLastTask();
 }
+/**
+ * 跨 shard 路径推进。
+ *
+ * 0.78.262 修复「claimer 站在对面 shard 虫洞格上不动」：
+ * 原实现**每 tick 从 i=0 重扫**，用当前房间名把 task.index 无条件改回
+ * 最后一个匹配的 waypoint。到达最后一段（其坐标就是对面回程虫洞格）后，
+ * index 在 `len-1 ↔ len` 之间反复横跳，`index==path.length` 永不成立，
+ * 任务永不弹出，claim 任务也永远轮不到执行。
+ *
+ * 现在：index 只向前推进（跨 shard 后落到新 shard 的下一段），越过末段
+ * 立即弹任务；最后一段没有虫洞可踩也视为到达。站在回程虫洞上时不再把
+ * creep memory 反向递回出发 shard（原实现每 tick 发一次，对端 retry 5000 tick）。
+ */
 Creep.prototype.moveCrossShardByPath = function(){
-
     this.autoHeal()
     let hostile = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS)
     this.rangedAttack(hostile)
     this.attack(hostile)
 
-    let path = this.lastTask().path
     let task = this.lastTask()
+    let path = task.path
+    if (!path || !path.length) return this.popTask().execLastTask();
     task.index = task.index||0;
-    for(let i=0;i<path.length;i++){
+    if (task.index >= path.length) return this.popTask().execLastTask();
+    for(let i=task.index;i<path.length;i++){
         let e = path[i]
         if(e.roomName == this.pos.roomName&& e.shard == Game.shard.name){
             task.index = i ;
         }
     }
-
-    // if(!this.memory["index"+task.index])Memory.test["index"+task.index]=(Memory.test["index"+task.index]||0)+1
-    // this.memory["index"+task.index]=1
+    if (task.index >= path.length) return this.popTask().execLastTask();
 
     let current = path[task.index];
-    if(task.index==path.length) return this.popTask().execLastTask();
     let pos = new RoomPosition(current.x,current.y,current.roomName)
     if(pos.isNearTo(this)){
         let portal = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_PORTAL).head()
-        if(portal) task.index += 1
-        if(portal&&portal.destination&&portal.destination.shard){ //传送门是跨shard的情况下
-            this.submitCrossShardCreepMemory(portal.destination.shard,this.memory)
+        if(portal){
+            task.index += 1
+            // 只在「确实要跨到下一跳 shard」时递 memory：最后一段站在回程
+            // 虫洞上（目标就是上一段的出发 shard）不再反向递交。
+            let prev = path[task.index-2]
+            let destShard = portal.destination&&portal.destination.shard
+            if(destShard&&!(task.index>=path.length&&prev&&prev.shard==destShard)){
+                this.submitCrossShardCreepMemory(destShard,this.memory)
+            }
+        }
+        else if(task.index==path.length-1){
+            // 最后一段没有虫洞可踩 ⇒ 这里就是终点，直接弹任务
+            return this.popTask().execLastTask();
         }
     }
     this.goTo(pos) //先交换内存再走路,防止cpu用完了
+}
+
+/**
+ * claim 成功后通知出发 shard 摘掉 claimCrossShard 旗子。
+ * 否则 StrategyClaimCrossShard 在源 shard 上看不到目标房（跨 shard 无视野），
+ * 每 ~300 tick 继续派新 claimer，形成永远填不满的循环。
+ */
+Creep.prototype.notifyClaimDone = function (flagName) {
+    let origin = (this.name||"").split("_")[0]
+    if (!origin || origin == Game.shard.name || !flagName) return
+    ManagerCrossShard.addCrossShardRequest(origin, { func: "removeFlag", data: { name: flagName } })
 }
 
 Creep.prototype.submitCrossShardCreepMemory = function (toShard) {

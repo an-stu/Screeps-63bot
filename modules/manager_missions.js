@@ -41,6 +41,13 @@ global.missionFunc = { //被crossShard引用 ，相当于交叉依赖了
         return true;
         // Memory.flags[data.flagName] = data.memory
     },
+    /** 跨 shard claim 成功后，由 target shard 通知出发 shard 摘旗。
+     *  旗子已不存在也算完成，避免 mission 在 TTL 内反复重试。 */
+    removeFlag (data) {
+        let flag = Game.flags[data.name]
+        if (flag) flag.remove()
+        return true;
+    },
     /** {path:"creeps.xxxx.pos",data:{x:1,y:1,z:1}}
      * {path:"creeps.["xxxx"].pos",data:{x:1,y:1,z:1}}
      * @param data

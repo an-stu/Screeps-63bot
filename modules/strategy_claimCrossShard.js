@@ -65,15 +65,21 @@
 //   totalRooms: 22 }
 
 /**
- * 跨 shard 路径：waypoint 全是**虫洞格**。creep 踩到虫洞时，moveCrossShardByPath
- * 把它的 memory 经 InterShardMemory 递到目标 shard，然后原地传送过去继续做后续任务。
+ * 跨 shard 路径：每一项都是**出发侧虫洞格**，按顺序踩过去；最后一项的
+ * destination 就应该是目标 shard。跨过去后当前房间不再匹配任何 waypoint，
+ * moveCrossShardByPath 会弹掉本任务、继续执行后面的 claim 任务。
+ *
+ * ⚠️ 不要把「落地侧」的坐标追加成最后一项：落地格就是回程虫洞，
+ * 旧版 handler 每 tick 回扫房间名会把 index 拉回去，形成 index 1↔2 的
+ * 死循环（claimer 站在虫洞上不动）。0.78.262 已修复推进逻辑，但路径
+ * 语义保持不变更稳。
+ *
  * 可用 `Memory.claimCrossShardPath`（{ path: [...] }）覆盖，调整路线不必重传代码。
- * 当前默认：shard3 E50S30(15,5) 虫洞 → shard2（对端虫洞同坐标），再步行到目标房 claim。
+ * 当前默认：shard3 E50S30(15,5) 虫洞直达 shard2，落地后步行到目标房 claim。
  */
 let DEFAULT_CLAIM_PATH = {
     path: [
         { shard: 'shard3', roomName: 'E50S30', x: 15, y: 5 },
-        { shard: 'shard2', roomName: 'E50S30', x: 15, y: 5 },
     ],
 };
 let getClaimPath = function () {
