@@ -1,3 +1,12 @@
+## v0.78.258 — CPU 账户自动化：unlock 券自动续期 + bucket 满转 pixel
+
+- 用户 11-16：跨 shard 前先激活 CPU unlock；多余的 CPU 在 bucket 满时转 pixel。主循环每 100 tick：
+  - `Game.resources.cpuUnlock > 0` → 调用 `Game.cpu.unlock()`（24 小时/张；有效期内重复调用返回 ERR_FULL，不消耗券，因此可以无脑续期）；
+  - `Game.cpu.bucket >= 10000` → `Game.cpu.generatePixel()`（10,000 bucket → 1 pixel）。
+- 已手动执行一次 `Game.cpu.unlock()`（返回 OK，账户 10 张券，190M×10 买单已成交）。
+- 注意：CPU/桶/段/Memory 都是 **每 shard 独立**；shard3 仍 20 CPU 上限，新 shard 的桶从满值开始，因此首次进入其他 shard 会立即产出 pixel。
+- 回归：core-profile 增加两条钉子（unlock 续期、满桶转 pixel）。
+
 ## v0.78.257 — 跨 shard claim：路线可配置，默认走 E50S30 虫洞进 shard2
 
 - 用户 11-16：开始向其他 shard 扩展，第一个目标房 **shard2:E51S29**，通过 **E50S30(15,5) 的跨 shard 虫洞**进入（同坐标对端虫洞；E50S30(27,22) 通往 shardX，忽略）。
