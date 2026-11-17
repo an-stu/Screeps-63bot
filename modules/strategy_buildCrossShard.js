@@ -580,6 +580,9 @@ function availableEnergyCaches(room) {
     }
     if (typeof FIND_STRUCTURES != "undefined") {
         room.find(FIND_STRUCTURES).forEach(structure => {
+            // 绝不从 Hive（spawn/extension）抽能量：那是 invader 来时产防守爬的
+            // 储备。援建爬只能从源/掉落/容器/废墟/墓碑取能，并负责把 Hive 填满。
+            if (structure.structureType == STRUCTURE_SPAWN || structure.structureType == STRUCTURE_EXTENSION) return;
             if (structure.store) add(structure, "store", structure.store[RESOURCE_ENERGY] || 0);
         });
     }
@@ -680,20 +683,34 @@ Creep.prototype.buildCrossShardRoom = function () {
         task.gathering = false;
     }
 
-    // Keep the controller alive first if it is at risk; otherwise build the
-    // current target site (spawn first, then any remaining site below RCL3).
-    if (!buildSite || nearDowngrade) {
-        if (this.store[RESOURCE_ENERGY] > 0 && room.controller && !room.controller.upgradeBlocked) {
+    // 控制器濒危优先保级（不可逆）。
+    if (nearDowngrade && energy > 0 && room.controller && !room.controller.upgradeBlocked) {
+        let result = this.upgradeController(room.controller);
+        if (result == ERR_NOT_IN_RANGE) this.moveTo(room.controller, {range:3, reusePath:20});
+        return;
+    }
+    if (energy > 0) {
+        // 优先填满 Hive（spawn/extension）：保证 invader 来时 spawn 有能量产防守爬。
+        // 援建爬只往 Hive 填、绝不从 Hive 抽（gather 已排除 spawn/extension）。
+        let hiveTarget = room.find(FIND_STRUCTURES)
+            .filter(s => (s.structureType == STRUCTURE_SPAWN || s.structureType == STRUCTURE_EXTENSION)
+                && s.store && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
+            .sort(byRange)[0];
+        if (hiveTarget) {
+            if (this.transfer(hiveTarget, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) this.moveTo(hiveTarget, {range:1, reusePath:20});
+            return;
+        }
+        // Hive 已满 → 援建工地（spawn 优先，其余任意）。
+        if (buildSite) {
+            if (this.build(buildSite) == ERR_NOT_IN_RANGE) this.moveTo(buildSite, {range:3, reusePath:20});
+            return;
+        }
+        // 无工地 → 升级控制器。
+        if (room.controller && !room.controller.upgradeBlocked) {
             let result = this.upgradeController(room.controller);
             if (result == ERR_NOT_IN_RANGE) this.moveTo(room.controller, {range:3, reusePath:20});
             return;
         }
-        gatherBootstrapEnergy(this, room, task);
-        return;
-    }
-    if (energy > 0) {
-        if (this.build(buildSite) == ERR_NOT_IN_RANGE) this.moveTo(buildSite, {range:3, reusePath:20});
-        return;
     }
     gatherBootstrapEnergy(this, room, task);
 };

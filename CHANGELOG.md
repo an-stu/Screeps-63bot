@@ -1,3 +1,25 @@
+## v0.78.271 — 援建爬不抽 Hive 反填 Hive + 低 RCL 允许对 invader 防守
+
+- 用户指出两个真问题（并先要求查清 safe mode 触发源）：
+  **safe mode 排查结论**：全仓唯一 `activateSafeMode` 是 station_defense.checkSafeMode
+  （station_tower 每 3 tick 调用），需「非 Invader + ≥5 强化 HEAL + 己方建筑废墟」三条件
+  同时成立；invader 无强化且被显式跳过，**不可能触发**。war_defenseCore.checkNeedDefense
+  只对 RCL7-8 玩家强化奶妈建防守旗、不开 safe mode；无任何「最后一只爬死」应急开 sf 逻辑。
+  E41S29 那次 sf 是玩家强化奶妈拆房或并行会话测试窗口手动激活，非 invader。
+- 修复：
+  1. **援建爬绝不从 Hive 抽能量**（strategy_buildCrossShard.availableEnergyCaches）：
+     原来把所有带 store 的结构当能量源，含 spawn/extension → 反向抽干防守储备。现排除
+     spawn/extension，只从源/掉落/容器/废墟/墓碑取能。
+  2. **援建爬带能量优先填满 Hive**（buildCrossShardRoom）：spawn/extension 有缺能就先
+     transfer 填满（保证 invader 来时 spawn 有能量产防守爬），Hive 满再援建工地，无工地
+     升级控制器；控制器濒危仍最优先保级。
+  3. **低 RCL 允许对 invader 产防守爬**（strategy_lowLevel）：撤销 v0.78.270 误加的 NPC
+     防守过滤——用户政策是「防不住时可对 invader 防守」，safe mode 的 NPC 免疫另由
+     checkSafeMode 保证，二者不冲突。
+- 回归：cross-shard-build 新增 3 组（优先填 Hive / Hive 满才建 / 绝不从 Hive 抽能）；
+  safe-mode-npc-guard 源码断言改为「lowLevel 不得过滤 invader 防守 + checkSafeMode 跳过
+  两类 NPC」。86 测试全绿，audit 77/213。
+
 ## v0.78.270 — safe mode / 低 RCL 防守对 NPC 免疫（invader 不拆建筑）
 
 - 现场：E41S29（shard2 RCL2 援建房）的 safe mode 被打出来一次（sfAvail 0、冷却中），

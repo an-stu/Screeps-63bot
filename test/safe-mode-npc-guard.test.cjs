@@ -98,13 +98,18 @@ const ownRuin = { structure: { structureType: "spawn", owner: { username: "an_w"
     assert.equal(activated(), 0, "不足 5 个强化 HEAL 不算危险");
 }
 
-// ── 源码层：lowLevel 援建房防守 NPC 闸必须存在 ───────────────────────────
+// ── 源码层：低 RCL 允许对 invader 产防守爬（safe mode 仍对 NPC 免疫） ──────
 {
     const low = read("strategy_lowLevel.js");
-    assert.ok(/defenseHostiles = defenseHostiles\.filter\(e => e\.owner && e\.owner\.username != "Invader" && e\.owner\.username != "Source Keeper"\);/.test(low),
-        "lowLevel 援建房必须过滤 NPC，不为 invader/Source Keeper 产防守爬");
-    assert.ok(/if \(Memory\.crossShardBuilds && Memory\.crossShardBuilds\[room\.name\]\) \{/.test(low),
-        "NPC 防守闸必须限定在援建房");
+    // 用户政策：低 RCL 防不住时可对 invader 产防守爬——防守触发不得过滤 NPC。
+    assert.ok(!/defenseHostiles\.filter\(e => e\.owner/.test(low),
+        "lowLevel 防守触发不得过滤 invader（低 RCL 允许对 NPC 防守）");
+    assert.ok(/room\.creeps\("lowLevelDefense"\)\.length < 3 && room\.tower\.length == 0/.test(low),
+        "低 RCL 防守爬生产逻辑保留");
+    // safe mode 的 NPC 免疫在 station_defense（上方行为测试已覆盖）。
+    const def = read("station_defense.js");
+    assert.ok(/owner == "Invader" \|\| owner == "Source Keeper"/.test(def),
+        "checkSafeMode 必须显式跳过 Invader 与 Source Keeper");
 }
 
 console.log("safe mode NPC guard: OK");

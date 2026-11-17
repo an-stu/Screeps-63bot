@@ -698,4 +698,61 @@ function runExec(sb, time) {
         "claimRoom 必须持久化援建配置以供恢复");
 }
 
+// 15. 援建爬带能量优先填满 Hive（spawn/extension），保证 invader 来时能产防守爬。
+{
+    const sb = makeWorld();
+    const spawnStruct = {id:"sp", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:100, getFreeCapacity:() => 200}};
+    const extStruct = {id:"ext", structureType:STRUCTURE_EXTENSION, pos:new RoomPosition(31, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:0, getFreeCapacity:() => 50}};
+    const site = {id:"road1", structureType:"road", pos:new RoomPosition(32, 16, "E51S29")};
+    makeRoom(sb, "E51S29", {level:2, spawns:[{id:"sp"}], structures:[spawnStruct, extStruct], sites:[site]});
+    const creep = makeBuilder(sb, "E51S29", {energy:100});
+    let transferred, built;
+    creep.transfer = t => { transferred = t; return OK; };
+    creep.build = t => { built = t; return OK; };
+    creep.moveTo = () => OK;
+    creep.upgradeController = () => OK;
+    creep.buildCrossShardRoom();
+    assert.equal(transferred, spawnStruct, "有能量优先填最近的缺能 Hive 建筑");
+    assert.equal(built, undefined, "Hive 未满时不先去建工地");
+    assert.equal(creep.memory.role, "crossShardBuilder", "RCL<3 不转 worker");
+}
+
+// 16. Hive 已满 → 援建爬转去建工地。
+{
+    const sb = makeWorld();
+    const spawnFull = {id:"sp", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:300, getFreeCapacity:() => 0}};
+    const site = {id:"extSite", structureType:STRUCTURE_EXTENSION, pos:new RoomPosition(31, 16, "E51S29")};
+    makeRoom(sb, "E51S29", {level:2, spawns:[{id:"sp"}], structures:[spawnFull], sites:[site]});
+    const creep = makeBuilder(sb, "E51S29", {energy:100});
+    let built;
+    creep.build = t => { built = t; return OK; };
+    creep.transfer = () => { throw new Error("Hive 已满不应再填"); };
+    creep.moveTo = () => OK;
+    creep.upgradeController = () => OK;
+    creep.buildCrossShardRoom();
+    assert.equal(built, site, "Hive 已满 → 援建工地");
+}
+
+// 17. 援建爬绝不从 Hive 抽能量：空载时从源/掉落取能，spawn/extension 不算能量源。
+{
+    const sb = makeWorld();
+    const spawnWithEnergy = {id:"sp", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:500, getFreeCapacity:() => 0}};
+    const source = {id:"src", energy:1000, pos:new RoomPosition(20, 20, "E51S29")};
+    makeRoom(sb, "E51S29", {level:1, spawns:[], structures:[spawnWithEnergy], sources:[source],
+        sites:[{id:"spawnSite", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29")}]});
+    const creep = makeBuilder(sb, "E51S29", {energy:0});
+    let harvested, withdrawn;
+    creep.harvest = t => { harvested = t; return OK; };
+    creep.withdraw = t => { withdrawn = t; return OK; };
+    creep.pickup = t => { withdrawn = t; return OK; };
+    creep.moveTo = () => OK;
+    creep.buildCrossShardRoom();
+    assert.equal(harvested, source, "空载援建爬从源取能");
+    assert.equal(withdrawn, undefined, "绝不从 Hive（spawn/extension）抽能量");
+}
+
 console.log("cross-shard build checks passed");

@@ -41,13 +41,9 @@ let pro = {
         }
         // 内层变量原来遮蔽外层：部件对象与字符串 MOVE 比较恒不等，
         // 过滤器形同虚设——纯 MOVE 侦察兵也会触发防御生产。
-        let defenseHostiles = room.find(FIND_HOSTILE_CREEPS).filter(e => e.body.filter(p => p.type != MOVE).length);
-        // 援建房（RCL<3）：invader / Source Keeper 不拆建筑，不为 NPC 产防守爬
-        // （用户政策：低 RCL 只对玩家攻击防守，或者不生产）；safe mode  likewise 不对 NPC 开。
-        if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) {
-            defenseHostiles = defenseHostiles.filter(e => e.owner && e.owner.username != "Invader" && e.owner.username != "Source Keeper");
-        }
-        if (room.spawn.length && defenseHostiles.length) {// 如果有敌人的爬且不是侦察兵
+        // 低 RCL 防不住时允许对 invader 产防守爬（用户政策）；safe mode 另由
+        // checkSafeMode 对 NPC 免疫，二者不冲突。
+        if (room.spawn.length && room.find(FIND_HOSTILE_CREEPS).filter(e => e.body.filter(p => p.type != MOVE).length).length) {// 如果有敌人的爬且不是侦察兵
             if (room.creeps("lowLevelDefense").length < 3 && room.tower.length == 0) pro.trySpawnLowLevelDefense(room)
         }
         // if ((room.getEnergyCapacityAvailable(room) < 800 || (room.storage && !room.storage.my))) {
