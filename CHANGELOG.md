@@ -1,3 +1,9 @@
+## v0.78.273 — 低级房孵化顺序：worker 按本 tick 预算、carrier 解除 spawnFailure
+
+- `strategy_lowLevel`：worker 体型改为 `getMiddleLevelWorkerBodyConfig(room, workerBudget)`，预算取 `currentEnergyAvailable`（trySpawn 的本 tick 缓存）或实有能量；hive 不够 800 时不再拿满容量体型硬撞而置 `spawnFailure`。
+- carrier 孵化前显式 `room.spawnFailure = false`，避免前面付不起的 worker/防御请求留下的粘滞标记挡住本可付得起的 carrier（与 station_upgrade / station_sources 同一处理）。
+- 回归：`test/lowlevel-spawn-unstick.test.cjs`（源码顺序钉子 + bodyBudget 行为）。
+
 ## v0.78.272 — 修 E51S29 产能：keeper 满配体型、spawn 占格清理、源容器优先
 
 - **keeper 接班按房间容量定体型**：在岗 keeper 还在时，用 `energyCapacityAvailable` 定体型并等 hive 攒够再孵（RCL3 容量 800 ⇒ WORK6+MOVE3+CARRY1）；只有「一只 keeper 都没有」的救急场景才按当前能量缩小。现场：E51S29 连续孵出 2 WORK 的小 keeper，单源收入锁死在 4/tick。

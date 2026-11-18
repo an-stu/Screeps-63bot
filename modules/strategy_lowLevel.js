@@ -138,7 +138,12 @@ let pro = {
                 && (room.creeps("worker", false).length < 2 ||
                     ((room.creeps("carrier").filter(e => e.isFree()).length > room.creeps("worker", false).length)
                         && room.creeps("worker", false).filter(e => e.isFree()).length < 2))) {
-                StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room), "worker", [])
+                // 体型必须按**本 tick 真能花出去**的能量算：按容量 800 请求而 hive 只有
+                // 400 时 trySpawn 静默失败并置 spawnFailure，把同 pass 后面本可付得起的
+                // 750 carrier 一起挡住（与 station_upgrade / station_sources 同一病根）。
+                let workerBudget = room.currentEnergyAvailable === undefined
+                    ? room.getEnergyAvailable() : room.currentEnergyAvailable;
+                StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room, workerBudget), "worker", [])
             }
 
 
@@ -209,6 +214,10 @@ let pro = {
             let carrierCnt = room.creeps("carrier", false).length;
             // 一只都没有时无条件补（死房自救）；否则只在没到编制且真有货要搬时才补
             if (carrierCnt < 1 || (carryTasks.length && carrierCnt < carrierTarget)) {
+                // 前面任何一次失败的孵化尝试（付不起的 worker / 防御爬）都会把
+                // spawnFailure 置真，trySpawn 首行见到就返回 ⇒ carrier 明明付得起
+                // 也永远排不上（与 station_upgrade.js:431 同一处理）。
+                room.spawnFailure = false;
                 StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
             }
 
