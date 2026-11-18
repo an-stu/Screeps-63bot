@@ -34,21 +34,64 @@
 - **源旁容器优先于工地预算**：`ManagerAutoPlanner.ensureSourceContainers` 对「没有容器/容器工地的源」直接在规划点补一个容器工地，绕过「10 个工地/房」的硬预算。E51S29 的 7d 源因容器工地排不上队（规划在 (25,32)），keeper 满仓后 `harvestSinkFree=false` 停挖、整源零收入。
 - 回归：`test/keeper-successor-fullbody.test.cjs`、`test/spawn-tile-guard.test.cjs`、`test/source-container-priority.test.cjs`。
 
-## v0.78.271 — 援建持续到 RCL3；援建爬不抽 Hive 能量
+## v0.78.271 — 援建爬不抽 Hive 反填 Hive + 低 RCL 允许对 invader 防守
 
-- spawn 建成后不再立刻 COMPLETE：RCL<3 继续派跨 shard 建筑爬援建剩余工地，RCL3 才交回本地经济；builder 任务在 RCL>=3 才转回普通 worker（保留寿命与载荷）。
-- 援建爬取能时排除 spawn/extension，Hive 储备只进不出；有能量优先填满 Hive，其次建工地，无工地时升级控制器。
-- RCL<3 持续援建期间派工回执 slot 保持有效，避免重复派工。
+- 用户指出两个真问题（并先要求查清 safe mode 触发源）：
+  **safe mode 排查结论**：全仓唯一 `activateSafeMode` 是 station_defense.checkSafeMode
+  （station_tower 每 3 tick 调用），需「非 Invader + ≥5 强化 HEAL + 己方建筑废墟」三条件
+  同时成立；invader 无强化且被显式跳过，**不可能触发**。war_defenseCore.checkNeedDefense
+  只对 RCL7-8 玩家强化奶妈建防守旗、不开 safe mode；无任何「最后一只爬死」应急开 sf 逻辑。
+  E41S29 那次 sf 是玩家强化奶妈拆房或并行会话测试窗口手动激活，非 invader。
+- 修复：
+  1. **援建爬绝不从 Hive 抽能量**（strategy_buildCrossShard.availableEnergyCaches）：
+     原来把所有带 store 的结构当能量源，含 spawn/extension → 反向抽干防守储备。现排除
+     spawn/extension，只从源/掉落/容器/废墟/墓碑取能。
+  2. **援建爬带能量优先填满 Hive**（buildCrossShardRoom）：spawn/extension 有缺能就先
+     transfer 填满（保证 invader 来时 spawn 有能量产防守爬），Hive 满再援建工地，无工地
+     升级控制器；控制器濒危仍最优先保级。
+  3. **低 RCL 允许对 invader 产防守爬**（strategy_lowLevel）：撤销 v0.78.270 误加的 NPC
+     防守过滤——用户政策是「防不住时可对 invader 防守」，safe mode 的 NPC 免疫另由
+     checkSafeMode 保证，二者不冲突。
+- 回归：cross-shard-build 新增 3 组（优先填 Hive / Hive 满才建 / 绝不从 Hive 抽能）；
+  safe-mode-npc-guard 源码断言改为「lowLevel 不得过滤 invader 防守 + checkSafeMode 跳过
+  两类 NPC」。86 测试全绿，audit 77/213。
 
-## v0.78.270 — 低级援建房的 NPC 防御口径
+## v0.78.270 — safe mode / 低 RCL 防守对 NPC 免疫（invader 不拆建筑）
 
-- `Memory.crossShardBuilds` 中的房间不自动开启 safe mode。
-- safe mode 判定的危险目标排除 NPC：Invader 与 Source Keeper 一样视为不拆建筑，不触发 safe mode（低 RCL 援建房不值得为 NPC 消耗）。
+- 现场：E41S29（shard2 RCL2 援建房）的 safe mode 被打出来一次（sfAvail 0、冷却中），
+  用户强调「不要被 invader 打出 safe mode，invader 不会拆建筑」。
+- 加固（station_defense.checkSafeMode）：
+  1. **显式跳过所有 NPC**：原来只跳 `Invader`，现把 `Source Keeper` 一并跳过，并对
+     `hostile.owner` 做空值保护——NPC 永不触发 safe mode。
+  2. **援建中的低级跨 shard 房不自动开 safe mode**：`Memory.crossShardBuilds[room]`
+     存在即直接 return（远程援建房被 NPC 打不值得消耗 safe mode；用户政策低 RCL 少反应）。
+     玩家带 >=5 强化 HEAL 拆房的正当防卫对**非援建房**保留不变。
+- 低 RCL 防守爬（strategy_lowLevel.exec）：援建房的防守触发敌情**过滤掉 Invader /
+  Source Keeper**，只对玩家攻击产 lowLevelDefense（用户：低 RCL 只对被袭防守，或不生产）。
+- 回归：新增 `safe-mode-npc-guard`（Invader/Source Keeper 满强化奶妈+废墟仍不开、玩家
+  强化奶妈拆房开、无废墟不开、援建房不开、<5 强化不开、lowLevel NPC 闸源码断言）；
+  86 测试全绿，audit 77/213。
 
-## v0.78.269 — 援建配置持久化与恢复
+## v0.78.269 — RCL<3 跨 shard 房持续援建、不自产（用户政策）
 
-- claim 确认所有权时把 bootstrap 配置写入 `room.memory.crossShardBootstrap`；建设模块在 RCL<3 且配置丢失时自动恢复（`recoverBootstrapConfigs`），保证援建不中断。
-- RCL<3 的援建房在 `strategy_lowLevel` 里跳过本地产 worker/采集/升级（只保留防守爬），避免本地产出与跨 shard 援建互相抢能量。
+- 政策：跨 shard 认领房在 **RCL<3 期间一直靠跨 shard 建筑爬援建，不本地自产**；低级房
+  spawn **只在被入侵时产防守爬**。原设计「spawn 建成即 COMPLETE 转本地经济」太早——
+  实测 E51S29（RCL2）已转成 16 个本地 worker 自产，E41S29（RCL1）还在援建。
+- 改动（四处，均围绕「援建持续到 RCL3」）：
+  1. `strategy_buildCrossShard.execRoom`：COMPLETE 门槛从「有 spawn」提到「有 spawn 且
+     RCL>=3」；RCL<3 已有 spawn 时跳过蓝图逻辑直接 `dispatchBuilders` 持续援建。
+  2. `buildCrossShardRoom` 处理器：转 worker 同样要 RCL>=3；RCL<3 时建筑爬援建**任意工地**
+     （spawn 未建优先 spawn，已建则 extensions/roads 等），不再只盯 spawn。
+  3. `strategy_lowLevel.exec`（RCL<3 即 capacity<800 分支）：援建房（`Memory.crossShardBuilds[room]`
+     存在）在自动立工地后**直接 return**，跳过本地 worker 生产/采集/升级；防守分支在其之前，
+     入侵时仍产 lowLevelDefense。RCL<3 房只走 lowLevel（manager_rooms:124），故覆盖全部本地产出口。
+  4. `claimRoom` 持久化 `room.memory.crossShardBootstrap`；`exec` 新增 `recoverBootstrapConfigs`：
+     RCL<3 已占领房若丢了建设配置（旧版 COMPLETE 误删）据此恢复，保证援建不断档。
+- 回归：cross-shard-build 新增 5 组（RCL<3 不转 worker/援建任意工地、RCL<3 不 COMPLETE 持续派、
+  RCL3 才 COMPLETE、配置丢失恢复、lowLevel 闸+claimRoom 持久化源码断言）；既有「spawn 建成转
+  worker」「完成后重启不重用收据槽」两用例改为 RCL3 模拟完成；claim-bootstrap-entry mock 补
+  room.memory（生产恒有）。85 测试全绿，audit 77/213。
+- 部署后需对 E51S29 恢复援建配置并写 crossShardBootstrap 标记（E41S29 配置仍在）。
 
 ## v0.78.268 — 援建等满配体型 + 默认虫洞改 E40S30
 

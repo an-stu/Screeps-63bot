@@ -256,7 +256,7 @@ function runExec(sb, time) {
 // slots from a previous completed operation.
 {
     const sb = makeWorld({ensureCreatesSite:true});
-    const room = makeRoom(sb, "E51S29", {memory:{structMap:{spawn:"encoded"}}, level:3});
+    const room = makeRoom(sb, "E51S29", {level:3, memory:{structMap:{spawn:"encoded"}}});
     const options = {originShard:"shard3", spawnRoom:"E49S31", builders:1,
         path:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]}};
     sb.StrategyBuildCrossShard.start(room.name, options);
@@ -587,7 +587,7 @@ function runExec(sb, time) {
 {
     const sb = makeWorld();
     const cache = {id:"drop", resourceType:RESOURCE_ENERGY, amount:100, pos:new RoomPosition(29, 16, "E51S29")};
-    const room = makeRoom(sb, "E51S29", {spawns:[{id:"spawn1"}], drops:[cache], sites:[], level:3});
+    const room = makeRoom(sb, "E51S29", {level:3, spawns:[{id:"spawn1"}], drops:[cache], sites:[]});
     const creep = makeBuilder(sb, "E51S29", {energy:75});
     let picked;
     creep.pickup = target => { picked = target; return OK; };
@@ -632,6 +632,128 @@ function runExec(sb, time) {
         runExec(sb, 1000 + i * 5);
     }
     assert.ok(world.missions.length >= 7, "more than six builders may be dispatched over the operation lifetime");
+}
+
+// 10. RCL<3 持续援建政策：spawn 已建但 RCL<3 时，建筑爬不转 worker，继续援建任意工地。
+{
+    const sb = makeWorld();
+    const extSite = {id:"ext1", structureType:STRUCTURE_EXTENSION, pos:new RoomPosition(31, 16, "E51S29")};
+    makeRoom(sb, "E51S29", {level:2, spawns:[{id:"spawn1"}], sites:[extSite]});
+    const creep = makeBuilder(sb, "E51S29", {energy:100});
+    let built;
+    creep.build = target => { built = target; return OK; };
+    creep.moveTo = () => OK;
+    creep.upgradeController = () => { throw new Error("RCL<3 有工地时不应转去升级"); };
+    creep.buildCrossShardRoom();
+    assert.equal(creep.memory.role, "crossShardBuilder", "RCL<3 spawn 已建也不转 worker（持续援建）");
+    assert.equal(built, extSite, "RCL<3 援建任意工地（extensions），不再只盯 spawn");
+    assert.equal(creep.memory.tasks.length, 1, "援建任务保留");
+}
+
+// 11. execRoom：RCL<3 + spawn 不 COMPLETE，配置保留并继续派建筑爬。
+{
+    const sb = makeWorld({ensureCreatesSite:true});
+    makeRoom(sb, "E51S29", {level:2, spawns:[{id:"spawn1"}], memory:{structMap:{spawn:"encoded"}}, sites:[]});
+    sb.StrategyBuildCrossShard.start("E51S29", {
+        originShard:"shard3", spawnRoom:"E49S31", builders:2,
+        path:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]},
+    });
+    runExec(sb, 1000);
+    assert.ok(sb.Memory.crossShardBuilds["E51S29"], "RCL<3 配置必须保留（持续援建）");
+    assert.ok(!world.operations.some(op => op.state === "COMPLETE"), "RCL<3 不得 COMPLETE");
+    assert.ok(world.missions.length >= 1, "RCL<3 继续派跨 shard 建筑爬");
+}
+
+// 12. execRoom：RCL>=3 + spawn 才 COMPLETE 并删配置。
+{
+    const sb = makeWorld({ensureCreatesSite:true});
+    makeRoom(sb, "E51S29", {level:3, spawns:[{id:"spawn1"}], memory:{structMap:{spawn:"encoded"}}, sites:[]});
+    sb.StrategyBuildCrossShard.start("E51S29", {
+        originShard:"shard3", spawnRoom:"E49S31", builders:2,
+        path:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]},
+    });
+    runExec(sb, 1000);
+    assert.ok(!sb.Memory.crossShardBuilds["E51S29"], "RCL3 COMPLETE 后删配置");
+    assert.ok(world.operations.some(op => op.state === "COMPLETE"), "RCL3 必须 COMPLETE");
+}
+
+// 13. 配置丢失恢复：RCL<3 已占领房从 room.memory.crossShardBootstrap 恢复援建配置。
+{
+    const sb = makeWorld();
+    makeRoom(sb, "E51S29", {level:2, spawns:[{id:"spawn1"}],
+        memory:{crossShardBootstrap:{originShard:"shard3", spawnRoom:"E49S31", builders:2,
+            path:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]}}}});
+    assert.ok(!sb.Memory.crossShardBuilds || !sb.Memory.crossShardBuilds["E51S29"], "前置：无配置");
+    runExec(sb, 1000);
+    assert.ok(sb.Memory.crossShardBuilds["E51S29"], "必须从 room.memory 恢复援建配置");
+    assert.equal(sb.Memory.crossShardBuilds["E51S29"].spawnRoom, "E49S31");
+}
+
+// 14. 源码层：lowLevel 援建闸 + claimRoom 持久化援建配置必须存在。
+{
+    const low = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_lowLevel.js"), "utf8");
+    assert.ok(/if \(Memory\.crossShardBuilds && Memory\.crossShardBuilds\[room\.name\]\) return;/.test(low),
+        "lowLevel 必须在援建房跳过本地 worker 生产（只留防守+工地）");
+    const creepSrc = fs.readFileSync(path.join(__dirname, "..", "modules", "prototype_creep.js"), "utf8");
+    assert.ok(/this\.room\.memory\.crossShardBootstrap = JSON\.parse\(JSON\.stringify\(bootstrap\)\);/.test(creepSrc),
+        "claimRoom 必须持久化援建配置以供恢复");
+}
+
+// 15. 援建爬带能量优先填满 Hive（spawn/extension），保证 invader 来时能产防守爬。
+{
+    const sb = makeWorld();
+    const spawnStruct = {id:"sp", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:100, getFreeCapacity:() => 200}};
+    const extStruct = {id:"ext", structureType:STRUCTURE_EXTENSION, pos:new RoomPosition(31, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:0, getFreeCapacity:() => 50}};
+    const site = {id:"road1", structureType:"road", pos:new RoomPosition(32, 16, "E51S29")};
+    makeRoom(sb, "E51S29", {level:2, spawns:[{id:"sp"}], structures:[spawnStruct, extStruct], sites:[site]});
+    const creep = makeBuilder(sb, "E51S29", {energy:100});
+    let transferred, built;
+    creep.transfer = t => { transferred = t; return OK; };
+    creep.build = t => { built = t; return OK; };
+    creep.moveTo = () => OK;
+    creep.upgradeController = () => OK;
+    creep.buildCrossShardRoom();
+    assert.equal(transferred, spawnStruct, "有能量优先填最近的缺能 Hive 建筑");
+    assert.equal(built, undefined, "Hive 未满时不先去建工地");
+    assert.equal(creep.memory.role, "crossShardBuilder", "RCL<3 不转 worker");
+}
+
+// 16. Hive 已满 → 援建爬转去建工地。
+{
+    const sb = makeWorld();
+    const spawnFull = {id:"sp", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:300, getFreeCapacity:() => 0}};
+    const site = {id:"extSite", structureType:STRUCTURE_EXTENSION, pos:new RoomPosition(31, 16, "E51S29")};
+    makeRoom(sb, "E51S29", {level:2, spawns:[{id:"sp"}], structures:[spawnFull], sites:[site]});
+    const creep = makeBuilder(sb, "E51S29", {energy:100});
+    let built;
+    creep.build = t => { built = t; return OK; };
+    creep.transfer = () => { throw new Error("Hive 已满不应再填"); };
+    creep.moveTo = () => OK;
+    creep.upgradeController = () => OK;
+    creep.buildCrossShardRoom();
+    assert.equal(built, site, "Hive 已满 → 援建工地");
+}
+
+// 17. 援建爬绝不从 Hive 抽能量：空载时从源/掉落取能，spawn/extension 不算能量源。
+{
+    const sb = makeWorld();
+    const spawnWithEnergy = {id:"sp", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29"),
+        store:{[RESOURCE_ENERGY]:500, getFreeCapacity:() => 0}};
+    const source = {id:"src", energy:1000, pos:new RoomPosition(20, 20, "E51S29")};
+    makeRoom(sb, "E51S29", {level:1, spawns:[], structures:[spawnWithEnergy], sources:[source],
+        sites:[{id:"spawnSite", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(30, 15, "E51S29")}]});
+    const creep = makeBuilder(sb, "E51S29", {energy:0});
+    let harvested, withdrawn;
+    creep.harvest = t => { harvested = t; return OK; };
+    creep.withdraw = t => { withdrawn = t; return OK; };
+    creep.pickup = t => { withdrawn = t; return OK; };
+    creep.moveTo = () => OK;
+    creep.buildCrossShardRoom();
+    assert.equal(harvested, source, "空载援建爬从源取能");
+    assert.equal(withdrawn, undefined, "绝不从 Hive（spawn/extension）抽能量");
 }
 
 console.log("cross-shard build checks passed");
