@@ -1,3 +1,10 @@
+## v0.78.272 — 修 E51S29 产能：keeper 满配体型、spawn 占格清理、源容器优先
+
+- **keeper 接班按房间容量定体型**：在岗 keeper 还在时，用 `energyCapacityAvailable` 定体型并等 hive 攒够再孵（RCL3 容量 800 ⇒ WORK6+MOVE3+CARRY1）；只有「一只 keeper 都没有」的救急场景才按当前能量缩小。现场：E51S29 连续孵出 2 WORK 的小 keeper，单源收入锁死在 4/tick。
+- **spawn 格占位自动清理**：`StationHive.trySpawn` 发现我方 creep / power creep 站在 spawn 格上时，把它挪到相邻空格并置 `spawnFailure`（spawnCreep 遇到占格会失败，且失败标记会挡住同 tick 后续孵化）。现场采样 37 tick 有 9 tick（24%）被 keeper 占格。
+- **源旁容器优先于工地预算**：`ManagerAutoPlanner.ensureSourceContainers` 对「没有容器/容器工地的源」直接在规划点补一个容器工地，绕过「10 个工地/房」的硬预算。E51S29 的 7d 源因容器工地排不上队（规划在 (25,32)），keeper 满仓后 `harvestSinkFree=false` 停挖、整源零收入。
+- 回归：`test/keeper-successor-fullbody.test.cjs`、`test/spawn-tile-guard.test.cjs`、`test/source-container-priority.test.cjs`。
+
 ## v0.78.271 — 援建持续到 RCL3；援建爬不抽 Hive 能量
 
 - spawn 建成后不再立刻 COMPLETE：RCL<3 继续派跨 shard 建筑爬援建剩余工地，RCL3 才交回本地经济；builder 任务在 RCL>=3 才转回普通 worker（保留寿命与载荷）。

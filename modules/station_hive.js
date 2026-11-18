@@ -191,6 +191,25 @@ let pro = {
             room.spawnFailure = true;
             return undefined;
         }
+        // 站在 spawn 格上的爬会阻塞孵化（spawnCreep ⇒ ERR_BUSY）。历史上多次出现
+        // 「spawn 被空闲搬运/刚出生的爬占住 ⇒ 整房无法生产」（strategy_lowLevel
+        // 2026-10-22 的 20 只搬运事故；E51S29 实测 24% 的 tick 被 keeper 占格）。
+        // 把占格的我方爬挪到相邻空格；移动意图下一 tick 才生效，本 tick 标记失败。
+        let blockers = spawn.pos.lookFor(LOOK_CREEPS)
+            .concat(typeof LOOK_POWER_CREEPS != "undefined" ? spawn.pos.lookFor(LOOK_POWER_CREEPS) : [])
+            .filter(e => e.my);
+        if (blockers.length) {
+            let blocker = blockers[0];
+            let spot = spawn.pos.nearPos(1).filter(p => p.walkable()
+                && !p.lookFor(LOOK_CREEPS).length
+                && (typeof LOOK_POWER_CREEPS == "undefined" || !p.lookFor(LOOK_POWER_CREEPS).length)).head();
+            if (spot) {
+                if (typeof blocker.move == "function") blocker.move(spot);
+                else if (typeof blocker.moveTo == "function") blocker.moveTo(spot, {range: 0});
+            }
+            room.spawnFailure = true;
+            return undefined;
+        }
         let code = spawn.spawnCreep(body, name, opts);
         if (code == OK) {
             room.spawnedMap[spawn.id] = 1;

@@ -372,8 +372,36 @@ let pro={
             // room.memory.structMap[STRUCTURE_EXTENSION].take(10).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_EXTENSION)})
         }
     },
+    /**
+     * 源旁容器是低级房唯一的能量出口：keeper 满仓后没有容器/link 可倒
+     * （harvestSinkFree=false）会**直接停挖**，整个源零收入。低级房的
+     * 10 个工地/房预算常被道路/tower 占满（tryCreateCons 的硬上限），
+     * 规划里的源容器排在后面永远轮不到 —— E51S29 实测 (25,32) 的容器
+     * 工地缺失、7d 源的 keeper 抱着 50 能量停挖。
+     * 这里对「还没有容器或容器工地的源」单独补一个规划点上的工地，
+     * 每轮最多补一个；这是收入基础设施，不受 10 个工地预算约束。
+     */
+    ensureSourceContainers (room){
+        if (!room.my || !room.memory.structMap || !room.memory.structMap[STRUCTURE_CONTAINER]) return;
+        let sources = room.source || [];
+        if (!sources.length) return;
+        let planned = Utils.decodePosArray(room.memory.structMap[STRUCTURE_CONTAINER]);
+        let near = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= 1;
+        let covered = source => room[STRUCTURE_CONTAINER].some(c => c.pos.isNearTo(source.pos))
+            || room.constructionSite.some(s => s.structureType == STRUCTURE_CONTAINER && s.pos.isNearTo(source.pos));
+        for (let source of sources) {
+            if (covered(source)) continue;
+            let spot = planned.find(p => near(p, source.pos));
+            if (!spot) continue;
+            if (room.lookForAt(LOOK_STRUCTURES, spot.x, spot.y).length) continue;
+            if (room.lookForAt(LOOK_CONSTRUCTION_SITES, spot.x, spot.y).length) continue;
+            if (room.getPositionAt(spot.x, spot.y).createConstructionSite(STRUCTURE_CONTAINER) == OK) return;
+        }
+    },
     tryAutoBuildLowLevel800 (room){
         if((Game.time+room.hashCode()) % 150 == 0 && Game.cpu.bucket>50 && room.memory.structMap){
+            // 源旁容器优先：keeper 满仓后没地方倒会直接停挖（见 ensureSourceContainers）
+            pro.ensureSourceContainers(room);
             // 开始建 road 和 container
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_CONTAINER,3);

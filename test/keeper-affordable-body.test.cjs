@@ -153,11 +153,11 @@ for (const hive of [100, 200, 250]) {
 // ── 5. 负对照：把预算改回 550 下限（并且去掉付得起守卫），第 1 条现场必须孵不出来 ──
 const OLD_UPPER = src
     // 单行子串替换（文件是 CRLF，跨行匹配会失败）
-    .replace("? Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft)",
-        "? Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550))")
-    .replace("if (ManagerCreeps.getBodyEnergyNeed(harBody) > budgetLeft) return;", "");
+    .replace("(inc ? spawnRoom.getEnergyCapacityAvailable() : Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft))",
+        "Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550))")
+    .replace("if (bodyCost > budgetLeft) return;", "");
 assert.notEqual(OLD_UPPER, src, "负对照的源码替换必须命中");
-assert.match(OLD_UPPER, /budgetLeft, 550\)\)\s*\r?\n\s*: Math\.min/, "预算必须两路都变成 550 下限");
+assert.match(OLD_UPPER, /Math\.max\(budgetLeft, 550\)/, "预算必须回到 550 下限");
 assert.equal(runForHive(OLD_UPPER, 400).filter(c => c.spend <= 400).length, 0,
     "旧写法（下限 550 ⇒ 550 体型）在 hive 400 时确实孵不出来 —— 这就是 650 tick 的零收入");
 

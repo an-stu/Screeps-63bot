@@ -3563,8 +3563,13 @@ let pro = {
                 let budgetLeft = spawnRoom.currentEnergyAvailable;
                 if (budgetLeft == undefined) budgetLeft = spawnRoom.getEnergyAvailable
                     ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
+                // 接班（在岗 keeper 还在）时按**房间容量**定体型：RCL3 容量 800
+                // ⇒ 3 组 = WORK6 + MOVE3 + CARRY1，等 hive 攒够再孵，不再被
+                // 当下余额锁成 WORK2 的小体型（E51S29 实测收入被锁死在 4/tick）。
+                // 只有「一只 keeper 都没有」的救急场景才按当前能量缩小，
+                // 避免断档（见 test/keeper-affordable-body 的零收入现场）。
                 let energyBudget = roomName == spawnRoom.name
-                    ? Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft)
+                    ? (inc ? spawnRoom.getEnergyCapacityAvailable() : Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft))
                     : Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550));
                 let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
                 // 连 1 组（300）都付不起时 getHarvesterBodyConfig 返回**空体型**，
