@@ -19,10 +19,12 @@ const code = raw
 assert.ok(/let carrierTarget = Math\.max\(2, Math\.min\(3, Math\.ceil\(\(sourceCnt \+ keeperCnt\) \/ 2\)\)\)/.test(code),
     "搬运编制必须有上限（源数 + keeper 数折半，夹在 2~3 只）");
 
-assert.ok(/if \(\(carrierCnt < 1 \|\| \(carryTasks\.length && carrierCnt < carrierTarget\)\) && carrierBudget >= 300\)/.test(code),
-    "首只搬运允许自救，补员必须有货且未到编制，同时检查最低孵化预算");
-assert.equal((code.match(/getCarrierBodyConfig\(room, carrierBudget\)/g) || []).length, 1,
-    "低级房每轮只计算一次搬运孵化");
+assert.ok(/let needCarrier = carrierCnt < 1[\s\S]{0,140}carrierCnt <= carrierTarget/.test(code),
+    "首只搬运允许自救，补员必须有货且未到编制；小体型替换允许临时超编一只");
+assert.ok(/carrierBudget >= fullCarrierCost/.test(code),
+    "carrier 只在付得起满配时孵化（不再按当下余额缩成小体型）");
+assert.equal((code.match(/getCarrierBodyConfig\(room\)/g) || []).length, 1,
+    "低级房每轮只计算一次满配搬运体型");
 
 // ── ② 编制上限不能自己膨胀 ─────────────────────────────────────────────────
 const m = code.match(/let carrierTarget = ([^;]+);/);

@@ -16,8 +16,13 @@ assert.match(lowSrc, /getMiddleLevelWorkerBodyConfig\(room,\s*workerBudget\)/,
     "低级房 worker 体型必须按本 tick 可花的能量计算");
 assert.match(lowSrc, /let workerBudget = room\.currentEnergyAvailable === undefined[\s\S]{0,80}: room\.currentEnergyAvailable;/,
     "workerBudget 优先用 trySpawn 的本 tick 预算缓存");
-assert.match(lowSrc, /room\.spawnFailure = false;[\s\S]{0,220}getCarrierBodyConfig\(room, carrierBudget\)/,
-    "carrier 孵化前必须清掉前面失败尝试留下的 spawnFailure");
+{
+    const bodyIdx = lowSrc.indexOf("fullCarrierBody = StationCarry.getCarrierBodyConfig(room)");
+    const unstickIdx = bodyIdx < 0 ? -1 : lowSrc.indexOf("room.spawnFailure = false;", bodyIdx);
+    const spawnIdx = bodyIdx < 0 ? -1 : lowSrc.indexOf("StationHive.trySpawn(room, room.name, fullCarrierBody", bodyIdx);
+    assert.ok(bodyIdx >= 0 && unstickIdx > bodyIdx && spawnIdx > unstickIdx,
+        "carrier 孵化前必须计算满配体型并清掉前面失败尝试留下的 spawnFailure");
+}
 
 // 2) 行为：getMiddleLevelWorkerBodyConfig 的 bodyBudget 真的限制体型
 if (!Array.prototype.head) {

@@ -1,3 +1,9 @@
+## v0.78.277 — carrier 只出满配 + 小体型立即换班
+
+- 低级房 carrier 不再按当下余额缩放：体型固定用满配（RCL3 = CARRY10/MOVE5 = 750），hive 付不起满配就按住不孵。之前 E51S29 出现 CARRY4/6/8 三只小 carrier，就是按 300/450/600 余额缩出来的。
+- 已有小体型 carrier（body 造价 < 满配）且 hive 付得起满配时，立即补一只满配替换；允许临时超编一只，老的小体型自然到期。`undersized` 只统计有 body 的在编爬。
+- 回归：更新 carrier 上限/满装/顺序钉子；`lowlevel-bootstrap-handoff` 补 Utils mock。
+
 ## v0.78.276 — RCL3 自营交接、矿工换班与降级保底
 
 - 孵化不再因 Spawn 中心格上有单位而自行拒绝；实际可用 Spawn 继续按引擎判定。同 tick 已承诺的孵化能量计入 Hive 补能判断。

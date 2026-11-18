@@ -52,6 +52,8 @@ function makeRoom({workers = [], carriers = [creep()], roomEnergy = 200, downgra
             roomMassStoreCnt: () => 0, getCarrierBodyConfig: () => ["carry", "move"]},
         StationTower: {generatorFillEnergyTasks: () => []},
         StationWork: {getMiddleLevelWorkerBodyConfig: (r, budget) => [budget], constructionNeedBuild: () => false},
+        BODYPART_COST: {work: 100, carry: 50, move: 50},
+        Utils: {getBodyEnergyNeed: body => body.reduce(sum => sum + 50, 0)},
         StationUpgrade: {stationName: "stationUpgrade", generatorFillEnergyTask: () => [],
             generatorUpgradeTask: r => ({taskName: "upgrade", id: r.controller.id})},
     };

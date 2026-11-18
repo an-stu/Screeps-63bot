@@ -15,7 +15,7 @@ const workSrc = fs.readFileSync(path.join(root, "modules/station_work.js"), "utf
 const order = [
     ["worker-rescue", lowSrc.indexOf("Math.min(rescueBudget, 200)")],
     ["keeper", lowSrc.indexOf("StationSources.trySpawnHarKeeper(room);")],
-    ["carrier", lowSrc.indexOf("StationCarry.getCarrierBodyConfig(room, carrierBudget)")],
+    ["carrier", lowSrc.indexOf("StationCarry.getCarrierBodyConfig(room)")],
     ["worker", lowSrc.indexOf("StationWork.getMiddleLevelWorkerBodyConfig(room, workerBudget)")],
     ["upgrader", lowSrc.indexOf("StationUpgrade.spawnUpgrader(room)")],
 ];
@@ -24,6 +24,13 @@ for (let i = 1; i < order.length; i++) {
     assert.ok(order[i - 1][1] < order[i][1],
         `${order[i - 1][0]} 必须排在 ${order[i][0]} 前面（当前 ${order[i - 1][1]} vs ${order[i][1]}）`);
 }
+
+// 1b) carrier 体型：只出满配，付不起就等；小体型在付得起满配时被替换
+assert.match(lowSrc, /let fullCarrierBody = StationCarry\.getCarrierBodyConfig\(room\)/);
+assert.match(lowSrc, /undersized && carrierCnt <= carrierTarget/,
+    "已有小体型 carrier 时允许临时多派一只满配替换");
+assert.match(lowSrc, /carrierBudget >= fullCarrierCost/,
+    "付不起满配时不得退化成小 carrier（等 hive 攒够）");
 
 // 2) 低级房 carry 门槛 = 300（不再等 1200 批次），且不要求满装
 assert.match(lowSrc, /room\.storage \? \(StationHive\.HiveNeedToFill\(room\) \? 1200 : 300\) : 300/,
