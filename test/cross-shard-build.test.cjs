@@ -127,6 +127,7 @@ function makeBuilder(sb, roomName, opts = {}) {
         getFreeCapacity() { return 300 - this[RESOURCE_ENERGY]; },
     };
     creep.lastTask = function () { return this.memory.tasks[this.memory.tasks.length - 1]; };
+    creep.upgradeController = () => OK;
     return creep;
 }
 
@@ -255,7 +256,7 @@ function runExec(sb, time) {
 // slots from a previous completed operation.
 {
     const sb = makeWorld({ensureCreatesSite:true});
-    const room = makeRoom(sb, "E51S29", {memory:{structMap:{spawn:"encoded"}}});
+    const room = makeRoom(sb, "E51S29", {memory:{structMap:{spawn:"encoded"}}, level:3});
     const options = {originShard:"shard3", spawnRoom:"E49S31", builders:1,
         path:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]}};
     sb.StrategyBuildCrossShard.start(room.name, options);
@@ -586,7 +587,7 @@ function runExec(sb, time) {
 {
     const sb = makeWorld();
     const cache = {id:"drop", resourceType:RESOURCE_ENERGY, amount:100, pos:new RoomPosition(29, 16, "E51S29")};
-    const room = makeRoom(sb, "E51S29", {spawns:[{id:"spawn1"}], drops:[cache], sites:[]});
+    const room = makeRoom(sb, "E51S29", {spawns:[{id:"spawn1"}], drops:[cache], sites:[], level:3});
     const creep = makeBuilder(sb, "E51S29", {energy:75});
     let picked;
     creep.pickup = target => { picked = target; return OK; };

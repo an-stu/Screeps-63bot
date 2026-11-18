@@ -178,10 +178,15 @@ let pro = {
     },
     checkSafeMode(room, hostiles) {
         // HelperError.catchError(()=>StationDefense.checkSafeMode(room))
+        // 援建中的低级跨 shard 房不自动开 safe mode：invader 不拆建筑，远程援建房
+        // 被 NPC 打也不值得消耗 safe mode（用户政策：低 RCL 只援建、少反应）。
+        if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) return;
         hostiles = hostiles || room.getHostileCreeps();
         let dangerous = false;
         for(let hostile of hostiles){
-            if(hostile.owner.username == "Invader")continue;
+            let owner = hostile.owner && hostile.owner.username;
+            // NPC（Invader / Source Keeper）不拆建筑，永不触发 safe mode。
+            if(owner == "Invader" || owner == "Source Keeper")continue;
             let boostedHeal = 0;
             for(let part of hostile.body){
                 if(part.type == HEAL && part.boost && ++boostedHeal >= 5){

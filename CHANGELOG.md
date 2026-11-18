@@ -1,3 +1,19 @@
+## v0.78.271 — 援建持续到 RCL3；援建爬不抽 Hive 能量
+
+- spawn 建成后不再立刻 COMPLETE：RCL<3 继续派跨 shard 建筑爬援建剩余工地，RCL3 才交回本地经济；builder 任务在 RCL>=3 才转回普通 worker（保留寿命与载荷）。
+- 援建爬取能时排除 spawn/extension，Hive 储备只进不出；有能量优先填满 Hive，其次建工地，无工地时升级控制器。
+- RCL<3 持续援建期间派工回执 slot 保持有效，避免重复派工。
+
+## v0.78.270 — 低级援建房的 NPC 防御口径
+
+- `Memory.crossShardBuilds` 中的房间不自动开启 safe mode。
+- safe mode 判定的危险目标排除 NPC：Invader 与 Source Keeper 一样视为不拆建筑，不触发 safe mode（低 RCL 援建房不值得为 NPC 消耗）。
+
+## v0.78.269 — 援建配置持久化与恢复
+
+- claim 确认所有权时把 bootstrap 配置写入 `room.memory.crossShardBootstrap`；建设模块在 RCL<3 且配置丢失时自动恢复（`recoverBootstrapConfigs`），保证援建不中断。
+- RCL<3 的援建房在 `strategy_lowLevel` 里跳过本地产 worker/采集/升级（只保留防守爬），避免本地产出与跨 shard 援建互相抢能量。
+
 ## v0.78.268 — 援建等满配体型 + 默认虫洞改 E40S30
 
 - 援建孵化优先满配 50 部件 worker：源房容量供得起 3000 但当前能量暂时不足时，按住请求等能量回满（mission 每 5 tick 重试），不再立即缩小体型；请求 15 分钟窗口的最后 5 分钟才回退到最大可负担体型，保证建设不卡死。容量本就不足 3000 的低本房不等待，直接派最大可负担体型。

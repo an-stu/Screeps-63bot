@@ -393,6 +393,8 @@ Creep.prototype.claimRoom = function () {
             }
             if (bootstrap) {
                 if (!global.StrategyBuildCrossShard || !StrategyBuildCrossShard.start(this.room.name, bootstrap)) return;
+                // 持久化援建配置：RCL<3 期间配置若丢失可据此恢复（持续援建到 RCL3）。
+                this.room.memory.crossShardBootstrap = JSON.parse(JSON.stringify(bootstrap));
                 this.notifyClaimDone(flagName, task.claimFlagShard || bootstrap.originShard);
             }
             this.popTask();

@@ -41,6 +41,8 @@ let pro = {
         }
         // 内层变量原来遮蔽外层：部件对象与字符串 MOVE 比较恒不等，
         // 过滤器形同虚设——纯 MOVE 侦察兵也会触发防御生产。
+        // 低 RCL 防不住时允许对 invader 产防守爬（用户政策）；safe mode 另由
+        // checkSafeMode 对 NPC 免疫，二者不冲突。
         if (room.spawn.length && room.find(FIND_HOSTILE_CREEPS).filter(e => e.body.filter(p => p.type != MOVE).length).length) {// 如果有敌人的爬且不是侦察兵
             if (room.creeps("lowLevelDefense").length < 3 && room.tower.length == 0) pro.trySpawnLowLevelDefense(room)
         }
@@ -50,6 +52,9 @@ let pro = {
             // maintenance, not the expensive auto-planning job. Keep this
             // active even when optional planner computation/visuals are off.
             if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel0(room);
+            // RCL<3 跨 shard 援建房：建设由跨 shard 建筑爬负责，本地 spawn 只产防守爬
+            // （上面入侵分支已处理），不本地产 worker / 采集 / 升级（用户政策：一直援建、不自产）。
+            if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) return;
             // if((Game.time+room.hashCode()) % 150 == 0  && Game.cpu.bucket>50 && room.memory.structMap){
             //     room.memory.structMap[STRUCTURE_SPAWN].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_SPAWN)})
             //     room.memory.structMap[STRUCTURE_EXTENSION].take(10).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_EXTENSION)})
