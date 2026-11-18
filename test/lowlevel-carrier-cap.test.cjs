@@ -19,8 +19,8 @@ const code = raw
 assert.ok(/let carrierTarget = Math\.max\(2, Math\.min\(3, Math\.ceil\(\(sourceCnt \+ keeperCnt\) \/ 2\)\)\)/.test(code),
     "搬运编制必须有上限（源数 + keeper 数折半，夹在 2~3 只）");
 
-assert.ok(/if \(carrierCnt < 1 \|\| \(carryTasks\.length && carrierCnt < carrierTarget\)\)/.test(code),
-    "派搬运必须同时满足「没到编制」；不能只看 carryTasks 非空（否则会无限派）");
+assert.ok(/if \(!carrierSpawned && \(carrierCnt < 1 \|\| \(carryTasks\.length && carrierCnt < carrierTarget\)\)\)/.test(code),
+    "派搬运必须同时满足「没到编制」且本 pass 未派过；不能只看 carryTasks 非空（否则会无限派）");
 
 // ── ② 编制上限不能自己膨胀 ─────────────────────────────────────────────────
 const m = code.match(/let carrierTarget = ([^;]+);/);

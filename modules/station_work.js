@@ -61,8 +61,22 @@ let pro={
     },
     stationName:"stationWork",
     generatorBuildTask(creep){
-        let target=creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES)
-        if(!target)return []
+        if (!creep.room || creep.room.level >= 4) {
+            let target=creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES)
+            if(!target)return []
+            return UtilsTask.task(target,"buildConst","registerStationBuild")
+        }
+        // 低 RCL：容器/spawn 是收入与产能基础设施，必须排在道路/其它工地前面。
+        // 10 个工地/房的预算常被道路占满，源容器排在后面永远轮不到（E51S29 实测）。
+        let sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+        if (!sites.length) return [];
+        let priority = s => (s.structureType == STRUCTURE_CONTAINER || s.structureType == STRUCTURE_SPAWN) ? 0
+            : s.structureType == STRUCTURE_TOWER ? 1
+            : s.structureType == STRUCTURE_EXTENSION ? 2
+            : 3;
+        let target = sites
+            .map(s => [s, priority(s), creep.pos.getRangeTo(s)])
+            .sort((a, b) => a[1] - b[1] || a[2] - b[2])[0][0];
         return UtilsTask.task(target,"buildConst","registerStationBuild")
 
     },

@@ -871,9 +871,13 @@ Creep.prototype.harvestEnergy = function () {
     // 仓库没能量：真的挖源（最后兜底）
     if (this.store.getFreeCapacity(RESOURCE_ENERGY) <= this.getActiveBodyparts(WORK) * 2) {
         // 满载：有 carrier 且源旁有 container 时先放进 container 让 carrier 搬运，
-        // 否则自己带回去（worker 自给自足路径，避免 carrier 挂机）
+        // 否则自己带回去（worker 自给自足路径，避免 carrier 挂机）。
+        // **hive 缺能时不进容器**：直接弹任务，让策略给 worker 派 fillHive ——
+        // 低级房 hive 永远是第一优先级（用户 2026-11-18），绕一次容器转手会多花
+        // 几十 tick，正是小房「能量有、spawn 却一直空」的来源。
         let container = station && Game.getObjectById(station.container);
-        if (container && this.pos.isNearTo(container) && this.room.creeps("carrier", false).length > 0) {
+        if (container && this.pos.isNearTo(container) && this.room.creeps("carrier", false).length > 0
+            && !(global.StationHive && StationHive.HiveNeedToFill(this.room))) {
             let code = this.transfer(container, RESOURCE_ENERGY);
             if (code == ERR_FULL || this.store[RESOURCE_ENERGY] == 0) this.popTask();
             return;
@@ -3367,7 +3371,10 @@ let pro = {
                 if (container && container.store[RESOURCE_ENERGY] > minEnergy && !room.used[container.id]) {
                     tasks.push([UtilsTask.task(container, "carryRes", "registerStationSourcesCarryInRoom", {
                         resType: RESOURCE_ENERGY,
-                        requireFullLoad: true,
+                        // 高级房保留「满装才发车」：容器里刚好一车能量时留给 keeper 当缓冲。
+                        // 低级房没有 storage，满装要求会让 carrier 永远等不到（2000 上限的
+                        // 容器被 keeper 缓慢填充），hive 因此长期缺能 —— 允许部分装载。
+                        requireFullLoad: !!room.storage,
                     })])
                 }
             }

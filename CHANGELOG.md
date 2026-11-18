@@ -1,3 +1,12 @@
+## v0.78.274 — 低 RCL 经济重排：keeper/carrier 优先、hive 永远第一、容器先建
+
+- **孵化优先级**（用户 2026-11-18）：全空房先给 200 的救急 worker（没有容器时 keeper 满 50 会停挖，必须有人先挖矿填 hive），之后 **keeper → carrier → worker → upgrader**。原顺序让 worker/upgrader 先吃掉本 tick 预算，hive 满 800 时一只工人就把能量花光，keeper 与 carrier 同 pass 都排不上。
+- **carrier 提前保编制**：`carrierTarget`（2~3，缺能 +1）在 keeper 之后立即判定并孵化，体型按本 tick 预算（`getCarrierBodyConfig(room, carrierBudget)`，RCL3 满配 CARRY10/MOVE5）。
+- **carrier 取能门槛**：无 storage 的低级房容器有 300 就搬（不再等 1200 批次门槛），且允许部分装载（`requireFullLoad: !!room.storage`）；高级房保持原口径。
+- **hive 永远第一**：满载 worker 在 hive 缺能时**不进容器**，直接弹任务由策略派 `fillHive`；空手 worker 在容器没货时也去捡地上掉落；hive 缺能时**不孵 upgrader**（临近降级才例外），避免和能量链抢预算。
+- **容器先建**：低 RCL 建造任务按 容器/spawn > 塔 > extension > 道路 选工地（RCL>=4 保持最近工地），配合 v0.78.272 的 `ensureSourceContainers`，源容器与升级容器优先落地。
+- 回归：`test/lowlevel-economy-priority.test.cjs`（孵化顺序、hive 优先钉子、建造优先级行为），并更新既有 carrier 上限/满装钉子。
+
 ## v0.78.273 — 低级房孵化顺序：worker 按本 tick 预算、carrier 解除 spawnFailure
 
 - `strategy_lowLevel`：worker 体型改为 `getMiddleLevelWorkerBodyConfig(room, workerBudget)`，预算取 `currentEnergyAvailable`（trySpawn 的本 tick 缓存）或实有能量；hive 不够 800 时不再拿满容量体型硬撞而置 `spawnFailure`。

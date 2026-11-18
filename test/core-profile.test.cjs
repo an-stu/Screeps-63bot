@@ -79,7 +79,9 @@ assert.ok(managerMissions.includes("data.resType == RESOURCE_ENERGY ? amount + c
 assert.ok(!main.includes("upgrade_E53S21_3") && !main.includes("createFlag(\"upgrade_"), "upgrade flags must remain manually controlled rather than hard-coded in the tick loop");
 assert.ok(powerCreepPrototype.includes("code == OK || code == ERR_INVALID_ARGS || code == ERR_NOT_ENOUGH_RESOURCES"), "operate-storage tasks must terminate after success or a terminal error");
 assert.ok(prototypeCreep.includes("直到能量用尽") && !prototypeCreep.includes("if (code == OK) this.popTask().execLastTask();"), "a fresh rampart builder must spend its carried energy before resuming normal work");
-assert.ok(stationSources.includes("requireFullLoad: true") && prototypeCreep.includes("task.requireFullLoad"), "source-container carriers must wait for more than a full load before withdrawing");
+// 2026-11-18：低级房（无 storage）允许部分装载 —— 2000 上限的源容器很难攒到
+// 「超过一整车」，满装要求会让 carrier 永远等不到、hive 长期缺能。高级房保持原口径。
+assert.ok(stationSources.includes("requireFullLoad: !!room.storage") && prototypeCreep.includes("task.requireFullLoad"), "high-level source-container carriers must wait for a full load; low-level rooms may take partial loads");
 // 原来断言要 `!ret.incomplete`，但那会**永远缓存不了路线**：storage 本身是建筑
 // （代价 255），PathFinder 够不到目标格就返回 incomplete=true，可路径其实已经停在
 // storage 旁边（实测 last=W33N55:(20,34)，紧邻 storage(21,34)）。改成断言以

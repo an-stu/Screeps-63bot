@@ -104,10 +104,41 @@ let pro = {
         } else { // 3级的时候可以分化creep来了
             if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel800(room);
 
-            if (room.creeps("worker", false).length + room.creeps("carrier", false).length == 0)// 如果没用搬运的就直接优先生一个
-                StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room), "worker", [])
+            // 低 RCL 孵化优先级（用户 2026-11-18）：**keeper（收入）→ carrier（搬运）
+            // → worker → upgrader**；但**全空房**先给一只 200 的救急 worker —— 没有
+            // 容器时 keeper 满 50 就停挖（harvestSinkFree=false），必须有人先挖矿填
+            // hive，否则 keeper/loader 谁也付不起。原顺序是 worker/upgrader 先吃满
+            // 预算，hive 800 时一只工人就把能量花光，keeper 与 carrier 同 pass 都排不上。
+            if (room.creeps("worker", false).length + room.creeps("carrier", false).length == 0) {
+                let rescueBudget = room.currentEnergyAvailable === undefined
+                    ? room.getEnergyAvailable() : room.currentEnergyAvailable;
+                if (rescueBudget >= 200) {
+                    StationHive.trySpawn(room, room.name,
+                        StationWork.getMiddleLevelWorkerBodyConfig(room, Math.min(rescueBudget, 200)), "worker", []);
+                }
+            }
 
             StationSources.trySpawnHarKeeper(room);
+
+            let carrierSpawned = false;
+            {
+                let keeperCnt = room.creeps("harvestEnergyKeeper", false).length;
+                let sourceCnt = room.source ? room.source.length : 2;
+                let carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
+                if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
+                let carrierCnt = room.creeps("carrier", false).length;
+                // 无 storage 的低级房：容器有 300 就值得搬（不再等 1200 的批次门槛，
+                // 那是给 RCL8 大容器准备的；2000 上限的容器经常攒不到）。
+                let carryMin = room.storage ? (StationHive.HiveNeedToFill(room) ? 1200 : 300) : 300;
+                let hasCarry = StationSources.generatorCarryEnergyTask(room, carryMin).length > 0;
+                let carrierBudget = room.currentEnergyAvailable === undefined
+                    ? room.getEnergyAvailable() : room.currentEnergyAvailable;
+                if ((carrierCnt < 1 || (hasCarry && carrierCnt < carrierTarget)) && carrierBudget >= 300) {
+                    room.spawnFailure = false;
+                    carrierSpawned = !!StationHive.trySpawn(room, room.name,
+                        StationCarry.getCarrierBodyConfig(room, carrierBudget), "carrier", []);
+                }
+            }
             // 与 high-level 一致：主房 keeper 之后才排外矿（外矿需 storage
             // 接收能量，无 storage 的低级房此调用为空操作）
             if (global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest") && !room.flags("stopRemote").length) {
@@ -147,7 +178,9 @@ let pro = {
             }
 
 
-            // 生 升级的 —— **上限 3 只**。
+            // 生 升级的 —— **上限 3 只**。hive 缺能时**不孵**：低级房的第一优先级
+            // 永远是把 spawn/extension 填满（用户 2026-11-18），升级爬会和 keeper/
+            // carrier 抢本 tick 的孵化预算。控制器临近降级时例外。
             //
             // 原条件把「空闲且有货的搬运数 - 1」当目标，正常房（2~3 只搬运）等于 1~2 只；
             // 但搬运一旦超编（2026-10-22 实测 W26N58 有 19 只）它就恒真，
@@ -157,7 +190,8 @@ let pro = {
             // station 记忆由 refreshRoom（每 61 tick 错峰）首次写入：新占房在
             // 首次 refresh 前该键不存在，裸取 [STRUCTURE_CONTAINER] 抛 TypeError
             // 让整个 lowLevel pass 中断到多 61 tick。
-            if (room.memory[StationUpgrade.stationName] && Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER])) {
+            if ((!StationHive.HiveNeedToFill(room) || room.isDownGrade())
+                && room.memory[StationUpgrade.stationName] && Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER])) {
                 let upgCnt = room.creeps("upgrader", false).length;
                 let loadedFree = room.creeps("carrier").filter(e => e.isFree() && e.store[RESOURCE_ENERGY] > 0).length;
                 if (upgCnt == 0 || (upgCnt < 3 && upgCnt < loadedFree - 1)) {
@@ -167,9 +201,11 @@ let pro = {
 
             // 内矿的能量搬运 和掉落资源
             let pickTasks = StationCarry.generatorPickTask(room, true)
-            // hive 满时容器能量无处去（keeper 溢出会堵死容器），降低门槛
-            // 到 300 尽量抽回；hive 缺电时才用 1200 门槛
-            let carryTasks = StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 300);
+            // 有 storage 的高等级房才用批次门槛（hive 满 300 抽干 / 缺电 1200 等批量）；
+            // 无 storage 的低级房容器有 300 就搬，避免 carrier 空转（2000 上限的
+            // 源容器经常攒不到 1200，hive 一直饿着）。
+            let carryTasks = StationSources.generatorCarryEnergyTask(room,
+                room.storage ? (StationHive.HiveNeedToFill(room) ? 1200 : 300) : 300);
             let storageTasks = StationCarry.generatorCarryStorageEnergyTask(room);
             room.creeps("carrier").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (StationHive.HiveNeedToFill(room)) {
@@ -213,18 +249,24 @@ let pro = {
             if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
             let carrierCnt = room.creeps("carrier", false).length;
             // 一只都没有时无条件补（死房自救）；否则只在没到编制且真有货要搬时才补
-            if (carrierCnt < 1 || (carryTasks.length && carrierCnt < carrierTarget)) {
+            if (!carrierSpawned && (carrierCnt < 1 || (carryTasks.length && carrierCnt < carrierTarget))) {
                 // 前面任何一次失败的孵化尝试（付不起的 worker / 防御爬）都会把
                 // spawnFailure 置真，trySpawn 首行见到就返回 ⇒ carrier 明明付得起
                 // 也永远排不上（与 station_upgrade.js:431 同一处理）。
                 room.spawnFailure = false;
-                StationHive.trySpawn(room, room.name, StationCarry.getCarrierBodyConfig(room), "carrier", [])
+                let carrierBudget = room.currentEnergyAvailable === undefined
+                    ? room.getEnergyAvailable() : room.currentEnergyAvailable;
+                StationHive.trySpawn(room, room.name,
+                    StationCarry.getCarrierBodyConfig(room, carrierBudget), "carrier", [])
             }
 
-            // 剩下的给 worker 搬运
+            // 剩下的给 worker 搬运。容器没货时也去捡地上的掉落（keeper 满仓溢出），
+            // 捡满后下一 tick 会按「hive 优先」填进去 —— 低级房不能只靠 carrier。
             room.creeps("worker").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (carryTasks.length) {
                     creep.addTask(carryTasks.pop())
+                } else if (pickTasks.length) {
+                    creep.addTask(pickTasks.shift())
                 }
             })
 
@@ -265,7 +307,8 @@ let pro = {
                 }
             })
 
-            let lowEnergyCarry = StationSources.generatorCarryEnergyTask(room, StationHive.HiveNeedToFill(room) ? 1200 : 300)
+            let lowEnergyCarry = StationSources.generatorCarryEnergyTask(room,
+                room.storage ? (StationHive.HiveNeedToFill(room) ? 1200 : 300) : 300)
             room.creeps("worker").filter(e => e.isFree()).forEach(creep => {
                 if (creep.storeEmpty()) {
                     if (lowEnergyCarry.length)
