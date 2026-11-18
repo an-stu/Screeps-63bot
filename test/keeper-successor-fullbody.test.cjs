@@ -67,11 +67,11 @@ function loadStation() {
     return ctx;
 }
 
-function run(hive) {
+function run(hive, ttl = 10) {
     const ctx = loadStation();
     const S = ctx.StationSources;
     const keeper = {
-        id: "k1", name: "k1", spawning: false, ticksToLive: 10,
+        id: "k1", name: "k1", spawning: false, ticksToLive: ttl,
         body: new Array(5).fill({type: ctx.MOVE}),
         memory: {role: "harvestEnergyKeeper"},
         headTask: () => ({id: "src1", taskName: "harvestEnergyKeeper", roomName: "W1N1"}),
@@ -119,5 +119,14 @@ assert.equal(rich[0].spend, 800, "满配档 = 800 能量");
 assert.equal(rich[0].body.filter(p => p === "work").length, 6, "RCL3 满配 = 6 WORK");
 assert.equal(rich[0].body.filter(p => p === "move").length, 3, "6 WORK 配 3 MOVE");
 assert.equal(rich[0].body.filter(p => p === "carry").length, 1);
+
+// 3) 老 keeper 还年轻（ttl 1400）但体型偏小：hive 付得起满配时立即换班
+const undersizedRich = run(800, 1400);
+assert.equal(undersizedRich.length, 1, "小体型 keeper 在 hive 付得起满配时应立即被替换");
+assert.equal(undersizedRich[0].spend, 800);
+
+// 4) 同上但 hive 付不起满配（400）：按住，不降级、不重复派
+const undersizedPoor = run(400, 1400);
+assert.equal(undersizedPoor.length, 0, "付不起满配时不得退化成小 keeper");
 
 console.log("keeper successor keeps the full-capacity body");

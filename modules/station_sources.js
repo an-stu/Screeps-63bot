@@ -3550,7 +3550,23 @@ let pro = {
             let lead = (Number(data["pathTime"]) || 0)
                 + (inc ? inc.body.length * 3 : 150)
                 + margin;
-            if ((inc && inc.ticksToLive <= lead) || mine.length == 0) {
+            // 体型升级换班（2026-11-18）：历史小体型 keeper（WORK2）原本要等
+            // ttl ≤ lead 才换，房间会被 4/tick 的收入锁 20+ 分钟（E51S29）。
+            // 在岗 keeper 的 WORK 数低于容量满配、且 hive 付得起满配时立即换班；
+            // 接班成功后会在老 keeper 上打 successorSpawned，不会重复派。
+            let capacityBody = StationSources.getHarvesterBodyConfig(
+                spawnRoom.getEnergyCapacityAvailable(), false, spawnRoom.level, data);
+            let capacityWork = (capacityBody || []).filter(p => p === WORK).length;
+            let capacityCost = 0;
+            if (typeof BODYPART_COST != "undefined")
+                for (let p of (capacityBody || [])) capacityCost += (BODYPART_COST[p] || 0);
+            let budgetNow = spawnRoom.currentEnergyAvailable;
+            if (budgetNow == undefined) budgetNow = spawnRoom.getEnergyAvailable
+                ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
+            let undersized = roomName == spawnRoom.name && inc && capacityWork > 0
+                && inc.body.filter(p => p.type === WORK).length < capacityWork
+                && budgetNow >= capacityCost;
+            if ((inc && inc.ticksToLive <= lead) || mine.length == 0 || undersized) {
                 // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起 ⇒ 按能量收缩体型。
                 //
                 // ⚠️ **本房 keeper 不许再把预算抬到 550**（2026-11-06 W26N58 实测）。

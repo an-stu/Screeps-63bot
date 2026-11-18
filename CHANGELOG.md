@@ -1,3 +1,9 @@
+## v0.78.275 — 小体型 keeper 立即换班（不再等 TTL）
+
+- 在岗 keeper 的 WORK 数低于「房间容量满配」时（历史 WORK2 小 keeper），只要 hive 付得起满配就**立即孵化满配接班人**，不再等 `ttl ≤ lead`（E51S29 两只 WORK2 原本还要 20+ 分钟才换班）。
+- 仅限主房 keeper；外矿 keeper 仍是原提前量逻辑。接班成功后照旧在老者上打 `successorSpawned`，不会重复派。
+- 回归：`keeper-successor-fullbody` 增加「ttl 1400 + hive 满 ⇒ 立即换班」「付不起 ⇒ 按住」两例。
+
 ## v0.78.274 — 低 RCL 经济重排：keeper/carrier 优先、hive 永远第一、容器先建
 
 - **孵化优先级**（用户 2026-11-18）：全空房先给 200 的救急 worker（没有容器时 keeper 满 50 会停挖，必须有人先挖矿填 hive），之后 **keeper → carrier → worker → upgrader**。原顺序让 worker/upgrader 先吃掉本 tick 预算，hive 满 800 时一只工人就把能量花光，keeper 与 carrier 同 pass 都排不上。
