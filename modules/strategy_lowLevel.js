@@ -3,6 +3,8 @@
  */
 
 
+const DOWNGRADE_PROTECTION_TICKS = 5000;
+
 Creep.prototype.lowLevelDefense = function () {
     let em = this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);
     if (em) {
@@ -35,6 +37,64 @@ let pro = {
         if (freeCarries.length && pickTasks.length) { freeCarries.pop().addTask(pickTasks.shift()); }
         pro.pickTasksMap[room.name] = pickTasks;
     },
+    directHarvestSources(room) {
+        const stations = room.memory[StationSources.stationName];
+        if (!stations) return [];
+        return (room.source || []).filter(source => {
+            const data = stations[source.id];
+            if (!data) return false;
+            const ids = data.creeps || [];
+            if (room.storage) return ids.length === 0;
+            const container = data.container && Game.getObjectById(data.container);
+            const ready = container && container.pos.isNearTo(source.pos) && ids.some(id => {
+                const keeper = Game.getObjectById(id);
+                return keeper && !keeper.spawning && keeper.pos.isEqualTo(container.pos);
+            });
+            return !ready;
+        });
+    },
+    assignDirectHarvest(room, sources, workers) {
+        if (!sources.length) return;
+        const assigned = new Set();
+        const available = [];
+        for (const worker of workers) {
+            const task = worker.headTask();
+            if (task && task.taskName === "harvestEnergy") assigned.add(task.id);
+            if (worker.isFree() && worker.storeEmpty()) available.push(worker);
+        }
+        for (const source of sources) {
+            if (!available.length) break;
+            if (!source.energy || assigned.has(source.id)) continue;
+            available.shift().addTask(StationSources.generatorReleaseAbleHarTask(room.memory[StationSources.stationName][source.id]));
+        }
+    },
+    needsDowngradeProtection(room) {
+        const controller = room.controller;
+        return !!(room.spawn.length && controller && !controller.upgradeBlocked
+            && controller.ticksToDowngrade <= DOWNGRADE_PROTECTION_TICKS);
+    },
+    assignDowngradeProtection(room, workers, urgent = pro.needsDowngradeProtection(room)) {
+        if (!urgent) return;
+        // 临近降级只保留一只应急 worker；优先空闲满载者，必要时中断施工。
+        if (workers.some(worker => {
+            const task = worker.lastTask();
+            return task && task.taskName === "upgrade" && task.id === room.controller.id && !worker.storeEmpty();
+        })) return;
+        let builder;
+        for (const worker of workers) {
+            if (worker.storeEmpty()) continue;
+            if (worker.isFree()) {
+                worker.addTask(StationUpgrade.generatorUpgradeTask(room));
+                return;
+            }
+            const task = worker.lastTask();
+            if (!builder && task && task.taskName === "buildConst" && task.roomName === room.name) builder = worker;
+        }
+        if (builder) {
+            builder.popTask();
+            builder.addTask(StationUpgrade.generatorUpgradeTask(room));
+        }
+    },
     exec(room) {
         if ((Game.time + room.hashCode()) % 3 != 0) {
             return
@@ -55,6 +115,7 @@ let pro = {
             // RCL<3 跨 shard 援建房：建设由跨 shard 建筑爬负责，本地 spawn 只产防守爬
             // （上面入侵分支已处理），不本地产 worker / 采集 / 升级（用户政策：一直援建、不自产）。
             if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) return;
+            pro.assignDowngradeProtection(room, room.creeps("worker"));
             // if((Game.time+room.hashCode()) % 150 == 0  && Game.cpu.bucket>50 && room.memory.structMap){
             //     room.memory.structMap[STRUCTURE_SPAWN].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_SPAWN)})
             //     room.memory.structMap[STRUCTURE_EXTENSION].take(10).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_EXTENSION)})
@@ -104,15 +165,24 @@ let pro = {
         } else { // 3级的时候可以分化creep来了
             if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel800(room);
 
+            const workers = room.creeps("worker");
+            const fallbackSources = pro.directHarvestSources(room);
+            const downgradeUrgent = pro.needsDowngradeProtection(room);
+            pro.assignDowngradeProtection(room, workers, downgradeUrgent);
+
             // 低 RCL 孵化优先级（用户 2026-11-18）：**keeper（收入）→ carrier（搬运）
             // → worker → upgrader**；但**全空房**先给一只 200 的救急 worker —— 没有
             // 容器时 keeper 满 50 就停挖（harvestSinkFree=false），必须有人先挖矿填
             // hive，否则 keeper/loader 谁也付不起。原顺序是 worker/upgrader 先吃满
             // 预算，hive 800 时一只工人就把能量花光，keeper 与 carrier 同 pass 都排不上。
-            if (room.creeps("worker", false).length + room.creeps("carrier", false).length == 0) {
+            const hasWorker = room.creeps("worker", false).length > 0;
+            // 有 carrier 却没有可搬的源容器时，也必须保留一条自采自用的启动链。
+            if (!hasWorker && (!room.creeps("carrier", false).length || downgradeUrgent
+                || (!room.storage && fallbackSources.length > 0 && fallbackSources.length === room.source.length))) {
                 let rescueBudget = room.currentEnergyAvailable === undefined
                     ? room.getEnergyAvailable() : room.currentEnergyAvailable;
                 if (rescueBudget >= 200) {
+                    room.spawnFailure = false;
                     StationHive.trySpawn(room, room.name,
                         StationWork.getMiddleLevelWorkerBodyConfig(room, Math.min(rescueBudget, 200)), "worker", []);
                 }
@@ -120,7 +190,8 @@ let pro = {
 
             StationSources.trySpawnHarKeeper(room);
 
-            let carrierSpawned = false;
+            const carryMin = room.storage ? (StationHive.HiveNeedToFill(room) ? 1200 : 300) : 300;
+            const carryTasks = StationSources.generatorCarryEnergyTask(room, carryMin);
             {
                 let keeperCnt = room.creeps("harvestEnergyKeeper", false).length;
                 let sourceCnt = room.source ? room.source.length : 2;
@@ -129,13 +200,11 @@ let pro = {
                 let carrierCnt = room.creeps("carrier", false).length;
                 // 无 storage 的低级房：容器有 300 就值得搬（不再等 1200 的批次门槛，
                 // 那是给 RCL8 大容器准备的；2000 上限的容器经常攒不到）。
-                let carryMin = room.storage ? (StationHive.HiveNeedToFill(room) ? 1200 : 300) : 300;
-                let hasCarry = StationSources.generatorCarryEnergyTask(room, carryMin).length > 0;
                 let carrierBudget = room.currentEnergyAvailable === undefined
                     ? room.getEnergyAvailable() : room.currentEnergyAvailable;
-                if ((carrierCnt < 1 || (hasCarry && carrierCnt < carrierTarget)) && carrierBudget >= 300) {
+                if ((carrierCnt < 1 || (carryTasks.length && carrierCnt < carrierTarget)) && carrierBudget >= 300) {
                     room.spawnFailure = false;
-                    carrierSpawned = !!StationHive.trySpawn(room, room.name,
+                    StationHive.trySpawn(room, room.name,
                         StationCarry.getCarrierBodyConfig(room, carrierBudget), "carrier", []);
                 }
             }
@@ -153,17 +222,8 @@ let pro = {
                 }
             }
 
-            // 挖矿
-            _.values(room.memory[StationSources.stationName]).forEach(data => {
-                if (data["creeps"].length == 0) {
-                    let posLen = room[data["id"]].pos.nearPos(1).filter(e => e.walkable()).length
-                    let targetCnt = posLen * 1.5 - room.creeps("worker").filter(e => e.headTask() && e.headTask().id == data["id"]).length;
-                    if (Math.min(6, Math.ceil(targetCnt)) > 0) {
-                        let creep = room.creeps("worker").filter(e => e.storeEmpty() && e.isFree()).head()
-                        if (creep) creep.addTask(StationSources.generatorReleaseAbleHarTask(data))
-                    }
-                }
-            });
+            // 新矿工仅登记、尚未到位或源容器仍是工地时，每源留一只可释放的直采 worker。
+            pro.assignDirectHarvest(room, fallbackSources, workers);
 
             if ((room.constructionSite.length || room.creeps(undefined, false).length == 0)  // 有工地的时候在造worker 或者全死光了
                 && (room.creeps("worker", false).length < 2 ||
@@ -174,7 +234,7 @@ let pro = {
                 // 750 carrier 一起挡住（与 station_upgrade / station_sources 同一病根）。
                 let workerBudget = room.currentEnergyAvailable === undefined
                     ? room.getEnergyAvailable() : room.currentEnergyAvailable;
-                StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room, workerBudget), "worker", [])
+                if (workerBudget >= 200) StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room, workerBudget), "worker", [])
             }
 
 
@@ -190,7 +250,7 @@ let pro = {
             // station 记忆由 refreshRoom（每 61 tick 错峰）首次写入：新占房在
             // 首次 refresh 前该键不存在，裸取 [STRUCTURE_CONTAINER] 抛 TypeError
             // 让整个 lowLevel pass 中断到多 61 tick。
-            if ((!StationHive.HiveNeedToFill(room) || room.isDownGrade())
+            if ((!StationHive.HiveNeedToFill(room) || downgradeUrgent || room.isDownGrade())
                 && room.memory[StationUpgrade.stationName] && Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER])) {
                 let upgCnt = room.creeps("upgrader", false).length;
                 let loadedFree = room.creeps("carrier").filter(e => e.isFree() && e.store[RESOURCE_ENERGY] > 0).length;
@@ -201,11 +261,6 @@ let pro = {
 
             // 内矿的能量搬运 和掉落资源
             let pickTasks = StationCarry.generatorPickTask(room, true)
-            // 有 storage 的高等级房才用批次门槛（hive 满 300 抽干 / 缺电 1200 等批量）；
-            // 无 storage 的低级房容器有 300 就搬，避免 carrier 空转（2000 上限的
-            // 源容器经常攒不到 1200，hive 一直饿着）。
-            let carryTasks = StationSources.generatorCarryEnergyTask(room,
-                room.storage ? (StationHive.HiveNeedToFill(room) ? 1200 : 300) : 300);
             let storageTasks = StationCarry.generatorCarryStorageEnergyTask(room);
             room.creeps("carrier").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (StationHive.HiveNeedToFill(room)) {
@@ -236,33 +291,9 @@ let pro = {
                 }
             }
 
-            // 搬运编制：与 highLevel 同一口径（源数 + keeper 数折半，2~3 只），**必须有上限**。
-            //
-            // 2026-10-22 实测 W26N58：原判断是 `carrier 数 < 1 || carryTasks.length`，而源容器
-            // 只要有能量 `carryTasks` 就非空 ⇒ 每 3 tick 派一只，22 小时攒到 **20 只搬运**，
-            // 其中 16 只空闲、19 只身上各抱着 500 能量（约 9,500 能量躺在爬身上没法用），
-            // 而 spawn 被这堆 400 能量的搬运长期占着 ⇒ **800 能量的 upgrader 永远排不上**，
-            // 升级速率卡在 6/tick（一只 upgrader 的 WORK 数）。
-            let sourceCnt = room.source ? room.source.length : 2;
-            let keeperCnt = room.creeps("harvestEnergyKeeper", false).length;
-            let carrierTarget = Math.max(2, Math.min(3, Math.ceil((sourceCnt + keeperCnt) / 2)));
-            if (StationHive.HiveNeedToFill(room)) carrierTarget = Math.min(3, carrierTarget + 1);
-            let carrierCnt = room.creeps("carrier", false).length;
-            // 一只都没有时无条件补（死房自救）；否则只在没到编制且真有货要搬时才补
-            if (!carrierSpawned && (carrierCnt < 1 || (carryTasks.length && carrierCnt < carrierTarget))) {
-                // 前面任何一次失败的孵化尝试（付不起的 worker / 防御爬）都会把
-                // spawnFailure 置真，trySpawn 首行见到就返回 ⇒ carrier 明明付得起
-                // 也永远排不上（与 station_upgrade.js:431 同一处理）。
-                room.spawnFailure = false;
-                let carrierBudget = room.currentEnergyAvailable === undefined
-                    ? room.getEnergyAvailable() : room.currentEnergyAvailable;
-                StationHive.trySpawn(room, room.name,
-                    StationCarry.getCarrierBodyConfig(room, carrierBudget), "carrier", [])
-            }
-
             // 剩下的给 worker 搬运。容器没货时也去捡地上的掉落（keeper 满仓溢出），
             // 捡满后下一 tick 会按「hive 优先」填进去 —— 低级房不能只靠 carrier。
-            room.creeps("worker").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
+            workers.filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (carryTasks.length) {
                     creep.addTask(carryTasks.pop())
                 } else if (pickTasks.length) {
@@ -270,15 +301,15 @@ let pro = {
                 }
             })
 
-            // 分配升级的运送 —— **必须排在塔之前**。
+            // 给升级容器预留一只搬运，优先于塔；平时不得抢在 Hive 之前。
             //
             // 2026-10-21 实测 W26N58（RCL3，无 storage）：塔被修理动作持续抽干，
             // `fillTowerTasks` 永远非空，于是「先塔、后升级容器」让每一只空闲搬运
             // 都被塔吃掉 ⇒ 控制器旁容器长期 0/2000、upgrader 抱着 0 能量站着、
             // 控制器进度冻结在 12,336 达数十 tick，而降级计时器 1/tick 往下走。
             // 升级容器上限只有 2000，先给它一只搬运不会挤占别的需求。
-            let upgCreep = room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).head();
-            if (upgCreep) {
+            let upgCreep = room.creeps("carrier").find(e => !e.storeEmpty() && e.isFree());
+            if (upgCreep && (downgradeUrgent || !StationHive.HiveNeedToFill(room))) {
                 let task = StationUpgrade.generatorFillEnergyTask(room.name, upgCreep.getPartCnt(CARRY) * 50);
                 if (task.length > 0) {
                     upgCreep.addTask(task);
@@ -307,21 +338,13 @@ let pro = {
                 }
             })
 
-            let lowEnergyCarry = StationSources.generatorCarryEnergyTask(room,
-                room.storage ? (StationHive.HiveNeedToFill(room) ? 1200 : 300) : 300)
-            room.creeps("worker").filter(e => e.isFree()).forEach(creep => {
-                if (creep.storeEmpty()) {
-                    if (lowEnergyCarry.length)
-                        creep.addTask(lowEnergyCarry.pop())
+            workers.filter(e => !e.storeEmpty() && e.isFree()).forEach(creep => {
+                if (StationHive.HiveNeedToFill(room)) {
+                    creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+                } else if (StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
+                    creep.addTask(StationWork.generatorBuildTask(creep));
                 } else {
-                    if (StationHive.HiveNeedToFill(room)) {
-                        creep.addTask(StationHive.generatorFillHiveTask(room, creep));
-                    } else if (StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
-                        creep.addTask(StationWork.generatorBuildTask(creep))
-                    }
-                    else {
-                        creep.addTask(StationUpgrade.generatorUpgradeTask(room));
-                    }
+                    creep.addTask(StationUpgrade.generatorUpgradeTask(room));
                 }
             })
         }

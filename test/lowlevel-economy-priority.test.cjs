@@ -32,7 +32,7 @@ assert.match(sourcesSrc, /requireFullLoad: !!room\.storage/,
     "低级房 carrier 允许部分装载（满装要求会让它永远等不到）");
 
 // 2b) hive 永远第一优先：缺能时不孵 upgrader；满载 worker 不进容器、直接回去填 hive
-assert.match(lowSrc, /if \(\(!StationHive\.HiveNeedToFill\(room\) \|\| room\.isDownGrade\(\)\)/,
+assert.match(lowSrc, /if \(\(!StationHive\.HiveNeedToFill\(room\) \|\| downgradeUrgent \|\| room\.isDownGrade\(\)\)/,
     "hive 缺能时不得孵化 upgrader（临近降级才例外）");
 assert.match(lowSrc, /else if \(pickTasks\.length\) \{\s*\r?\n\s*creep\.addTask\(pickTasks\.shift\(\)\)/,
     "空手 worker 容器没货时也要去捡掉落能量");

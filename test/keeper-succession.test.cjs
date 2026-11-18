@@ -144,15 +144,36 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     assert.equal(spawnCalls.length, 1, "到点就要提前派（提前量必须生效）");
     assert.equal(spawnCalls[0][3], "harvestEnergyKeeper", "派的是 keeper");
     assert.equal(keeper.memory.successorSpawned, true, "派成功后要在在岗那只身上打标记");
+    assert.equal(keeper.memory.successorName, "newKeeper", "记录被接受的接班人，便于跨房跟踪/失联重派");
 }
 
 {
     // ③ 已经打了标记（接班人在路上/已在岗）→ 不重复派
     const ctx = loadStation();
     const S = ctx.StationSources;
-    const { room, spawnCalls } = setup(ctx, { keeperTtl: 10, spawnTimeAge: 1490, keeperMemory: { successorSpawned: true } });
+    const { room, spawnCalls } = setup(ctx, {
+        keeperTtl: 10, spawnTimeAge: 1490,
+        keeperMemory: { successorSpawned: true, successorName: "newKeeper" },
+    });
+    ctx.Game.creeps.newKeeper = {
+        id: "k2", name: "newKeeper", spawning: false, ticksToLive: 1490,
+        memory: { role: "harvestEnergyKeeper" },
+        headTask: () => ({ id: "src1", taskName: "harvestEnergyKeeper" }),
+    };
     S.trySpawnOuterHarKeeper("W1N1", room);
     assert.equal(spawnCalls.length, 0, "带标记就不再重复生");
+}
+
+{
+    // ③a 已接受的接班人后来死亡/丢失 → 解除旧标记，incumbent 仍在时可重新派。
+    const ctx = loadStation();
+    const S = ctx.StationSources;
+    const { room, spawnCalls } = setup(ctx, {
+        keeperTtl: 10, spawnTimeAge: 1490,
+        keeperMemory: { successorSpawned: true, successorName: "lostKeeper" },
+    });
+    S.trySpawnOuterHarKeeper("W1N1", room);
+    assert.equal(spawnCalls.length, 1, "丢失的接班人不能让 incumbent 永久卡在 successorSpawned");
 }
 
 {
@@ -343,9 +364,9 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
         "旧的守卫必须删掉（它把提前量作废了）");
     assert.ok(/if \(mine\.some\(e => e\.spawning\)\) return;/.test(codeOnly),
         "必须挡住「已有接班人在孵化」的情形，否则会滚雪球");
-    assert.ok(/if \(mine\.some\(e => e\.memory && e\.memory\.successorSpawned\)\) return;/.test(codeOnly),
+    assert.ok(/let markedIncumbents = mine\.filter\(e => e\.memory && e\.memory\.successorSpawned\);/.test(codeOnly),
         "新守卫必须查 successorSpawned 标记");
-    assert.ok(/if \(StationHive\.trySpawn\([\s\S]{0,200}?successorSpawned = true/.test(codeOnly),
+    assert.ok(/let successorName = StationHive\.trySpawn\([\s\S]{0,250}?if \(successorName\)[\s\S]{0,250}?successorSpawned = true/.test(codeOnly),
         "标记只能在 trySpawn 返回真之后打");
     assert.ok(!/data\["spawnTime"\] -=/.test(codeOnly),
         "spawnTime 必须是赋值，不能是 -=（累减会让提前量越漂越早）");

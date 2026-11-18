@@ -1,6 +1,5 @@
-// 0.78.272 回归：站在 spawn 格上的爬会阻塞孵化（spawnCreep ⇒ ERR_BUSY）。
-// trySpawn 必须把占格的我方爬挪到相邻空格，并在本 tick 标记 spawnFailure。
-// 现场：E51S29 采样 37 tick 里有 9 tick（24%）spawn 格被 keeper 占住。
+// Regression: an idle Spawn may start a creep even when a creep occupies its tile.
+// Spawn selection must still skip a Spawn that is actively spawning and use a free one.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -16,32 +15,32 @@ if (!Array.prototype.head) {
 }
 
 function makeWorld(opts = {}) {
-    const world = {spawnCalls: [], moved: null};
+    const world = {spawnCalls: []};
     const blockers = opts.blockers || [];
-    const spawnPos = {
-        x: 11, y: 15,
-        lookFor(type) {
-            if (type === "creeps") return blockers.filter(b => b.isCreep);
-            if (type === "powerCreeps") return blockers.filter(b => !b.isCreep);
-            return [];
+    const spawn = (id, spawning) => ({
+        id,
+        pos: {
+            x: 11, y: 15,
+            lookFor(type) {
+                if (type === "creeps") return blockers.filter(b => b.isCreep);
+                if (type === "powerCreeps") return blockers.filter(b => !b.isCreep);
+                return [];
+            },
         },
-        nearPos() {
-            return [{
-                x: 12, y: 15,
-                walkable: () => true,
-                lookFor: () => [],
-            }];
-        },
-    };
-    const spawn = {
-        id: "spawn1", pos: spawnPos, spawning: null,
+        spawning,
         isActive: () => true,
-        spawnCreep(body, name, o) { world.spawnCalls.push({body, name, o}); return 0; },
-    };
+        // Mirrors the engine contract: an occupied Spawn tile alone does not prevent
+        // starting a creep; the engine evaluates placement/egress as part of spawning.
+        spawnCreep(body, name, o) {
+            world.spawnCalls.push({id, body, name, o});
+            return 0;
+        },
+    });
+    const spawns = opts.spawnStates || [null];
     const room = {
         name: "E51S29", my: true, level: 3, spawnFailure: false, spawnedMap: {},
         controller: {owner: {username: "an_w"}},
-        spawn: [spawn],
+        spawn: spawns.map((state, i) => spawn(`spawn${i + 1}`, state)),
         getEnergyAvailable: () => 1000,
         currentEnergyAvailable: 1000,
     };
@@ -58,54 +57,71 @@ function makeWorld(opts = {}) {
         Utils: {getBodyEnergyNeed: body => body.length * 50},
     };
     sandbox.global = sandbox;
-    // 只加载 trySpawn 所需的最小上下文：整个文件依赖较多，按函数截取。
-    const start = source.indexOf("trySpawn(room, targetRoomName, body, role, tasks, ops)");
-    assert.ok(start >= 0, "trySpawn 定义必须存在");
-    let open = source.indexOf("{", start);
-    let depth = 0, end = -1;
-    for (let i = open; i < source.length; i++) {
-        if (source[i] === "{") depth++;
-        else if (source[i] === "}" && --depth === 0) { end = i; break; }
+    // Load only the methods under test: the complete module requires a larger game runtime.
+    function extractMethod(signature) {
+        const start = source.indexOf(signature);
+        assert.ok(start >= 0, `${signature} definition must exist`);
+        const open = source.indexOf("{", start);
+        let depth = 0, end = -1;
+        for (let i = open; i < source.length; i++) {
+            if (source[i] === "{") depth++;
+            else if (source[i] === "}" && --depth === 0) { end = i; break; }
+        }
+        assert.ok(end > open, `${signature} body must be closed`);
+        return source.slice(start, end + 1);
     }
-    assert.ok(end > open, "trySpawn 函数体必须闭合");
-    vm.runInNewContext("var StationHive = { " + source.slice(start, end + 1) + " };", sandbox);
+    const methods = [
+        extractMethod("trySpawn(room, targetRoomName, body, role, tasks, ops)"),
+        extractMethod("HiveNeedToFill(room)"),
+    ];
+    vm.runInNewContext("var StationHive = { " + methods.join(", ") + " };", sandbox);
     return {world, room, sandbox};
 }
 
-// 1) 我方爬站在 spawn 格：挪到相邻空格、本 tick 放弃孵化、置 spawnFailure
+const body = ["work", "carry", "move"];
+
+// An owned creep on the Spawn tile must not be preemptively treated as ERR_BUSY.
 {
-    const blocker = {my: true, isCreep: true, move(pos) { this.moved = pos; }};
+    const blocker = {my: true, isCreep: true};
     const {world, room, sandbox} = makeWorld({blockers: [blocker]});
-    const name = sandbox.StationHive.trySpawn(room, "E51S29", ["work", "carry", "move"], "harvestEnergyKeeper", []);
-    assert.equal(name, undefined, "占格时本 tick 不得孵化");
-    assert.equal(world.spawnCalls.length, 0, "不得调用 spawnCreep");
-    assert.equal(room.spawnFailure, true, "必须置 spawnFailure，避免同 tick 反复尝试");
-    assert.ok(blocker.moved && blocker.moved.x === 12 && blocker.moved.y === 15, "占格爬必须被挪到相邻空格");
+    const name = sandbox.StationHive.trySpawn(room, "E51S29", body, "harvestEnergyKeeper", []);
+    assert.equal(typeof name, "string", "occupied tile should not prevent a successful spawn attempt");
+    assert.equal(world.spawnCalls.length, 1, "spawnCreep should be called for an idle occupied Spawn");
+    assert.equal(world.spawnCalls[0].id, "spawn1");
+    assert.equal(room.spawnedMap.spawn1, 1, "successful Spawn should be marked used this tick");
+    assert.equal(room.spawnFailure, false);
 }
 
-// 2) 下一个 tick 格子空了：正常孵化
+// A busy Spawn is skipped; a later idle Spawn remains available for the attempt.
 {
-    const {world, room, sandbox} = makeWorld();
-    const name = sandbox.StationHive.trySpawn(room, "E51S29", ["work", "carry", "move"], "harvestEnergyKeeper", []);
-    assert.equal(typeof name, "string", "孵化成功必须返回 creep 名字");
-    assert.equal(world.spawnCalls.length, 1, "无占格时必须尝试孵化");
+    const {world, room, sandbox} = makeWorld({spawnStates: [{name: "busy"}, null]});
+    const name = sandbox.StationHive.trySpawn(room, "E51S29", body, "harvestEnergyKeeper", []);
+    assert.equal(typeof name, "string");
+    assert.equal(world.spawnCalls.length, 1, "only the idle Spawn should be used");
+    assert.equal(world.spawnCalls[0].id, "spawn2", "the second free Spawn should be selected");
+    assert.equal(room.spawnedMap.spawn1, undefined, "busy Spawn must remain unused");
+    assert.equal(room.spawnedMap.spawn2, 1);
 }
 
-// 3) 敌方爬占格：不挪、不孵化（不能替对手做位移）
+// A same-tick spawn can consume all 800 energy while the Game snapshot stays stale.
+// HiveNeedToFill must use committed energy, then include in-flight hive reservations.
 {
-    const enemy = {my: false, isCreep: true, move() { throw new Error("must not move enemy"); }};
-    const {world, room, sandbox} = makeWorld({blockers: [enemy]});
-    sandbox.StationHive.trySpawn(room, "E51S29", ["work", "carry", "move"], "harvestEnergyKeeper", []);
-    assert.equal(world.spawnCalls.length, 1, "敌方占格不应阻止孵化尝试（引擎自行裁决）");
+    const {room, sandbox} = makeWorld();
+    room.energyAvailable = 800;
+    room.energyCapacityAvailable = 800;
+    room.currentEnergyAvailable = 800;
+    const fullCostBody = Array(16).fill("carry");
+
+    sandbox.StationHive.trySpawn(room, "E51S29", fullCostBody, "harvestEnergyKeeper", []);
+    assert.equal(room.currentEnergyAvailable, 0, "successful spawn should reserve all 800 energy");
+    assert.equal(room.energyAvailable, 800, "Game energy snapshot remains stale in this fixture");
+
+    room.hiveEnergySending = 0;
+    assert.equal(sandbox.StationHive.HiveNeedToFill(room), true,
+        "committed zero energy should win over the stale Game snapshot");
+    room.hiveEnergySending = 800;
+    assert.equal(sandbox.StationHive.HiveNeedToFill(room), false,
+        "an 800-energy in-flight reservation should suppress redundant filling");
 }
 
-// 4) power creep 占格同样要挪（它也能堵 spawn）
-{
-    const pc = {my: true, isCreep: false, move(pos) { this.moved = pos; }};
-    const {world, room, sandbox} = makeWorld({blockers: [pc]});
-    sandbox.StationHive.trySpawn(room, "E51S29", ["work", "carry", "move"], "harvestEnergyKeeper", []);
-    assert.ok(pc.moved, "power creep 也要挪开");
-    assert.equal(world.spawnCalls.length, 0);
-}
-
-console.log("spawn tile occupancy is cleared before spawning");
+console.log("spawn selection handles occupied tiles and busy spawns");

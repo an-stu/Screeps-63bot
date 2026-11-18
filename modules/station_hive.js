@@ -84,7 +84,11 @@ let pro = {
         // room.hiveEnergySending 是当 tick 房间对象上的预约量，可能尚未初始化。
         // 缺省按 0 处理，否则能量空了但还没有 fillHive 任务时 NaN 比较恒为 false，
         // hive 会永远缺能（E53S21 根因）。
-        return room.energyAvailable + (room.hiveEnergySending || 0) < room.energyCapacityAvailable;
+        // 同 tick 孵化会递减 currentEnergyAvailable；Game 的 energyAvailable 快照可能仍是旧值。
+        let available = room.energyAvailable;
+        if (Number.isFinite(room.currentEnergyAvailable))
+            available = Math.min(available, room.currentEnergyAvailable);
+        return available + (room.hiveEnergySending || 0) < room.energyCapacityAvailable;
     },
     /**
      * 动态能量余量：全局平均能量 + 最低房能量双重滞回。
@@ -188,25 +192,6 @@ let pro = {
         }
         let spawn = room.spawn.find(e => !e.spawning && !room.spawnedMap[e.id] && (room.level == 8 || e.isActive()));
         if (!spawn) {
-            room.spawnFailure = true;
-            return undefined;
-        }
-        // 站在 spawn 格上的爬会阻塞孵化（spawnCreep ⇒ ERR_BUSY）。历史上多次出现
-        // 「spawn 被空闲搬运/刚出生的爬占住 ⇒ 整房无法生产」（strategy_lowLevel
-        // 2026-10-22 的 20 只搬运事故；E51S29 实测 24% 的 tick 被 keeper 占格）。
-        // 把占格的我方爬挪到相邻空格；移动意图下一 tick 才生效，本 tick 标记失败。
-        let blockers = spawn.pos.lookFor(LOOK_CREEPS)
-            .concat(typeof LOOK_POWER_CREEPS != "undefined" ? spawn.pos.lookFor(LOOK_POWER_CREEPS) : [])
-            .filter(e => e.my);
-        if (blockers.length) {
-            let blocker = blockers[0];
-            let spot = spawn.pos.nearPos(1).filter(p => p.walkable()
-                && !p.lookFor(LOOK_CREEPS).length
-                && (typeof LOOK_POWER_CREEPS == "undefined" || !p.lookFor(LOOK_POWER_CREEPS).length)).head();
-            if (spot) {
-                if (typeof blocker.move == "function") blocker.move(spot);
-                else if (typeof blocker.moveTo == "function") blocker.moveTo(spot, {range: 0});
-            }
             room.spawnFailure = true;
             return undefined;
         }

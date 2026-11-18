@@ -3414,9 +3414,13 @@ let pro = {
             UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestEnergy")
         ]
     },
-    /** 重复 keeper 清理：每个挖矿点只保留 1 只（保留最年轻的），不受生爬失败影响 */
+    /**
+     * 重复 keeper 清理：正常只留 1 只；换班途中暂留 incumbent + 已接受的接班人，
+     * 接班人真正抵达矿点后再退役 incumbent。避免新爬刚孵出/还在路上就把在岗爬杀掉。
+     */
     cleanupDuplicateKeepers(roomName) {
-        let harMemory = Memory.rooms[roomName.name || roomName] && Memory.rooms[roomName.name || roomName][StationSources.stationName];
+        let targetRoomName = roomName.name || roomName;
+        let harMemory = Memory.rooms[targetRoomName] && Memory.rooms[targetRoomName][StationSources.stationName];
         if (!harMemory) return;
         _.values(harMemory).forEach(data => {
             // 跳过认领表等辅助字段，只处理真正的挖矿点
@@ -3429,6 +3433,43 @@ let pro = {
                 if (creep && creep.ticksToLive) alive.push(creep);
             }
             if (alive.length > 1) {
+                // succession 标记在老 keeper 身上；successorName 精确指向成功孵化请求。
+                // 旧版只有 successorSpawned 时，退回到同矿点另一只爬作为接班人候选。
+                let incumbent = alive.find(e => e.memory && e.memory.successorSpawned);
+                let successor;
+                if (incumbent) {
+                    let successorName = incumbent.memory.successorName;
+                    successor = successorName
+                        ? alive.find(e => e !== incumbent && (e.name == successorName || e.id == successorName))
+                        : alive.filter(e => e !== incumbent).sort((a, b) => b.ticksToLive - a.ticksToLive)[0];
+                }
+                if (incumbent && successor) {
+                    // 任意 source 邻格都是可工作的矿位。若 incumbent 正站在 container 上，
+                    // successor 会先落在另一个 source 邻格；仍应交接，不能要求它先踩上
+                    // 被 incumbent 占着的 container，否则两只会永久互相挡位。
+                    let source = Game.getObjectById(data.id);
+                    let pos = successor.pos;
+                    let sourcePos = source && source.pos;
+                    let range = pos && sourcePos
+                        ? (pos.getRangeTo ? pos.getRangeTo(sourcePos)
+                            : Math.max(Math.abs(pos.x - sourcePos.x), Math.abs(pos.y - sourcePos.y)))
+                        : Infinity;
+                    let successorAtPost = !successor.spawning && successor.ticksToLive > 0
+                        && pos && pos.roomName == targetRoomName
+                        && sourcePos && sourcePos.roomName == targetRoomName
+                        && range <= 1;
+                    let keep = successorAtPost ? [successor] : [incumbent, successor];
+                    alive.filter(e => !keep.includes(e)).forEach(e => e.suicide());
+                    data.creeps = keep.map(e => e.id);
+                    return;
+                }
+                if (incumbent) {
+                    // 接班请求仍在路上、尚未注册到矿点时，保护原岗位；只清掉其它真重复。
+                    alive.filter(e => e !== incumbent).forEach(e => e.suicide());
+                    data.creeps = [incumbent.id];
+                    return;
+                }
+                // 非接班场景保持原规则：真正的重复只留寿命最长（通常是最新）的那只。
                 alive.sort((a, b) => b.ticksToLive - a.ticksToLive);
                 alive.slice(1).forEach(e => e.suicide());
             }
@@ -3514,9 +3555,13 @@ let pro = {
             // tick」触发）永远走不到 ⇒ 实际只能等老那只**死掉**才派，断档 = 整个孵化时间
             // （66~99 tick）+ 赶路，而不是设计的 ~6 tick。实测 W33N53 的源因此满仓。
             //
-            // 现在改成显式标记：**派出接班人时，在在岗那只的 memory 上打 successorSpawned**，
-            // 只要同一矿点还有一只带这个标记的爬（在孵或在岗都算），就不再重复派。
-            // 老那只死后它的 memory 一并消失，接班人是干净的，下一轮照常触发。
+            // 现在改成显式标记：派出接班人时，在在岗那只的 memory 上记
+            // `successorSpawned + successorName`。只要这个命名接班人还存在（在孵、
+            // 行军或已到矿点），就不再重复派；若它消失则清标记，让 incumbent 可重派。
+            // 老那只退役/死亡后，它的标记一并消失，接班人是干净的，下一轮照常触发。
+            // Room.creeps is grouped by creep.memory.roomName (the spawn room for this
+            // role), not by physical position, so it continues to include remote successors
+            // while they travel. Avoid a shard-wide Game.creeps scan inside this source loop.
             let mine = spawnRoom.creeps("harvestEnergyKeeper", false).filter(e => {
                 let t = e.headTask && e.headTask();
                 return t && t.id == data.id;
@@ -3526,8 +3571,23 @@ let pro = {
             //    而孵化中的接班人还没打标记 ⇒ 触发条件里 `data.creeps.length == 0`
             //    立刻成立 ⇒ 又派一只（实测 E41S32 2 个源同时有 3 只在孵、W33N55 5 只 keeper）。
             if (mine.some(e => e.spawning)) return;
-            // ② 在岗那只已被标记（接班人在路上）⇒ 也别重复派。
-            if (mine.some(e => e.memory && e.memory.successorSpawned)) return;
+            // ② 在岗那只已被标记（接班人在路上）⇒ 也别重复派；接班人不在了则下方解标记。
+            let markedIncumbents = mine.filter(e => e.memory && e.memory.successorSpawned);
+            let successorPending = markedIncumbents.some(inc => {
+                let successorName = inc.memory.successorName;
+                if (successorName) {
+                    // Game.creeps[name] is an O(1) lookup and includes spawning creeps.
+                    return !!(Game.creeps && Game.creeps[successorName]);
+                }
+                // 兼容旧版只有 boolean 标记的 creep。
+                return mine.some(e => e !== inc);
+            });
+            if (successorPending) return;
+            // 被接受的接班人已消失（死亡/丢失任务），解除标记以便 incumbent 仍在时重派。
+            markedIncumbents.forEach(e => {
+                delete e.memory.successorSpawned;
+                delete e.memory.successorName;
+            });
             // ③ 主房能量优先：外矿在「主房穷」时缓一缓 —— **但只在这个矿点已经有在岗
             //    keeper 时才缓**。一只都没有时（新矿点 / 老 keeper 刚死）必须放行，
             //    否则外矿收入归零、主房永远穷，闸门自锁（见上面挪走那条的注释）。
@@ -3543,7 +3603,7 @@ let pro = {
             // **老那只死的那一刻**才成立 ⇒ 提前量被清零，断档 = 整个孵化时间 + 赶路。
             // 铁证：实测所有主房源的 `记录龄 + ttl` **恒等于 1500**。
             // 爬自己的 `ticksToLive` 才是不受别人改写的不可变事实（见 10-14 那条教训）。
-            let inc = mine.filter(e => !e.spawning).head();
+            let inc = mine.filter(e => !e.spawning)[0];
             // 余量可调：`Memory.marketSettings.keeperSuccessionMargin`（改完立刻生效，不必重传代码）
             let margin = Number(Memory.marketSettings && Memory.marketSettings.keeperSuccessionMargin);
             if (!(margin >= 0)) margin = KEEPER_SUCCESSION_MARGIN;
@@ -3623,9 +3683,15 @@ let pro = {
                 // currentEnergyAvailable)`）都按虚高的预算定体型 ⇒ spawnCreep 被引擎以
                 // ERR_NOT_ENOUGH_ENERGY 拒绝、spawnFailure 置真 ⇒ 白丢一个 spawn pass。
                 // 结论与 station_upgrade.js / strategy_highLevel.js 同一处完全一致。
-                if (StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks)) {
+                let successorName = StationHive.trySpawn(spawnRoom, spawnRoom.name, harBody, "harvestEnergyKeeper", tasks);
+                if (successorName) {
                     // 派成功了才打标记：接班人在路上，其余的在岗爬不用再补
-                    mine.forEach(e => { if (e.memory && !e.spawning) e.memory.successorSpawned = true; });
+                    mine.forEach(e => {
+                        if (e.memory && !e.spawning) {
+                            e.memory.successorSpawned = true;
+                            if (typeof successorName == "string") e.memory.successorName = successorName;
+                        }
+                    });
                 }
             }
         });
