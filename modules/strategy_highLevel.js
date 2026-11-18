@@ -516,7 +516,14 @@ let pro = {
         // hive（spawn/extension）不需要能量时，才把 carrier 的剩余能量放回 storage；
         // 否则能量优先喂 hive，避免 spawn/ext 饥饿导致无法产爬
         if (!StationHive.HiveNeedToFill(room)) {
-            room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).forEach(e => e.fillAllMainRoomStorage())
+            room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).forEach(creep => {
+                // 没有足够空手搬运时，直接用现成载荷补仍未派单的塔。
+                if (fillTowerTasks.length && creep.store[RESOURCE_ENERGY] > 0) {
+                    creep.addTask(fillTowerTasks.shift());
+                } else {
+                    creep.fillAllMainRoomStorage();
+                }
+            });
         }
 
         // container 能量：按需派发——有多少个有能量的源容器 + terminal 超额，派多少只
@@ -578,7 +585,7 @@ let pro = {
         //
         // `fillRes` 自带「空手先去 storage 取货」的分支（prototype_creep.js:626），
         // 所以这里给空手搬运也有效。
-        if (freeCarries.length) {
+        if (!fillTowerTasks.length && freeCarries.length) {
             // 同上：先取承运爬再按它的容量预订
             let carrier = freeCarries.pop();
             let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50);

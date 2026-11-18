@@ -18,13 +18,14 @@ function creep(energy = 0, ...tasks) {
         getPartCnt: () => 2};
 }
 
-function makeRoom({workers = [], carriers = [creep()], roomEnergy = 200, downgrade = 16000} = {}) {
+function makeRoom({workers = [], carriers = [creep()], roomEnergy = 200, downgrade = 16000,
+    towerNeedsFill = false, upgradeNeedsFill = false, storage} = {}) {
     const src = {id: "srcA", pos: pos(10, 10), energy: 3000};
     const objects = {miner: {pos: pos(10, 11), spawning: false}};
     const spawns = [];
     let carryScans = 0;
     const room = {
-        name: "E51S29", spawn: [{}], tower: [], source: [src], constructionSite: [],
+        name: "E51S29", spawn: [{}], tower: [], source: [src], constructionSite: [], storage,
         controller: {id: "ctrl", ticksToDowngrade: downgrade},
         memory: {stationSources: {srcA: {id: src.id, roomName: "E51S29", creeps: ["miner"]}}},
         creeps(role) {
@@ -52,11 +53,13 @@ function makeRoom({workers = [], carriers = [creep()], roomEnergy = 200, downgra
             roomMassStoreCnt: () => 0,
             // 满配 15 部件 = 750 能量：接近 RCL3 真实口径（低成本 mock 会让 199 能量也“付得起”）
             getCarrierBodyConfig: () => new Array(15).fill("carry")},
-        StationTower: {generatorFillEnergyTasks: () => []},
+        StationTower: {generatorFillEnergyTasks: () => towerNeedsFill ? [{taskName: "fillRes", id: "tower"}] : []},
         StationWork: {getMiddleLevelWorkerBodyConfig: (r, budget) => [budget], constructionNeedBuild: () => false},
         BODYPART_COST: {work: 100, carry: 50, move: 50},
         Utils: {getBodyEnergyNeed: body => body.reduce(sum => sum + 50, 0)},
-        StationUpgrade: {stationName: "stationUpgrade", generatorFillEnergyTask: () => [],
+        UtilsTask: {task: (target, taskName) => ({taskName, id: target.id})},
+        StationUpgrade: {stationName: "stationUpgrade", generatorFillEnergyTask: () =>
+            upgradeNeedsFill ? [{taskName: "fillRes", id: "upgradeContainer"}] : [],
             generatorUpgradeTask: r => ({taskName: "upgrade", id: r.controller.id})},
     };
     ctx.global = ctx;
@@ -110,4 +113,27 @@ test("downgrade timer sends just one loaded worker to upgrade without a controll
     blocked.room.controller.upgradeBlocked = 10;
     blocked.run();
     assert.equal(blocked.room.creeps("worker")[0].lastTask().taskName, "buildConst");
+});
+
+test("loaded carriers serve tower before upgrade container once the hive is full", () => {
+    const priority = {roomEnergy: 800, towerNeedsFill: true, upgradeNeedsFill: true};
+    const one = creep(500);
+    makeRoom({...priority, carriers: [one]}).run();
+    assert.equal(one.lastTask()?.id, "tower", "the only loaded carrier must charge the empty tower");
+
+    const first = creep(500), second = creep(500);
+    makeRoom({...priority, carriers: [first, second]}).run();
+    assert.equal(first.lastTask()?.id, "tower");
+    assert.equal(second.lastTask()?.id, "upgradeContainer", "an unassigned load can still serve upgrade");
+});
+
+test("hive refill and remaining upgrade/storage destinations are preserved", () => {
+    const one = creep(500);
+    makeRoom({roomEnergy: 399, towerNeedsFill: true, upgradeNeedsFill: true, carriers: [one]}).run();
+    assert.equal(one.lastTask()?.taskName, "fillHive");
+
+    const first = creep(500), second = creep(500);
+    makeRoom({roomEnergy: 800, upgradeNeedsFill: true, carriers: [first, second], storage: {id: "storage"}}).run();
+    assert.equal(first.lastTask()?.id, "upgradeContainer");
+    assert.equal(second.lastTask()?.id, "storage");
 });
