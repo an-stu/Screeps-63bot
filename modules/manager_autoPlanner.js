@@ -320,6 +320,11 @@ let pro={
         return false;
     },
     tryCreateStructs(room,structMap,struct,structCnt=2500){
+        // Generic planning is also used by claim/cross-shard bootstrap. Below
+        // RCL6 only containers serving an energy source or controller qualify.
+        if (struct === STRUCTURE_CONTAINER && room.level < 6) {
+            return pro.ensureSourceContainers(room, structMap);
+        }
         structCnt = Math.min(structCnt,CONTROLLER_STRUCTURES[struct][room.level])
         if(structMap[struct]){
             let built = room[struct] && room[struct].length > -1 ? room[struct].length : (room[struct] ? 1 : 0);
@@ -383,10 +388,11 @@ let pro={
      * 10-site ceiling once, but records its intent so generic planning cannot
      * duplicate the tile or ignore the count later in this tick.
      */
-    ensureSourceContainers (room){
-        if (!room.my || !room.memory.structMap || !room.memory.structMap[STRUCTURE_CONTAINER]) return;
+    ensureSourceContainers (room, structMap = room.memory.structMap){
+        if (!room.my || !structMap || !structMap[STRUCTURE_CONTAINER]
+            || room._priorityContainerIntentTick === Game.time) return;
         let sources = room.source || [];
-        let planned = Utils.decodePosArray(room.memory.structMap[STRUCTURE_CONTAINER]);
+        let planned = Utils.decodePosArray(structMap[STRUCTURE_CONTAINER]);
         let near = (a, b) => !!a && !!b && Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= 1;
         let containers = room[STRUCTURE_CONTAINER] || [];
         let sites = room.constructionSite || [];
@@ -406,6 +412,7 @@ let pro={
                 if (room._constructIntents && room._constructIntents[intentKey]) continue;
                 let pos = room.getPositionAt(spot.x, spot.y);
                 if (pos && pos.createConstructionSite(STRUCTURE_CONTAINER) == OK) {
+                    room._priorityContainerIntentTick = Game.time;
                     room._construct_builed = (room._construct_builed || 0) + 1;
                     room._constructIntents = room._constructIntents || {};
                     room._constructIntents[intentKey] = true;
@@ -424,11 +431,12 @@ let pro={
     },
     tryAutoBuildLowLevel800 (room){
         if((Game.time+room.hashCode()) % 150 == 0 && Game.cpu.bucket>50 && room.memory.structMap){
-            // Source/controller containers precede generic (mineral) container and road sites.
+            // Source/controller containers precede other sites. Only RCL6+
+            // rooms may also queue the other blueprint slots (e.g. mineral).
             pro.ensureSourceContainers(room);
             // 开始建 road 和 container
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
-            pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_CONTAINER,3);
+            if (room.level >= 6) pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_CONTAINER);
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_TOWER);
             if(room.extension&&room.extension.length>=20)
                 pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_STORAGE);

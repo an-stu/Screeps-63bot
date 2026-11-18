@@ -19,24 +19,32 @@ function extractMethod(source, header) {
     throw new Error("unterminated " + header);
 }
 
-const priorityMethod = extractMethod(src, "ensureSourceContainers (room){");
+const priorityMethod = extractMethod(src, "ensureSourceContainers (room,");
 const genericMethod = extractMethod(src, "tryCreateCons(pos,struct){");
+const typeMethod = extractMethod(src, "tryCreateStructs(room,structMap,struct,structCnt=2500){");
 const lowLevelMethod = extractMethod(src, "tryAutoBuildLowLevel800 (room){");
+const highLevelMethod = extractMethod(src, "tryAutoBuildHighLevel (room){");
 const sandbox = {
     STRUCTURE_CONTAINER: "container",
     STRUCTURE_ROAD: "road",
     STRUCTURE_RAMPART: "rampart",
     STRUCTURE_EXTENSION: "extension",
+    STRUCTURE_TOWER: "tower",
+    STRUCTURE_WALL: "constructedWall",
+    CONTROLLER_STRUCTURES: Object.fromEntries(["container", "extension", "road", "tower"]
+        .map(type => [type, Array(9).fill(5)])),
     LOOK_STRUCTURES: "structures",
     LOOK_CONSTRUCTION_SITES: "sites",
     OK: 0,
-    Utils: {decodePosArray: () => sandbox.planned},
     planned: [],
-    Game: {rooms: {}, time: 1, constructionSites: {}},
+    Game: {rooms: {}, time: 1, constructionSites: {}, cpu: {bucket: 10000}},
+    MIN_CPU: false,
+    _: {keys: Object.keys},
+    RoomPosition: function (x, y, name) { return sandbox.Game.rooms[name].getPositionAt(x, y); },
     console: {log() {}},
 };
-vm.runInNewContext("Array.prototype.head=function(){return this[0]}; var pro = { "
-    + priorityMethod + "," + genericMethod + "," + lowLevelMethod + " };", sandbox);
+vm.runInNewContext("Array.prototype.head=function(){return this[0]}; Array.prototype.take=function(n){return this.slice(0,n)}; function copyArray(a){return Array.from(a)}; var Utils={decodePosArray:()=>copyArray(planned)}; var pro = { "
+    + [priorityMethod, genericMethod, typeMethod, lowLevelMethod, highLevelMethod, "pruneOutOfTierExtensionSites(){}"].join(",") + " };", sandbox);
 
 function makeRoom(opts = {}) {
     const created = [];
@@ -46,6 +54,8 @@ function makeRoom(opts = {}) {
     const room = {
         name: "W0N0",
         my: opts.my !== false,
+        level: opts.level ?? 3,
+        hashCode: () => 0,
         memory: {structMap: {container: "encoded"}},
         source: opts.sources || [
             {id: "srcA", pos: {x: 9, y: 10}},
@@ -53,6 +63,7 @@ function makeRoom(opts = {}) {
         ],
         controller: opts.controller === null ? null : {pos: opts.controller || {x: 24, y: 24}},
         container: opts.containers || [],
+        extension: [],
         constructionSite: opts.sites || [],
         blockedAt: opts.blockedAt || {},
         lookForAt(type, x, y) {
@@ -70,7 +81,7 @@ function makeRoom(opts = {}) {
         getPositionAt(x, y) {
             return {
                 x, y, roomName: room.name,
-                lookFor(type) { return room.lookForAt(type, x, y); },
+                lookFor(type) { return sandbox.copyArray(room.lookForAt(type, x, y)); },
                 createConstructionSite(type) {
                     attempted.push({x, y, type});
                     const result = room.failAt && room.failAt[x + ":" + y];
@@ -95,10 +106,7 @@ function nearPos(pos) {
 // Keep the existing 150-tick gate and run the purpose-aware pass before generic
 // container (mineral) and road placement.
 assert.match(lowLevelMethod, /% 150 == 0/);
-assert.ok(lowLevelMethod.indexOf("pro.ensureSourceContainers(room)")
-    < lowLevelMethod.indexOf("pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_CONTAINER,3)"));
-assert.ok(lowLevelMethod.indexOf("pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_CONTAINER,3)")
-    < lowLevelMethod.indexOf("STRUCTURE_ROAD"));
+assert.ok(lowLevelMethod.indexOf("pro.ensureSourceContainers(room)") < lowLevelMethod.indexOf("STRUCTURE_ROAD"));
 
 // 1) The fourth blueprint container slot is the controller slot. It still wins
 // with the site ceiling full and ten unrelated road sites already queued.
@@ -124,10 +132,12 @@ assert.ok(lowLevelMethod.indexOf("pro.tryCreateStructs(room,room.memory.structMa
     assert.equal(room.created.length, 1, "only one priority container is submitted per pass");
 
     room.constructionSite.push({structureType: "container", pos: {x: 9, y: 9}});
+    sandbox.Game.time++;
     sandbox.pro.ensureSourceContainers(room);
     assert.deepEqual(room.created[1], {x: 25, y: 32, type: "container"}, "second source precedes controller");
 
     room.constructionSite.push({structureType: "container", pos: {x: 25, y: 32}});
+    sandbox.Game.time++;
     sandbox.pro.ensureSourceContainers(room);
     assert.deepEqual(room.created[2], {x: 25, y: 25, type: "container"}, "controller is next after source coverage");
     assert.equal(room.created.length, 3);
@@ -185,6 +195,7 @@ assert.ok(lowLevelMethod.indexOf("pro.tryCreateStructs(room,room.memory.structMa
 
     const fresh = makeRoom();
     sandbox.pro.ensureSourceContainers(fresh);
+    sandbox.pro.tryCreateStructs(fresh, fresh.memory.structMap, "container");
     const duplicate = sandbox.pro.tryCreateCons(fresh.getPositionAt(9, 9), "container");
     assert.equal(duplicate, false, "generic planning must see a same-tick priority intent");
     assert.equal(sandbox.pro.tryCreateCons(fresh.getPositionAt(9, 9), "road"), false,
@@ -214,6 +225,35 @@ assert.ok(lowLevelMethod.indexOf("pro.tryCreateStructs(room,room.memory.structMa
     const hostile = makeRoom({my: false});
     sandbox.pro.ensureSourceContainers(hostile);
     assert.deepEqual(hostile.created, []);
+}
+
+// 8) Exercise the shared claim/bootstrap entry and both automatic build passes.
+// Place the mineral first in the blueprint so an RCL prefix can't hide a bug.
+{
+    const planned = [{x: 15, y: 15}, {x: 9, y: 9}, {x: 25, y: 32}, {x: 25, y: 25}];
+    const sources = planned.slice(1, 3).map(pos => ({pos}));
+    const allPriority = planned.slice(1).map(pos => ({pos}));
+    const mineral = {x: 15, y: 15, type: "container"};
+    sandbox.Game.time = 600;
+    for (let level = 1; level <= 5; level++) {
+        const room = makeRoom({level, planned, containers: sources});
+        sandbox.pro.tryCreateStructs(room, room.memory.structMap, "container");
+        assert.deepEqual(room.created, [{x: 25, y: 25, type: "container"}], `shared entry at RCL${level}`);
+    }
+    for (const [method, level] of [["tryAutoBuildLowLevel800", 3], ["tryAutoBuildHighLevel", 4], ["tryAutoBuildHighLevel", 5]]) {
+        const room = makeRoom({level, planned, containers: allPriority});
+        sandbox.pro[method](room);
+        assert.deepEqual(room.created, [], `${method} must not create mineral containers at RCL${level}`);
+    }
+    for (const method of ["tryAutoBuildLowLevel800", "tryAutoBuildHighLevel"]) {
+        const room = makeRoom({level: 6, planned, containers: allPriority});
+        sandbox.pro[method](room);
+        assert.deepEqual(room.created, [mineral], `${method} must allow the fourth container at RCL6`);
+    }
+    const existing = {structureType: "container", pos: planned[0], remove() { assert.fail("existing site must remain"); }};
+    const room = makeRoom({level: 5, planned, containers: allPriority, sites: [existing]});
+    sandbox.pro.tryAutoBuildHighLevel(room);
+    assert.deepEqual(room.constructionSite, [existing]);
 }
 
 console.log("source and controller blueprint containers are prioritized safely");
