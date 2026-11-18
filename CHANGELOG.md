@@ -1,3 +1,9 @@
+## v0.78.278 — carrier 编制只数满配（修复小体型占满名额不换班）
+
+- v0.78.277 的替换条件 `carrierCnt <= carrierTarget` 会被小体型占满编制后失效：E51S29 三只 CARRY4/6/8 让 carrierCnt=3 > target=2，满配替换永不触发。
+- 编制改为只数**满配** carrier（`fullCarrierCnt < carrierTarget`）：小体型不占名额，hive 付得起满配就补，补到满配数量后自动停止；`carryTasks` 非空且总数未到编制时仍可补。
+- 回归：carrier 上限/满配钉子与 `lowlevel-bootstrap-handoff` 的 mock（满配 15 部件）同步。
+
 ## v0.78.277 — carrier 只出满配 + 小体型立即换班
 
 - 低级房 carrier 不再按当下余额缩放：体型固定用满配（RCL3 = CARRY10/MOVE5 = 750），hive 付不起满配就按住不孵。之前 E51S29 出现 CARRY4/6/8 三只小 carrier，就是按 300/450/600 余额缩出来的。

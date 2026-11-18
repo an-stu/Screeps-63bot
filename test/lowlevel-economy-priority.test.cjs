@@ -27,8 +27,8 @@ for (let i = 1; i < order.length; i++) {
 
 // 1b) carrier 体型：只出满配，付不起就等；小体型在付得起满配时被替换
 assert.match(lowSrc, /let fullCarrierBody = StationCarry\.getCarrierBodyConfig\(room\)/);
-assert.match(lowSrc, /undersized && carrierCnt <= carrierTarget/,
-    "已有小体型 carrier 时允许临时多派一只满配替换");
+assert.match(lowSrc, /fullCarrierCnt < carrierTarget/,
+    "编制只数满配 carrier：小体型不占名额，付得起就补满配");
 assert.match(lowSrc, /carrierBudget >= fullCarrierCost/,
     "付不起满配时不得退化成小 carrier（等 hive 攒够）");
 

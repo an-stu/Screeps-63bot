@@ -203,18 +203,16 @@ let pro = {
                 let carrierBudget = room.currentEnergyAvailable === undefined
                     ? room.getEnergyAvailable() : room.currentEnergyAvailable;
                 // 体型策略与 keeper 一致（用户 2026-11-18：尽可能大）：只在付得起
-                // **满配**时出 carrier；已有小体型（E51S29 实测 CARRY4/6/8 各一只）
-                // 且 hive 付得起满配时立即补一只满配替换（临时多一只在编，老的
-                // 小体型自然到期）。小体型按当下余额缩放是「一直很小」的根源。
+                // **满配**时出 carrier。编制只数**满配** carrier —— 小体型不占编制，
+                // 否则 3 只小 carrier 会把名额占满、永远不换（E51S29 实测 4/6/8 各一只）。
                 let fullCarrierBody = StationCarry.getCarrierBodyConfig(room);
                 let fullCarrierCost = Utils.getBodyEnergyNeed(fullCarrierBody);
                 let partCost = part => (typeof BODYPART_COST != "undefined"
                     ? (BODYPART_COST[part.type] || 0) : 50);
-                let undersized = room.creeps("carrier").some(c => c.body && c.body.length
-                    && c.body.reduce((sum, p) => sum + partCost(p), 0) < fullCarrierCost);
-                let needCarrier = carrierCnt < 1
-                    || (carryTasks.length && carrierCnt < carrierTarget)
-                    || (undersized && carrierCnt <= carrierTarget);
+                let fullCarrierCnt = room.creeps("carrier", false).filter(c => c.body && c.body.length
+                    && c.body.reduce((sum, p) => sum + partCost(p), 0) >= fullCarrierCost).length;
+                let needCarrier = fullCarrierCnt < carrierTarget
+                    || (carryTasks.length && carrierCnt < carrierTarget);
                 if (needCarrier && carrierBudget >= fullCarrierCost) {
                     room.spawnFailure = false;
                     StationHive.trySpawn(room, room.name, fullCarrierBody, "carrier", []);

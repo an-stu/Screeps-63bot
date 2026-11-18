@@ -49,7 +49,9 @@ function makeRoom({workers = [], carriers = [creep()], roomEnergy = 200, downgra
             },
             generatorFillHiveTask: () => ({taskName: "fillHive"})},
         StationCarry: {generatorPickTask: () => [], generatorCarryStorageEnergyTask: () => [],
-            roomMassStoreCnt: () => 0, getCarrierBodyConfig: () => ["carry", "move"]},
+            roomMassStoreCnt: () => 0,
+            // 满配 15 部件 = 750 能量：接近 RCL3 真实口径（低成本 mock 会让 199 能量也“付得起”）
+            getCarrierBodyConfig: () => new Array(15).fill("carry")},
         StationTower: {generatorFillEnergyTasks: () => []},
         StationWork: {getMiddleLevelWorkerBodyConfig: (r, budget) => [budget], constructionNeedBuild: () => false},
         BODYPART_COST: {work: 100, carry: 50, move: 50},
