@@ -2363,6 +2363,24 @@ let pro = {
                 }
             }
         });
+        // 升级容器 + 正在使用的 upgrader 站位同样抬高：
+        // 外矿路线不该穿过控制器旁的升级工位（用户 2026-11-18）。
+        // 位置是动态的（creep.memory.upgradePosition，控制器 3 格内择优），
+        // 所以两者都写；只在重算路线时采样一次，不会造成每 tick 抖动。
+        let upgradeStation = (global.StationUpgrade && StationUpgrade.stationName) || "stationUpgrade";
+        let upgradeMem = room.memory && room.memory[upgradeStation];
+        if (upgradeMem && upgradeMem[STRUCTURE_CONTAINER]) {
+            let upgradeContainer = Game.getObjectById(upgradeMem[STRUCTURE_CONTAINER]);
+            if (upgradeContainer && upgradeContainer.pos) {
+                cm.set(upgradeContainer.pos.x, upgradeContainer.pos.y, OUTER_ROAD_WORK_TILE_COST);
+            }
+        }
+        room.find(FIND_MY_CREEPS).forEach(creep => {
+            let pos = creep.memory && creep.memory.upgradePosition;
+            if (!pos || !room.controller || pos.controllerId != room.controller.id) return;
+            if (cm.get(pos.x, pos.y) >= 254) return;
+            cm.set(pos.x, pos.y, OUTER_ROAD_WORK_TILE_COST);
+        });
         return cm;
     },
     /**

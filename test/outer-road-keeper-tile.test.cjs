@@ -40,6 +40,7 @@ const terrain = {get: (x, y) => walls.has(x + ":" + y) ? WALL : 0};
 
 const structures = [
     {structureType: "container", pos: {x: 33, y: 11}},
+    {id: "upgC", structureType: "container", pos: {x: 30, y: 16}},
     {structureType: "road", pos: {x: 33, y: 12}},
     {structureType: "road", pos: {x: 34, y: 12}},
     {structureType: "road", pos: {x: 35, y: 12}},
@@ -56,12 +57,14 @@ const sources = [
     {id: "src2", pos: {x: 20, y: 20}},
 ];
 
+const upgradeCreeps = [{memory: {upgradePosition: {x: 31, y: 16, controllerId: "ctrl"}}}];
 const room = {
     name: "E41S29",
-    memory: {},
+    memory: {stationUpgrade: {container: "upgC"}},
+    controller: {id: "ctrl"},
     getStructures: () => structures,
     constructionSite: sites,
-    find: type => type === 104 ? sources : [],
+    find: type => type === 104 ? sources : (type === 102 ? upgradeCreeps : []),
     lookForAt(type, x, y) {
         const list = type === "structures" ? structures : type === "sites" ? sites : [];
         return list.filter(e => e.pos.x === x && e.pos.y === y);
@@ -72,11 +75,12 @@ const sandbox = {
     TERRAIN_MASK_WALL: WALL, TERRAIN_MASK_SWAMP: SWAMP,
     STRUCTURE_ROAD: "road", STRUCTURE_CONTAINER: "container", STRUCTURE_RAMPART: "rampart",
     LOOK_STRUCTURES: "structures", LOOK_CONSTRUCTION_SITES: "sites",
-    FIND_SOURCES: 104,
+    FIND_SOURCES: 104, FIND_MY_CREEPS: 102,
     OUTER_ROAD_WORK_TILE_COST: 8,
     PathFinder: {CostMatrix},
     Utils: {decodePosArray: () => []},
-    Game: {rooms: {"E41S29": room}, map: {getRoomTerrain: () => terrain}},
+    Game: {rooms: {"E41S29": room}, map: {getRoomTerrain: () => terrain},
+        getObjectById: id => id === "upgC" ? structures[1] : null},
     console: {log() {}},
 };
 sandbox.global = sandbox;
@@ -89,6 +93,11 @@ const cm = pro.outerRoadRoomCallback("E41S29", true, "X1X1", undefined);
 // 1) 只保护容器格本身
 assert.equal(cm.get(33, 11), 8, "源旁容器格（keeper 站桩位）必须保持高代价");
 assert.equal(cm.get(21, 20), 8, "容器【工地】格同样要保护（容器还没建好时 keeper 就站在那）");
+
+// 1b) 升级容器格 + upgrader 当前站位同样保护
+assert.equal(cm.get(30, 16), 8, "升级容器格（upgrader 补给位）必须抬高");
+assert.equal(cm.get(31, 16), 8, "upgrader 当前站位（memory.upgradePosition）必须抬高");
+assert.equal(cm.get(32, 16), 2, "控制器附近普通格不受影响");
 
 // 2) 原先被整圈误伤的 road / 源格恢复正常
 assert.equal(cm.get(33, 12), 1, "容器隔壁的 road 不再被抬到 8");
