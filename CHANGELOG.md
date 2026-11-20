@@ -1,3 +1,10 @@
+## v0.78.282 — 本地 worker 只出容量满配（援建体型太小的修复）
+
+- 低级房本地 worker（建造主力）体型与 keeper/carrier 同口径：只按**房间容量**取满配（RCL4 = 6 组 WORK6/CARRY6/MOVE6 = 1200），hive 付不起就按住等回满，不再按当 tick 余额缩成 800/400 的小工。
+- 唯一例外：全空房救急仍是 200 的 1 组 worker（否则没人挖矿填 hive）。
+- 跨 shard 援建 builder 已是满配 50 部件（WORK10/CARRY15/MOVE25 = 3000），本次不动。
+- 回归：`lowlevel-spawn-unstick` / `lowlevel-economy-priority` 钉子改为「满配 + 付得起才孵」。
+
 ## v0.78.281 — E50S30 NPC 商队：同 shard、RCL8 实测观测才允许截货
 
 - 默认关闭。仅 `shard2/E50S30`；显式启用 `Memory.cpuFeatures.npcConvoy = true` 和 `combat = true`，且观测开关不能关闭。必须收到同 shard 己方 RCL8 Observer 当前 tick 的确认视野，发现系统账号 `Screeps` 的有货商队才允许计划。普通 `Invader`、玩家、旧情报、低桶或没有两座可用 Spawn 都不触发。

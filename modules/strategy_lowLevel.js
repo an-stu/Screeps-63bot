@@ -239,12 +239,17 @@ let pro = {
                 && (room.creeps("worker", false).length < 2 ||
                     ((room.creeps("carrier").filter(e => e.isFree()).length > room.creeps("worker", false).length)
                         && room.creeps("worker", false).filter(e => e.isFree()).length < 2))) {
-                // 体型必须按**本 tick 真能花出去**的能量算：按容量 800 请求而 hive 只有
-                // 400 时 trySpawn 静默失败并置 spawnFailure，把同 pass 后面本可付得起的
-                // 750 carrier 一起挡住（与 station_upgrade / station_sources 同一病根）。
+                // 体型与 keeper/carrier 同口径（用户 2026-11-18：援建体型派大一点）：
+                // 只出**容量满配** worker（RCL4 = 6 组 WORK6/CARRY6/MOVE6 = 1200），
+                // 付不起就等 hive 回满，不再按当 tick 余额缩成 800/400 的小工。
+                // 空房救急仍走上面的 200 小 worker（那是唯一的例外）。
+                let fullWorkerBody = StationWork.getMiddleLevelWorkerBodyConfig(room);
+                let fullWorkerCost = Utils.getBodyEnergyNeed(fullWorkerBody);
                 let workerBudget = room.currentEnergyAvailable === undefined
                     ? room.getEnergyAvailable() : room.currentEnergyAvailable;
-                if (workerBudget >= 200) StationHive.trySpawn(room, room.name, StationWork.getMiddleLevelWorkerBodyConfig(room, workerBudget), "worker", [])
+                if (workerBudget >= fullWorkerCost) {
+                    StationHive.trySpawn(room, room.name, fullWorkerBody, "worker", [])
+                }
             }
 
 

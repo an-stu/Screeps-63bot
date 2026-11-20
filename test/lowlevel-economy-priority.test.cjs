@@ -16,7 +16,7 @@ const order = [
     ["worker-rescue", lowSrc.indexOf("Math.min(rescueBudget, 200)")],
     ["keeper", lowSrc.indexOf("StationSources.trySpawnHarKeeper(room);")],
     ["carrier", lowSrc.indexOf("StationCarry.getCarrierBodyConfig(room)")],
-    ["worker", lowSrc.indexOf("StationWork.getMiddleLevelWorkerBodyConfig(room, workerBudget)")],
+    ["worker", lowSrc.indexOf("StationWork.getMiddleLevelWorkerBodyConfig(room)")],
     ["upgrader", lowSrc.indexOf("StationUpgrade.spawnUpgrader(room)")],
 ];
 for (const [name, idx] of order) assert.ok(idx >= 0, name + " 的孵化调用必须存在");
@@ -31,6 +31,13 @@ assert.match(lowSrc, /fullCarrierCnt < carrierTarget/,
     "编制只数满配 carrier：小体型不占名额，付得起就补满配");
 assert.match(lowSrc, /carrierBudget >= fullCarrierCost/,
     "付不起满配时不得退化成小 carrier（等 hive 攒够）");
+{
+    const bodyIdx = lowSrc.indexOf("let fullWorkerBody = StationWork.getMiddleLevelWorkerBodyConfig(room)");
+    const costIdx = bodyIdx < 0 ? -1 : lowSrc.indexOf("let fullWorkerCost = Utils.getBodyEnergyNeed(fullWorkerBody)", bodyIdx);
+    const gateIdx = bodyIdx < 0 ? -1 : lowSrc.indexOf("workerBudget >= fullWorkerCost", bodyIdx);
+    assert.ok(bodyIdx >= 0 && costIdx > bodyIdx && gateIdx > costIdx,
+        "worker 也只出满配体型，付不起就等（用户 2026-11-18）");
+}
 
 // 2) 低级房 carry 门槛 = 300（不再等 1200 批次），且不要求满装
 assert.match(lowSrc, /room\.storage \? \(StationHive\.HiveNeedToFill\(room\) \? 1200 : 300\) : 300/,

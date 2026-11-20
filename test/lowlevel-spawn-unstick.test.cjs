@@ -12,10 +12,12 @@ const lowSrc = fs.readFileSync(path.join(root, "modules/strategy_lowLevel.js"), 
 const workSrc = fs.readFileSync(path.join(root, "modules/station_work.js"), "utf8");
 
 // 1) 源码钉子：worker 必须带本 tick 预算；carrier 必须解除 spawnFailure 粘滞标记
-assert.match(lowSrc, /getMiddleLevelWorkerBodyConfig\(room,\s*workerBudget\)/,
-    "低级房 worker 体型必须按本 tick 可花的能量计算");
+assert.match(lowSrc, /let fullWorkerBody = StationWork\.getMiddleLevelWorkerBodyConfig\(room\)/,
+    "worker 必须按房间容量取满配体型（不再按当 tick 余额缩小）");
 assert.match(lowSrc, /let workerBudget = room\.currentEnergyAvailable === undefined[\s\S]{0,80}: room\.currentEnergyAvailable;/,
     "workerBudget 优先用 trySpawn 的本 tick 预算缓存");
+assert.match(lowSrc, /workerBudget >= fullWorkerCost/,
+    "付不起满配时按住不孵（等 hive 回满），避免小体型工人");
 {
     const bodyIdx = lowSrc.indexOf("fullCarrierBody = StationCarry.getCarrierBodyConfig(room)");
     const unstickIdx = bodyIdx < 0 ? -1 : lowSrc.indexOf("room.spawnFailure = false;", bodyIdx);
