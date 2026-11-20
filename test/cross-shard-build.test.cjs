@@ -167,6 +167,12 @@ function runExec(sb, time) {
     assert.equal(request.mission.data.body.filter(part => part == "work").length, 12);
     assert.equal(request.mission.data.body.filter(part => part == "carry").length, 12);
     assert.equal(request.mission.data.body.filter(part => part == "move").length, 24);
+    // 交错排列：1W1C2M 循环，而不是三段式
+    const chunk = ["work", "carry", "move", "move"];
+    for (let i = 0; i < request.mission.data.body.length; i += 4) {
+        assert.deepEqual(Array.from(request.mission.data.body.slice(i, i + 4)), chunk,
+            "body 每 4 个部件必须是一组 1W1C2M（损伤时保持比例）");
+    }
 }
 
 // 2. start() is idempotent, copies the saved route, and honors explicitly

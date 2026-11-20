@@ -447,18 +447,25 @@ let pro = {
 
     /**
      * 与普通援建一致的 **1:1:2**（WORK:CARRY:MOVE）满配：12 组 = 48 部件 / 3000 能量。
-     * 用户 2026-11-18：跨 shard 援建不再用 10:15:25 的重载货体型 —— 1:1:2 更机动，
-     * 被伏击时同样造价下携带的货物更少、损失更可控。
+     * 用户 2026-11-18：不再用 10:15:25 的重载货体型；且必须**交错排列**
+     * `1W1C2M 1W1C2M …`，而不是把 WORK/CARRY/MOVE 分成三段 —— 受伤从 body
+     * 前端扣部件时，每掉一组仍保持 1:1:2，不会先掉光某种能力。
      */
     preferredBuilderBody() {
-        return ManagerCreeps.calcBodyPart({[WORK]:12, [CARRY]:12, [MOVE]:24});
+        return pro.aidBodyChunks(12);
     },
 
-    /** 按可用预算生成 1:1:2 体型（每组 250 能量），最多 12 组。 */
+    /** 交错 1:1:2 体型：每组 [WORK, CARRY, MOVE, MOVE]（250 能量），最多 12 组。 */
+    aidBodyChunks(groups) {
+        let body = [];
+        for (let i = 0; i < groups; i++) body.push(WORK, CARRY, MOVE, MOVE);
+        return body;
+    },
+
+    /** 按可用预算生成交错 1:1:2 体型（每组 250 能量），最多 12 组。 */
     affordableBuilderBody(energyBudget) {
         if (typeof energyBudget != "number" || energyBudget < 250) return [];
-        let groups = Math.min(12, Math.floor(energyBudget / 250));
-        return ManagerCreeps.calcBodyPart({[WORK]:groups, [CARRY]:groups, [MOVE]:groups * 2});
+        return pro.aidBodyChunks(Math.min(12, Math.floor(energyBudget / 250)));
     },
 
     /** Clamp energy by live availability, the spawn manager's spent-this-tick cache, and hive capacity. */
