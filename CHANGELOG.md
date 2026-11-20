@@ -1,3 +1,9 @@
+## v0.78.289 — ≥2 Invader 恢复派强化小队；撤退只冻结采运
+
+- 撤销 v0.78.288 的「≥2 不派兵」守卫：`trySpawnOuterDefenser` 恢复原强化远程小队选择（Invader ≥2 → TOUGH2/RANGED22/HEAL6/MOVE20；lab 缺化合物时剥离 TOUGH 仍会出兵）。
+- 派发循环调整：Invader≥2 时**先派防守**，随后才进入撤退闸暂停 keeper/carrier/scout 的新派发；采运爬按 v0.78.288 撤离，小队清到 <2 并稳定 100 tick 后自动回流。
+- 回归：移除「≥2 禁派」钉子，改为断言必须保留远程小队体型。
+
 ## v0.78.288 — 外矿敌人政策：1 个 Invader 可打，≥2 全员撤退
 
 - 新增撤退状态 `Memory.rooms[room].outerRetreat`：Invader 数量 **≥2** 时进入撤退；降到 <2 并持续 100 tick 解除；完全失去视野时 5000 tick 硬过期。

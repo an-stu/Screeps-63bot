@@ -105,7 +105,8 @@ for (const fn of ["Creep.prototype.harvestEnergyOuterKeeper = function () {",
     assert.ok(src.slice(idx, idx + 400).includes("outerRetreatCheck"),
         fn + " 必须读取撤退状态");
 }
-assert.ok(/outerInvaderCount\(harRoom\) >= 2\) return null;/.test(src),
-    "≥2 invader 时不得派防守爬（全员撤退）");
+assert.ok(!/outerInvaderCount\(harRoom\) >= 2\) return null;/.test(src),
+    "≥2 invader 时必须允许派强化小队（不得再禁派）");
+assert.ok(src.includes("[RANGED_ATTACK]: 22"), "强化小队远程体型必须保留");
 
 console.log("outer retreat policy: 1 invader fightable, 2+ retreat");

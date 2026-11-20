@@ -5187,8 +5187,6 @@ let pro = {
         if (spawnRoom.spawnFailure) return null;
         let targetName = roomName.name || roomName;
         let harRoom = Game.rooms[targetName];
-        // 撤退政策：Invader ≥2 不派兵（全员撤离，交给防守/主力回防）
-        if (harRoom && pro.outerInvaderCount(harRoom) >= 2) return null;
         let sourceMemory = Memory.rooms[targetName];
         let data = sourceMemory && sourceMemory[pro.stationName]
             && _.values(sourceMemory[pro.stationName]).find(e => e && e.id);
