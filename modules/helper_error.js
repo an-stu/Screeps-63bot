@@ -59,7 +59,7 @@ let pro_err={
         // 限流：每 10 次错误打印一次，避免刷屏
         pro_err.print += 1;
         if(pro_err.print > 10) pro_err.print = 1;
-        if(pro_err.print === 1) console.log(tmp);
+        if(pro_err.print === 1) Logger.log("Error", tmp);
     },
 }
 

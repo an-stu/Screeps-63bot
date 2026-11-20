@@ -218,7 +218,7 @@ global.claimLog = function (roomName) {
         Logger.warning("Claim", roomName, "no saved operation log");
         return;
     }
-    console.log(JSON.stringify(operation, null, 2));
+    Logger.log("Claim", JSON.stringify(operation, null, 2));
     return operation;
 };
 global.claimLog.help = 'claimLog("E53S21") — show the saved claim state and bounded history';

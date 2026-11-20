@@ -31,7 +31,7 @@ global.missionFunc = { //被crossShard引用 ，相当于交叉依赖了
         let room = Game.rooms[data.spawnRoom]
         // log(data)
         if(!room||!room.my){
-            console.log(Game.shard.name+ " " +data.spawnRoom+" is not yours")
+            Logger.log("Missions", Game.shard.name+ " " +data.spawnRoom+" is not yours")
             return true;
         }
         return StationHive.trySpawn(room, data.targetRoomName, data.body, data.role, data.tasks);
@@ -106,7 +106,7 @@ global.missionFunc = { //被crossShard引用 ，相当于交叉依赖了
                     let cnt = low;
                     if(cnt && (cnt==data.amount || cnt>=3000)){
                         let code = from.terminal.send(data.resType,cnt,data.toRoomName)
-                        // console.log(code)
+                        // Logger.log("Missions", code)
                         if(code==OK){
                             data.amount -= cnt;
                             if(!data.amount)return true;
@@ -160,7 +160,7 @@ let pro={
                     if(e.callBack){
                         if(missionCallBack[e.callBack])
                             missionCallBack[e.callBack](e.data)
-                        else console.log("no callBack name : "+e.callBack)
+                        else Logger.log("Missions", "no callBack name : "+e.callBack)
                     }
                     delete missions[id];
                 }

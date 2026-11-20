@@ -187,11 +187,11 @@ let pro={
     // DisCtrlBoost:()=>{return {[BOOST_RES["damage"][2]]:30*3,[BOOST_RES["heal"][2]]:30*6}},
     execSpawnHealer (flag, room, body, boost) {
         if(!room||!room.my||room.level<8){
-            flag.remove();console.log(flag.getRoomName()+" 不是你的房间或没8级");
+            flag.remove();Logger.log("WarPC", flag.getRoomName()+" 不是你的房间或没8级");
             return;
         }
         if(!StationLab.boostAble(room,boost)){
-            console.log(room.name+" Healer 资源不足");
+            Logger.log("WarPC", room.name+" Healer 资源不足");
             return;
         }
         let task =  [
@@ -202,11 +202,11 @@ let pro={
     },
     execSpawnOpsCar (flag, room, body, boost) {
         if(!room||!room.my||room.level<8){
-            flag.remove();console.log(flag.getRoomName()+" 不是你的房间或没8级");
+            flag.remove();Logger.log("WarPC", flag.getRoomName()+" 不是你的房间或没8级");
             return;
         }
         if(!StationLab.boostAble(room,boost)){
-            console.log(room.name+" OpsCar 资源不足");
+            Logger.log("WarPC", room.name+" OpsCar 资源不足");
             return;
         }
         let task =  [
@@ -217,11 +217,11 @@ let pro={
     },
     execDisableController (flag, room, body, boost) {
         if(!room||!room.my||room.level<8){
-            flag.remove();console.log(flag.getRoomName()+" 不是你的房间或没8级");
+            flag.remove();Logger.log("WarPC", flag.getRoomName()+" 不是你的房间或没8级");
             return;
         }
         if(!StationLab.boostAble(room,boost)){
-            console.log(room.name+" OpsCar 资源不足");
+            Logger.log("WarPC", room.name+" OpsCar 资源不足");
             return;
         }
         let task =  [

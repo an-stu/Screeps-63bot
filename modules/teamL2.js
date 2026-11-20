@@ -329,7 +329,7 @@ let pro = {
             split.find(e=>e.indexOf("crossShard")>=0).split("&")[1]
             :undefined
         let flagName = "team_"+ teamNumber +"_"+ randomId()
-        console.log(pro[split[2]])
+        Logger.log("TeamL2", pro[split[2]])
         flag.pos.createFlag(flagName)
             ManagerCrossShard.addCrossShardRequest(toShard,{
             func: "createSpawnFlagCressShard",

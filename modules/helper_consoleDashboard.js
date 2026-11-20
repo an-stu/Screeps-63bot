@@ -217,7 +217,7 @@ let dashboard = {
         // All dynamic values above are escaped before using the explicit rich
         // output API. Older servers receive a compact readable text fallback.
         if(typeof console.logUnsafe == "function")console.logUnsafe(output);
-        else console.log(output.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
+        else Logger.log("Console", output.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
         return `dashboard rendered${roomName ? ": " + roomName : ""}`;
     }
 };

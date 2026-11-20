@@ -132,7 +132,7 @@ singleList.forEach((type) => {
             } else {
                 let cache = local[this.name] ? local[this.name][type] : new Hub(this)[type];
                 if (cache) {
-                    //console.log(type);
+                    //Logger.log("StructCache", type);
                     return this[bindstring] = Game.getObjectById(cache);
                 } else {
                     return this[bindstring] = undefined;
@@ -181,14 +181,14 @@ additionalList.forEach((type) => {
     let bindstring = '_' + type;
     Object.defineProperty(Room.prototype, type, {
         get () {
-            ////console.log('in add');
+            ////Logger.log("StructCache", 'in add');
             if (bindstring in this) {
                 return this[bindstring];
             } else {
                 let cache = local[this.name] ? local[this.name][type] : new Hub(this)[type];
                 this[bindstring] = [];
                 if (cache) {
-                    //console.log(type);
+                    //Logger.log("StructCache", type);
                     for (let id of cache) {
                         let o = Game.getObjectById(id);
                         if (o) {

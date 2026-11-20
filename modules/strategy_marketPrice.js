@@ -115,7 +115,7 @@ let pro = {
     updateSellPrice (show=false) {
         let profitMap = {} // 利润
         pro._depoSellPrice = {};
-        if(show)console.log("基础价格:","商品","均价","最低售价","利润","售价比")
+        if(show)Logger.log("Price", "基础价格:","商品","均价","最低售价","利润","售价比")
 
         let myRooms = _.values(Game.rooms).filter(e=>e.my)
 
@@ -127,14 +127,14 @@ let pro = {
             let storeRatio = Math.min(Math.sqrt(depoRatioMap[DEPO_MAP[k]]),1.414)-1; //sqrt(x)
             let minSellPrice = pro._depoResPrice[k]*(1-PRICE_TOLERANCE*storeRatio); // 最少需要的价格
             let profit = minSellPrice/pro._depoNeedPerCommodity[k] - pro._depoCostPerCommodity[k];
-            if(show)console.log(k,pro._depoResPrice[k],minSellPrice,profit,1-PRICE_TOLERANCE*storeRatio)
+            if(show)Logger.log("Price", k,pro._depoResPrice[k],minSellPrice,profit,1-PRICE_TOLERANCE*storeRatio)
             profitMap[k] = profit;
             pro._depoMinSellPrice[k] = minSellPrice;
             if(profit>defaultDepoPrice*1.5)pro._depoSellPrice[k] = minSellPrice;// 必须有的赚才卖
         }
 
 
-        if(show)console.log("修正价格:","商品","售价","均价差距比","利润");
+        if(show)Logger.log("Price", "修正价格:","商品","售价","均价差距比","利润");
         [BLUE,YELLOW,PINK,GREEN].forEach(series=>{ // 按利润线均匀出售
             let maxProfit = 0;
             series.forEach(e=>{if(maxProfit < profitMap[e])maxProfit = profitMap[e]})
@@ -142,9 +142,9 @@ let pro = {
             series.forEach(e=>{if(maxProfit > profitMap[e]){
                 // let oldPrice = pro._depoSellPrice[e];
                 pro._depoSellPrice[e] = (maxProfit+pro._depoCostPerCommodity[e])*pro._depoNeedPerCommodity[e] // 修正后的价格
-                if(show)console.log(e,pro._depoSellPrice[e],pro._depoSellPrice[e]/(pro._depoResPrice[e]||1),maxProfit);
+                if(show)Logger.log("Price", e,pro._depoSellPrice[e],pro._depoSellPrice[e]/(pro._depoResPrice[e]||1),maxProfit);
             }else {
-                if(show)console.log(e,pro._depoSellPrice[e],pro._depoSellPrice[e]/(pro._depoResPrice[e]||1),maxProfit);
+                if(show)Logger.log("Price", e,pro._depoSellPrice[e],pro._depoSellPrice[e]/(pro._depoResPrice[e]||1),maxProfit);
             }})
             // series.forEach(e=> delete pro._depoSellPrice[e])
         })
@@ -276,12 +276,12 @@ let pro = {
                 // sellPrice
                 // opsPerDepo
 
-                // console.log(sellDepo,mp[depo],basePrice,basePrice/mp[depo])//,basePrice/sellDepoPrice
+                // Logger.log("Price", sellDepo,mp[depo],basePrice,basePrice/mp[depo])//,basePrice/sellDepoPrice
                 // log(mp)
                 pro._depoNeedPerCommodity[sellDepo] = mp[depo];
                 pro._depoCostPerCommodity[sellDepo] = basePrice/mp[depo];
             });
-            // console.log()
+            // Logger.log("Price", )
         })
 
     },
@@ -370,7 +370,7 @@ pro.calculateAllCommoditiesProfit = function(showDetail = false, outputToConsole
 
 function printCommodityAnalysis(html){
     if(typeof console.logUnsafe=="function")console.logUnsafe(html);
-    else console.log(html.replace(/<[^>]*>/g," ").replace(/\s+/g," "));
+    else Logger.log("Price", html.replace(/<[^>]*>/g," ").replace(/\s+/g," "));
 }
 /**
  * 生成紧凑的商品利润分析表格

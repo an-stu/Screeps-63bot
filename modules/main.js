@@ -1,5 +1,5 @@
 require("main_mount");
-Logger.info("Script reload", "bucket", Game.cpu.bucket, "version", RUNTIME_PROFILE.version);
+Logger.info("Core", "Script reload", "bucket", Game.cpu.bucket, "version", RUNTIME_PROFILE.version);
 
 const CPU_PROFILE_INTERVAL = 97;
 const OPTIONAL_CPU_OFFSETS = {marketAutoBuy:19, autoPlanner:7, visual:3};
@@ -30,7 +30,7 @@ let pro = {
         // 线上逐 tick 翻转（实测 1997↔2005），角色过滤/经济间隔随 tick 抖动。
         // global 跨 tick 持久（重载才清零），天然可做粘滞位。
         MIN_CPU = !!Memory.mincpu || (MIN_CPU ? Game.cpu.bucket < 2400 : Game.cpu.bucket < 2000);
-        if (MIN_CPU && Game.time % 100 == 0) console.log("warning : min cpu on")
+        if (MIN_CPU && Game.time % 100 == 0) Logger.log("Core", "warning : min cpu on")
         let objects = getTickObjects();
         objects.rooms.forEach(room => room.used = {});
         if (global.ManagerCrossShard && isCpuFeatureEnabled("crossShard")) HelperError.catchError(() => ManagerCrossShard.init());
@@ -201,7 +201,7 @@ let executeWakeTasks = function () {
         }
         HelperError.catchError(() => {
             let result = wakeTask.task(wakeTask);
-            console.log(name, result);
+            Logger.log("Core", name, result);
             if (result) wakeTask.tryTime--;
             if (result == "done") delete WAKE_TASK[name];
         }, name);
@@ -352,7 +352,7 @@ let main = function () {
     }
 
     if (Game.time % 300 == 0) {
-        console.log(LOCAL_SHARD_NAME + " bucket : " + Game.cpu.bucket)
+        Logger.log("Core", LOCAL_SHARD_NAME + " bucket : " + Game.cpu.bucket)
     }
     executeWakeTasks();
     HelperError.throwAllError();

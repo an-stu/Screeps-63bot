@@ -230,7 +230,7 @@ let pro={
         if(!id)id = toShard +":"+ pro.getTaskId()
         else id = toShard +":"+id
         if(!toShard||toShard == LOCAL_SHARD_NAME){
-            // console.log("toShard equal to " + LOCAL_SHARD_NAME)
+            // Logger.log("CrossShard", "toShard equal to " + LOCAL_SHARD_NAME)
             ManagerMissions.addMission(data,id)
             return id;
         }
@@ -252,7 +252,7 @@ let pro={
         }
         let handler = global.missionFunc && global.missionFunc[req.data && req.data.func];
         if (typeof handler != "function") {
-            Logger.warning("Unknown cross-shard mission", req.data && req.data.func, id);
+            Logger.warning("CrossShard", "Unknown cross-shard mission", req.data && req.data.func, id);
             return;
         }
         if(handler(req.data.data)){//来自 mission ，相当于交叉依赖了
@@ -294,7 +294,7 @@ let pro={
         });
 
         if(!pro.shardData[LOCAL_SHARD_NAME]) { // 报错 暂时不执行，防止奇怪的东西混进来
-            console.log("cross shard error: No local shard, check your codes");
+            Logger.log("CrossShard", "cross shard error: No local shard, check your codes");
             return;
         }
         pro.localShardData = pro.shardData[LOCAL_SHARD_NAME];

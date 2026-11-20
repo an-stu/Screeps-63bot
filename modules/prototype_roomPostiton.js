@@ -328,8 +328,8 @@ RoomPosition.prototype.hashCode = function () {
 //         return {range: opts.range||1, pos: i};
 //     });
 //
-//     if(opts.avoid) console.log('`avoid` option cannot be used when `PathFinder.use()` is enabled. Use `costCallback` instead.');
-//     if(opts.ignore) console.log('`ignore` option cannot be used when `PathFinder.use()` is enabled. Use `costCallback` instead.');
+//     if(opts.avoid) Logger.log("RoomPos", '`avoid` option cannot be used when `PathFinder.use()` is enabled. Use `costCallback` instead.');
+//     if(opts.ignore) Logger.log("RoomPos", '`ignore` option cannot be used when `PathFinder.use()` is enabled. Use `costCallback` instead.');
 //     let searchOpts = {
 //         roomCallback: function(roomName) {
 //             if(Game.rooms[roomName]) {

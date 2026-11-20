@@ -519,7 +519,7 @@ let pro = {
         //             if (minPrice<dealPrice&&minOrder) {
         //                 minOrder.price = 1e5;
         //                 let code = Game.market.deal(minOrder.id, Math.min(r.terminal.store[RESOURCE_ENERGY], minOrder.remainingAmount,10000), myRoom);
-        //                 console.log("buy GCL : ", r.name, resType, minOrder.remainingAmount, minPrice, minOrder.id, code);
+        //                 Logger.log("GCL", "buy GCL : ", r.name, resType, minOrder.remainingAmount, minPrice, minOrder.id, code);
         //                 Game.market.dealed[minOrder.id] = true;
         //                 return code==OK
         //             }
@@ -539,7 +539,7 @@ let pro = {
     exec (room) {
         let flag = room.flags("GCLRoom").head()
         let fromRoom = Game.rooms[flag.getRoomName()];
-        if(!fromRoom){console.log("命名错误,GCLRoom_{主房间,从哪里生爬的}_{PC/带有storage的(3M以上的)}");return;}
+        if(!fromRoom){Logger.log("GCL", "命名错误,GCLRoom_{主房间,从哪里生爬的}_{PC/带有storage的(3M以上的)}");return;}
         if((Game.time+fromRoom.hashCode())%3!=0)return;
         pro.createStructs(flag)
         pro.movePos(flag)

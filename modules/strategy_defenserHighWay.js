@@ -94,7 +94,7 @@ let pro = {
                 return {task:task, body:body}
             }
         }else {
-            console.log(room.name+" damage too high to spawn defenseHighWay")
+            Logger.log("DefHighway", room.name+" damage too high to spawn defenseHighWay")
         }
     },
     checkDefense(flagName,room,spawnRoom){

@@ -12,11 +12,11 @@ Array.prototype.toMap= function(){return this.reduce((map,entry)=>{map[entry[0]]
 Array.prototype.find= function(...e){return _.find(this,...e)};
 Array.prototype.maxBy= function(func){return this.reduce((ori, another)=>func(ori)>=func(another)?ori:another,this[0])};
 Array.prototype.minBy= function(func){return this.reduce((ori, another)=>func(ori)<func(another)?ori:another,this[0])};
-Array.prototype.log= function(){console.log(JSON.stringify(this));return this};
+Array.prototype.log= function(){Logger.log("Utils", JSON.stringify(this));return this};
 Array.prototype.randomGet= function(){return this[Math.floor(this.length*Math.random())]};
 
-clog=function(...e){console.log(...e)};
-log=function(...e){console.log(JSON.stringify(e))};
+clog=function(...e){Logger.log("Utils", ...e)};
+log=function(...e){Logger.log("Utils", JSON.stringify(e))};
 
 let base36 = Math.pow(36,10)
 randomId = ()=>_.padLeft(Math.ceil(Math.random()*base36).toString(36).toLocaleUpperCase(),10,"0")

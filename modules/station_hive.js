@@ -170,7 +170,7 @@ let pro = {
     },
     trySpawn(room, targetRoomName, body, role, tasks, ops) {
         if (!room || !room.my) {
-            console.log("room not yours cannot spawn in " + targetRoomName);
+            Logger.log("Hive", "room not yours cannot spawn in " + targetRoomName);
             return
         }
         if (!room.spawnedMap) room.spawnedMap = {};

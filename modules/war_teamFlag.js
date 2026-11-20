@@ -254,7 +254,7 @@ let pro = {
             body:body,
             tasks:[UtilsTask.taskData("doNothing","registerFlag1t",{id:flagName})].concat(backTasks)
         }
-        // console.log(boost)
+        // Logger.log("WarFlag", boost)
         if(boost!==false){
             out.tasks.push(StationLab.generatorBoostFightBodyTask(body,boost).head())
         }
@@ -269,7 +269,7 @@ let pro = {
         let targetRoomName = memory.roomName;
         let room = Game.rooms[targetRoomName];
         if(!room||!room.my){
-            console.log(targetRoomName + " is not your room");
+            Logger.log("WarFlag", targetRoomName + " is not your room");
             return false;
         }
         let name = "spawnTeam_"+targetRoomName+"_"+randomId();

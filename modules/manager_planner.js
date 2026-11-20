@@ -236,7 +236,7 @@ let pro={
                 roomWalkable.forNear(func,nd.x,nd.y)
         })
 
-        // console.log(Game.cpu.getUsed()-t)
+        // Logger.log("PlannerData", Game.cpu.getUsed()-t)
 
         putAbleCacheMap[tarRoot] = innerPutAbleList
         AllCacheMap[tarRoot] = AllCacheList
@@ -1169,7 +1169,7 @@ let pro={
 
 
         // let t = Game.cpu.getUsed()
-        // console.log(Game.cpu.getUsed()-t)
+        // Logger.log("PlannerData", Game.cpu.getUsed()-t)
         pro.dismiss()
 
         // HelperVisual.showRoomStructures(roomName,structMap)

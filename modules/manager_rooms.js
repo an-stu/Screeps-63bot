@@ -144,7 +144,7 @@ const managerRooms = {
         }
 
         if (Game.time % 30 == 0 && room.level >= 7 && room.storage && room.storage.store.getFreeCapacity() <= 0) {
-            console.log(room.name + " storage is full");
+            Logger.log("Rooms", room.name + " storage is full");
         }
     },
 };

@@ -111,7 +111,7 @@ let pro = {
                 else if (val >= 1200) visual.text(val, x, y + 0.35, { color: "BlueViolet", opacity: 0.25, font: font })
                 // else visual.text("⊙", x,y+0.25, {color: "cyan",opacity:0.75,font: 1})
             })
-            console.log("showRoomTowerDamage : cpuUsed  " + (Game.cpu.getUsed() - t))
+            Logger.log("Visual", "showRoomTowerDamage : cpuUsed  " + (Game.cpu.getUsed() - t))
 
             // let towers = flag.room.find(FIND_STRUCTURES,{filter:e=>e.structureType==STRUCTURE_TOWER})
             // for(let y = 0; y < 50; y+=1) {

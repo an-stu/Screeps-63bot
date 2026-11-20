@@ -247,7 +247,7 @@ let pro={
     show(){
         let output = cpuEcharts(Game.time, this.series(this.cpu), this.series(this.bucket));
         if (typeof console.logUnsafe == "function") console.logUnsafe(output);
-        else console.log("CPU samples: " + this.size + ", average: " + this.average(this.cpu, this.size).toFixed(2));
+        else Logger.log("CPU", "CPU samples: " + this.size + ", average: " + this.average(this.cpu, this.size).toFixed(2));
     },
     exec (){
         if (!this.shouldRun(this.sampleInterval)) return;

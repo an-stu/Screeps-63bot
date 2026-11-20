@@ -49,7 +49,7 @@ let RES_BALANCE_ROOM = function () {
 }()
 
 let RES_HOLD_ROOM = function () {
-    // console.log(RESOURCES_ALL.length * 3000+ 50000);
+    // Logger.log("Resource", RESOURCES_ALL.length * 3000+ 50000);
     let obj = {};
     RESOURCES_ALL.forEach(e => {
         obj[e] = 3000
@@ -309,7 +309,7 @@ let pro = {
                         if (amount < 100) continue;
                         let code = amount > 0 ? fromRoom.terminal.send(resType, amount, room.name) : ERR_NOT_ENOUGH_RESOURCES
                         if (code == OK) {
-                            console.log("factory send ", code, fromRoom.name, resType, amount, room.name, resCnt)
+                            Logger.log("Resource", "factory send ", code, fromRoom.name, resType, amount, room.name, resCnt)
                             require[resType] = require[resType] - amount;
                         }
                     }
@@ -328,7 +328,7 @@ let pro = {
                 let pAmount = pro.freightBudget(targetRoom, room.name, RESOURCE_POWER, targetRoom.terminal.store[RESOURCE_POWER])
                 if (pAmount >= 100) {
                     targetRoom.terminal.send(RESOURCE_POWER, pAmount, room.name);
-                    console.log(targetRoom.name + " -> " + room.name + " power " + pAmount)
+                    Logger.log("Resource", targetRoom.name + " -> " + room.name + " power " + pAmount)
                 }
             }
         }
@@ -438,7 +438,7 @@ let pro = {
                             let amount = pro.freightBudget(room, targetRoom.name, maxResType, Math.min(room.terminal.store[maxResType], 3000))
                             if (amount < 100) return false;
                             let code = room.terminal.send(maxResType, amount, targetRoom.name);
-                            if (code == OK) console.log("full storage send : " + room.name + " -> " + targetRoom.name + " = ( " + amount + " , " + maxResType + " ) ")
+                            if (code == OK) Logger.log("Resource", "full storage send : " + room.name + " -> " + targetRoom.name + " = ( " + amount + " , " + maxResType + " ) ")
                             if (code == OK) return true;
                         }
                     }
@@ -477,11 +477,11 @@ let pro = {
             } else if (roomName == "random") {
                 let rooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.name != room.name
                     && e.terminal && e.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 100000);// 必须要有空闲的容量
-                if (rooms.length == 0) console.log("you have not enough rooms")
+                if (rooms.length == 0) Logger.log("Resource", "you have not enough rooms")
                 targetRoom = Utils.randomGet(_.sample(rooms, 1))
             } else {
                 targetRoom = Game.rooms[roomName]
-                if (!targetRoom || !targetRoom.my) console.log("storageEmpty_" + roomName + " is not yours")
+                if (!targetRoom || !targetRoom.my) Logger.log("Resource", "storageEmpty_" + roomName + " is not yours")
             }
             if (targetRoom) {
                 let res = room.terminal.store.getLessResTypesExceptEnergy()
@@ -498,7 +498,7 @@ let pro = {
                 if (amount < TERMINAL_MIN_SEND) return
 
                 let code = room.terminal.send(resType, amount, targetRoom.name)
-                console.log("storageEmpty from ", room.name, "to", targetRoom.name, amount, resType, code)
+                Logger.log("Resource", "storageEmpty from ", room.name, "to", targetRoom.name, amount, resType, code)
             } else throw new Error("targetRoom not found")
         }
     },

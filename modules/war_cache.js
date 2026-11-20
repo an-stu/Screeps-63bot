@@ -21,7 +21,7 @@ let pro={
         arr.forEach((x,y)=>{
             arr.set(x,y,_.sum(work.map(e=> e.effect*WarDamageCal.calTowerDamage(Math.max(Math.abs(e.x-x),Math.abs(e.y-y))))))
         })
-        // console.log(Game.cpu.getUsed()-t)
+        // Logger.log("WarCache", Game.cpu.getUsed()-t)
         return arr;
     },
     getTowerDamageRoomArray(roomName){

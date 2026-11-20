@@ -147,7 +147,7 @@ Creep.prototype.raL1=function () {
             let em1 = this.pos.findInRange(FIND_HOSTILE_CREEPS,3,{filter:e=>!e.pos.coverRampart()&&!this.pos.isNearTo(e)}).head();// 找附近的爬
             if(em1) this.rangedAttack(em1)
         } else if(isHostileCreep){
-            // console.log(em.id);
+            // Logger.log("TeamRaL1", em.id);
             this.moveTo(em);
             if(this.pos.isNearTo(em)&& em && em.body && this.body.find(e=>e.type==RANGED_ATTACK)) {this.rangedMassAttack()}
             else if (this.pos.isNearTo(em)&& em && em.body && this.body.find(e=>e.type==ATTACK)) {this.attack(em)}
@@ -292,7 +292,7 @@ let pro = {
     // raBoost3:{[BOOST_RES["damage"][0]]:30*1,[BOOST_RES["fatigue"][0]]:30*1,[BOOST_RES["rangedAttack"][0]]:30*1,[BOOST_RES["heal"][0]]:30*1,[BOOST_RES["capacity"][0]]:30*1,[BOOST_RES["attack"][0]]:30*1,[BOOST_RES["build"][0]]:30*1},
     execSpawnCrossShard (flag,raBody,raBoost) {
         if (!global.ManagerCrossShard) {
-            if (Game.time % 100 == 0) console.log(flag.name + ": cross-shard manager is disabled");
+            if (Game.time % 100 == 0) Logger.log("TeamRaL1", flag.name + ": cross-shard manager is disabled");
             return;
         }
         if(flag.name.indexOf("_keeper")>=0){
@@ -307,7 +307,7 @@ let pro = {
         if(!flag.memory.taskId){
             let crossData = flag.getCrossShardParams()[0]
             let pathData = global.pathData[crossData]
-            if(!pathData)return console.log(" path error: "+crossData)
+            if(!pathData)return Logger.log("TeamRaL1", " path error: "+crossData)
             let mission = {
                 func:"spawnCreepCressShard",
                 // callBack:"setFlagMemory",
@@ -381,12 +381,12 @@ let pro = {
         if(!flag.memory.creepName || (flag.name.indexOf("_keeper")>=0 && flag.memory.spawnTime+1450-flag.memory.concatTime<Game.time)){
             let room = Game.rooms[flag.getRoomName()]
             if(!room||!room.my||room.level<8){
-                flag.remove();console.log(flag.getRoomName()+" 不是你的房间或没8级");
+                flag.remove();Logger.log("TeamRaL1", flag.getRoomName()+" 不是你的房间或没8级");
                 return;
             }
             // log(pro.raBoost)
             if(!StationLab.boostAble(room,raBoost)){
-                console.log(room.name+" 资源不足");
+                Logger.log("TeamRaL1", room.name+" 资源不足");
                 return;
             }
 

@@ -27,7 +27,7 @@ Creep.prototype.moveCrossShardByRoomName = function(){
                 x: tmp ? tmp.pos.x : 25,
                 y: tmp ? tmp.pos.y : 25,
             };
-            if(!tmp) console.log(this.name+" moveCrossShardByRoomName path error : "+JSON.stringify(current))
+            if(!tmp) Logger.log("TradeXShard", this.name+" moveCrossShardByRoomName path error : "+JSON.stringify(current))
             cached = portalCache[cacheKey];
         }
         if(cached.found) pos = new RoomPosition(cached.x, cached.y, current.roomName)

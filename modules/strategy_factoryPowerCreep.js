@@ -34,7 +34,7 @@ let pro = {
         let hint = msg => {
             if (Game.time - (flag.memory.lastHintTick || 0) > 300) {
                 flag.memory.lastHintTick = Game.time;
-                console.log(flag.name + ": " + msg)
+                Logger.log("FactoryPC", flag.name + ": " + msg)
             }
         };
         let room = flag.room;

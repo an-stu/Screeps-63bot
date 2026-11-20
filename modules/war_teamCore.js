@@ -67,10 +67,10 @@ global.SpawnTeam = {
         return !!(memory && Array.isArray(memory.spawnList));
     },
     exec (flag){
-        if(!flag)return console.log("flag can not exit");
+        if(!flag)return Logger.log("WarTeam", "flag can not exit");
         let memory = this.getQueueMemory(flag);
         if (!memory || !Array.isArray(memory.spawnList)) {
-            Logger.warning("Removing invalid spawnTeam flag", flag.name);
+            Logger.warning("WarTeam", "Removing invalid spawnTeam flag", flag.name);
             this.removeQueue(flag);
             return;
         }
@@ -84,14 +84,14 @@ global.SpawnTeam = {
         // are deliberately treated as legacy state and discarded on reload.
         if (!Number.isFinite(memory.createdAt)
             || Game.time - memory.createdAt > SPAWN_TEAM_TTL) {
-            Logger.warning("Removing expired spawnTeam flag", flag.name);
+            Logger.warning("WarTeam", "Removing expired spawnTeam flag", flag.name);
             this.removeQueue(flag);
             return;
         }
         let room = Game.rooms[flag.pos.roomName];
         if(!room||!room.my){
             flag.remove();
-            return console.log("room "+flag.pos.roomName+" is not yours");
+            return Logger.log("WarTeam", "room "+flag.pos.roomName+" is not yours");
         }
 
         let list = memory.spawnList;

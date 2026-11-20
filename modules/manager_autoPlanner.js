@@ -221,7 +221,7 @@ let pro={
         })
 
         if(WallError){
-            console.log("围墙没维好，建筑会被打到")
+            Logger.log("Planner", "围墙没维好，建筑会被打到")
             return;
         }
         visited.init()
@@ -244,7 +244,7 @@ let pro={
         if(!s)return
         let room = Game.rooms[s.pos.roomName]
         if(!room||!room.my){
-            console.log("房间不是我的，禁止保存");
+            Logger.log("Planner", "房间不是我的，禁止保存");
             return;
         }
         // let t = Game.cpu.getUsed();
@@ -266,7 +266,7 @@ let pro={
             if(struct==STRUCTURE_CONTAINER)len = 4
             if(!structMap[struct]||structMap[struct].length<len){
                 let currentLen = (structMap[struct]?structMap[struct].length:0)
-                console.log(struct+" 未使用完:现有"+currentLen+",最少"+len)
+                Logger.log("Planner", struct+" 未使用完:现有"+currentLen+",最少"+len)
             }
         })
 
@@ -275,7 +275,7 @@ let pro={
         // createRoads 会对 undefined.forEach 抛错，跳过末尾的 s.remove()，
         // saveBlueprint 旗子卡死、每 tick 重复报错。此时直接弃旗退出。
         if(!roomManor){
-            console.log("saveBlueprint: 围墙不完整，放弃保存并移除旗标")
+            Logger.log("Planner", "saveBlueprint: 围墙不完整，放弃保存并移除旗标")
             s.remove();
             return;
         }
@@ -541,7 +541,7 @@ let pro={
                     roomStructsData.structMap[e] = Utils.encodePosArray(roomStructsData.structMap[e].map(t=>{return {x:t[0],y:t[1]}}))
                 })
                 Memory.rooms[roomStructsData.roomName].structMap = roomStructsData.structMap
-            }else console.log("storagePos 位置不合适")
+            }else Logger.log("Planner", "storagePos 位置不合适")
             p.remove()
         }
         else if(Game.rooms[p.pos.roomName]&&Game.rooms[p.pos.roomName].controller){

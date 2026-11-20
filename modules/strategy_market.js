@@ -388,7 +388,7 @@ let pro = {
         let keepBuyIds = new Set(_.values(bestBuy).map(e => e.id));
         _.values(Game.market.orders).forEach(e => {
             if (e.type != ORDER_BUY || !e.remainingAmount || keepBuyIds.has(e.id)) return;
-            console.log(`[cancel] duplicate buy ${e.roomName} ${e.resourceType} ${e.id}`);
+            Logger.log("Market", `[cancel] duplicate buy ${e.roomName} ${e.resourceType} ${e.id}`);
             Game.market.cancelOrder(e.id);
         });
     },
@@ -496,7 +496,7 @@ let pro = {
                 diag.skipped.push([resType, skipReason, Math.round(realMargin)]);
                 skippedCandidates.push([resType, components]);
                 if (skipReason == "low-margin") {
-                    console.log(`[buyHighProfit] skip ${resType}: real ${Math.round(realMargin)}% < ${threshold}%`);
+                    Logger.log("Market", `[buyHighProfit] skip ${resType}: real ${Math.round(realMargin)}% < ${threshold}%`);
                 }
                 return;
             }
@@ -543,7 +543,7 @@ let pro = {
                     if (!factoryRooms.some(r => r.name == o.roomName)) return;
                     if (Game.market.cancelOrder(o.id) == OK) {
                         diag.canceled.push([o.roomName, comp, o.remainingAmount, resType]);
-                        console.log(`[buyHighProfit] cancel ${o.roomName} ${comp} ${o.remainingAmount} (${resType} low profit)`);
+                        Logger.log("Market", `[buyHighProfit] cancel ${o.roomName} ${comp} ${o.remainingAmount} (${resType} low profit)`);
                     }
                 });
             }
@@ -577,7 +577,7 @@ let pro = {
             let buyAmount = Math.min(minOrder.amount, maxCnt)
             let code = Game.market.deal(minOrder.id, buyAmount, room.name);
             if (code == OK) {
-                console.log("buy depo: ", resType, buyAmount, minPrice, minOrder.id, code, room.name);
+                Logger.log("Market", "buy depo: ", resType, buyAmount, minPrice, minOrder.id, code, room.name);
                 Game.market.dealed[minOrder.id] = true;
                 return true
             }
@@ -847,7 +847,7 @@ let pro = {
             if (decision.action == "none") continue;
             if (decision.action == "recreate") {
                 Game.market.cancelOrder(our.id);
-                console.log(`[scanUnderpriced] recreate ${comp} ${our.price.toFixed(2)} -> ${decision.price.toFixed(2)} (cap ${cap.toFixed(2)})`);
+                Logger.log("Market", `[scanUnderpriced] recreate ${comp} ${our.price.toFixed(2)} -> ${decision.price.toFixed(2)} (cap ${cap.toFixed(2)})`);
             }
             Game.market.createOrder({
                 type: ORDER_BUY,
@@ -857,11 +857,11 @@ let pro = {
                 roomName: "E41S23",
             });
             if (decision.action == "create") {
-                console.log(`[scanUnderpriced] ${comp} buy 50000 @ ${decision.price.toFixed(2)} (chain margin ${Math.round(marginByComp[comp] || 0)}%)`);
+                Logger.log("Market", `[scanUnderpriced] ${comp} buy 50000 @ ${decision.price.toFixed(2)} (chain margin ${Math.round(marginByComp[comp] || 0)}%)`);
             }
         }
         if (results.length && results[0].margin > marginPct) {
-            console.log(`[scanUnderpriced] best: ${results[0].product} margin ${Math.round(results[0].margin)}%`);
+            Logger.log("Market", `[scanUnderpriced] best: ${results[0].product} margin ${Math.round(results[0].margin)}%`);
         }
     },
     /**
@@ -898,7 +898,7 @@ let pro = {
                 totalAmount: sellAmount,
                 roomName: room.name,
             });
-            if (code == OK) console.log(`[sellDeposit] ${room.name} ${resType} ${sellAmount} @ ${price}`);
+            if (code == OK) Logger.log("Market", `[sellDeposit] ${room.name} ${resType} ${sellAmount} @ ${price}`);
         }
     },
     /**
@@ -929,7 +929,7 @@ let pro = {
             let buyAmount = Math.min(minOrder.amount, maxCnt)
             let code = Game.market.deal(minOrder.id, buyAmount, room.name);
             if (code == OK) {
-                console.log("buy some: ", resType, buyAmount, minPrice, minOrder.id, code, room.name);
+                Logger.log("Market", "buy some: ", resType, buyAmount, minPrice, minOrder.id, code, room.name);
                 Game.market.dealed[minOrder.id] = true;
                 return true
             }
@@ -1157,7 +1157,7 @@ let pro = {
     if (orders.length > 1) {
         orders.forEach(e => {
             Game.market.cancelOrder(e.id);
-            console.log(`[cancel] ${room.name} ${resType} order ${e.id}`);
+            Logger.log("Market", `[cancel] ${room.name} ${resType} order ${e.id}`);
         });
         // 取消后重新获取订单（数量应该为0）
         orders = [];
@@ -1209,7 +1209,7 @@ let pro = {
             // 只有一个订单，修改价格
             let order = orders[0];
             Game.market.changeOrderPrice(order.id, maxPrice);
-            console.log(`[update] ${room.name} ${resType} order ${order.id} price to ${maxPrice}`);
+            Logger.log("Market", `[update] ${room.name} ${resType} order ${order.id} price to ${maxPrice}`);
         } else if (orders.length === 0) {
             // 没有订单，创建新订单
             let sellAmount = resCnt - 400000;
@@ -1223,9 +1223,9 @@ let pro = {
                 });
                 
                 if (result === OK) {
-                    console.log(`[sell] ${room.name} ${resType} ${sellAmount} with price ${maxPrice}`);
+                    Logger.log("Market", `[sell] ${room.name} ${resType} ${sellAmount} with price ${maxPrice}`);
                 } else {
-                    console.log(`[error] Failed to create order in ${room.name} for ${resType}, error: ${result}`);
+                    Logger.log("Market", `[error] Failed to create order in ${room.name} for ${resType}, error: ${result}`);
                 }
             }
         }
@@ -1235,7 +1235,7 @@ let pro = {
         if (orders.length > 0) {
             orders.forEach(e => {
                 Game.market.cancelOrder(e.id);
-                console.log(`[cancel] ${room.name} ${resType} order ${e.id} due to insufficient resources`);
+                Logger.log("Market", `[cancel] ${room.name} ${resType} order ${e.id} due to insufficient resources`);
             });
         }
     }
@@ -1272,7 +1272,7 @@ let pro = {
                     && e.roomName == room.name && e.remainingAmount > 0);
                 belowKeep.forEach(e => {
                     Game.market.cancelOrder(e.id);
-                    console.log(`[cancel] ${room.name} ${resType} below keep ${e.id}`);
+                    Logger.log("Market", `[cancel] ${room.name} ${resType} below keep ${e.id}`);
                 });
                 continue;
             }
@@ -1294,14 +1294,14 @@ let pro = {
                 e.resourceType == resType && e.type == ORDER_SELL && e.roomName == room.name);
             myOrders.filter(e => !e.remainingAmount).forEach(e => {
                 Game.market.cancelOrder(e.id);
-                console.log(`[cancel] ${room.name} ${resType} spent order ${e.id}`);
+                Logger.log("Market", `[cancel] ${room.name} ${resType} spent order ${e.id}`);
             });
             let orders = myOrders.filter(e => e.remainingAmount > 0);
             if (orders.length > 1) {
                 // 只保留一张卖单，取消多余的
                 orders.slice(1).forEach(e => {
                     Game.market.cancelOrder(e.id);
-                    console.log(`[cancel] ${room.name} ${resType} extra order ${e.id}`);
+                    Logger.log("Market", `[cancel] ${room.name} ${resType} extra order ${e.id}`);
                 });
                 orders = [orders[0]];
             }
@@ -1342,7 +1342,7 @@ let pro = {
                     totalAmount: sellAmount,
                     roomName: room.name,
                 });
-                if (code == OK) console.log(`[sellMineral] ${room.name} ${resType} ${sellAmount} @ ${price}`);
+                if (code == OK) Logger.log("Market", `[sellMineral] ${room.name} ${resType} ${sellAmount} @ ${price}`);
             }
         }
     },
@@ -1491,7 +1491,7 @@ let pro = {
                 let sales = Memory.marketSales = Memory.marketSales || [];
                 sales.push([Game.time, resType, sellAmount, Math.round(bestPrice)]);
                 if (sales.length > 50) sales.splice(0, sales.length - 50);
-                console.log(`[售卖] ${room.name} ${resType} ${sellAmount} 价格${bestPrice.toFixed(3)} ` +
+                Logger.log("Market", `[售卖] ${room.name} ${resType} ${sellAmount} 价格${bestPrice.toFixed(3)} ` +
                           `利润率${item.profitMargin.toFixed(1)}% ${item.series}系列`);
                 maxOrder.amount -= sellAmount;
                 return; // 交易后停止本轮交易
@@ -1536,7 +1536,7 @@ let pro = {
                         let buyAmount = Math.min(minOrder.amount, 10000)
                         let code = Game.market.deal(minOrder.id, buyAmount, room.name);
                         if (code == OK) {
-                            console.log("buy res: ", resType, buyAmount, minPrice, minOrder.id, code, room.name);
+                            Logger.log("Market", "buy res: ", resType, buyAmount, minPrice, minOrder.id, code, room.name);
                             dealed[minOrder.id] = true;
                         }
                         return;// 交易后直接停止本轮交易
@@ -1602,7 +1602,7 @@ pro.getBestCommoditiesToSell = function(showDetail = false) {
             };
             
             if (showDetail) {
-                console.log(`[最佳] ${seriesName}系列: ${item.resType} - 利润 ${item.profit.toFixed(3)} (${item.profitMargin.toFixed(1)}%)`);
+                Logger.log("Market", `[最佳] ${seriesName}系列: ${item.resType} - 利润 ${item.profit.toFixed(3)} (${item.profitMargin.toFixed(1)}%)`);
             }
         });
     }
@@ -1616,13 +1616,13 @@ pro.showBestCommodities = function() {
     let bestCommodities = pro.getBestCommoditiesToSell(true);
     let sellPrice = pro.getOnSellPrice();
     
-    console.log("=".repeat(80));
-    console.log("最佳售卖商品列表 (每个系列利润率最高的两种)");
-    console.log("=".repeat(80));
+    Logger.log("Market", "=".repeat(80));
+    Logger.log("Market", "最佳售卖商品列表 (每个系列利润率最高的两种)");
+    Logger.log("Market", "=".repeat(80));
     
     let seriesMap = getSeriesMap();
     for (let seriesName in seriesMap) {
-        console.log(`\n${seriesName}系列:`);
+        Logger.log("Market", `\n${seriesName}系列:`);
         
         let seriesItems = Object.keys(bestCommodities)
             .filter(resType => bestCommodities[resType].series === seriesName)
@@ -1634,10 +1634,10 @@ pro.showBestCommodities = function() {
             .sort((a, b) => b.profitMargin - a.profitMargin);
         
         if (seriesItems.length === 0) {
-            console.log("  暂无有利润的商品");
+            Logger.log("Market", "  暂无有利润的商品");
         } else {
             seriesItems.forEach((item, index) => {
-                console.log(`  ${index + 1}. ${item.resType.padEnd(15)} - 售价 ${item.price.toFixed(3)} ` +
+                Logger.log("Market", `  ${index + 1}. ${item.resType.padEnd(15)} - 售价 ${item.price.toFixed(3)} ` +
                           `利润率 ${item.profitMargin.toFixed(1)}%`);
             });
         }
@@ -1646,13 +1646,13 @@ pro.showBestCommodities = function() {
     // 显示强制售卖的商品
     let forcedItems = Object.keys(ON_SALE);
     if (forcedItems.length > 0) {
-        console.log("\n强制售卖商品:");
+        Logger.log("Market", "\n强制售卖商品:");
         forcedItems.forEach(resType => {
-            console.log(`  ${resType.padEnd(15)} - 固定售价 ${ON_SALE[resType]}`);
+            Logger.log("Market", `  ${resType.padEnd(15)} - 固定售价 ${ON_SALE[resType]}`);
         });
     }
     
-    console.log("=".repeat(80));
+    Logger.log("Market", "=".repeat(80));
 };
 
 global.StrategyMarket = pro;

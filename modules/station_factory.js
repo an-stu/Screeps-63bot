@@ -206,7 +206,7 @@ let pro={
         if(!flag)return undefined;
         let split = flag.getNameSplit();
         if(split.length<=1){
-            console.log("Error: "+flag.name+" is not OPF_{PC.NAME}");
+            Logger.log("Factory", "Error: "+flag.name+" is not OPF_{PC.NAME}");
             return undefined;
         }
         let pc = StrategyFactoryPowerCreep.getPowerCreep(room);
