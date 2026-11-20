@@ -158,9 +158,18 @@ assert.equal(live.nextBudget, 1200 - live.state.spend,
     "同一 pass 里后续角色读到的预算必须等于真实余量，不能虚高");
 
 // ── 3. 负对照：把那行清缓存加回去，后续角色的预算就会被抬高 ─────────────────
-const OLD_WIPE = src.replace(
-    "                spawnRoom.spawnFailure = false;\r\n",
-    "                spawnRoom.spawnFailure = false;\r\n                spawnRoom.currentEnergyAvailable = undefined;\r\n");
+// 行尾兼容：station_sources 可能以 CRLF 或 LF 保存（近期补丁已统一为 LF）
+const MARKER = "spawnRoom.spawnFailure = false;";
+const markerPos = src.indexOf(MARKER);
+assert.ok(markerPos >= 0, "必须能找到 keeper 的 spawnFailure 复位行");
+const markerLineStart = src.lastIndexOf("\n", markerPos) + 1;
+const markerLineEnd = src.indexOf("\n", markerPos);
+const markerEol = src[markerLineEnd - 1] === "\r" ? "\r\n" : "\n";
+const markerLine = src.slice(markerLineStart, markerLineEnd).replace(/\r$/, "");
+const markerIndent = markerLine.slice(0, markerLine.indexOf(MARKER));
+const OLD_WIPE = src.slice(0, markerLineEnd + 1)
+    + markerIndent + "spawnRoom.currentEnergyAvailable = undefined;" + markerEol
+    + src.slice(markerLineEnd + 1);
 assert.notEqual(OLD_WIPE, src, "负对照的源码替换必须命中（CRLF）");
 const buggy = runKeeper(OLD_WIPE);
 assert.equal(buggy.state.cacheInitFrom, "energyAvailable",

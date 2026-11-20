@@ -1,3 +1,11 @@
+## v0.78.288 — 外矿敌人政策：1 个 Invader 可打，≥2 全员撤退
+
+- 新增撤退状态 `Memory.rooms[room].outerRetreat`：Invader 数量 **≥2** 时进入撤退；降到 <2 并持续 100 tick 解除；完全失去视野时 5000 tick 硬过期。
+- 外矿派发循环读取撤退状态：撤退中暂停该矿全部派发（keeper / carrier / 防守 / core 专队）。Invader **=1** 时照常派近战防守清掉。
+- 反转原「≥2 派强化远程小队」逻辑：`trySpawnOuterDefenser` 在 Invader≥2 时直接不派兵（全员撤离）。
+- keeper / carrier / outerDefense 接到撤退状态后沿缓存外矿路线朝主房撤离；keeper 丢能量减重，无路线时朝远离敌人的方向逃。
+- 回归：`outer-retreat-policy`（1 不撤 / ≥2 撤 / 降到 1 后 100 tick 解除 / 5000 tick 硬过期 / 派发与三种爬的钉子）。
+
 ## v0.78.287 — 本地援建统一按出兵房 RCL>=5 限制（移除黑名单）
 
 - 撤销 `Memory.noAidSpawnRooms` 黑名单；改为通用规则：低级房的本地代孵只会选择 **RCL>=5** 的出兵房，RCL<5 一律拒绝（按房间总能量对应的等级判断）。

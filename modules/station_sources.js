@@ -32,6 +32,13 @@ const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
 /** keeper 撤离触发距离：敌对爬进入该半径且无防守爬接战就撤（Overmind flee 语义） */
 const OUTER_KEEPER_FLEE_RANGE = 6;
 /**
+ * 外矿撤退政策（用户 2026-11-18）：Invader **=1 可派防守打，≥2 全员撤出**。
+ * 撤退状态存 Memory（不依赖视野），Invader 降到 <2 并持续 100 tick 后解除；
+ * 完全失去视野时 5000 tick 硬过期，避免永久停矿。
+ */
+const OUTER_RETREAT_CLEAR_TICKS = 100;
+const OUTER_RETREAT_STALE_TICKS = 5000;
+/**
  * 「我方矿工站位」的寻路代价：**只有源旁的容器/容器工地那一格**（keeper 站桩位）。
  *
  * 为什么要抬高：矿点旁的 container 在代价矩阵里是最低代价 1（为了让寻路复用已有路），
@@ -387,6 +394,7 @@ Creep.prototype.concatStationSources = function () {
 
 Creep.prototype.harvestEnergyOuterKeeper = function () {
     let task = this.headTask();
+    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, true);
     if (task.roomName != this.room.name) {
         // 去程沿缓存路径走（路径方向 source→storage，去程是反向 -1），不脱离路线
         let data = Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
@@ -1016,6 +1024,7 @@ Creep.prototype.coreBuster = function () {
 
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
+    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     // T3 强化的小队防守爬：目标房的 invader 清干净一段时间 → 回主房贴 spawn 回收。
     // 放在最前面：回收期间不再接战、不再巡逻，直接走人（见 squadDefenderShouldRecycle）。
     if (pro.squadDefenderShouldRecycle(this, task)) {
@@ -1557,6 +1566,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
 /** 搬运策略 */
 Creep.prototype.harvestEnergyOuterCarry = function () {
     let task = this.headTask();
+    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     let rm = Memory.rooms[this.headTask().roomName];
     if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
         // ── 动态平衡（0.78.225，用户 2026-11-08「carrier 有点不平衡，动态平衡」）──
@@ -2675,6 +2685,53 @@ let pro = {
             }
         }
         return { index: best, dist: bestDist };
+    },
+    /** 外矿撤退政策（用户 2026-11-18）：1 个 Invader 可打，≥2 全员撤。 */
+    outerInvaderCount(room) {
+        if (!room) return 0;
+        let cache = Game._outerInvaderCnt || (Game._outerInvaderCnt = {});
+        let hit = cache[room.name];
+        if (hit && hit.t === Game.time) return hit.n;
+        let hostiles = room.getHostileCreeps ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
+        let n = hostiles.filter(e => e.owner && e.owner.username == "Invader").length;
+        cache[room.name] = {t: Game.time, n: n};
+        return n;
+    },
+    outerRetreatState(roomName) {
+        let mem = Memory.rooms && Memory.rooms[roomName];
+        let retreat = mem && mem.outerRetreat;
+        if (!retreat) return null;
+        if (Game.time - retreat.tick > OUTER_RETREAT_STALE_TICKS) { delete mem.outerRetreat; return null; }
+        return retreat;
+    },
+    outerRetreatCheck(roomOrName) {
+        let rooms = Game.rooms || {};
+        let room = typeof roomOrName == "string" ? rooms[roomOrName] : roomOrName;
+        let roomName = room ? room.name : roomOrName;
+        if (!roomName) return null;
+        if (room) {
+            let count = pro.outerInvaderCount(room);
+            let mem = Memory.rooms[roomName] || (Memory.rooms[roomName] = {});
+            if (count >= 2) mem.outerRetreat = {tick: Game.time, count: count};
+            else if (mem.outerRetreat && Game.time - mem.outerRetreat.tick >= OUTER_RETREAT_CLEAR_TICKS) {
+                delete mem.outerRetreat;
+            }
+        }
+        return pro.outerRetreatState(roomName);
+    },
+    /** 撤退：沿缓存外矿路线朝主房走（+1）；keeper 丢能量减重。 */
+    outerRetreatMove(creep, dropEnergy) {
+        let task = creep.headTask();
+        if (!task) return;
+        let data = Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
+            && Memory.rooms[task.roomName][pro.stationName][task.id];
+        if (dropEnergy && creep.store && creep.store[RESOURCE_ENERGY] > 0) creep.drop(RESOURCE_ENERGY);
+        if (pro.moveOuterCarrierOnRoad(creep, task, data, 1)) return;
+        let hunter = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+        if (hunter) {
+            let step = PathFinder.search(creep.pos, {pos:hunter.pos, range:8}, {flee:true, maxRooms:1}).path[0];
+            if (step) return pro.defenseStep(creep, new RoomPosition(step.x, step.y, creep.room.name), 0);
+        }
     },
     /**
      * Advance a normal outer carrier one waypoint along its cached road.
@@ -5130,6 +5187,8 @@ let pro = {
         if (spawnRoom.spawnFailure) return null;
         let targetName = roomName.name || roomName;
         let harRoom = Game.rooms[targetName];
+        // 撤退政策：Invader ≥2 不派兵（全员撤离，交给防守/主力回防）
+        if (harRoom && pro.outerInvaderCount(harRoom) >= 2) return null;
         let sourceMemory = Memory.rooms[targetName];
         let data = sourceMemory && sourceMemory[pro.stationName]
             && _.values(sourceMemory[pro.stationName]).find(e => e && e.id);

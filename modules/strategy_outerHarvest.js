@@ -312,6 +312,9 @@ let pro = {
             // 核心消失足够久之后再恢复。判据只读 Memory（由 StationObserver.observeLastRoom
             // 在有视野时刷新），**不依赖调用时刻有没有视野** —— 停派后爬撤走就没视野了。
             if (pro.invaderCoreBlocks(targetRoomName)) continue;
+            // 撤退政策（用户 2026-11-18）：Invader≥2 全员撤出，暂停该矿全部派发。
+            if (typeof StationSources != "undefined" && StationSources
+                && StationSources.outerRetreatCheck && StationSources.outerRetreatCheck(targetRoomName)) continue;
             // 每个旗子只由它选择的派发房间处理，避免多个已方房间重复派发
             let spawnRoom = flag.memory.spawnRoom && Game.rooms[flag.memory.spawnRoom];
             if (!spawnRoom || !spawnRoom.my) {
