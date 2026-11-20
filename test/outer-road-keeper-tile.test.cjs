@@ -45,6 +45,7 @@ const structures = [
     {structureType: "road", pos: {x: 34, y: 12}},
     {structureType: "road", pos: {x: 35, y: 12}},
     {structureType: "road", pos: {x: 36, y: 12}},
+    {structureType: "road", pos: {x: 36, y: 16}},
 ];
 const sites = [
     {structureType: "road", pos: {x: 33, y: 13}},
@@ -57,7 +58,10 @@ const sources = [
     {id: "src2", pos: {x: 20, y: 20}},
 ];
 
-const upgradeCreeps = [{memory: {upgradePosition: {x: 31, y: 16, controllerId: "ctrl"}}}];
+const upgradeCreeps = [
+    {memory: {role: "upgrader", upgradePosition: {x: 31, y: 16, controllerId: "ctrl"}}},
+    {memory: {role: "worker", upgradePosition: {x: 36, y: 16, controllerId: "ctrl"}}},
+];
 const room = {
     name: "E41S29",
     memory: {stationUpgrade: {container: "upgC"}},
@@ -98,6 +102,7 @@ assert.equal(cm.get(21, 20), 8, "容器【工地】格同样要保护（容器�
 assert.equal(cm.get(30, 16), 8, "升级容器格（upgrader 补给位）必须抬高");
 assert.equal(cm.get(31, 16), 8, "upgrader 当前站位（memory.upgradePosition）必须抬高");
 assert.equal(cm.get(32, 16), 2, "控制器附近普通格不受影响");
+assert.equal(cm.get(36, 16), 1, "worker 的临时升级站位不得把 road 抬价（只有专职 upgrader 才保护）");
 
 // 2) 原先被整圈误伤的 road / 源格恢复正常
 assert.equal(cm.get(33, 12), 1, "容器隔壁的 road 不再被抬到 8");

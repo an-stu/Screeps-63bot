@@ -2376,7 +2376,10 @@ let pro = {
             }
         }
         room.find(FIND_MY_CREEPS).forEach(creep => {
-            let pos = creep.memory && creep.memory.upgradePosition;
+            // 只保护**专职 upgrader** 的站位：worker 的临时 upgradePosition
+            // （降级应急升级等）不该把 road 抬价、逼外矿路线绕行（用户 2026-11-18）。
+            if (!creep.memory || creep.memory.role != "upgrader") return;
+            let pos = creep.memory.upgradePosition;
             if (!pos || !room.controller || pos.controllerId != room.controller.id) return;
             if (cm.get(pos.x, pos.y) >= 254) return;
             cm.set(pos.x, pos.y, OUTER_ROAD_WORK_TILE_COST);
