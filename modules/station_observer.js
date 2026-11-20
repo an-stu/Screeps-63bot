@@ -71,8 +71,8 @@ let pro={
                 && !(w.c && Game.time - (w.cl || 0) < 10000)) delete watch[rn];
         }
     },
-    requestRoom(roomName, preferredObserverRoom) {
-        if (Game.rooms[roomName]) return preferredObserverRoom;
+    requestRoom(roomName, preferredObserverRoom, force = false) {
+        if (Game.rooms[roomName] && !force) return preferredObserverRoom;
         let preferred = preferredObserverRoom && Game.rooms[preferredObserverRoom];
         let observerRoom = preferred && preferred.my && preferred.observer
             && Game.map.getRoomLinearDistance(preferred.name, roomName) <= 10
@@ -202,6 +202,10 @@ let pro={
             : regularQueue && regularQueue.length ? regularQueue.shift() : undefined;
         if(roomName){
             let observeResult = room.observer.observeRoom(roomName);
+            if (observeResult == OK && global.StrategyNpcConvoy
+                && StrategyNpcConvoy.watches(roomName)) {
+                StrategyNpcConvoy.recordObservation(room, roomName, Game.time + 1);
+            }
             if (observeResult == OK && isPriorityObservation) {
                 pro.watchRoom(roomName).p = Game.time + 1;
             }

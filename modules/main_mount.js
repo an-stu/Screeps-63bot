@@ -20,10 +20,11 @@ global.CPU_FEATURES = {
     claimCrossShard: true,
     deposits: true,
     powerBank: true,
+    npcConvoy: true,
     GCLRoom: true,
     combat: true,
 }
-global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits","powerBank","GCLRoom","combat"])
+global.CPU_OPT_IN_FEATURES = new Set(["market","autoPlanner","visual","crossShard","crossShardTrade","claimCrossShard","deposits","powerBank","npcConvoy","GCLRoom","combat"])
 global.isCpuFeatureEnabled = name => {
     let value = (Memory.cpuFeatures || {})[name];
     if(CPU_OPT_IN_FEATURES.has(name))return value === true && CPU_FEATURES[name] !== false;
@@ -33,8 +34,8 @@ global.isCpuFeatureEnabled = name => {
 // the online cross-shard feature gate is temporarily disabled.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.78.280",
-    uploadedModules: 74,
+    version: "0.78.281",
+    uploadedModules: 75,
     restoredSnapshotModules: 69,
     intentionallyExcluded: []
 }
@@ -98,6 +99,7 @@ require('station_tower');
 require('station_lab');
 require('station_factory');
 require('station_observer');
+require('strategy_npcConvoy');
 
 require('strategy_lowLevel');
 require('strategy_highLevel');

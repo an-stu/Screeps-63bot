@@ -305,7 +305,7 @@ let pro = {
         if (result == OK) {
             room.memory.controllerSignVersion = CONTROLLER_SIGN_VERSION;
             room.memory.controllerSignText = desired;
-            Logger.info("Controller signed", room.name, desired);
+            Logger.info("Upgrade", "Controller signed", room.name, desired);
         }
         return true;
     },

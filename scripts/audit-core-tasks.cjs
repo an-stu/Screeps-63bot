@@ -15,7 +15,7 @@ function stripComments(source) {
 }
 
 const sources = manifest
-    .filter(name => typeof snapshot.modules[name] === "string")
+    .filter(name => snapshot.modules[name] === undefined || typeof snapshot.modules[name] === "string")
     .map(name => [name, stripComments(readModule(name))]);
 const handlers = new Map([["suicide", "Screeps API"]]);
 const generated = new Map();
