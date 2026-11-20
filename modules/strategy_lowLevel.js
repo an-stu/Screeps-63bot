@@ -151,6 +151,10 @@ let pro = {
                             if (!spawnRoom) {
                                 return;
                             }
+                            // 用户政策（2026-11-18）：名单里的房不再为他房代孵 worker
+                            // （本地援建统一停用；这些目标房改走跨 shard 援建）。
+                            if (spawnRoom.name != room.name
+                                && (Memory.noAidSpawnRooms || []).indexOf(spawnRoom.name) >= 0) return;
                             if (spawnRoom.name != room.name && room.creeps("worker", false).length >= 4) return;// 如果不是自己的房间最多生4个
                             StationHive.trySpawn(spawnRoom, room.name, StationWork.getLowLevelWorkerBodyConfig(spawnRoom), "worker", [])
                         }

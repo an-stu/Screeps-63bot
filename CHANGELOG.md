@@ -1,3 +1,9 @@
+## v0.78.286 — 本地代孵黑名单：E51S29 不再派援建
+
+- 新增 `Memory.noAidSpawnRooms`（每 shard 数组）：名单内的房间不再被选为他房的本地代孵出兵房（低级房 worker 代孵路径）；列表为空时行为不变，占领出兵不受影响。
+- 用户要求：shard2 的援建统一走跨 shard 这一路出兵源，E51S29 只负责本房经济与占领出兵，不再给 E55S29/E56S29 等低级房代孵小 worker。
+- 回归：黑名单检查必须位于 trySpawn 之前（`lowlevel-economy-priority`）。
+
 ## v0.78.285 — 跨 shard 援建 body 改为交错 1W1C2M 排列
 
 - 上一版只改了比例（1:1:2），排列仍是「全部 WORK、全部 CARRY、全部 MOVE」三段式；受伤从 body 前端扣部件时会先掉光一种能力。
