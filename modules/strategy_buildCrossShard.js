@@ -445,24 +445,20 @@ let pro = {
         return pro.sendSpawnReceipt(data, receipt);
     },
 
-    /** Preferred 50-part body, advertised in every target-shard request. */
+    /**
+     * 与普通援建一致的 **1:1:2**（WORK:CARRY:MOVE）满配：12 组 = 48 部件 / 3000 能量。
+     * 用户 2026-11-18：跨 shard 援建不再用 10:15:25 的重载货体型 —— 1:1:2 更机动，
+     * 被伏击时同样造价下携带的货物更少、损失更可控。
+     */
     preferredBuilderBody() {
-        return ManagerCreeps.calcBodyPart({[WORK]:10, [CARRY]:15, [MOVE]:25});
+        return ManagerCreeps.calcBodyPart({[WORK]:12, [CARRY]:12, [MOVE]:24});
     },
 
-    /** Largest valid builder body affordable from the source room's budget. */
+    /** 按可用预算生成 1:1:2 体型（每组 250 能量），最多 12 组。 */
     affordableBuilderBody(energyBudget) {
-        if (typeof energyBudget != "number" || energyBudget < 200) return [];
-        let body;
-        if (energyBudget >= 3000) {
-            body = pro.preferredBuilderBody();
-        } else if (energyBudget < 600) {
-            body = ManagerCreeps.calcBodyPart({[WORK]:1, [CARRY]:1, [MOVE]:energyBudget >= 250 ? 2 : 1});
-        } else {
-            let groups = Math.min(5, Math.floor(energyBudget / 600));
-            body = ManagerCreeps.calcBodyPart({[WORK]:groups * 2, [CARRY]:groups * 3, [MOVE]:groups * 5});
-        }
-        return pro.bodyCost(body) <= energyBudget ? body : [];
+        if (typeof energyBudget != "number" || energyBudget < 250) return [];
+        let groups = Math.min(12, Math.floor(energyBudget / 250));
+        return ManagerCreeps.calcBodyPart({[WORK]:groups, [CARRY]:groups, [MOVE]:groups * 2});
     },
 
     /** Clamp energy by live availability, the spawn manager's spent-this-tick cache, and hive capacity. */

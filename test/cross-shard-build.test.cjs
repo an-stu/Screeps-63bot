@@ -162,11 +162,11 @@ function runExec(sb, time) {
     assert.equal(tasks[0].taskName, "buildCrossShardRoom");
     assert.equal(tasks[0].roomName, "E51S29");
     assert.ok(tasks[0].slotId, "each builder task has a stable source-dedup slot");
-    assert.equal(request.mission.data.body.length, 50, "request advertises the preferred full-size worker");
+    assert.equal(request.mission.data.body.length, 48, "request advertises the 1:1:2 full-size worker");
     assert.equal(sb.StrategyBuildCrossShard.bodyCost(request.mission.data.body), 3000);
-    assert.equal(request.mission.data.body.filter(part => part == "work").length, 10);
-    assert.equal(request.mission.data.body.filter(part => part == "carry").length, 15);
-    assert.equal(request.mission.data.body.filter(part => part == "move").length, 25);
+    assert.equal(request.mission.data.body.filter(part => part == "work").length, 12);
+    assert.equal(request.mission.data.body.filter(part => part == "carry").length, 12);
+    assert.equal(request.mission.data.body.filter(part => part == "move").length, 24);
 }
 
 // 2. start() is idempotent, copies the saved route, and honors explicitly
@@ -293,7 +293,7 @@ function runExec(sb, time) {
     assert.equal(world.missions.length, 2, "two retiring workers request exactly two replacements");
     assert.equal(old1.memory.role, "crossShardBuilder", "old workers must continue contributing");
     assert.equal(old2.memory.tasks[0].taskName, "buildCrossShardRoom");
-    assert.ok(world.missions.every(m => m.mission.data.body.length === 50));
+    assert.ok(world.missions.every(m => m.mission.data.body.length === 48));
     const next = makeBuilder(sb, room.name, {name:"next", slotId:cfg.pending[0].slotId});
     next.ticksToLive = 1200;
     sb.Game.creeps.next = next;
@@ -344,10 +344,10 @@ function runExec(sb, time) {
     world.spawnResult = "shard3_1001_1";
     assert.equal(sb.missionFunc.spawnCrossShardBuilder(data), true, "successful spawn acknowledges request");
     assert.equal(world.spawnCalls, 2);
-    assert.equal(world.lastSpawn.body.length, 50, "an old small-body request still spawns the preferred body when affordable");
-    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 10);
-    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 15);
-    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 25);
+    assert.equal(world.lastSpawn.body.length, 48, "an old small-body request still spawns the preferred 1:1:2 body when affordable");
+    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 12);
+    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 12);
+    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 24);
     assert.equal(world.missions.at(-1).mission.func, "crossShardBuilderSpawned");
     assert.equal(world.missions.at(-1).mission.data.creepName, "shard3_1001_1");
 
@@ -394,8 +394,8 @@ function runExec(sb, time) {
 // and room capacity. Scaled bodies keep the requested WORK:CARRY:MOVE ratio.
 {
     const cases = [
-        {label:"capacity limit", available:5000, cached:5000, capacity:1800, cost:1800, work:6, carry:9, move:15},
-        {label:"spent-this-tick cache", available:3000, cached:1200, capacity:5000, cost:1200, work:4, carry:6, move:10},
+        {label:"capacity limit", available:5000, cached:5000, capacity:1800, cost:1750, work:7, carry:7, move:14},
+        {label:"spent-this-tick cache", available:3000, cached:1200, capacity:5000, cost:1000, work:4, carry:4, move:8},
         {label:"small affordable body", available:5000, cached:5000, capacity:250, cost:250, work:1, carry:1, move:2},
     ];
     for (const sample of cases) {
@@ -466,8 +466,8 @@ function runExec(sb, time) {
     assert.equal(deadline.missionFunc.spawnCrossShardBuilder(builderRequest({expiresAt:world.now + 10000})), true,
         "near the deadline the largest affordable body spawns instead of stalling");
     assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 4);
-    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 6);
-    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 10);
+    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 4);
+    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 8);
 
     const full = makeWorld();
     full.Game.shard.name = "shard3";
@@ -475,11 +475,11 @@ function runExec(sb, time) {
         energyCapacityAvailable:5000, spawns:[{id:"spawn1"}]});
     world.spawnResult = "spawned-full";
     assert.equal(full.missionFunc.spawnCrossShardBuilder(builderRequest()), true,
-        "a funded room spawns the full 50-part worker");
-    assert.equal(world.lastSpawn.body.length, 50);
-    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 10);
-    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 15);
-    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 25);
+        "a funded room spawns the full 1:1:2 worker");
+    assert.equal(world.lastSpawn.body.length, 48);
+    assert.equal(world.lastSpawn.body.filter(part => part == "work").length, 12);
+    assert.equal(world.lastSpawn.body.filter(part => part == "carry").length, 12);
+    assert.equal(world.lastSpawn.body.filter(part => part == "move").length, 24);
 
     const poorRoom = makeWorld();
     poorRoom.Game.shard.name = "shard3";
