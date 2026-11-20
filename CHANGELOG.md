@@ -1,3 +1,9 @@
+## v0.78.290 — RCL4 后期允许第 2 只 upgrader（hive 满 + 升级容器有余量）
+
+- 低级房升级爬条件追加：hive 满且升级容器能量 >300 时，允许 upgCnt 从 1 提升到 2（仍受 3 只上限与「hive 缺能不孵化」约束）。
+- 现场 E41S29：RCL4 结构全部建满（20 extension / 1 tower / 4 container / 86 road、0 工地），单只 upgrader 仅 ~10/tick，房间看起来「不动」；控制器数值实际在涨（257078→257178）。此改动把富余能量转成升级速度。
+- 回归：`lowlevel-carrier-cap` 的升级爬上限钉子更新（允许 surplus 分支）。
+
 ## v0.78.289 — ≥2 Invader 恢复派强化小队；撤退只冻结采运
 
 - 撤销 v0.78.288 的「≥2 不派兵」守卫：`trySpawnOuterDefenser` 恢复原强化远程小队选择（Invader ≥2 → TOUGH2/RANGED22/HEAL6/MOVE20；lab 缺化合物时剥离 TOUGH 仍会出兵）。

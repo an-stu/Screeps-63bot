@@ -49,7 +49,7 @@ assert.ok(/carrierTarget = Math\.max\(2, Math\.min\(3, Math\.ceil\(\(sourceCnt \
 // 一旦搬运超编（实测 19 只）就恒真 ⇒ 会一路派到十几只，每只 800 能量，纯浪费。
 assert.ok(/let upgCnt = room\.creeps\("upgrader", false\)\.length/.test(code),
     "升级爬计数必须含孵化中（spawned=false），否则会连派");
-assert.ok(/upgCnt < 3 && upgCnt < loadedFree - 1/.test(code),
-    "升级爬必须夹在 3 只以内（3 × 6 WORK 吃满 ~20/tick 收入）");
+assert.ok(/upgCnt < 3 && \(upgCnt < loadedFree - 1 \|\| \(surplus && upgCnt < 2\)\)/.test(code),
+    "升级爬必须夹在 3 只以内；hive 满且升级容器有余量时允许第 2 只");
 
 console.log("low-level carrier cap checks passed");

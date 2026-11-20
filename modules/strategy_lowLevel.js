@@ -280,11 +280,17 @@ let pro = {
             // station 记忆由 refreshRoom（每 61 tick 错峰）首次写入：新占房在
             // 首次 refresh 前该键不存在，裸取 [STRUCTURE_CONTAINER] 抛 TypeError
             // 让整个 lowLevel pass 中断到多 61 tick。
-            if ((!StationHive.HiveNeedToFill(room) || downgradeUrgent || room.isDownGrade())
-                && room.memory[StationUpgrade.stationName] && Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER])) {
+            let upgradeContainer = room.memory[StationUpgrade.stationName]
+                && Game.getObjectById(room.memory[StationUpgrade.stationName][STRUCTURE_CONTAINER]);
+            if ((!StationHive.HiveNeedToFill(room) || downgradeUrgent || room.isDownGrade()) && upgradeContainer) {
                 let upgCnt = room.creeps("upgrader", false).length;
                 let loadedFree = room.creeps("carrier").filter(e => e.isFree() && e.store[RESOURCE_ENERGY] > 0).length;
-                if (upgCnt == 0 || (upgCnt < 3 && upgCnt < loadedFree - 1)) {
+                // RCL4 后期结构建满、没有工地时，单只 upgrader 只有 ~10/tick，
+                // 房间看起来「不动」。hive 满且升级容器有余量（>300）时允许第 2 只，
+                // 把富余能量转成升级速度（用户 2026-11-18）；仍受 3 只上限与缺能闸约束。
+                let surplus = !StationHive.HiveNeedToFill(room)
+                    && (upgradeContainer.store[RESOURCE_ENERGY] || 0) > 300;
+                if (upgCnt == 0 || (upgCnt < 3 && (upgCnt < loadedFree - 1 || (surplus && upgCnt < 2)))) {
                     StationUpgrade.spawnUpgrader(room)
                 }
             }
