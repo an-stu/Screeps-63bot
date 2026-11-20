@@ -32,7 +32,7 @@ const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
 /** keeper 撤离触发距离：敌对爬进入该半径且无防守爬接战就撤（Overmind flee 语义） */
 const OUTER_KEEPER_FLEE_RANGE = 6;
 /**
- * 「我方矿工工作位」的寻路代价：矿点及其相邻一圈。
+ * 「我方矿工站位」的寻路代价：**只有源旁的容器/容器工地那一格**（keeper 站桩位）。
  *
  * 为什么要抬高：矿点旁的 container 在代价矩阵里是最低代价 1（为了让寻路复用已有路），
  * 结果**外矿路线会特意从主房 keeper 的岗位上穿过去** —— 实测 W33N55 的路线压在
@@ -40,7 +40,9 @@ const OUTER_KEEPER_FLEE_RANGE = 6;
  *
  * 取 8：比空地 2 / 沼泽 5 都高，足够让寻路宁可多走一两格绕开；但不封死，
  * 万一真没有别的路也还走得通（不会把路线逼成 incomplete）。
- * 这条对任何房间通用：矿区房里那也是我们矿工的工作位，同样不该被踩。
+ *
+ * ⚠️ 只保护容器格本身（2026-11-18 用户定案）：原来的「矿点 3×3 整圈」会让路线
+ * 无谓绕路（E41S29 的 road 全被抬到 8）。keeper 的工位是容器格，其余邻格不必让。
  */
 const OUTER_ROAD_WORK_TILE_COST = 8;
 /**
@@ -2344,15 +2346,20 @@ let pro = {
             if (cm.get(site.pos.x, site.pos.y) >= 254) return;   // 该格有不可走建筑，保持封死
             cm.set(site.pos.x, site.pos.y, 1);
         });
-        // 最后再把「我方矿工工作位」（矿点及其相邻一圈）抬高，
-        // 免得外矿路线从 keeper 的岗位上穿过去挤占它。见 OUTER_ROAD_WORK_TILE_COST。
+        // 只抬高 keeper 的**实际站位**（源旁的容器/容器工地那一格），不再保护整圈：
+        // 用户 2026-11-18 —— 工位就是容器格，整圈 3×3 抬高会让外矿路线无谓绕路
+        // （E41S29 实测：源 (34,11) 旁的 road (33~35,12) 全被抬到 8，路线被迫拐去 y=13）。
         room.find(FIND_SOURCES).forEach(src => {
             for (let dx = -1; dx <= 1; dx++) {
                 for (let dy = -1; dy <= 1; dy++) {
                     let x = src.pos.x + dx, y = src.pos.y + dy;
                     if (x < 0 || x > 49 || y < 0 || y > 49) continue;
                     if (cm.get(x, y) >= 254) continue;   // 已判不可走的别动
-                    cm.set(x, y, OUTER_ROAD_WORK_TILE_COST);
+                    let keeperTile = room.lookForAt(LOOK_STRUCTURES, x, y)
+                        .some(s => s.structureType == STRUCTURE_CONTAINER)
+                        || room.lookForAt(LOOK_CONSTRUCTION_SITES, x, y)
+                        .some(s => s.structureType == STRUCTURE_CONTAINER);
+                    if (keeperTile) cm.set(x, y, OUTER_ROAD_WORK_TILE_COST);
                 }
             }
         });
