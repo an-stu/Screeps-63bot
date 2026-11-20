@@ -1,3 +1,10 @@
+## v0.78.291 — 低 RCL 出兵房的外矿防守体型按容量收缩（修复外矿死锁）
+
+- 现象：E41S29（RCL4、容量 1300）的外矿 E42S29 完全不动。无视野但有近期敌人记忆时，派发要求「先有防守爬」，而 invader 防守体型固定 5,360 能量，永远孵不出 ⇒ keeper/carrier 被防守闸全部锁死（实测 ~3000 tick）。
+- 修复：`trySpawnOuterDefenser` 在防守体型超过出兵房容量时，按容量缩成可负担的近战体型（MOVE:ATTACK 1:1 + 1 HEAL；1300 容量 ⇒ MOVE8/ATTACK8/HEAL1 ≈ 1290）。
+- 另：E42S29 的 `har_E41S29` 外矿旗已丢失（station 仅剩过期登记），已在 E42S29 重建（spawnRoom=E41S29）。
+- 回归：`outer-retreat-policy` 增加容量收缩钉子；全量测试通过。
+
 ## v0.78.290 — RCL4 后期允许第 2 只 upgrader（hive 满 + 升级容器有余量）
 
 - 低级房升级爬条件追加：hive 满且升级容器能量 >300 时，允许 upgCnt 从 1 提升到 2（仍受 3 只上限与「hive 缺能不孵化」约束）。

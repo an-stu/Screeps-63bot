@@ -97,6 +97,8 @@ function roomWith(sb, name, invaders) {
 // 5) 源码钉子：派发循环、三种外矿爬、防守出兵闸都必须接上撤退政策
 assert.ok(/StationSources\.outerRetreatCheck\(targetRoomName\)\) continue;/.test(outer),
     "外矿派发循环必须在撤退时暂停");
+assert.ok(/defenseCost > defenseCapacity/.test(src),
+    "防守体型必须按出兵房容量收缩，避免低 RCL 房永远生不出防守锁死采运");
 for (const fn of ["Creep.prototype.harvestEnergyOuterKeeper = function () {",
     "Creep.prototype.harvestEnergyOuterCarry = function () {",
     "Creep.prototype.outerDefense = function () {"]) {

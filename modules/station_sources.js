@@ -5233,6 +5233,19 @@ let pro = {
 
         // 体型按房间实际敌情算（没有视野时退回固定体型），需要 boost 时先确认 lab 有货
         let cfg = pro.getOuterHarDefenseBodyConfig(isInvader, harRoom);
+        // 低容量出兵房（RCL4 = 1300）付不起 5,360 的 invader 近战体型 ⇒ 防守永远生不出来；
+        // 而「有威胁但无防守」会把 keeper/carrier 全部锁死（E42S29 实测 3000 tick 死锁）。
+        // 按出兵房容量缩一个付得起的近战体型（MOVE:ATTACK 1:1 + 1 HEAL）。
+        let defenseCost = 0;
+        if (typeof BODYPART_COST != "undefined")
+            for (let part of (cfg.body || [])) defenseCost += (BODYPART_COST[part] || 0);
+        let defenseCapacity = typeof spawnRoom.getEnergyCapacityAvailable == "function"
+            ? spawnRoom.getEnergyCapacityAvailable() : spawnRoom.energyCapacityAvailable;
+        if (defenseCost > defenseCapacity) {
+            let pairs = Math.max(1, Math.floor((defenseCapacity - BODYPART_COST[HEAL])
+                / (BODYPART_COST[MOVE] + BODYPART_COST[ATTACK])));
+            cfg = {body: ManagerCreeps.calcBodyPart({[MOVE]: pairs, [ATTACK]: pairs, [HEAL]: 1}), boostRes: {}};
+        }
         // 出生即定岗：接替兵**继承**被接替者的岗位（它接的就是这个岗），补员兵挑
         // 当时人最少的那组。岗位连同「离这组窝最近的矿点」一起写进任务，见
         // outerDefenseAssignmentForSpawn / generatorOuterHarDefenseTask。
