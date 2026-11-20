@@ -53,6 +53,12 @@ assert.match(lowSrc, /else if \(pickTasks\.length\) \{\s*\r?\n\s*creep\.addTask\
 assert.match(sourcesSrc, /!\(global\.StationHive && StationHive\.HiveNeedToFill\(this\.room\)\)/,
     "hive 缺能时满载 worker 不得把能量倒进容器，应直接回填 hive");
 
+// 2c) 援建房里的本地 worker 不能挂机：仍要派采集/建造任务
+assert.match(lowSrc, /assignDirectHarvest\(room, pro\.directHarvestSources\(room\), localWorkers\)/,
+    "援建房的中空手本地 worker 要派直采任务");
+assert.match(lowSrc, /localWorkers\.filter\(e => e\.isFree\(\)\)[\s\S]{0,400}generatorBuildTask/,
+    "援建房的满载本地 worker 要派建造任务（不能 tasks=0 挂机）");
+
 // 3) 低 RCL 建造优先容器/spawn，其次塔/extension，最后道路
 {
     const sites = [

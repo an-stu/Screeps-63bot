@@ -1,3 +1,9 @@
+## v0.78.283 — 援建出兵房 RCL>4；援建房本地 worker 不再挂机
+
+- 跨 shard 援建的**出兵房必须 RCL>4**：`spawnCrossShardBuilder` 对 RCL≤4 的出兵房直接拒绝（返回 false 让 mission 重试），避免容量不足时产出小体型 builder。
+- 援建房（`Memory.crossShardBuilds` 存在）的**在场本地 worker 不再直接 return 挂机**：空手派直采任务，满载按 hive > 工地 > 升级 分配；仍然不孵化新的本地爬（重活交给援建爬）。
+- 回归：出兵房 RCL4 拒绝援建请求、满配请求仍走 50 部件；lowLevel 援建闸保留任务分配；全量测试通过。
+
 ## v0.78.282 — 本地 worker 只出容量满配（援建体型太小的修复）
 
 - 低级房本地 worker（建造主力）体型与 keeper/carrier 同口径：只按**房间容量**取满配（RCL4 = 6 组 WORK6/CARRY6/MOVE6 = 1200），hive 付不起就按住等回满，不再按当 tick 余额缩成 800/400 的小工。

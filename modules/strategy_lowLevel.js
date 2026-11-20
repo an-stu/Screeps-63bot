@@ -114,7 +114,19 @@ let pro = {
             if (global.ManagerAutoPlanner) ManagerAutoPlanner.tryAutoBuildLowLevel0(room);
             // RCL<3 跨 shard 援建房：建设由跨 shard 建筑爬负责，本地 spawn 只产防守爬
             // （上面入侵分支已处理），不本地产 worker / 采集 / 升级（用户政策：一直援建、不自产）。
-            if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) return;
+            if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) {
+                // 援建房本地产爬停掉（用户政策），但**已在场的本地 worker 不能挂机**：
+                // 空手去直采；满载按 hive > 工地 > 升级 的顺序分配（2026-11-18）。
+                let localWorkers = room.creeps("worker");
+                pro.assignDirectHarvest(room, pro.directHarvestSources(room), localWorkers);
+                localWorkers.filter(e => e.isFree()).forEach(creep => {
+                    if (creep.storeEmpty()) return;
+                    if (StationHive.HiveNeedToFill(room)) creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+                    else if (StationWork.constructionNeedBuild(room) && !room.isDownGrade()) creep.addTask(StationWork.generatorBuildTask(creep));
+                    else creep.addTask(StationUpgrade.generatorUpgradeTask(room));
+                });
+                return;
+            }
             pro.assignDowngradeProtection(room, room.creeps("worker"));
             // if((Game.time+room.hashCode()) % 150 == 0  && Game.cpu.bucket>50 && room.memory.structMap){
             //     room.memory.structMap[STRUCTURE_SPAWN].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_SPAWN)})

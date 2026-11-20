@@ -375,6 +375,13 @@ function runExec(sb, time) {
     assert.equal(sb.missionFunc.spawnCrossShardBuilder(badSpawn), false, "wrong or unavailable spawn room is never accepted");
     assert.equal(world.spawnCalls, callsBeforeBadRoom);
 
+    // 出兵房 RCL<=4 只能产小体型 = 不接援建请求（用户 2026-11-18）
+    makeRoom(sb, "E49S30", {level:4, spawns:[{id:"lowSpawn", isActive:() => true}]});
+    const lowLevel = Object.assign({}, data, {requestId:"low-rcl", slotId:"low-rcl-slot", spawnRoom:"E49S30"});
+    const callsBeforeLow = world.spawnCalls;
+    assert.equal(sb.missionFunc.spawnCrossShardBuilder(lowLevel), false, "出兵房 RCL<=4 不得接援建");
+    assert.equal(world.spawnCalls, callsBeforeLow);
+
     const expired = Object.assign({}, data, {requestId:"expired", slotId:"expired-slot", expiresAt:world.now - 1});
     assert.equal(sb.missionFunc.spawnCrossShardBuilder(expired), true, "expired request returns a retry signal to target");
     assert.equal(world.missions.at(-1).mission.data.expired, true);
@@ -692,8 +699,8 @@ function runExec(sb, time) {
 // 14. 源码层：lowLevel 援建闸 + claimRoom 持久化援建配置必须存在。
 {
     const low = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_lowLevel.js"), "utf8");
-    assert.ok(/if \(Memory\.crossShardBuilds && Memory\.crossShardBuilds\[room\.name\]\) return;/.test(low),
-        "lowLevel 必须在援建房跳过本地 worker 生产（只留防守+工地）");
+    assert.ok(/if \(Memory\.crossShardBuilds && Memory\.crossShardBuilds\[room\.name\]\) \{[\s\S]{0,900}assignDirectHarvest[\s\S]{0,900}return;/.test(low),
+        "lowLevel 援建房：不产新爬，但必须给在场 worker 派任务（不能挂机）");
     const creepSrc = fs.readFileSync(path.join(__dirname, "..", "modules", "prototype_creep.js"), "utf8");
     assert.ok(/this\.room\.memory\.crossShardBootstrap = JSON\.parse\(JSON\.stringify\(bootstrap\)\);/.test(creepSrc),
         "claimRoom 必须持久化援建配置以供恢复");

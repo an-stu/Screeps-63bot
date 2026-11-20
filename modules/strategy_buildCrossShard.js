@@ -405,6 +405,10 @@ let pro = {
         }
         let room = Game.rooms[data.spawnRoom];
         if (!room || room.name != data.spawnRoom || !room.my || !room.find(FIND_MY_SPAWNS).length) return false;
+        // 用户政策（2026-11-18）：**出兵房 RCL 必须 >4**，否则只能产出小体型
+        // builder（大房容量才供得起 3000 的满配 50 部件）。请求返回 false 会按
+        // mission TTL 重试，不会留下半成品爬。
+        if (((room.controller && room.controller.level) || 0) <= 4) return false;
         if (!global.StationHive || typeof StationHive.trySpawn != "function") return false;
 
         // Requests from older target shards carry a smaller body. Always
