@@ -147,14 +147,13 @@ let pro = {
                         // log(StationWork.getLowLevelWorkerBodyConfig(spawnRoom,false))
                         if (creep) creep.addTask(StationSources.generatorReleaseAbleHarTask(data))
                         else if (room.creeps("worker").length < 20 && !room.find(FIND_FLAGS).filter(e => e.getPrefix() == "claimCrossShard").length) {
-                            let spawnRoom = StationHive.getClosestSpawnRoom(room, 7, 3, 15)
+                            let spawnRoom = StationHive.getClosestSpawnRoom(room, 7, 5, 15)
                             if (!spawnRoom) {
                                 return;
                             }
-                            // 用户政策（2026-11-18）：名单里的房不再为他房代孵 worker
-                            // （本地援建统一停用；这些目标房改走跨 shard 援建）。
-                            if (spawnRoom.name != room.name
-                                && (Memory.noAidSpawnRooms || []).indexOf(spawnRoom.name) >= 0) return;
+                            // 用户政策（2026-11-18）：出兵房按容量对应的 RCL<5 一律禁止
+                            // 本地援建（小房出兵只能产小体型，援建统一走跨 shard）。
+                            if (spawnRoom.name != room.name && (spawnRoom.level || 0) < 5) return;
                             if (spawnRoom.name != room.name && room.creeps("worker", false).length >= 4) return;// 如果不是自己的房间最多生4个
                             StationHive.trySpawn(spawnRoom, room.name, StationWork.getLowLevelWorkerBodyConfig(spawnRoom), "worker", [])
                         }

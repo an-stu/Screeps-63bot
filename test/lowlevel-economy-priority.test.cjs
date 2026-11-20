@@ -53,9 +53,11 @@ assert.match(lowSrc, /else if \(pickTasks\.length\) \{\s*\r?\n\s*creep\.addTask\
 assert.match(sourcesSrc, /!\(global\.StationHive && StationHive\.HiveNeedToFill\(this\.room\)\)/,
     "hive 缺能时满载 worker 不得把能量倒进容器，应直接回填 hive");
 
-// 2b2) 本地代孵黑名单：指定房间不得为他房出 worker
-assert.match(lowSrc, /Memory\.noAidSpawnRooms \|\| \[\]\)\.indexOf\(spawnRoom\.name\) >= 0\) return;/,
-    "Memory.noAidSpawnRooms 中的房间不得为他房代孵 worker");
+// 2b2) 本地代孵按出兵房 RCL 限制：<5 一律不派
+assert.match(lowSrc, /getClosestSpawnRoom\(room, 7, 5, 15\)/,
+    "本地代孵只会选中 RCL>=5 的出兵房");
+assert.match(lowSrc, /spawnRoom\.name != room\.name && \(spawnRoom\.level \|\| 0\) < 5\) return;/,
+    "出兵房 RCL<5 禁止派本地援建");
 
 // 2c) 援建房里的本地 worker 不能挂机：仍要派采集/建造任务
 assert.match(lowSrc, /assignDirectHarvest\(room, pro\.directHarvestSources\(room\), localWorkers\)/,
