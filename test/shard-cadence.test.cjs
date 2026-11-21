@@ -20,14 +20,17 @@ function method(source, header) {
 
 const high = read("strategy_highLevel.js");
 const lab = read("station_lab.js");
+const market = read("strategy_market.js");
 const sandbox = {
     MIN_CPU: false,
+    isSaveCpu: true,
     Game: {time: 1, shard: {name: "shard2"}, cpu: {bucket: 9999}},
     calls: 0,
 };
 vm.runInNewContext(`this.pro = {stationName: "stationLab", getRegBoostMap() { calls++; return {}; },
 ${method(high, "economyInterval() {")},
-${method(lab, "checkBoostLabsNeed(room){")}
+${method(lab, "checkBoostLabsNeed(room){")},
+${method(market, "shouldRunMarketRoom() {")}
 };`, sandbox);
 const room = {hashCode: () => 0, memory: {stationLab: {boostLabMap:{}}}};
 for (const shard of ["shard0","shard1","shard2","shard3"]) {
@@ -46,9 +49,16 @@ for (const shard of ["shard0","shard1","shard2","shard3"]) {
         sandbox.pro.checkBoostLabsNeed(room);
     }
     assert.equal(sandbox.calls, shard === "shard3" ? 2 : 6);
+    sandbox.Game.time = 10;
+    sandbox.Game.cpu.bucket = 4500;
+    assert.equal(sandbox.pro.shouldRunMarketRoom(), shard !== "shard3",
+        "the regular market batch on other shards must not be skipped by the shard3 savings gate");
+    sandbox.Game.time = 870;
+    assert.equal(sandbox.pro.shouldRunMarketRoom(), true,"shard3 retains its full eligibility window");
 }
 assert.match(lab, /const buffered = Game\.shard\?\.name === "shard3";\s*if \(buffered && \(Game\.time \+ room\.hashCode\(\)\) % 2/);
 assert.match(lab, /Game\.cpu\.bucket < \(Game\.shard\?\.name === "shard3" \? 8000 : 5000\)/);
 assert.match(read("main.js"), /Game\.cpu\.bucket >= 6000\s*&& HelperCpuUsed\.shouldRun\(Game\.shard\.name === "shard3" \? 25 : 10/);
+assert.match(read("manager_rooms.js"), /ROOM_REFRESH_INTERVAL = Game\.shard\?\.name === "shard3" \? 61 : 31/);
 
 console.log("shard-specific optional cadence: OK");

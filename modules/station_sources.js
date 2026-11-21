@@ -2493,6 +2493,94 @@ let pro = {
         });
         return cm;
     },
+    /** Return only the new interior between two unchanged same-room anchors. */
+    outerRoadLocalDetour(path, first, last) {
+        const before = path[first-1], after = path[last+1], conflict = path[first];
+        const name = conflict.roomName, room = Game.rooms[name];
+        if (!room || before?.roomName !== name || after?.roomName !== name) return;
+        const tile = p => p.x+50*p.y;
+        const start = tile(before), goal = tile(after);
+        if (start === goal) return;
+        const fixed = new Set(path.filter((p,i) => p.roomName === name && (i < first-1 || i > last+1)).map(tile));
+        const work = pro.outerRoadSourceContainerTileSet(room);
+        const terrain = Game.map.getRoomTerrain(name);
+        const resources = new Set([room.controller, room.mineral,
+            ...(room.source || (room.find ? room.find(FIND_SOURCES) || [] : []))]
+            .filter(o=>o?.pos).map(o=>tile(o.pos)));
+        const costs = new Map([[start,1],[goal,1]]);
+        const weight = (t,x,y) => {
+            if (costs.has(t)) return costs.get(t);
+            let cost = 0;
+            // One three-tile radius around the conflict; do not pick a new exit.
+            if (x>0 && x<49 && y>0 && y<49 && Math.abs(x-conflict.x)<=3 && Math.abs(y-conflict.y)<=3
+                && !fixed.has(t) && !resources.has(t) && !work.has(x+":"+y)
+                && !(terrain.get(x,y) & TERRAIN_MASK_WALL)
+                && !pro.roadBlockedByBlueprint({x,y,roomName:name})) {
+                const structures = room.lookForAt(LOOK_STRUCTURES,x,y);
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES,x,y);
+                if (pro.outerRoadTileWalkable(structures) && pro.outerRoadTileWalkable(sites)) {
+                    cost = structures.some(s=>s.structureType===STRUCTURE_ROAD) ? 1
+                        : (terrain.get(x,y) & TERRAIN_MASK_SWAMP) ? 10 : 4;
+                }
+            }
+            costs.set(t,cost);
+            return cost;
+        };
+        const pending = new Map([[start,0]]), previous = new Map(), visited = new Set();
+        while (pending.size) {
+            let current, best = Infinity;
+            for (const [t,d] of pending) if (d < best) { current=t; best=d; }
+            if (current === goal) {
+                const detour = [];
+                for (let t=previous.get(goal); t!==start; t=previous.get(t)) {
+                    detour.push(new RoomPosition(t%50,Math.floor(t/50),name));
+                }
+                // Avoid trading one occupied tile for a long new road.
+                if (detour.length <= last-first+5) return detour.reverse();
+                return;
+            }
+            pending.delete(current);
+            visited.add(current);
+            const cx=current%50, cy=Math.floor(current/50);
+            for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++) {
+                if ((!dx&&!dy)||cx+dx<0||cx+dx>49||cy+dy<0||cy+dy>49) continue;
+                const t=current+dx+50*dy;
+                if (visited.has(t)) continue;
+                const cost=weight(t,cx+dx,cy+dy);
+                if (!cost||best+cost>=(pending.get(t)??Infinity)) continue;
+                pending.set(t,best+cost);
+                previous.set(t,current);
+            }
+        }
+    },
+    spliceOuterRoadWorkTiles(path, crossingSig) {
+        const remaining = new Set(crossingSig.split("|"));
+        const key = p => p.roomName+":"+p.x+":"+p.y;
+        let replacement;
+        for (let first=1; first<path.length-1; first++) {
+            if (!remaining.has(key(path[first]))) continue;
+            let last=first;
+            while (last+1<path.length-1 && path[last+1].roomName===path[first].roomName
+                && remaining.has(key(path[last+1]))) last++;
+            const detour = pro.outerRoadLocalDetour(path,first,last);
+            if (!detour) { first=last; continue; }
+            for (let i=first;i<=last;i++) remaining.delete(key(path[i]));
+            replacement = path = path.slice(0,first).concat(detour,path.slice(last+1));
+            first += detour.length-1;
+        }
+        if (replacement) return {path:replacement,crossingSig:[...remaining].sort().join("|")};
+    },
+    saveOuterRoadPath(data, path, crossingSig) {
+        data.roadPathStr = pro.serializeOuterRoadPath(path);
+        data.roadPathTick = Game.time;
+        data.roadSourceContainerCrossingSig = crossingSig;
+        data.roadValidateTick = Game.time;
+        data.roadValidateOk = true;
+        delete data.roadCompleteTick;
+        delete data.roadPath;
+        delete data.roadPathError;
+        return pro.getOuterRoadPath(data);
+    },
     /**
      * 外矿修路路径：从矿区容器到主房间 storage 一次性寻路，
      * 主房间按蓝图路网走（规划的其他建筑不可走），结果按房间
@@ -2500,14 +2588,6 @@ let pro = {
      */
     ensureOuterRoadPath(data, spawnRoom) {
         let to = spawnRoom.storage && spawnRoom.storage.pos;
-        let preserveCached = undefined;
-        let preserveCrossingSig = "";
-        let preserveCrossingCount = 0;
-        const retainCachedRoute = () => {
-            if (!preserveCached) return undefined;
-            if (Game.time - data.roadPathTick >= OUTER_ROAD_PATH_TTL) data.roadPathTick = Game.time;
-            return preserveCached;
-        };
         if (data.roadPathStr && data.roadPathStr.indexOf("undefined") < 0 && data.roadPathTick) {
             let cached = pro.getOuterRoadPath(data);
             let end = cached && cached.last();
@@ -2522,14 +2602,16 @@ let pro = {
                 && pro.outerRoadWalkable(cached, data)) {
                 let crossingSig = data.roadSourceContainerCrossingSig || "";
                 if (crossingSig && data.roadSourceContainerAttemptSig !== crossingSig) {
-                    // Try at most once for this visible pass-through signature.
-                    // If no better route exists, keep the proven route and avoid
-                    // spending PathFinder again every production pass.
-                    preserveCached = cached;
-                    preserveCrossingSig = crossingSig;
-                    preserveCrossingCount = crossingSig.split("|").length;
+                    // A soft work-tile conflict merits only a small local patch:
+                    // preserve exits and the already paved road in other rooms.
                     data.roadSourceContainerAttemptSig = crossingSig;
-                } else {
+                    const repaired = pro.spliceOuterRoadWorkTiles(cached,crossingSig);
+                    if (repaired) {
+                        if (repaired.crossingSig) data.roadSourceContainerAttemptSig = repaired.crossingSig;
+                        else delete data.roadSourceContainerAttemptSig;
+                        return pro.saveOuterRoadPath(data,repaired.path,repaired.crossingSig);
+                    }
+                }
                 // **一条路走到底（用户 10-31）：只要路线仍走得通就续期，绝不为省几格
                 // 代价而换道。** 原来只有 TTL 内复用；TTL（1000 tick）一到就算旧路
                 // 完好也强制重算 —— plain=2 / road=1 下等价路径随时可能判给另一条
@@ -2537,7 +2619,6 @@ let pro = {
                 // 走不通（被新建筑封死）才走下面的 delete + 重算。
                 if (Game.time - data.roadPathTick >= OUTER_ROAD_PATH_TTL) data.roadPathTick = Game.time;
                 return cached;
-                }
             } else {
                 delete data.roadPathStr;
                 delete data.roadPathTick;
@@ -2577,7 +2658,7 @@ let pro = {
         });
         } catch (e) {
             data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
-            return retainCachedRoute();
+            return undefined;
         }
         // 蓝图约束可能把主房入口到 storage 的所有格子封死。首选确实无解时，退回
         // **不带蓝图但保留建筑代价**的搜索。
@@ -2597,7 +2678,7 @@ let pro = {
                 });
             } catch (e) {
                 data.roadPathError = "fallback search threw: " + e.message + " tick=" + Game.time;
-                return retainCachedRoute();
+                return undefined;
             }
         }
         let end = ret && ret.path && ret.path.last();
@@ -2621,34 +2702,13 @@ let pro = {
                 roadPath = ret.path.slice(0, -1);
             }
             if (roadPath.length > 1) {
-                let candidateCrossings = pro.outerRoadSourceContainerPassThroughs(roadPath, data);
-                if (preserveCached) {
-                    let routeRooms = new Set(roadPath.map(p => p.roomName));
-                    let unknown = preserveCrossingSig.split("|").filter(key => {
-                        let roomName = key.slice(0, key.indexOf(":"));
-                        return routeRooms.has(roomName) && !Game.rooms[roomName];
-                    });
-                    candidateCrossings = Array.from(new Set(candidateCrossings.concat(unknown))).sort();
-                }
-                if (preserveCached && candidateCrossings.length >= preserveCrossingCount) {
-                    // Keep the old route unless this search strictly removes at
-                    // least one visible source-container crossing.
-                    return retainCachedRoute();
-                }
-                data.roadPathStr = pro.serializeOuterRoadPath(roadPath);
-                data.roadPathTick = Game.time;
-                data.roadSourceContainerCrossingSig = candidateCrossings.join("|");
-                data.roadValidateTick = Game.time;
-                data.roadValidateOk = true;
                 delete data.roadSourceContainerAttemptSig;
-                delete data.roadPath;
-                delete data.roadPathError;
-                return pro.getOuterRoadPath(data);
+                return pro.saveOuterRoadPath(data,roadPath,pro.outerRoadSourceContainerPassThroughs(roadPath,data).join("|"));
             }
         }
         data.roadPathError = "no path: ret=" + (ret ? "pathLen=" + (ret.path || []).length + " incomplete=" + ret.incomplete + " ops=" + ret.ops : "undefined")
             + " from=" + from.roomName + ":" + from.x + "," + from.y + " to=" + to.roomName + ":" + to.x + "," + to.y + " tick=" + Game.time;
-        return retainCachedRoute();
+        return undefined;
     },
     /** 读取外矿路径：反序列化结果按 tick 全局缓存，多只爬共享 */
     getOuterRoadPath(data) {

@@ -29,6 +29,9 @@ const methods = [
     "blueprintWalkableSet(room)",
     "structMapPositions(value)",
     "outerRoadRoomCallback(roomName, useBlueprint, homeRoom, mergePaths)",
+    "outerRoadLocalDetour(path, first, last)",
+    "spliceOuterRoadWorkTiles(path, crossingSig)",
+    "saveOuterRoadPath(data, path, crossingSig)",
     "ensureOuterRoadPath(data, spawnRoom)",
 ].map(h => extractMethod(src, h));
 
@@ -125,31 +128,51 @@ assert.equal(cm.get(34, 11), 2, "源格本身不按容器工位惩罚（普通�
 assert.equal(cm.get(33, 13), 1, "道路工地仍按已修好计 1");
 assert.equal(cm.get(37, 12), 255, "墙仍然封死");
 
-// E52S29 before the near container was built: only the far route crosses it.
+// E52S29: cached-route repair is local, preserves the already-built cross-room
+// suffix, and never falls back to a full search for a merely occupied work tile.
 {
     const point = (x,y,roomName = "E52S29") => ({x,y,roomName});
     const route = (...points) => Object.assign(points, {last() { return this.at(-1); }});
     const homePos = point(12,17,"E51S29");
     const end = point(13,17,"E51S29");
     const old = route(point(7,29),point(6,28),point(5,27),end);
-    const detour = route(point(7,29),point(6,29),point(5,28),point(5,27),end);
+    const fullSearchPath = route(point(7,29),point(7,28),point(6,27),point(5,27),end);
     const far = {id: "far", roomName: "E52S29", x: 34, y: 11, roadPathStr: "old", roadPathTick: 1};
     const near = {id: "near", roomName: "E52S29", x: 7, y: 28};
     const sourcePositions = [{pos: point(34,11)}, {pos: point(7,28)}];
+    const farStructures = [
+        {structureType: "road", pos: point(6,29)},
+        {structureType: "extension", pos: point(7,28)},
+    ];
+    const farSites = [
+        {structureType: "container", pos: point(35,11)},
+        {structureType: "container", pos: point(6,28)},
+    ];
     sandbox.Game.rooms.E52S29 = {
-        name: "E52S29", memory: {}, getStructures: () => [], lookForAt: () => [],
+        name: "E52S29", memory: {}, getStructures: () => farStructures,
+        lookForAt(type, x, y) {
+            const list = type === "structures" ? farStructures : type === "sites" ? farSites : [];
+            return list.filter(e => e.pos.x === x && e.pos.y === y);
+        },
         find: k => k === sandbox.FIND_SOURCES ? sourcePositions : [],
-        constructionSite: [point(35,11),point(6,28)].map(pos => ({pos,structureType:"container"})),
+        constructionSite: farSites,
     };
     pro.stationName = "stationSources";
-    pro.getOuterRoadPath = data => data.roadPathStr === "new" ? detour : old;
-    pro.serializeOuterRoadPath = p => p === detour ? "new" : "old";
+    let patched;
+    pro.getOuterRoadPath = data => data.roadPathStr === "patched" ? patched
+        : data.roadPathStr === "invalid" ? fullSearchPath : old;
+    pro.serializeOuterRoadPath = p => {
+        if (p === old) return "old";
+        if (p === fullSearchPath) return "invalid";
+        patched = route(...p);
+        return "patched";
+    };
     let searches = 0;
     sandbox.PathFinder.search = (_, goal) => {
         assert.equal(goal.pos, homePos);
         assert.equal(goal.range, 1);
         searches++;
-        return {path: detour, incomplete: false};
+        return {path: fullSearchPath, incomplete: false};
     };
     Object.assign(sandbox, {
         Memory: {rooms: {}}, OUTER_ROAD_VALIDATE_INTERVAL: 50, OUTER_ROAD_PATH_TTL: 1000,
@@ -160,10 +183,56 @@ assert.equal(cm.get(37, 12), 255, "墙仍然封死");
         "near route may still start at its own container site");
     assert.deepEqual(Array.from(pro.outerRoadSourceContainerPassThroughs(old,far)), ["E52S29:6:28"]);
     const home = {name: "E51S29",storage: {pos: homePos}};
-    assert.equal(pro.ensureOuterRoadPath(far, home), detour);
-    assert.equal(far.roadPathStr, "new");
-    assert.equal(pro.ensureOuterRoadPath(far, home), detour);
-    assert.equal(searches, 1, "the improved route is reused, not re-searched");
+    pro.roadBlockedByBlueprint = pos => pos.roomName === "E52S29" && pos.x === 6 && pos.y === 27;
+    const localInterior = pro.outerRoadLocalDetour(old, 1, 1);
+    assert.ok(Array.isArray(localInterior) && localInterior.length > 0,
+        "a local detour returns only its replacement interior");
+    assert.ok(!localInterior.some(p => (p.x === 7 && p.y === 29) || (p.x === 5 && p.y === 27)),
+        "the local helper must exclude both unchanged anchors");
+    assert.ok(localInterior.every(p => p.roomName === "E52S29"
+        && Math.abs(p.x - 6) <= 3 && Math.abs(p.y - 28) <= 3),
+        "the local detour must stay in the same room and within radius three");
+    assert.ok(localInterior.some(p => p.x === 6 && p.y === 29),
+        "the local detour cost must prefer a built road");
+    assert.ok(!localInterior.some(p => (p.x === 7 && p.y === 28) || (p.x === 6 && p.y === 27)),
+        "existing blockers and planned non-road tiles must be excluded");
+    const repaired = pro.ensureOuterRoadPath(far, home);
+    assert.equal(repaired, patched);
+    assert.equal(far.roadPathStr, "patched");
+    assert.ok(!repaired.some(p => p.roomName === "E52S29" && p.x === 6 && p.y === 28),
+        "local repair must remove the source-container work-tile crossing");
+    assert.ok(repaired.some(p => p.roomName === "E52S29" && p.x === 6 && p.y === 29),
+        "equal-length alternatives prefer the already-built road");
+    assert.ok(!repaired.some(p => p.roomName === "E52S29" && p.x === 7 && p.y === 28),
+        "the detour must not cross an existing blocking extension");
+    assert.ok(!repaired.some(p => p.roomName === "E52S29" && p.x === 6 && p.y === 27),
+        "the detour must not cross a planned non-road building");
+    const repairedEnd = repaired.findIndex(p => p.roomName === "E51S29");
+    assert.deepEqual(Array.from(repaired.slice(repairedEnd), p => [p.roomName,p.x,p.y]),
+        Array.from(old.slice(3), p => [p.roomName,p.x,p.y]),
+        "local repair must preserve the exact cross-room exit/entry suffix");
+    assert.equal(searches, 0, "a walkable cached route with a work-tile crossing must not run full PathFinder");
+    assert.equal(pro.ensureOuterRoadPath(far, home), patched);
+    assert.equal(searches, 0, "the repaired route is reused without a full search");
+
+    // If the local area has no legal detour, keep the proven cache and still do
+    // not spend a room-wide search just to resolve a soft work-tile conflict.
+    const stuck = {id: "stuck", roomName: "E52S29", x: 34, y: 11,
+        roadPathStr: "old", roadPathTick: 1};
+    pro.roadBlockedByBlueprint = pos => pos.roomName === "E52S29"
+        && Math.abs(pos.x - 6) <= 3 && Math.abs(pos.y - 28) <= 3;
+    assert.equal(pro.ensureOuterRoadPath(stuck, home), old,
+        "an unfixable local conflict must retain the validated cached path");
+    assert.equal(stuck.roadPathStr, "old");
+    assert.equal(searches, 0, "an unfixable local conflict must not invoke full PathFinder");
+
+    // A genuinely invalid cached segment (visible non-walkable structure) still
+    // follows the existing full-search recovery path.
+    const invalid = {id: "invalid", roomName: "E52S29", x: 34, y: 11,
+        roadPathStr: "invalid", roadPathTick: 1};
+    pro.roadBlockedByBlueprint = () => false;
+    assert.equal(pro.ensureOuterRoadPath(invalid, home), fullSearchPath);
+    assert.equal(searches, 1, "a visible blocker on the cached route still triggers full PathFinder");
 }
 
 console.log("outer road only protects the keeper's container tile");

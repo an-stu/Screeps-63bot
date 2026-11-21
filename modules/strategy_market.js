@@ -1362,13 +1362,18 @@ let pro = {
         if (map[key] !== undefined) return map[key];
         return map[key] = Game.market.calcTransactionCost(100, fromRoom, toRoom) / 100;
     },
+    shouldRunMarketRoom() {
+        if (!isSaveCpu || Game.shard?.name !== "shard3") return true;
+        const {time, cpu:{bucket}} = Game;
+        return !((bucket < 5000 && time % 29 !== 0)
+            || (bucket < 8000 && time % 10 !== 0)
+            || (bucket < 9000 && time % 5 !== 0)
+            || (bucket < 9500 && time % 3 !== 0));
+    },
     exec(room) {
-        if (isSaveCpu && (
-            (Game.cpu.bucket < 5000 && (Game.time) % 29 != 0) ||
-            (Game.cpu.bucket < 8000 && (Game.time) % 10 != 0) ||
-            (Game.cpu.bucket < 9000 && (Game.time) % 5 != 0) ||
-            (Game.cpu.bucket < 9500 && (Game.time) % 3 != 0)
-        )) return;//+room.hashCode() 同一 tick 计算，省点 计算需要的 资源
+        // The main loop still batches market work and holds it in emergency
+        // MIN_CPU mode on every shard. Only shard3 adds a second cadence gate.
+        if (!pro.shouldRunMarketRoom()) return;
         // let time = Game.cpu.getUsed();
 
         if (!room.my || !room.terminal || !room.terminal.my) return;

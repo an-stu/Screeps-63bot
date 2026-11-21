@@ -9,7 +9,7 @@ global.SPECIAL_ROOM = new Set([
 
 const ROOM_MEMORY_TTL = 20000;
 const ROOM_TTL_SWEEP_INTERVAL = 10;
-const ROOM_REFRESH_INTERVAL = 61;
+const ROOM_REFRESH_INTERVAL = Game.shard?.name === "shard3" ? 61 : 31;
 /**
  * 强制清空某房移动缓存的周期。
  *
