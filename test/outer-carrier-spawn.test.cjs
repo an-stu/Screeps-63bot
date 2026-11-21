@@ -134,9 +134,10 @@ assert.ok(!/trySpawnOuterHarCarrier\(flag\.pos\.roomName, room\)/.test(
 // 复检通过就续期复用，走不通才 delete + 重算。
 assert.ok(/if \(Game\.time - data\.roadPathTick >= OUTER_ROAD_PATH_TTL\) data\.roadPathTick = Game\.time;/.test(code),
     "TTL 到期后旧路仍走得通必须续期复用（一条路走到底，不得重算换道铺平行 site）");
-assert.ok(code.indexOf("outerRoadWalkable(cached, data)") >= 0
-    && code.indexOf("if (Game.time - data.roadPathTick >= OUTER_ROAD_PATH_TTL) data.roadPathTick = Game.time;")
-        > code.indexOf("outerRoadWalkable(cached, data)"),
+const validatedRoute = code.indexOf("outerRoadWalkable(cached, data)");
+assert.ok(validatedRoute >= 0
+    && code.indexOf("if (Game.time - data.roadPathTick >= OUTER_ROAD_PATH_TTL) data.roadPathTick = Game.time;", validatedRoute)
+        > validatedRoute,
     "续期必须发生在可走复检通过之后（新建筑封路仍会触发重算）");
 
 // ── ⑫ Overmind 式修路：危急优先 + 兄弟路线合并 ─────────────────────────────

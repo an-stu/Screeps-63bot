@@ -45,13 +45,14 @@ const OUTER_RETREAT_STALE_TICKS = 5000;
  * 结果**外矿路线会特意从主房 keeper 的岗位上穿过去** —— 实测 W33N55 的路线压在
  * (3,24) 上，而主房 keeper 正是站在那儿挖 (4,25) 的。两者互相挤占，影响正常挖矿。
  *
- * 取 8：比空地 2 / 沼泽 5 都高，足够让寻路宁可多走一两格绕开；但不封死，
- * 万一真没有别的路也还走得通（不会把路线逼成 incomplete）。
+ * 取 40：比空地、沼泽和已修道路都高，鼓励远程路线绕开；仍是软代价，
+ * 必要时能穿过，绝不封死自己的必经起点。
  *
  * ⚠️ 只保护容器格本身（2026-11-18 用户定案）：原来的「矿点 3×3 整圈」会让路线
  * 无谓绕路（E41S29 的 road 全被抬到 8）。keeper 的工位是容器格，其余邻格不必让。
  */
 const OUTER_ROAD_WORK_TILE_COST = 8;
+const OUTER_ROAD_SOURCE_CONTAINER_COST = 40;
 /**
  * 巡逻时在每个 keeperLair 驻守点停留多久（tick）。
  *
@@ -202,23 +203,6 @@ const OUTER_ROAD_STUCK_INVALIDATE = 25;
  * 现在单次失败只回退到原生 moveTo（照样走得动），连续失败超过这个 tick 数才作废。
  */
 const OUTER_ROAD_FAIL_TOLERANCE = 100;
-/**
- * 主房边缘 link（外矿卸货口）：外矿搬运爬把能量倒在**主房内那段共用路线旁边**的
- * link 上就掉头，由 link 送进主房 link 网（link 之间任意距离互传），砍掉它在
- * 主房内的最后一段路。一个 link 服务以该房为主房的所有矿点（路线在主房内共用）。
- * 发送端（攒够多少能量才发给 hub/升级 link）在 StationCarry.transformLink。
- */
-/**
- * 搬运爬在边缘 link 边**最多等**多少个 tick（只在「link 满、这一 tick 一克都
- * 塞不进」时计数）。
- *
- * 为什么需要等：link 只有 800 容量，而一趟货 1250+，塞不完的部分本来只能走
- * storage —— 那等于白省（还是得跑完主房那段路）。link 的发送轮询
- * （StationCarry.transformLink）约每 7~10 tick 跑一次，所以在这里等几 tick
- * 比带着货再走二十格划算得多。上限的意义是**绝不楔死**：link 没人收
- * （hub 满 / 被拆 / 关掉了站）时，等满这个数就照旧走 storage。
- */
-const OUTER_EDGE_LINK_WAIT = 12;
 /**
  * 矿区干涸时，搬运爬最多在容器边等多少个 tick 再带着「不满半仓」的货回主房。
  *
@@ -1374,6 +1358,20 @@ Creep.prototype.registerStationSourcesDefenseOutRoom = function () {
 Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     let task = this.lastTask();
     let target = this.lastTaskObj();
+    // Migrate an active legacy edge-link task in place. Preserve its task stack,
+    // payload, and cached-path index; only restore the source-to-storage endpoint.
+    if ((target && target.structureType == STRUCTURE_LINK)
+        || (!target && task.roadDir !== -1 && task.roomName === this.memory?.roomName)) {
+        let home = this.mainRoom();
+        if (!home || !home.storage) return;
+        target = home.storage;
+        task.id = target.id;
+        task.roomName = target.pos.roomName;
+        task.x = target.pos.x;
+        task.y = target.pos.y;
+        task.roadDir = 1;
+        delete task.edgeLinkWait;
+    }
     let data = task.mineRoom && Memory.rooms[task.mineRoom]
         && Memory.rooms[task.mineRoom][pro.stationName]
         && Memory.rooms[task.mineRoom][pro.stationName][task.stationId];
@@ -1388,7 +1386,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         this.popTask();
         // 卸货点同样走 outerCarryDropOff（主房边缘 link 在位就卸它）
         let dropHome = this.mainRoom();
-        let dropOff = (dropHome && pro.outerCarryDropOff(dropHome)) || (dropHome && dropHome.storage);
+        let dropOff = dropHome && dropHome.storage;
         if (!dropOff) return this.execLastTask();
         this.addTask([
             UtilsTask.task(dropHome.storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
@@ -1404,7 +1402,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     if (task.keepBuilding && complete && this.store[RESOURCE_ENERGY] > 0) {
         this.popTask();
         let doneHome = this.mainRoom();
-        let doneDropOff = (doneHome && pro.outerCarryDropOff(doneHome)) || (doneHome && doneHome.storage);
+        let doneDropOff = doneHome && doneHome.storage;
         if (!doneDropOff) return this.execLastTask();
         this.addTask([
             UtilsTask.task(doneHome.storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
@@ -1429,29 +1427,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // shard3_83436569_2 已经因为无视野抛过一次。解析不出来就按「已到端点」处理：
     // 下面的卸货有 `target && target.store` 守卫，随后照常掉头/返回。
     if (!target || this.pos.isNearTo(target) || (this.store[RESOURCE_ENERGY] == 0 && noRoute)) {
-        if (target && target.store && this.store[RESOURCE_ENERGY] > 0) {
-            // 卸货点是**边缘 link** 时：link 只有 800 容量，而这一趟有 1250+。
-            // 先把塞得进的塞进去，剩下的**有界地等** link 把能量发给主房
-            // （link 轮询约每 7~10 tick 一次）—— 在 link 边等几 tick，比带着
-            // 几百能量再走完主房那二十格划算得多。等满
-            // OUTER_EDGE_LINK_WAIT 个「link 满、一克都塞不进」的 tick 就收手，
-            // 剩下的交给栈里的 fillRes(storage) 兜底（**绝不楔死**）。
-            let energy = this.store[RESOURCE_ENERGY];
-            if (target.structureType == STRUCTURE_LINK) {
-                let free = target.store.getFreeCapacity(RESOURCE_ENERGY);
-                let amount = Math.min(energy, free);
-                let wait = task.edgeLinkWait || 0;
-                if (free <= 0) wait++;                       // 这一 tick 一克都塞不进
-                if (amount < energy && wait < OUTER_EDGE_LINK_WAIT) {
-                    if (amount > 0) this.transfer(target, RESOURCE_ENERGY, amount);
-                    task.edgeLinkWait = wait;
-                    return;                                   // 留在 link 边等它发走
-                }
-                if (amount > 0) this.transfer(target, RESOURCE_ENERGY, amount);
-            } else {
-                this.transfer(target, RESOURCE_ENERGY);
-            }
-        }
+        if (target && target.store && this.store[RESOURCE_ENERGY] > 0) this.transfer(target, RESOURCE_ENERGY);
         this.popTask();
         if (task.keepBuilding && this.store[RESOURCE_ENERGY] > 0 && data) {
             // 确定完成后再退出：端点强制刷新完成度检查
@@ -1460,7 +1436,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
                 // 掉头：回程那一趟的卸货点同样走 outerCarryDropOff（边缘 link 在位就卸它）
                 let backHome = this.mainRoom();
                 let nextTarget = task.roadDir == 1 ? pro.getOuterMineTarget(data)
-                    : ((backHome && pro.outerCarryDropOff(backHome)) || (backHome && backHome.storage));
+                    : (backHome && backHome.storage);
                 let ops = {
                     mineRoom: task.mineRoom,
                     stationId: task.stationId,
@@ -1815,7 +1791,7 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         if (!home || !home.storage) return;   // 主房/storage 拿不到：本 tick 跳过（此前这里抛 TypeError 刷 lastError）
         // 卸货点：主房边缘 link 在位就卸它（回程同路、先经过它），否则 storage。
         // 到场时 link 满/消失由卸货函数自己回退，见 outerCarryDropOff。
-        let dropOff = pro.outerCarryDropOff(home) || home.storage;
+        let dropOff = home.storage;
         let isRoadBuilder = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
         if (data && !pro.outerRoadComplete(data) && isRoadBuilder) {
             // 道路未修好时只让带 WORK 的专职 carrier 修路。普通搬运爬
@@ -1825,13 +1801,8 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
             }));
         } else {
             let roadTask = [
-                // 栈底：最终兜底把能量送进 storage（边缘 link 满/被拆时接住剩下的货）
                 UtilsTask.task(home.storage, "fillRes", undefined, { resType: RESOURCE_ENERGY }),
-                // 边缘 link 在位时插一层：先往 link 卸，卸不下的往下漏给 storage
-                dropOff != home.storage
-                    ? UtilsTask.task(dropOff, "fillRes", undefined, { resType: RESOURCE_ENERGY })
-                    : undefined,
-                // 栈顶：沿缓存路线走回主房，到场（link 或 storage）卸货
+                // 栈顶：沿缓存路线走回主房，到场后卸到 storage。
                 UtilsTask.task(dropOff, "harvestEnergyOuterCarryRoadBuilder", undefined, {
                     mineRoom: task.roomName, stationId: task.id, roadDir: 1,
                 }) // 想致富先修路：source -> storage
@@ -2255,6 +2226,77 @@ let pro = {
         // 实测 (22,30) 上 nuker 与己方 rampart 共存，判定成可走，寻路直接穿过 nuker。
         return !structures.some(s => !pro.outerRoadStructureWalkable(s));
     },
+    /** Build source-container tile positions once per visible room and tick. */
+    outerRoadSourceContainerTileSet(room) {
+        if (!room) return new Set();
+        let cached = room._outerRoadSourceContainerTileCache;
+        if (cached && cached.tick == Game.time) return cached.tiles;
+        let sources = room.find ? (room.find(FIND_SOURCES) || []) : (room.source || []);
+        if (!sources.length) {
+            let empty = new Set();
+            room._outerRoadSourceContainerTileCache = {tick: Game.time, tiles: empty};
+            return empty;
+        }
+        let structures = room.getStructures ? room.getStructures()
+            : (room.find ? (room.find(FIND_STRUCTURES) || []) : []);
+        let sites = room.constructionSite || (room.find && typeof FIND_CONSTRUCTION_SITES != "undefined"
+            ? (room.find(FIND_CONSTRUCTION_SITES) || []) : []);
+        let containerTiles = new Set();
+        let structuresByTile = {};
+        structures.forEach(s => {
+            let key = s.pos.x + ":" + s.pos.y;
+            (structuresByTile[key] || (structuresByTile[key] = [])).push(s);
+            if (s.structureType == STRUCTURE_CONTAINER) containerTiles.add(key);
+        });
+        sites.forEach(s => {
+            if (s.structureType == STRUCTURE_CONTAINER) containerTiles.add(s.pos.x + ":" + s.pos.y);
+        });
+        let planned = room.memory && room.memory.structMap && room.memory.structMap[STRUCTURE_CONTAINER];
+        pro.structMapPositions(planned).forEach(p => {
+            containerTiles.add((p.x != undefined ? p.x : p[0]) + ":" + (p.y != undefined ? p.y : p[1]));
+        });
+        let tiles = new Set();
+        sources.forEach(src => {
+            let pos = src.pos || src;
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    let x = pos.x + dx, y = pos.y + dy;
+                    if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                    let key = x + ":" + y;
+                    if (!containerTiles.has(key)) continue;
+                    let at = structuresByTile[key] || [];
+                    if (at.some(s => !pro.outerRoadStructureWalkable(s))) continue;
+                    tiles.add(key);
+                }
+            }
+        });
+        room._outerRoadSourceContainerTileCache = {tick: Game.time, tiles: tiles};
+        return tiles;
+    },
+    /** Visible source-container tiles on a route, excluding this mine's start. */
+    outerRoadSourceContainerPassThroughs(path, data) {
+        let ownContainer = data && data.container && data.container.pos ? data.container
+            : (data && data.container && Game.getObjectById ? Game.getObjectById(data.container) : undefined);
+        let ownPos = ownContainer && ownContainer.pos;
+        let tilesByRoom = {};
+        let crossings = new Set();
+        for (let i = 0; i < path.length; i++) {
+            let p = path[i];
+            let room = Game.rooms[p.roomName];
+            if (!room) continue;
+            if (!tilesByRoom[p.roomName]) tilesByRoom[p.roomName] = pro.outerRoadSourceContainerTileSet(room);
+            let key = p.x + ":" + p.y;
+            if (!tilesByRoom[p.roomName].has(key)) continue;
+            let isOwnStart = i === 0 && ownPos && (ownPos.roomName || data.roomName) == p.roomName
+                && ownPos.x == p.x && ownPos.y == p.y;
+            // If the source has only a visible container site, its first path
+            // tile may be the start even before a container ID is registered.
+            if (!isOwnStart && !ownPos && i === 0 && data && p.roomName == data.roomName
+                && Math.max(Math.abs(p.x - data.x), Math.abs(p.y - data.y)) <= 1) isOwnStart = true;
+            if (!isOwnStart) crossings.add(p.roomName + ":" + key);
+        }
+        return Array.from(crossings).sort();
+    },
     outerRoadWalkable(path, data) {
         if (data.roadValidateTick && Game.time - data.roadValidateTick < OUTER_ROAD_VALIDATE_INTERVAL) {
             return data.roadValidateOk !== false;
@@ -2265,8 +2307,20 @@ let pro = {
             if (!room) continue;
             let st = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
             if (!st.length) continue;
-            if (!pro.outerRoadTileWalkable(st)) { data.roadValidateOk = false; return false; }
+            if (!pro.outerRoadTileWalkable(st)) {
+                data.roadValidateOk = false;
+                data.roadSourceContainerCrossingSig = "";
+                delete data.roadSourceContainerAttemptSig;
+                return false;
+            }
         }
+        let crossings = pro.outerRoadSourceContainerPassThroughs(path, data);
+        let visibleRooms = new Set(path.filter(p => Game.rooms[p.roomName]).map(p => p.roomName));
+        let priorCrossings = (data.roadSourceContainerCrossingSig || "").split("|").filter(Boolean);
+        // Keep previously observed pass-throughs for route rooms that are now
+        // unseen; lack of vision is not evidence that the crossing disappeared.
+        let retained = priorCrossings.filter(key => !visibleRooms.has(key.slice(0, key.indexOf(":"))));
+        data.roadSourceContainerCrossingSig = Array.from(new Set(retained.concat(crossings))).sort().join("|");
         data.roadValidateOk = true;
         return true;
     },
@@ -2385,22 +2439,12 @@ let pro = {
             if (cm.get(site.pos.x, site.pos.y) >= 254) return;   // 该格有不可走建筑，保持封死
             cm.set(site.pos.x, site.pos.y, 1);
         });
-        // 只抬高 keeper 的**实际站位**（源旁的容器/容器工地那一格），不再保护整圈：
-        // 用户 2026-11-18 —— 工位就是容器格，整圈 3×3 抬高会让外矿路线无谓绕路
-        // （E41S29 实测：源 (34,11) 旁的 road (33~35,12) 全被抬到 8，路线被迫拐去 y=13）。
-        room.find(FIND_SOURCES).forEach(src => {
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    let x = src.pos.x + dx, y = src.pos.y + dy;
-                    if (x < 0 || x > 49 || y < 0 || y > 49) continue;
-                    if (cm.get(x, y) >= 254) continue;   // 已判不可走的别动
-                    let keeperTile = room.lookForAt(LOOK_STRUCTURES, x, y)
-                        .some(s => s.structureType == STRUCTURE_CONTAINER)
-                        || room.lookForAt(LOOK_CONSTRUCTION_SITES, x, y)
-                        .some(s => s.structureType == STRUCTURE_CONTAINER);
-                    if (keeperTile) cm.set(x, y, OUTER_ROAD_WORK_TILE_COST);
-                }
-            }
+        // 源容器格（包括尚未建成的蓝图点）软惩罚 40，优先让外矿道路绕过 keeper
+        // 的站位；仍可走，不会封住本矿自己的路线起点。邻格道路继续复用代价 1。
+        pro.outerRoadSourceContainerTileSet(room).forEach(key => {
+            let xy = key.split(":");
+            let x = Number(xy[0]), y = Number(xy[1]);
+            if (cm.get(x, y) < 254) cm.set(x, y, OUTER_ROAD_SOURCE_CONTAINER_COST);
         });
         // 升级容器 + 正在使用的 upgrader 站位同样抬高：
         // 外矿路线不该穿过控制器旁的升级工位（用户 2026-11-18）。
@@ -2410,7 +2454,7 @@ let pro = {
         let upgradeMem = room.memory && room.memory[upgradeStation];
         if (upgradeMem && upgradeMem[STRUCTURE_CONTAINER]) {
             let upgradeContainer = Game.getObjectById(upgradeMem[STRUCTURE_CONTAINER]);
-            if (upgradeContainer && upgradeContainer.pos) {
+            if (upgradeContainer && upgradeContainer.pos && cm.get(upgradeContainer.pos.x, upgradeContainer.pos.y) < 254) {
                 cm.set(upgradeContainer.pos.x, upgradeContainer.pos.y, OUTER_ROAD_WORK_TILE_COST);
             }
         }
@@ -2431,7 +2475,15 @@ let pro = {
      * serializePath 紧凑序列化存储，OUTER_ROAD_PATH_TTL tick 重算一次
      */
     ensureOuterRoadPath(data, spawnRoom) {
-        let to = spawnRoom.storage ? spawnRoom.storage.pos : (spawnRoom.terminal ? spawnRoom.terminal.pos : undefined);
+        let to = spawnRoom.storage && spawnRoom.storage.pos;
+        let preserveCached = undefined;
+        let preserveCrossingSig = "";
+        let preserveCrossingCount = 0;
+        const retainCachedRoute = () => {
+            if (!preserveCached) return undefined;
+            if (Game.time - data.roadPathTick >= OUTER_ROAD_PATH_TTL) data.roadPathTick = Game.time;
+            return preserveCached;
+        };
         if (data.roadPathStr && data.roadPathStr.indexOf("undefined") < 0 && data.roadPathTick) {
             let cached = pro.getOuterRoadPath(data);
             let end = cached && cached.last();
@@ -2444,6 +2496,16 @@ let pro = {
             if (end && to && end.roomName == to.roomName
                 && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1
                 && pro.outerRoadWalkable(cached, data)) {
+                let crossingSig = data.roadSourceContainerCrossingSig || "";
+                if (crossingSig && data.roadSourceContainerAttemptSig !== crossingSig) {
+                    // Try at most once for this visible pass-through signature.
+                    // If no better route exists, keep the proven route and avoid
+                    // spending PathFinder again every production pass.
+                    preserveCached = cached;
+                    preserveCrossingSig = crossingSig;
+                    preserveCrossingCount = crossingSig.split("|").length;
+                    data.roadSourceContainerAttemptSig = crossingSig;
+                } else {
                 // **一条路走到底（用户 10-31）：只要路线仍走得通就续期，绝不为省几格
                 // 代价而换道。** 原来只有 TTL 内复用；TTL（1000 tick）一到就算旧路
                 // 完好也强制重算 —— plain=2 / road=1 下等价路径随时可能判给另一条
@@ -2451,9 +2513,13 @@ let pro = {
                 // 走不通（被新建筑封死）才走下面的 delete + 重算。
                 if (Game.time - data.roadPathTick >= OUTER_ROAD_PATH_TTL) data.roadPathTick = Game.time;
                 return cached;
+                }
+            } else {
+                delete data.roadPathStr;
+                delete data.roadPathTick;
+                delete data.roadSourceContainerCrossingSig;
+                delete data.roadSourceContainerAttemptSig;
             }
-            delete data.roadPathStr;
-            delete data.roadPathTick;
         }
         let from = Game.getObjectById(data.container);
         from = from ? from.pos : new RoomPosition(data.x, data.y, data.roomName);
@@ -2476,19 +2542,18 @@ let pro = {
             if (!mergePaths.length) mergePaths = undefined;
         }
         try {
-            ret = PathFinder.search(from, to, {
+            ret = PathFinder.search(from, { pos: to, range: 1 }, {
             plainCost: 1,
             swampCost: 5,
             maxRooms: 8,
             // 两房路线叠加主房蓝图代价时，默认 2,000 ops 会在刚进主房
             // 就提前结束。此搜索仅在缓存失效时运行，允许一次完整求解。
             maxOps: 20000,
-            range: 1,
             roomCallback: roomName => pro.outerRoadRoomCallback(roomName, true, spawnRoom.name, mergePaths),
         });
         } catch (e) {
             data.roadPathError = "search threw: " + e.message + " tick=" + Game.time;
-            return undefined;
+            return retainCachedRoute();
         }
         // 蓝图约束可能把主房入口到 storage 的所有格子封死。首选确实无解时，退回
         // **不带蓝图但保留建筑代价**的搜索。
@@ -2499,21 +2564,20 @@ let pro = {
         // 就卡死原地蹭，路也永远"修不完"。现在兜底同样带建筑代价，只是去掉蓝图软代价。
         if (!ret || ret.incomplete) {
             try {
-                ret = PathFinder.search(from, to, {
+                ret = PathFinder.search(from, { pos: to, range: 1 }, {
                     plainCost: 1,
                     swampCost: 5,
                     maxRooms: 8,
                     maxOps: 20000,
-                    range: 1,
                     roomCallback: roomName => pro.outerRoadRoomCallback(roomName, false, spawnRoom.name, mergePaths),
                 });
             } catch (e) {
                 data.roadPathError = "fallback search threw: " + e.message + " tick=" + Game.time;
-                return undefined;
+                return retainCachedRoute();
             }
         }
         let end = ret && ret.path && ret.path.last();
-        // 判据只看「终点是否贴着 storage/terminal（≤1 格）」。
+        // 判据只看「终点是否贴着 storage（≤1 格）」。
         //
         // **不能再用 `!ret.incomplete`**：storage 本身是建筑，在代价矩阵里是 255，
         // PathFinder 够不到目标格时会返回 `incomplete=true`，但路径其实已经停在
@@ -2527,14 +2591,32 @@ let pro = {
             && Math.max(Math.abs(end.x - to.x), Math.abs(end.y - to.y)) <= 1;
         if (ret && reachesDestination && ret.path.length > 1) {
             let roadPath = ret.path;
-            // 剔除终点=storage/terminal 自身的位置：被建筑占位，爬永远走不上去会卡死。
+            // 剔除终点=storage 自身的位置：被建筑占位，爬永远走不上去会卡死。
             // PathFinder 会把被阻挡的 goal（range>0）也放进 path。
             if (end && end.roomName == to.roomName && end.x == to.x && end.y == to.y) {
                 roadPath = ret.path.slice(0, -1);
             }
             if (roadPath.length > 1) {
+                let candidateCrossings = pro.outerRoadSourceContainerPassThroughs(roadPath, data);
+                if (preserveCached) {
+                    let routeRooms = new Set(roadPath.map(p => p.roomName));
+                    let unknown = preserveCrossingSig.split("|").filter(key => {
+                        let roomName = key.slice(0, key.indexOf(":"));
+                        return routeRooms.has(roomName) && !Game.rooms[roomName];
+                    });
+                    candidateCrossings = Array.from(new Set(candidateCrossings.concat(unknown))).sort();
+                }
+                if (preserveCached && candidateCrossings.length >= preserveCrossingCount) {
+                    // Keep the old route unless this search strictly removes at
+                    // least one visible source-container crossing.
+                    return retainCachedRoute();
+                }
                 data.roadPathStr = pro.serializeOuterRoadPath(roadPath);
                 data.roadPathTick = Game.time;
+                data.roadSourceContainerCrossingSig = candidateCrossings.join("|");
+                data.roadValidateTick = Game.time;
+                data.roadValidateOk = true;
+                delete data.roadSourceContainerAttemptSig;
                 delete data.roadPath;
                 delete data.roadPathError;
                 return pro.getOuterRoadPath(data);
@@ -2542,7 +2624,7 @@ let pro = {
         }
         data.roadPathError = "no path: ret=" + (ret ? "pathLen=" + (ret.path || []).length + " incomplete=" + ret.incomplete + " ops=" + ret.ops : "undefined")
             + " from=" + from.roomName + ":" + from.x + "," + from.y + " to=" + to.roomName + ":" + to.x + "," + to.y + " tick=" + Game.time;
-        return undefined;
+        return retainCachedRoute();
     },
     /** 读取外矿路径：反序列化结果按 tick 全局缓存，多只爬共享 */
     getOuterRoadPath(data) {
@@ -2562,7 +2644,7 @@ let pro = {
         let cache = global._outerRoadPathCache = global._outerRoadPathCache || {};
         let key = data.roomName + ":" + data.id;
         let c = cache[key];
-        if (!c || c.tick != Game.time) {
+        if (!c || c.tick != Game.time || c.str !== str) {
             let path = [];
             let sep = str.indexOf(";");
             if (sep < 0) return undefined;
@@ -2571,7 +2653,7 @@ let pro = {
             for (let i = 0; i + 2 < body.length; i += 3) {
                 path.push(new RoomPosition(pro.dc(body[i + 1]), pro.dc(body[i + 2]), rooms[pro.dc(body[i])]));
             }
-            cache[key] = c = { tick: Game.time, path: path };
+            cache[key] = c = { tick: Game.time, str: str, path: path };
         }
         return c.path;
     },
@@ -3086,8 +3168,7 @@ let pro = {
      * 会被整趟跳过。
      */
     outerCarryDropOff(home) {
-        if (!home) return undefined;
-        return pro.outerEdgeLink(home) || home.storage;
+        return home && home.storage;
     },
     /**
      * 搬运爬**身边**值得捡的地面掉落能量堆（只挑能量）。
@@ -4305,11 +4386,6 @@ let pro = {
                 pro.ensureOuterRoadPath(data, spawnRoom);
                 pro.placeOuterRoadSites(data, spawnRoom);
                 pro.cleanupOuterRoadSites(data, spawnRoom);
-                // 主房边缘 link（外矿卸货口）：只与主房有关，重复调用是幂等的。
-                // 用 HelperError.catchError 包住：这个函数一旦抛异常，整个外矿
-                // pass 会在中途断掉 —— 外矿生产全停（allDefendersFull 那次的
-                // 教训），而它只是个可选优化，绝不能拖垮采运。
-                HelperError.catchError(() => pro.ensureOuterEdgeLink(spawnRoom), "outerEdgeLink:" + spawnRoom.name);
                 // 安全网：任务栈被扒空的 carrier 没有任何地方会补任务，会永久闲置
                 // 在原地（见 harvestEnergyOuterCarryRoadBuilder 里 store==0 分支的
                 // 注释）。这里发现就立刻把搬运任务派回去，比事后在控制台里一只只

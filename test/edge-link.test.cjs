@@ -4,7 +4,7 @@
  * 三块都用 VM 跑**真实模块源码**（桩掉 Game / Memory / Creep / Room），
  * 而不是断言源码字符串 —— 负对照能直接验（把实现改回旧写法，测试必须失败）：
  *   · 边缘 link 选址：必须贴路线、不压路点、不占已有建筑/工地
- *   · 搬运爬回程：link 在位卸 link、满了有界等待后回退 storage（不许楔死）
+ *   · 搬运爬回程：不再使用边缘 Link，旧任务直接改发 Storage
  *   · 体型：部件数 ≤ 50（旧版修路爬 77 部件，spawnCreep 直接 ERR_INVALID_ARGS）
  *   · 防守满员闸：编制不满时暂停外矿生产（旧版 allDefendersFull 未定义，
  *     每 6 tick 抛 ReferenceError 把整条外矿生产链打断）
@@ -401,8 +401,8 @@ function edgeLinkFixture({ links = [], sites = [], roads = [], level = 8 } = {})
     assert.equal(s.ctx.StationSources.outerCarryDropOff(s.spawnRoom).id, "st1", "没有 link 时卸货点回退 storage");
 }
 
-// ───────────────────────── 3) 搬运爬回程卸货（有界等待 + 回退） ─────────────────────────
-function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBuilding, wait } = {}) {
+// ───────────────────────── 3) 回程只交 Storage，兼容旧 Link 任务 ─────────────────────────
+function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBuilding, wait, missingTarget, missingStorage } = {}) {
     const ctx = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx);
     const calls = [];
@@ -419,13 +419,14 @@ function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBui
     const creep = {
         ticksToLive: 500,
         room: { name: "W33N55" },
+        memory: { roomName: "W33N55" },
         store: makeStore({ energy: 1250 }, 1700),
         pos: { isNearTo: () => true, inRangeTo: () => true, getRangeTo: () => 1 },
         getPartCnt: () => 0,
         getActiveBodyparts: () => 0,
         mainRoom: () => ctx.Game.rooms.W33N55,
         lastTask: () => task,
-        lastTaskObj: () => target,
+        lastTaskObj: () => missingTarget ? undefined : target,
         popTask() { calls.push(["pop"]); return this; },
         execLastTask() { calls.push(["exec"]); return this; },
         addTask() { calls.push(["add"]); return this; },
@@ -434,30 +435,30 @@ function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBui
         build() { return CONSTANTS.OK; },
     };
     ctx.Game.rooms = {
-        W33N55: { name: "W33N55", storage: { id: "st1", pos: { x: 21, y: 34, roomName: "W33N55" } } },
+        W33N55: { name: "W33N55", storage: missingStorage ? undefined : {
+            id: "st1", structureType: "storage", store: makeStore({}, 1e6),
+            pos: { x: 21, y: 34, roomName: "W33N55" },
+        } },
     };
     ctx.Creep.prototype.harvestEnergyOuterCarryRoadBuilder.call(creep);
     return { calls, task, target };
 }
 
 {
-    // link 只有 800 空位、身上 1250 → 卸 800 并**留在原地等**（不能 pop 走人）
+    // 存量旧任务：Link 有空位也不能分批向 Link 卸货。
     const { calls, task } = dropOffFixture({ linkFree: 800 });
     const t = calls.find(c => c[0] === "transfer");
-    assert.deepEqual(t, ["transfer", "lk", "energy", 800], "只能卸 link 装得下的部分");
-    assert.ok(!calls.some(c => c[0] === "pop"), "还有货没卸完：不能把任务弹掉");
-    assert.equal(task.edgeLinkWait || 0, 0, "这一 tick 有进展，不消耗等待配额");
+    assert.deepEqual(t, ["transfer", "st1", "energy", undefined], "旧 Link 任务应改发 Storage");
+    assert.deepEqual([task.id, task.x, task.y], ["st1", 21, 34]);
+    assert.equal(task.edgeLinkWait, undefined);
 }
 
 {
-    // link 满：前几 tick 只是等（记配额），到上限就 pop 让 fillRes(storage) 兜底
-    const { calls, task } = dropOffFixture({ linkFree: 0, wait: 0 });
-    assert.ok(!calls.some(c => c[0] === "transfer"), "link 满了一克都塞不进，不能再发 transfer");
-    assert.ok(!calls.some(c => c[0] === "pop"), "第一 tick 满了还不该放弃，先等一轮");
-    assert.equal(task.edgeLinkWait, 1, "没进展的 tick 要记进等待配额");
-
-    const capped = dropOffFixture({ linkFree: 0, wait: 12 });
-    assert.ok(capped.calls.some(c => c[0] === "pop"), "等满上限必须 pop，交给 storage 兜底（绝不楔死）");
+    const stale = dropOffFixture({ linkFree: 0, wait: 12, missingTarget: true });
+    assert.deepEqual(stale.calls.find(c => c[0] === "transfer"), ["transfer", "st1", "energy", undefined],
+        "消失的旧 Link 同样应改发 Storage");
+    const noStorage = dropOffFixture({ linkFree: 800, missingStorage: true });
+    assert.deepEqual(noStorage.calls, [], "没有 Storage 时保留货物，不回退 Link");
 }
 
 {
@@ -469,7 +470,7 @@ function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBui
 }
 
 {
-    // harvestEnergyOuterCarry：回程任务栈 = [fillRes(storage), fillRes(edgeLink), roadBuilder(edgeLink)]
+    // harvestEnergyOuterCarry：有旧边缘 Link，回程任务栈仍只有 Storage 两层。
     const ctx = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx);
     const link = { id: "lk", structureType: CONSTANTS.STRUCTURE_LINK, store: makeStore({}, 800), pos: { x: 2, y: 22, roomName: "W33N55" } };
@@ -505,8 +506,9 @@ function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBui
     assert.ok(added.length >= 2, "回程必须压上卸货任务");
     const top = added[added.length - 1];
     assert.equal(top.taskName, "harvestEnergyOuterCarryRoadBuilder");
-    assert.equal(top.id, "lk", "栈顶（先执行）要走回边缘 link 卸货");
-    assert.ok(added.some(t => t.taskName === "fillRes" && t.id === "lk"), "link 卸货层在位");
+    assert.equal(top.id, "st1", "栈顶（先执行）沿缓存路回 Storage");
+    assert.ok(added.every(t => t.id === "st1"), "边缘 Link 在位也不插入 Link 卸货层");
+    assert.equal(ctx.StationSources.outerCarryDropOff(home).id, "st1");
     assert.ok(added.some(t => t.taskName === "fillRes" && t.id === "st1"), "storage 兜底层必须在栈底接住剩下的能量");
     assert.equal(added[0].id, "st1", "storage 兜底在栈底（最后执行）");
 
@@ -1045,9 +1047,10 @@ function defenceGateFixture(defenders) {
         memory: {}, getEnergyCapacityAvailable: () => 12900,
     };
     S.trySpawnOuterHarCarrier("W34N55", spawnRoom);
-    for (const c of ["route", "sites", "cleanup", "edge"]) {
+    for (const c of ["route", "sites", "cleanup"]) {
         assert.ok(calls.includes(c), `补员被挡住时「${c}」这类外矿路维护仍必须执行`);
     }
+    assert.ok(!calls.includes("edge"), "外矿路线维护不再自动选建边缘 Link");
     assert.equal(spawned, 0, "超过 carrier 上限 → 一只都不补（闸门本身照旧）");
 }
 

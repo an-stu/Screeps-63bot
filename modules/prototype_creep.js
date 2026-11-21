@@ -694,6 +694,20 @@ Creep.prototype.fillRes = function () {
     if (task.resType == undefined) throw new Error("resType no found:" + task)
     let obj = this.lastTaskObj();
 
+    // A pre-upgrade outer-hauler stack can already be on its old Link
+    // fillRes leaf. Keep the load and migrate the leaf to home Storage;
+    // ordinary in-room Link tasks are deliberately unaffected.
+    if (this.memory?.role === "outerHarvestEnergyCarrier" && task.resType === RESOURCE_ENERGY
+        && (!obj || obj.structureType === STRUCTURE_LINK)) {
+        const home = this.mainRoom();
+        if (obj || task.roomName === home?.name) {
+            const storage = home?.storage;
+            if (!storage) return;
+            obj = storage;
+            Object.assign(task, {id: storage.id, roomName: storage.pos.roomName, x: storage.pos.x, y: storage.pos.y});
+        }
+    }
+
     if (this[task.id]) return this.popTask();
     if (!obj) {
         this[task.id] = true;
