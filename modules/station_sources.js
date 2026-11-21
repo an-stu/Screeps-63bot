@@ -39,6 +39,23 @@ const OUTER_KEEPER_FLEE_RANGE = 6;
 const OUTER_RETREAT_CLEAR_TICKS = 100;
 const OUTER_RETREAT_STALE_TICKS = 5000;
 /**
+ * 撤退期间**完全失去视野**的宽限（tick）。
+ *
+ * 全员撤出后房里没人 → 没有视野 → `outerRetreatCheck` 数不到 invader → 撤退状态
+ * 永远解除不了，只能等 5000 tick 硬过期（≈4.3 小时停矿）。盲态超过这个宽限就
+ * 作废撤退，让生产链重新派爬进房拿视野（进去看到 ≥2 会当 tick 重新落闸），
+ * 同时 strategy_outerHarvest 会在盲态期间派 1-MOVE 探头。
+ */
+const OUTER_RETREAT_BLIND_TICKS = 250;
+/**
+ * 无威胁的普通矿房，防守爬安静多少 tick 后退役（回收成能量）。
+ *
+ * 实测（2026-11-21 shard2 E52S29）：`outerInvaderSeen={n:0}`、`outerLairCount=0`，
+ * 却长期站着 2 只防守爬 —— 没有窝就没有岗位（outerDefensePosts 为空），
+ * 它们只会原地站到 ttl 耗尽，还白占编制与 CPU。300 tick ≈ 16 分钟安静期。
+ */
+const OUTER_DEFENDER_IDLE_RECYCLE = 300;
+/**
  * 「我方矿工站位」的寻路代价：**只有源旁的容器/容器工地那一格**（keeper 站桩位）。
  *
  * 为什么要抬高：矿点旁的 container 在代价矩阵里是最低代价 1（为了让寻路复用已有路），
@@ -382,7 +399,7 @@ Creep.prototype.concatStationSources = function () {
 
 Creep.prototype.harvestEnergyOuterKeeper = function () {
     let task = this.headTask();
-    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, true);
+    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, true);
     if (task.roomName != this.room.name) {
         // 去程沿缓存路径走（路径方向 source→storage，去程是反向 -1），不脱离路线
         let data = Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
@@ -490,7 +507,7 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
 
 Creep.prototype.harvestMineralOuterKeeper = function () {
     let task = this.headTask();
-    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
+    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     // 矿物记录挂在 StationMineral.stationName（一房一条、不按 id 分桶），
     // 不是本模块的 "stationSources"。原来按 [pro.stationName][task["id"]] 取，
     // 拿到的是 undefined，下一行 station["container"] 必定抛 TypeError ——
@@ -567,6 +584,9 @@ Creep.prototype.harvestMineralOuterKeeper = function () {
  */
 Creep.prototype.harvestMineralOuterCarry = function () {
     let task = this.headTask();
+    // 撤退政策要覆盖**所有**外矿爬（用户 2026-11-21）：矿物搬运以前没有这一行，
+    // ≥2 invader 时它照样进房送死。
+    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     let rm = Memory.rooms[task.roomName];
     let data = rm && rm[StationMineral.stationName];
     let resType = data && data["resType"];
@@ -630,6 +650,7 @@ Creep.prototype.harvestMineralOuterCarry = function () {
  */
 Creep.prototype.buildOuterMineralContainer = function () {
     let task = this.headTask();
+    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     let rm = Memory.rooms[task.roomName];
     let data = rm && rm[StationMineral.stationName];
     let container = data && Game.getObjectById(data["container"]);
@@ -920,7 +941,7 @@ Creep.prototype.harvestEnergy = function () {
 /** 预定 */
 Creep.prototype.reserveOuterHar = function () {
     let task = this.headTask();
-    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
+    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     if (task.roomName != this.room.name) {
         this.goTo(task); // reserver 目标是控制器，不走矿区道路
     } else {
@@ -1014,10 +1035,16 @@ Creep.prototype.coreBuster = function () {
 
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
-    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
+    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     // T3 强化的小队防守爬：目标房的 invader 清干净一段时间 → 回主房贴 spawn 回收。
     // 放在最前面：回收期间不再接战、不再巡逻，直接走人（见 squadDefenderShouldRecycle）。
     if (pro.squadDefenderShouldRecycle(this, task)) {
+        return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
+    }
+    // 普通矿房清干净之后没有岗位可守（没有窝 ⇒ outerDefensePosts 为空），
+    // 不退役就会一直站到 ttl 耗尽（实测 shard2 E52S29 站了 2 只）。
+    if (pro.outerDefenderIdleShouldRetire(this, this.room)) {
+        delete this.memory.targetId;
         return this.popTask().addTask([UtilsTask.taskData("recycleCreep")]).execLastTask();
     }
     if (task.roomName != this.room.name) {
@@ -1353,6 +1380,8 @@ Creep.prototype.registerStationSourcesDefenseOutRoom = function () {
 /** 搬运修路策略 */
 Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     let task = this.lastTask();
+    // 路线维修爬同样在矿房里干活 → 撤退政策一视同仁（任务里矿房叫 mineRoom）。
+    if (task && task.mineRoom && pro.outerRetreatCheck(task.mineRoom)) return pro.outerRetreatMove(this, false);
     let target = this.lastTaskObj();
     // Migrate an active legacy edge-link task in place. Preserve its task stack,
     // payload, and cached-path index; only restore the source-to-storage endpoint.
@@ -1559,7 +1588,7 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
 /** 搬运策略 */
 Creep.prototype.harvestEnergyOuterCarry = function () {
     let task = this.headTask();
-    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
+    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     let rm = Memory.rooms[this.headTask().roomName];
     if (rm && rm[pro.stationName] && rm[pro.stationName][this.headTask().id]) {
         // ── 动态平衡（0.78.225，用户 2026-11-08「carrier 有点不平衡，动态平衡」）──
@@ -2816,13 +2845,17 @@ let pro = {
         let room = typeof roomOrName == "string" ? rooms[roomOrName] : roomOrName;
         let roomName = room ? room.name : roomOrName;
         if (!roomName) return null;
+        let mem = Memory.rooms[roomName] || (Memory.rooms[roomName] = {});
         if (room) {
             let count = pro.outerInvaderCount(room);
-            let mem = Memory.rooms[roomName] || (Memory.rooms[roomName] = {});
             if (count >= 2) mem.outerRetreat = {tick: Game.time, count: count};
             else if (mem.outerRetreat && Game.time - mem.outerRetreat.tick >= OUTER_RETREAT_CLEAR_TICKS) {
                 delete mem.outerRetreat;
             }
+        } else if (mem.outerRetreat && Game.time - mem.outerRetreat.tick > OUTER_RETREAT_BLIND_TICKS) {
+            // 没视野的宽限：全员撤出后没人能数 invader，旧实现只能等 5000 tick
+            // 硬过期（≈4.3 小时停矿）。宽限一到就作废撤退，让爬重新进房拿视野。
+            delete mem.outerRetreat;
         }
         return pro.outerRetreatState(roomName);
     },
@@ -4604,6 +4637,10 @@ let pro = {
             .filter(e => e.structureType == STRUCTURE_KEEPER_LAIR)
             .sort((a, b) => (a.pos.x - b.pos.x) || (a.pos.y - b.pos.y));
         room._defLairsCache = lairs;
+        // 无视野时的编制要用「上次看到几个窝」（keeper 房编制 = ceil(lairs/2)）。
+        if (lairs.length && room.memory && room.memory.outerLairCount !== lairs.length) {
+            room.memory.outerLairCount = lairs.length;
+        }
         return lairs;
     },
     /**
@@ -4866,6 +4903,20 @@ let pro = {
      * 例外：房里出现 ≥2 只 Invader 爬（远程风筝小队）时编制固定 **1** —— 那时
      * 防守爬会换 T3 远程体型，一只就够（见下面 invader 分支的说明）。
      */
+    /**
+     * 无威胁的**普通矿房**（没有 keeper 窝）里，安静的防守爬应当退役回主房。
+     * keeper 房永远需要驻守（窝会持续出 keeper），只要还有 lair 就一律留下。
+     */
+    outerDefenderIdleShouldRetire(creep, room) {
+        if (!creep || !creep.memory || !room) return false;
+        // 单元测试的 room 桩 / 无视野伪 room：一律不退役
+        if (typeof room.find != "function") return false;
+        if (pro.defenseLairs(room).length) { delete creep.memory.idleSince; return false; }
+        let hostiles = pro.defenseHostiles(room);
+        if (hostiles.length) { delete creep.memory.idleSince; return false; }
+        if (!creep.memory.idleSince) { creep.memory.idleSince = Game.time; return false; }
+        return Game.time - creep.memory.idleSince > OUTER_DEFENDER_IDLE_RECYCLE;
+    },
     outerDefenseQuota(room, roomName) {
         // 基线可用 Memory.marketSettings.outerDefenseBase 覆盖（缺省 2）：
         // 设成 1 = 只留一只防守爬兜整个房间。逐 tick 模拟（含地形/现有道路/受伤降速）
@@ -4878,11 +4929,15 @@ let pro = {
         base = Math.max(1, Math.min(4, base));
         roomName = roomName || (room && room.name);
         if (!room) {
-            // 无视野时用最近一次看到的 Invader 数（由 outerInvaderCount 写入）：
-            // 1 只 ⇒ 编制 1；≥2 ⇒ 1（强化小队）。
-            let seen = roomName && Memory.rooms[roomName] && Memory.rooms[roomName].outerInvaderSeen;
-            if (seen && seen.t && Game.time - seen.t < OUTER_HOSTILE_MEMORY_TICKS) return 1;
-            return base;
+            // 无视野时用最近一次看到的数据（outerInvaderCount / defenseLairs 写入）：
+            let mem = (roomName && Memory.rooms[roomName]) || {};
+            let seen = mem.outerInvaderSeen;
+            if (seen && seen.n >= 1) return 1;                    // 看到过 invader ⇒ 1 只
+            let lairs = Number(mem.outerLairCount) || 0;
+            if (lairs) return Math.max(base, Math.min(4, Math.ceil(lairs / 2)));   // keeper 房按窝数
+            // **普通矿房默认 1 只**（用户 2026-11-21：只有一个 invader 时一只就够）。
+            // 原来退回 base=2，而「没视野」正是外矿最常见状态 ⇒ 单 invader 房间长期派 2 只。
+            return 1;
         }
         let hostiles = room.find(FIND_HOSTILE_CREEPS);
         // invader **远程风筝小队**（≥2 只 Invader 爬）：防守爬这时会换成 T3 远程

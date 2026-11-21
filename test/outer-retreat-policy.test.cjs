@@ -1,124 +1,114 @@
-// 0.78.288 回归：外矿「1 个 Invader 可打、≥2 全员撤」政策。
-// - outerRetreatCheck 在有视野时维护 Memory.rooms[room].outerRetreat
-// - Invader≥2 进入撤退；降到 <2 持续 100 tick 后解除；失去视野 5000 tick 硬过期
-// - 派发循环、keeper/carrier/defenser 都会读取该状态
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
-const src = fs.readFileSync(path.join(root, "modules", "station_sources.js"), "utf8");
-const outer = fs.readFileSync(path.join(root, "modules", "strategy_outerHarvest.js"), "utf8");
+const read = f => fs.readFileSync(path.join(root, "modules", f), "utf8");
+const strip = t => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
-function extractMethod(source, header) {
-    const start = source.indexOf(header);
-    assert.ok(start >= 0, "missing " + header);
-    const open = source.indexOf("{", start);
-    let depth = 0;
-    for (let i = open; i < source.length; i++) {
-        if (source[i] === "{") depth++;
-        else if (source[i] === "}" && --depth === 0) return source.slice(start, i + 1);
-    }
-    throw new Error("unterminated " + header);
-}
+const src = read("station_sources.js");
+const code = strip(src);
+const strat = strip(read("strategy_outerHarvest.js"));
 
-const METHODS = ["outerInvaderCount(room)", "outerRetreatState(roomName)", "outerRetreatCheck(roomOrName)"]
-    .map(h => extractMethod(src, h));
+// ── 外矿防守 / 撤退政策（用户 2026-11-21）──────────────────────────────────
+//
+// 现场问题三条：
+//   ① 防守爬有时不去打 invader（卡着）
+//   ② 只有一个 invader 却派了两只
+//   ③ 多 invader 时要求「所有爬都离开房间直到它们死亡」
+// 根因：撤退状态只能靠 5000 tick 硬过期解除（≈4.3 小时停矿），因为全员撤出后
+// 房里没视野、数不到 invader；且无视野时编制退回基线 2。
 
-const CLEAR = Number(/const OUTER_RETREAT_CLEAR_TICKS = (\d+)/.exec(src)[1]);
-const STALE = Number(/const OUTER_RETREAT_STALE_TICKS = (\d+)/.exec(src)[1]);
-
-function makeWorld() {
-    const sandbox = {
-        Memory: {rooms: {}},
-        Game: {time: 1000, rooms: {}},
-        FIND_HOSTILE_CREEPS: "hostiles",
-        OUTER_RETREAT_CLEAR_TICKS: CLEAR,
-        OUTER_RETREAT_STALE_TICKS: STALE,
-        console: {log() {}},
-    };
-    sandbox.global = sandbox;
-    vm.runInNewContext("var pro = {" + METHODS.join(",\n") + "};", sandbox);
-    return sandbox;
-}
-
-function roomWith(sb, name, invaders) {
-    const hostiles = [];
-    for (let i = 0; i < invaders; i++) hostiles.push({owner: {username: "Invader"}});
-    const room = {name, find: () => hostiles, getHostileCreeps: () => hostiles};
-    sb.Game.rooms[name] = room;
-    return room;
-}
-
-// 1) 1 个 Invader ⇒ 不撤退（可以派防守打）
+// ① 盲态宽限：必须存在，且在外视野分支里用上
+assert.ok(/const OUTER_RETREAT_BLIND_TICKS = \d+;/.test(code), "必须有 OUTER_RETREAT_BLIND_TICKS 常量");
 {
-    const sb = makeWorld();
-    const room = roomWith(sb, "E42S29", 1);
-    assert.equal(sb.pro.outerRetreatCheck(room), null, "单个 invader 不触发撤退");
-    assert.equal(sb.Memory.rooms["E42S29"].outerRetreat, undefined);
+    const m = /outerRetreatCheck\(roomOrName\) \{[\s\S]*?\n    \},/.exec(code);
+    assert.ok(m, "outerRetreatCheck 必须存在");
+    const body = m[0];
+    assert.ok(/else if \(mem\.outerRetreat && Game\.time - mem\.outerRetreat\.tick > OUTER_RETREAT_BLIND_TICKS\)/.test(body),
+        "没视野时必须按 OUTER_RETREAT_BLIND_TICKS 作废撤退（否则全员撤出后永远解除不了）");
+    assert.ok(/delete mem\.outerRetreat;/.test(body), "宽限到期要删掉撤退状态");
 }
 
-// 2) ≥2 个 Invader ⇒ 进入撤退，Memory 记录
+// ② 编制：无视野时普通矿房（没有 lair 记录）默认 1 只
 {
-    const sb = makeWorld();
-    const room = roomWith(sb, "E42S29", 2);
-    const retreat = sb.pro.outerRetreatCheck(room);
-    assert.ok(retreat, "两个 invader 必须撤退");
-    assert.equal(retreat.count, 2);
-    assert.ok(sb.Memory.rooms["E42S29"].outerRetreat, "撤退状态写进 Memory（无视野仍然有效）");
+    const m = /outerDefenseQuota\(room, roomName\) \{[\s\S]*?\n    \},/.exec(code);
+    assert.ok(m, "outerDefenseQuota 必须存在");
+    const body = m[0];
+    assert.ok(/let lairs = Number\(mem\.outerLairCount\) \|\| 0;/.test(body), "无视野时要用缓存的 lair 数");
+    assert.ok(/if \(lairs\) return Math\.max\(base, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);/.test(body),
+        "keeper 房按窝数算编制");
+    assert.ok(/return 1;\s*$/m.test(body) || /\n            return 1;/.test(body),
+        "普通矿房无视野时编制必须退回 1（不能退回基线 2）");
+    assert.ok(/if \(seen && seen\.n >= 1\) return 1;/.test(body), "看到过 ≥1 只 invader ⇒ 1 只");
 }
+// lair 数要被缓存，否则无视野时算不出 keeper 房编制
+assert.ok(/room\.memory\.outerLairCount = lairs\.length;/.test(code), "defenseLairs 必须缓存 outerLairCount");
 
-// 3) 敌人降到 1：撤退状态在 100 tick 内保持，之后解除（1 个可以打）
+// ③ 所有外矿爬都要撤退（缺一个就会有人留在房里送死）
+const OUTER_TASKS = [
+    "harvestEnergyOuterKeeper", "harvestMineralOuterKeeper", "harvestMineralOuterCarry",
+    "buildOuterMineralContainer", "reserveOuterHar", "outerDefense",
+    "harvestEnergyOuterCarry", "harvestEnergyOuterCarryRoadBuilder",
+];
+for (const name of OUTER_TASKS) {
+    const re = new RegExp(`Creep\\.prototype\\.${name} = function \\(\\) \\{[\\s\\S]{0,400}?outerRetreatCheck`);
+    assert.ok(re.test(code), `${name} 必须做撤退检查`);
+}
+// 空任务栈不能抛 TypeError（那会每 tick 静默卡死）
+assert.ok(!/if \(pro\.outerRetreatCheck\(task\.roomName\)\)/.test(code), "撤退检查必须先判 task 存在");
+assert.ok(/if \(task && task\.mineRoom && pro\.outerRetreatCheck\(task\.mineRoom\)\)/.test(code), "路线维修爬用 mineRoom 判撤退");
+
+// ④ 撤退闸必须排在派兵之前（否则派进去的兵当 tick 又被撤，在房界来回走）
 {
-    const sb = makeWorld();
-    let room = roomWith(sb, "E42S29", 2);
-    sb.pro.outerRetreatCheck(room);
-    sb.Game.time += 50;
-    room = roomWith(sb, "E42S29", 1);
-    assert.ok(sb.pro.outerRetreatCheck(room), "降到 1 后的 100 tick 内仍保持撤退（防止马上回去被反打）");
-    sb.Game.time += CLEAR - 49;
-    assert.equal(sb.pro.outerRetreatCheck(room), null, "持续 <2 达到 100 tick 后解除撤退");
-    assert.equal(sb.Memory.rooms["E42S29"].outerRetreat, undefined);
+    const retreatIdx = strat.indexOf("StationSources.outerRetreatCheck(targetRoomName)");
+    const defIdx = strat.indexOf("StationSources.trySpawnOuterDefenser(targetRoomName");
+    // 用带 pro. 前缀的**调用点**，否则 indexOf 会命中更靠前的函数定义
+    const coreIdx = strat.indexOf("pro.spawnCoreBuster(targetRoomName");
+    assert.ok(retreatIdx > 0 && defIdx > retreatIdx, "撤退闸必须在 trySpawnOuterDefenser 之前");
+    assert.ok(coreIdx > retreatIdx, "撤退闸必须在 core 专队之前");
 }
 
-// 4) 失去视野：Memory 状态仍生效，超过 5000 tick 才硬过期
+// ⑤ 盲态探头：撤退期间派 1-MOVE scouter 拿视野
+assert.ok(/retreatProbe\(flag, spawnRoom, targetRoomName\);/.test(strat), "撤退分支必须调用 retreatProbe");
+assert.ok(/retreatProbe\(flag, spawnRoom, mineRoom\) \{/.test(strat), "retreatProbe 必须存在");
 {
-    const sb = makeWorld();
-    sb.Memory.rooms["E42S29"] = {outerRetreat: {tick: 1000, count: 3}};
-    assert.ok(sb.pro.outerRetreatState("E42S29"), "无视野时撤退状态必须继续生效");
-    sb.Game.time = 1000 + STALE - 1;
-    assert.ok(sb.pro.outerRetreatState("E42S29"));
-    sb.Game.time = 1000 + STALE + 1;
-    assert.equal(sb.pro.outerRetreatState("E42S29"), null, "超过硬过期时间后允许恢复派发");
-    assert.equal(sb.Memory.rooms["E42S29"].outerRetreat, undefined);
+    const m = /retreatProbe\(flag, spawnRoom, mineRoom\) \{[\s\S]*?\n    \},/.exec(strat);
+    assert.ok(m, "retreatProbe 实现必须可定位");
+    const body = m[0];
+    assert.ok(/if \(Game\.rooms\[mineRoom\]\) return;/.test(body), "有视野时不重复派探头");
+    assert.ok(/Game\.time - mem\.retreatProbeAt < 40/.test(body), "探头要节流（40 tick）");
+    assert.ok(/\[MOVE\], "scouter"/.test(body), "探头必须是最便宜的 1-MOVE scouter");
 }
 
-// 5) 源码钉子：派发循环、三种外矿爬、防守出兵闸都必须接上撤退政策
-assert.ok(/StationSources\.outerRetreatCheck\(targetRoomName\)\) continue;/.test(outer),
-    "外矿派发循环必须在撤退时暂停");
-assert.ok(/defenseCost > defenseCapacity/.test(src),
-    "防守体型必须按出兵房容量收缩，避免低 RCL 房永远生不出防守锁死采运");
-for (const fn of ["Creep.prototype.harvestEnergyOuterKeeper = function () {",
-    "Creep.prototype.harvestEnergyOuterCarry = function () {",
-    "Creep.prototype.outerDefense = function () {",
-    "Creep.prototype.reserveOuterHar = function () {",
-    "Creep.prototype.harvestMineralOuterKeeper = function () {"]) {
-    const idx = src.indexOf(fn);
-    assert.ok(idx >= 0, fn + " 必须存在");
-    assert.ok(src.slice(idx, idx + 400).includes("outerRetreatCheck"),
-        fn + " 必须读取撤退状态（≥2 全员离房）");
-}
-assert.ok(/outerInvaderCount\(harRoom\) >= 2\) return null;/.test(src),
-    "≥2 Invader 时不得派防守（全员撤离）");
-assert.ok(/e\.owner && e\.owner\.username == "Invader"\) \/\/ invader 全房可打/.test(src),
-    "invader 在全房任何位置都必须成为防守目标（不能只守窝区）");
-assert.ok(/if \(invaders\.length === 1\)/.test(src),
-    "单个 invader 的防守编制必须收敛到 1");
-assert.ok(/outerInvaderSeen/.test(src),
-    "无视野时用最近一次看到的 invader 数决定编制");
-assert.ok(/outerInvaderCount\(harRoom\) >= 2\) return null;/.test(src),
-    "≥2 invader 时不得派防守（全员离房）");
-assert.ok(src.includes("[RANGED_ATTACK]: 22"), "强化小队体型定义保留（供单只/新版编排复用）");
+// ⑥ ≥2 invader 时不派防守（撤退政策接管）
+assert.ok(/if \(harRoom && pro\.outerInvaderCount\(harRoom\) >= 2\) return null;/.test(code),
+    "≥2 invader 时必须停止派防守爬");
 
-console.log("outer retreat policy: 1 invader fightable, 2+ retreat");
+// ⑦ 无威胁的普通矿房：防守爬要退役，不能站到 ttl 耗尽
+//
+// 实测 2026-11-21 shard2 E52S29：outerInvaderSeen={n:0}、outerLairCount=0，
+// 却长期站着 2 只防守爬（没有窝就没有岗位，它们只会原地站到死）。
+assert.ok(/const OUTER_DEFENDER_IDLE_RECYCLE = \d+;/.test(code), "必须有闲置退役阈值常量");
+assert.ok(/outerDefenderIdleShouldRetire\(creep, room\) \{/.test(code), "必须有退役判定函数");
+{
+    const m = /outerDefenderIdleShouldRetire\(creep, room\) \{[\s\S]*?\n    \},/.exec(code);
+    const body = m[0];
+    assert.ok(/if \(pro\.defenseLairs\(room\)\.length\) \{ delete creep\.memory\.idleSince; return false; \}/.test(body),
+        "keeper 房（有 lair）永不退役");
+    assert.ok(/if \(hostiles\.length\) \{ delete creep\.memory\.idleSince; return false; \}/.test(body),
+        "有活体敌人时不退役");
+    assert.ok(/OUTER_DEFENDER_IDLE_RECYCLE/.test(body), "退役判据要用安静时长");
+}
+// 必须接在 outerDefense 的**撤退检查之后**、且用回收任务（不是 suicide）
+{
+    const m = /Creep\.prototype\.outerDefense = function \(\) \{[\s\S]*?\n\};/.exec(code);
+    assert.ok(m, "outerDefense 必须可定位");
+    const body = m[0];
+    const retireIdx = body.indexOf("outerDefenderIdleShouldRetire");
+    assert.ok(retireIdx > 0, "outerDefense 必须调用退役判定");
+    assert.ok(body.indexOf("recycleCreep", retireIdx) > retireIdx, "退役要走 recycleCreep（回收能量）");
+    assert.ok(body.indexOf("outerRetreatCheck") < retireIdx, "撤退检查要排在退役之前（撤退优先）");
+}
+
+console.log("outer retreat policy checks passed");

@@ -98,6 +98,27 @@ let pro = {
      *
      * 规模按 core 等级（见 coreBusterPlan）：一级只上 ATTACK；更高等级补 HEAL。
      */
+    /**
+     * 撤退期间的**盲态探头**（用户 2026-11-21：多 invader 全员离房直到它们死）。
+     *
+     * 全员撤出后房里没人 → 没有视野 → `outerRetreatCheck` 数不到 invader，
+     * 撤退状态只能等宽限/硬过期，矿点白停几小时。这里每 40 tick 派一只 1-MOVE
+     * scouter 进去看一眼：看到 0 只就解除撤退、生产回流；看到 ≥2 就重新落闸，
+     * 代价只有 50 能量（死也要死得便宜）。
+     */
+    retreatProbe(flag, spawnRoom, mineRoom) {
+        if (Game.rooms[mineRoom]) return;                         // 有视野：等它自己数
+        let mem = Memory.rooms[mineRoom] || (Memory.rooms[mineRoom] = {});
+        if (mem.retreatProbeAt && Game.time - mem.retreatProbeAt < 40) return;
+        let busy = spawnRoom.creeps("scouter", false).some(c => {
+            let t = c.headTask && c.headTask();
+            return t && t.roomName == mineRoom;
+        });
+        if (busy) return;
+        mem.retreatProbeAt = Game.time;
+        StationHive.trySpawn(spawnRoom, spawnRoom.name, [MOVE], "scouter",
+            [UtilsTask.taskOutView(flag.id, mineRoom, undefined, undefined, "scouterToRoom")]);
+    },
     spawnCoreBuster(targetRoomName, spawnRoom) {
         if (spawnRoom.spawnFailure) return;
         let harRoom = Game.rooms[targetRoomName];
@@ -362,6 +383,17 @@ let pro = {
                 Memory.outerPaused[targetRoomName] = Game.time + OUTER_CONGESTION_PAUSE_TICKS;
                 continue;
             }
+            // 撤退政策（用户 2026-11-18 / 2026-11-21）：Invader ≥2 时**所有爬**离房 ——
+            // 包括防守兵与 core/tower 专队，不再往里填人（旧实现是「防守兵照派」，
+            // 派进去的兵当 tick 就被撤退掉，在房界来回走 = 「卡着」）。
+            // 清到 <2 并稳定 100 tick 后自动解除，keeper/carrier 回流。
+            //
+            // **必须放在派兵之前**：放在后面时防守兵/core 专队仍会被派进战区。
+            if (typeof StationSources != "undefined" && StationSources
+                && StationSources.outerRetreatCheck && StationSources.outerRetreatCheck(targetRoomName)) {
+                pro.retreatProbe(flag, spawnRoom, targetRoomName);
+                continue;
+            }
             if (Memory.rooms[targetRoomName]) {
                 // 按**实际威胁**判断，而不是按旗名/房间类别（见 roomNeedsDefense）
                 let isInvader = pro.roomNeedsDefense(Game.rooms[targetRoomName], flag);
@@ -371,11 +403,6 @@ let pro = {
                 // invader 塔（lv2 core 部署后留下）：派小近战专职拆掉。
                 pro.spawnTowerBuster(targetRoomName, spawnRoom);
             }
-            // 撤退政策（用户 2026-11-18）：Invader≥2 时采运爬先撤出、暂停新派发；
-            // **防守兵照派**（强化小队会在上面被派去打）。清到 <2 并稳定 100 tick
-            // 后解除撤退，keeper/carrier 自动回流。
-            if (typeof StationSources != "undefined" && StationSources
-                && StationSources.outerRetreatCheck && StationSources.outerRetreatCheck(targetRoomName)) continue;
             // Scout 只负责首次建立 source Memory。已有坐标、container ID 与路径
             // 后，keeper 本身可以直接走入不可见的矿区；为重新拿视野而多派 scout
             // 会把外矿恢复额外延后一个往返。

@@ -504,7 +504,16 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerDefenseQuota(roomWith(3)), 3,
         "3 只 keeper → 3 只防守爬（1 打 2 必死：实测 2 只防守爬 + 4 只矿工一波全灭）");
     assert.equal(S.outerDefenseQuota(roomWith(9)), 4, "上限 4 = lair 数");
-    assert.equal(S.outerDefenseQuota(undefined), 2, "没有视野时退回基线，不凭想象加派");
+    // 无视野时的编制（2026-11-21 改）：普通矿房默认 **1 只** —— 只有一个 invader
+    // 时一只就够，而「没视野」恰恰是最常见的状态，退回基线 2 会长期多派一只。
+    // keeper 房靠缓存的窝数（defenseLairs 写的 outerLairCount）算，不凭想象加派。
+    assert.equal(S.outerDefenseQuota(undefined), 1, "无视野 + 无 lair 记录 → 1 只（不退回基线 2）");
+    ctx.Memory.rooms = ctx.Memory.rooms || {};
+    ctx.Memory.rooms.W34N55 = { outerLairCount: 4 };
+    assert.equal(S.outerDefenseQuota(undefined, "W34N55"), 2, "无视野但缓存 4 个窝 → ceil(4/2)=2");
+    ctx.Memory.rooms.W34N55 = { outerInvaderSeen: { n: 1, t: 0 } };
+    assert.equal(S.outerDefenseQuota(undefined, "W34N55"), 1, "看到过 1 只 invader → 1 只");
+    delete ctx.Memory.rooms.W34N55;
 
     // 基线可调：设 1 = 只留一只防守爬兜整个房间（用户想试单只时用，不用改代码）
     ctx.Memory.marketSettings = { outerDefenseBase: 1 };

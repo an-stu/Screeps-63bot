@@ -1,3 +1,26 @@
+## v0.78.303 — 外矿防守：撤退盲态、单 invader 编制、闲置退役
+
+在 0.78.301/302（卸货改 storage、退役边缘 link、源容器格软代价 40）之上，补外矿防守的四个洞：
+
+- **撤退盲态宽限** `OUTER_RETREAT_BLIND_TICKS = 250`：全员撤出后房里没人 ⇒ 没视野 ⇒
+  `outerRetreatCheck` 数不到 invader ⇒ 撤退状态解除不了，只能等 5000 tick（≈4.3 小时停矿）。
+  现在盲态超 250 tick 就作废撤退；`StrategyOuterHarvest.retreatProbe()` 在盲态期间每 40 tick
+  派一只 1-MOVE scouter 进去看一眼（50 能量），看到 0 只立刻恢复生产，看到 ≥2 当 tick 重新落闸。
+- **撤退闸前移**：原来排在派兵之后，防守兵 / core 专队仍被派进战区、进去当 tick 又被撤，
+  在房界来回走（用户看到的「卡着」）。现在撤退期间一律 `continue`，不派任何人。
+- **无视野编制 = 1**：`outerDefenseQuota` 的 `!room` 分支原来 `return base`（2），而「没视野」
+  正是外矿最常见状态 ⇒ 单个 invader 房间长期派 2 只。现在：看到过 invader ⇒ 1；
+  有缓存的窝数（`defenseLairs` 写 `outerLairCount`）⇒ `ceil(lairs/2)`；普通矿房 ⇒ 1。
+- **闲置退役** `outerDefenderIdleShouldRetire`：无 keeper 窝的普通矿房连续 300 tick 没有敌对爬，
+  防守爬就 `recycleCreep` 回主房。实测 shard2 E52S29 `outerInvaderSeen={n:0}`、`outerLairCount=0`
+  却长期站 2 只 —— 没窝就没岗位，它们只会站到 ttl 耗尽，还白占编制。
+
+撤退覆盖补齐：矿物搬运 / 矿物容器建造 / 路线维修三个任务以前没有撤退检查，现在八个外矿任务
+统一；已有 5 处检查加 `task &&` 判空（空任务栈时 `task.roomName` 抛 TypeError 会被吞掉 = 静默卡死）。
+
+测试：`outer-retreat-policy` 扩到覆盖盲态宽限、编制三档、八任务覆盖、撤退闸顺序、闲置退役；
+`edge-link` 的无视野编制断言同步。全量 102 个测试通过。
+
 ## v0.78.302 — 移除外矿边缘 Link
 
 - 删除外矿专用 Link 的选址、建造和转发逻辑；外矿搬运继续直接卸入主房 Storage。保留旧搬运任务迁移，以兼容仍在路上的爬。
