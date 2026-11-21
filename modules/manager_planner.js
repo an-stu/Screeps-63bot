@@ -581,6 +581,73 @@ let pro={
         return [unionFind,sizeMap,roomWalkable,nearWall,putAbleCacheMap,allCacheMap]
 
     },
+    protectLabPlaza (roomName, structMap) {
+        let pair = p => Array.isArray(p) ? [p[0], p[1]] : [p.x, p.y];
+        let key = (x, y) => x * 50 + y;
+        let labs = (structMap[STRUCTURE_LAB] || []).map(pair);
+        if (!labs.length) return null;
+        let terrain = new Room.Terrain(roomName);
+        let ramparts = (structMap[STRUCTURE_RAMPART] || []).map(pair);
+        let rampartSet = new Set(ramparts.map(p => key(p[0], p[1])));
+        let room = Game.rooms[roomName];
+        if (room && room.find) room.find(FIND_STRUCTURES).forEach(e => {
+            if (e.structureType == STRUCTURE_RAMPART) rampartSet.add(key(e.pos.x, e.pos.y));
+        });
+        let minX = Math.min(...labs.map(p => p[0])), maxX = Math.max(...labs.map(p => p[0]));
+        let minY = Math.min(...labs.map(p => p[1])), maxY = Math.max(...labs.map(p => p[1]));
+        let options = [];
+        for (let edge of ["north", "south", "west", "east"]) {
+            let perimeter = new Set();
+            let add = (x, y) => perimeter.add(key(x, y));
+            if (edge == "north" || edge == "south") {
+                let nearY = edge == "north" ? minY : maxY;
+                let farY = edge == "north" ? maxY + 1 : minY - 1;
+                for (let x = minX - 1; x <= maxX + 1; x++) {
+                    add(x, nearY);
+                    add(x, farY);
+                }
+                for (let y = Math.min(nearY, farY) + 1; y < Math.max(nearY, farY); y++) {
+                    add(minX - 1, y);
+                    add(maxX + 1, y);
+                }
+            } else {
+                let nearX = edge == "west" ? minX : maxX;
+                let farX = edge == "west" ? maxX + 1 : minX - 1;
+                for (let y = minY - 1; y <= maxY + 1; y++) {
+                    add(nearX, y);
+                    add(farX, y);
+                }
+                for (let x = Math.min(nearX, farX) + 1; x < Math.max(nearX, farX); x++) {
+                    add(x, minY - 1);
+                    add(x, maxY + 1);
+                }
+            }
+            let added = [], naturalWalls = 0, reused = 0, valid = true;
+            perimeter.forEach(k => {
+                let x = Math.floor(k / 50), y = k % 50;
+                let tile = terrain.get(x, y);
+                if (tile == TERRAIN_MASK_WALL) {
+                    naturalWalls++;
+                    return;
+                }
+                if (x <= 0 || y <= 0 || x >= 49 || y >= 49) {
+                    valid = false;
+                    return;
+                }
+                if (rampartSet.has(k)) reused++;
+                else added.push([x, y]);
+            });
+            if (valid) options.push({edge, added, naturalWalls, reused,
+                perimeter: Array.from(perimeter).map(k => [Math.floor(k / 50), k % 50])});
+        }
+        options.sort((a, b) => a.added.length - b.added.length || b.reused - a.reused);
+        if (!options.length) return null;
+        let best = options[0];
+        best.added.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+        structMap[STRUCTURE_RAMPART] = ramparts.concat(best.added);
+        return {rampart: structMap[STRUCTURE_RAMPART], addedRamparts: best.added,
+            naturalWalls: best.naturalWalls, edge: best.edge, perimeter: best.perimeter};
+    },
     placeLabPlaza (roomName, structMap, origin) {
         let pair = p => Array.isArray(p) ? [p[0], p[1]] : [p.x, p.y];
         let key = (x, y) => x * 50 + y;
@@ -720,13 +787,21 @@ let pro={
                 || a.pos[1] - b.pos[1] || a.pos[0] - b.pos[0]);
             if (replacementCandidates.length < candidate.displaced.length) continue;
             let replacements = replacementCandidates.slice(0, candidate.displaced.length).map(e => e.pos);
+            let protection = pro.protectLabPlaza(roomName, {
+                lab: candidate.labs,
+                rampart: structMap[STRUCTURE_RAMPART] || [],
+            });
+            if (!protection) continue;
 
             structMap[STRUCTURE_LAB] = candidate.labs;
             structMap[STRUCTURE_ROAD] = roads.concat(addedRoads);
             structMap[STRUCTURE_EXTENSION] = remainingExtensions.concat(replacements);
+            structMap[STRUCTURE_RAMPART] = protection.rampart;
             return {
                 x: candidate.x, y: candidate.y, flip: candidate.flip,
                 labs: candidate.labs, plazaRoads: candidate.plazaRoads, addedRoads,
+                addedRamparts: protection.addedRamparts, naturalWalls: protection.naturalWalls,
+                defenseEdge: protection.edge,
                 relocated: candidate.displaced.map((p, i) => ({from: p, to: replacements[i]})),
             };
         }

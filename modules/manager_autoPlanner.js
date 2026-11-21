@@ -342,6 +342,16 @@ let pro={
             // if(structMap[struct].length<structCnt)
         }
     },
+    tryCreateLabRamparts(room) {
+        let structMap = room.memory.structMap;
+        if (room.level < 2 || !structMap || !structMap[STRUCTURE_LAB] || !structMap[STRUCTURE_RAMPART]) return;
+        let labs = Utils.decodePosArray(structMap[STRUCTURE_LAB]);
+        if (!labs.length) return;
+        Utils.decodePosArray(structMap[STRUCTURE_RAMPART]).forEach(pos => {
+            let nearLab = labs.some(lab => Math.max(Math.abs(lab.x - pos.x), Math.abs(lab.y - pos.y)) <= 3);
+            if (nearLab) pro.tryCreateCons(new RoomPosition(pos.x, pos.y, room.name), STRUCTURE_RAMPART);
+        });
+    },
     /** 删除当前 RCL 之外的 Extension 工地，保持严格的分级蓝图。 */
     pruneOutOfTierExtensionSites(room){
         let encoded = room.memory.structMap && room.memory.structMap[STRUCTURE_EXTENSION];
@@ -442,6 +452,7 @@ let pro={
                 pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_STORAGE);
                 // room.memory.structMap[STRUCTURE_STORAGE].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_STORAGE)})
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_ROAD);
+            pro.tryCreateLabRamparts(room);
         }
     },
     tryAutoBuildHighLevel (room){
@@ -477,6 +488,7 @@ let pro={
                 pro.tryCreateStructs(room, room.memory.structMap, STRUCTURE_ROAD);
             }
         }
+        if (Game.cpu.bucket > 500) pro.tryCreateLabRamparts(room);
         if((Game.time+room.hashCode()) % 600 == 0 && Game.cpu.bucket>500&&room.memory.structMap){ // 4级后600tick更新一次
             // 开始建 road 和 container
             _.keys(CONTROLLER_STRUCTURES).forEach(struct=>{
