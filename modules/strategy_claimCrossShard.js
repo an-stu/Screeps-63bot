@@ -149,9 +149,9 @@ let pro = {
                     ManagerCrossShard.addCrossShardRequest(split[1], mission)
                 }
             } else {
-                if (!Memory.rooms[flag.pos.roomName].structMap && flag.room) { // 创建蓝图
-                    if(Game.cpu.bucket<9500)return;
-                    ManagerAutoPlanner.computeRoom(flag);
+                if (!room.memory.structMap?.[STRUCTURE_SPAWN]?.length && flag.room) {
+                    const planned = StrategyClaim.ensureClaimBlueprint(room,6000);
+                    if (planned.state) StrategyClaim.recordOperation(flag,planned.state,planned);
                 } else {
                     if (Game.time - flag.memory.spawnTime > 300) {
                         let split = flag.name.split("_");

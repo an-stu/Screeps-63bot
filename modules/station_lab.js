@@ -329,7 +329,7 @@ let pro={
         return out;
     },
     checkBoostLabsNeed(room){ //计算lab还需要填充哪些东西
-        if((Game.time+room.hashCode())%3!=0)return;// 和tick同步，没创建的时候不计算，省点cpu
+        if(Game.shard?.name === "shard3" && (Game.time+room.hashCode())%3!=0)return;
         let obj =  room.memory[pro.stationName]
         let boostLabMap = obj.boostLabMap; // 使用中的lab
         let regBoostMap = pro.getRegBoostMap(room) ;//需要的数量
@@ -588,8 +588,9 @@ let pro={
             return undefined;
         }
         if(obj["reacting"]) return obj["reacting"];
-        // CPU 保护开关：bucket < 8000 时不启动新反应（已有反应照常继续）
-        if (Game.cpu.bucket < 8000) return obj["reacting"];
+        // shard3 leaves more headroom for many active labs. Elsewhere only
+        // a low reserve delays a new batch; an active batch is never stopped here.
+        if (Game.cpu.bucket < (Game.shard?.name === "shard3" ? 8000 : 5000)) return obj["reacting"];
         // 如果上次检查过了就不检查了
         if(Game.time-(obj.lastCheckNeedReactionTick||0)<=30)return obj["reacting"];
         obj.lastCheckNeedReactionTick = Game.time;
@@ -720,7 +721,8 @@ let pro={
             // 合成中的 lab 每 tick 要检查状态，但 12 次 getObjectById 开销大。
             // 缓冲 2 tick：合成（REACTION_TIME 分钟级）状态变化慢，2 tick
             // 延迟无影响，却能省一半的 map + getObjectById。
-            if ((Game.time + room.hashCode()) % 2 != 0) return;
+            const buffered = Game.shard?.name === "shard3";
+            if (buffered && (Game.time + room.hashCode()) % 2 != 0) return;
             let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
             let centerLabs = obj.centerLabs.map(id => Game.getObjectById(id))
             // Layout cache can expire between checks, so react defensively to a
@@ -773,10 +775,9 @@ let pro={
                 (centerLabs[0].store.getLabReactionResType()||LAB_REACTIONS[obj["reacting"]][0])!=LAB_REACTIONS[obj["reacting"]][0]||
                 (centerLabs[1].store.getLabReactionResType()||LAB_REACTIONS[obj["reacting"]][1])!=LAB_REACTIONS[obj["reacting"]][1])){
                 obj["stat"] = 'clear'
-            }else if(obj["stat"] == 'reacting' && reactHit <= (reactRt % 2 ? 1 : 0)){
-                // CPU 保护开关：bucket < 8000 时不执行反应（反应物保留在
-                // centerLabs，bucket 恢复后自动继续）
-                if(Game.cpu.bucket < 8000) return;
+            }else if(obj["stat"] == 'reacting' && reactHit <= (buffered && reactRt % 2 ? 1 : 0)){
+                // Keep the reagents and resume after the shard's bucket recovers.
+                if(Game.cpu.bucket < (buffered ? 8000 : 5000)) return;
                 let boosting = new Set(_.values(boostLabMap).flat())
                 for(let lab of otherLabs){
                     if(boosting.has(lab.id))continue;

@@ -707,23 +707,32 @@ let pro={
             p.remove()
         }
         else if(Game.rooms[p.pos.roomName]&&Game.rooms[p.pos.roomName].controller){
-            pro.computeRoom(p)
+            const result = pro.computeRoom(p);
+            if (!result.ok) Logger.warning("Planner", p.pos.roomName, result.reason);
             p.remove()
         }
     },
     computeRoom (roomObject){
-        if(Game.cpu.bucket<300)return;
-        let points = []
-        points = points.concat([roomObject.room.controller.pos])
-        points = points.concat([roomObject.room.mineral.pos])
-        points = points.concat(roomObject.room.source.map(e=>e.pos))
-        points = points.map(e=>{return {pos:new RoomPosition(e.x,e.y,roomObject.pos.roomName) }} )
-        let roomStructsData = ManagerPlanner.computeManor(roomObject.pos.roomName,points)
-        if (!roomStructsData) return;
+        if(Game.cpu.bucket<300)return {ok:false, reason:"insufficient_cpu"};
+        const room = roomObject?.room, name = roomObject?.pos?.roomName || room?.name;
+        if (!room?.controller?.pos || !room.mineral?.pos || !room.source?.length || !name) {
+            return {ok:false, reason:"missing_room_data"};
+        }
+        let points = [room.controller.pos, room.mineral.pos, ...room.source.map(e=>e.pos)]
+        points = points.map(e=>{return {pos:new RoomPosition(e.x,e.y,name) }} )
+        let roomStructsData = ManagerPlanner.computeManor(name,points)
+        if (!roomStructsData?.structMap) return {ok:false, reason:"no_valid_layout"};
+        if (!roomStructsData.structMap[STRUCTURE_SPAWN]?.some(([x,y]) =>
+            Number.isInteger(x) && Number.isInteger(y) && x>0 && x<49 && y>0 && y<49)) {
+            return {ok:false, reason:"missing_spawn_slot"};
+        }
         _.keys(roomStructsData.structMap).forEach(e=>{
             roomStructsData.structMap[e] = Utils.encodePosArray(roomStructsData.structMap[e].map(t=>{return {x:t[0],y:t[1]}}))
         })
-        Memory.rooms[roomObject.pos.roomName].structMap = roomStructsData.structMap
+        const rooms = Memory.rooms || (Memory.rooms = {});
+        const memory = room.memory || (rooms[name] = rooms[name] || {});
+        memory.structMap = roomStructsData.structMap;
+        return {ok:true};
     }
 };
 

@@ -37,6 +37,7 @@ function load() {
         Memory: { rooms: {}, creeps: {} },
         Game: {
             time: 1,
+            shard: { name: "shard3" },
             rooms: {},
             creeps: {},
             cpu: { bucket: 10000, limit: 20, getUsed: () => 0 },
@@ -187,3 +188,14 @@ function runTicks(setupResult) {
 }
 
 console.log("lab reaction parity buffer checks passed");
+{
+    const s = setup("G");
+    s.ctx.Game.shard.name = "shard2";
+    s.ctx.Game.cpu.bucket = 6000;
+    assert.equal(runTicks(s),12,"fast shards run once per true odd-cycle window, without duplicate tolerance attempts");
+    const d = setup("GH",{deadCenter:true});
+    d.ctx.Game.shard.name = "shard2";
+    d.ctx.Game.time = 2;
+    d.ctx.StationLab.exec(d.room);
+    assert.equal(d.stat(),"clear","only shard3 delays the state check to the next even tick");
+}

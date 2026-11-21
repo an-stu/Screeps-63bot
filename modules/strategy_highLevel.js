@@ -886,6 +886,11 @@ let pro = {
         let idx = rooms ? rooms.indexOf(room) : -1;
         return idx >= 0 ? idx % interval : room.hashCode() % interval;
     },
+    economyInterval() {
+        if (MIN_CPU) return 10; // Emergency bucket protection on every shard.
+        if (Game.shard?.name === "shard3") return Game.cpu.bucket < 5000 ? 14 : 7;
+        return 5;
+    },
     exec(room) {
         if (!MIN_CPU) pro.processPowerSpawn(room)// 每tick都要处理
         // **link 发送每 tick 执行**（0.78.190）：原来跟经济 pass 共用 %7 门槛，
@@ -903,7 +908,7 @@ let pro = {
         // 成本（1~3 CPU/房），15 房在 %7 下平均 2.1 房/tick ≈ 4-6 CPU；降到
         // %14 后减半，bucket 回升到 5000+ 自动回到 7。生爬/派任务对 7→14 tick
         // 的延迟不敏感（爬寿命 1500 tick 量级）。
-        let economyInterval = MIN_CPU ? 10 : (Game.cpu.bucket < 5000 ? 14 : 7);
+        let economyInterval = pro.economyInterval();
         // 经济 pass 按**房间序号**错峰，而不是按随机 hashCode。
         //
         // 原来 `(Game.time + room.hashCode()) % 7/10`：13 个房的随机哈希会互相撞车

@@ -8,7 +8,6 @@
  */
 const BUILD_INTERVAL = 5;
 const PLANNER_MIN_BUCKET = 6000;
-const PLANNER_RETRY_TICKS = 250;
 const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 const TRANSIT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const SOURCE_RECEIPT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -209,8 +208,8 @@ let pro = {
         let sites = room.find(FIND_MY_CONSTRUCTION_SITES);
         let hasSpawnSite = sites.some(site => site.structureType == STRUCTURE_SPAWN);
 
-        if (!roomMemory.structMap && !hasSpawnSite) {
-            pro.ensureBlueprint(room, cfg, roomMemory);
+        if (!roomMemory.structMap?.[STRUCTURE_SPAWN]?.length && !hasSpawnSite) {
+            if (!pro.ensureBlueprint(room, cfg)) return;
             roomMemory = getRoomMemory(room);
             sites = room.find(FIND_MY_CONSTRUCTION_SITES);
             hasSpawnSite = sites.some(site => site.structureType == STRUCTURE_SPAWN);
@@ -233,37 +232,19 @@ let pro = {
         pro.dispatchBuilders(cfg);
     },
 
-    ensureBlueprint(room, cfg, roomMemory) {
-        if (cfg.nextPlannerAttemptAt && Game.time < cfg.nextPlannerAttemptAt) return false;
-        if (!global.ManagerAutoPlanner || typeof ManagerAutoPlanner.computeRoom != "function") {
-            pro.recordOperation(cfg, "WAITING_FOR_PLANNER", {reason:"planner_unavailable"});
+    ensureBlueprint(room, cfg) {
+        if (!global.StrategyClaim || typeof StrategyClaim.ensureClaimBlueprint !== "function") {
+            pro.recordOperation(cfg, "WAITING_FOR_PLANNER", {reason:"claim_planner_unavailable"});
             return false;
         }
-        let bucket = Game.cpu && Game.cpu.bucket || 0;
-        if (bucket < PLANNER_MIN_BUCKET) {
-            pro.recordOperation(cfg, "WAITING_FOR_PLANNER_CPU", {bucket:bucket});
-            return false;
-        }
-        pro.recordOperation(cfg, "PLANNING", {bucket:bucket});
-        try {
-            ManagerAutoPlanner.computeRoom({room:room, pos:room.controller.pos});
-        } catch (e) {
-            cfg.lastPlannerError = String(e && e.message || e).slice(0, 120);
-        }
-        roomMemory = getRoomMemory(room);
-        if (roomMemory.structMap) {
+        const result = StrategyClaim.ensureClaimBlueprint(room,PLANNER_MIN_BUCKET);
+        if (result.ready) {
             delete cfg.nextPlannerAttemptAt;
             delete cfg.lastPlannerError;
             return true;
         }
-        // A failed room planner is expensive; do not rerun it every strategy
-        // pass. The tick deadline persists across resets.
-        cfg.nextPlannerAttemptAt = Game.time + PLANNER_RETRY_TICKS;
-        pro.recordOperation(cfg, "PLANNER_FAILED", {
-            bucket:bucket,
-            retryAt:cfg.nextPlannerAttemptAt,
-            error:cfg.lastPlannerError,
-        });
+        cfg.nextPlannerAttemptAt = result.retryAt;
+        pro.recordOperation(cfg, result.state, result);
         return false;
     },
 
@@ -557,7 +538,7 @@ let pro = {
         let roomMemory = getRoomMemory(room);
         let sites = room.find(FIND_MY_CONSTRUCTION_SITES);
         if (sites.some(site => site.structureType == STRUCTURE_SPAWN)) return true;
-        if (!roomMemory.structMap) pro.ensureBlueprint(room, cfg, roomMemory);
+        if (!roomMemory.structMap?.[STRUCTURE_SPAWN]?.length && !pro.ensureBlueprint(room,cfg)) return false;
         roomMemory = getRoomMemory(room);
         if (roomMemory.structMap && global.StrategyClaim && StrategyClaim.ensureConstructionSites) {
             try { StrategyClaim.ensureConstructionSites(room); } catch (e) { /* retry */ }

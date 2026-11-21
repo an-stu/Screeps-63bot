@@ -5,6 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_buildCrossShard.js"), "utf8");
+const claimSource = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_claim.js"), "utf8");
 const FIND_MY_SPAWNS = "mySpawns";
 const FIND_MY_CONSTRUCTION_SITES = "mySites";
 const FIND_SOURCES = "sources";
@@ -34,7 +35,7 @@ let world;
 function makeWorld(opts = {}) {
     world = {
         created:[], missions:[], plannerCalls:0, ensureCalls:0, destroyCalls:0,
-        operations:[], now:1000000, planSucceeds:opts.planSucceeds !== false,
+        operations:[], warnings:[], now:1000000, planSucceeds:opts.planSucceeds !== false,
         ensureCreatesSite:opts.ensureCreatesSite !== false,
         legacyPath:{path:[{shard:"shard3", roomName:"E50S30", x:15, y:5}]},
         spawnCalls:0, spawnResult:undefined,
@@ -50,6 +51,7 @@ function makeWorld(opts = {}) {
         STRUCTURE_SPAWN, STRUCTURE_EXTENSION, RESOURCE_ENERGY,
         OK, ERR_NOT_IN_RANGE, WORK:"work", CARRY:"carry", MOVE:"move",
         Date:{now:() => world.now},
+        Logger:{warning(...args) { world.warnings.push(args); }},
         ManagerCreeps:{calcBodyPart(set) {
             let body = [];
             Object.keys(set).forEach(type => { for (let i = 0; i < set[type]; i++) body.push(type); });
@@ -83,7 +85,11 @@ function makeWorld(opts = {}) {
         console:{log(){}},
     };
     sandbox.global = sandbox;
-    vm.runInNewContext(source, sandbox, {filename:"strategy_buildCrossShard.js"});
+    const claimHooks = sandbox.StrategyClaim;
+    const context = vm.createContext(sandbox);
+    vm.runInContext(`(function(){\n${claimSource}\n})()`, context, {filename:"strategy_claim.js"});
+    Object.assign(sandbox.StrategyClaim, claimHooks);
+    vm.runInContext(source, context, {filename:"strategy_buildCrossShard.js"});
     return sandbox;
 }
 
@@ -324,8 +330,10 @@ function runExec(sb, time) {
     assert.equal(world.ensureCalls, 0, "site creation waits for a blueprint");
     assert.equal(world.missions.length, 0, "workers are not sent without a spawn blueprint site");
     assert.ok(world.operations.some(entry => entry.state == "PLANNER_FAILED"));
+    assert.equal(world.operations.at(-1).state, "PLANNER_FAILED", "do not overwrite failure with a generic waiting state");
     runExec(sb, 1250);
     assert.equal(world.plannerCalls, 2, "planning retries after the persisted throttle interval");
+    assert.equal(world.warnings.length, 1, "same blueprint failure does not spam the console");
 }
 
 // 5. Acknowledgements are idempotent; expired requests can be refreshed and

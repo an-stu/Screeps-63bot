@@ -26,6 +26,46 @@ let isClaimCleanupTarget = function (room, structure) {
 };
 
 let pro = {
+    ensureClaimBlueprint(room, minBucket = Game.shard?.name === "shard3" ? 9500 : 6000) {
+        if (!room?.controller?.pos || !room.memory) return {state:"WAITING_FOR_VISION"};
+        const memory = room.memory;
+        const hasSpawnSlot = () => !!memory.structMap?.[STRUCTURE_SPAWN]?.length;
+        if (hasSpawnSlot()) {
+            delete memory.claimBlueprintFailure;
+            return {ready:true};
+        }
+        let failure = memory.claimBlueprintFailure;
+        const report = () => {
+            if (room.my && global.Logger && failure.warnedReason !== failure.reason) {
+                const message = {missing_room_data:"缺少控制器、矿物或能量源坐标",
+                    no_valid_layout:"未找到可用布局", missing_spawn_slot:"蓝图没有有效的首个 Spawn 位置",
+                    planner_exception:"规划器报错"}[failure.reason] || failure.reason;
+                Logger.warning("ClaimBlueprint", room.name, "新占领房间的蓝图未生成：", message,
+                    failure.error || "", "下次重试 tick", failure.retryAt);
+                failure.warnedReason = failure.reason;
+            }
+            return {state:"PLANNER_FAILED", reason:failure.reason, error:failure.error, retryAt:failure.retryAt};
+        };
+        if (failure?.retryAt > Game.time) return report();
+        if (!global.ManagerAutoPlanner || typeof ManagerAutoPlanner.computeRoom !== "function")
+            return {state:"WAITING_FOR_PLANNER", reason:"planner_unavailable"};
+        const bucket = Game.cpu?.bucket || 0;
+        if (bucket < minBucket) return {state:"WAITING_FOR_PLANNER_CPU", bucket};
+        let result, error;
+        try {
+            result = ManagerAutoPlanner.computeRoom({room, pos:room.controller.pos});
+        } catch (e) {
+            error = String(e?.message || e).slice(0,120);
+        }
+        if (hasSpawnSlot()) {
+            delete memory.claimBlueprintFailure;
+            return {ready:true};
+        }
+        const reason = error ? "planner_exception" : result?.reason || "no_valid_layout";
+        failure = memory.claimBlueprintFailure = {reason, error, tick:Game.time, retryAt:Game.time+250,
+            warnedReason:failure?.warnedReason};
+        return report();
+    },
     recordOperation(flag, state, details) {
         Memory.claimOperations = Memory.claimOperations || {};
         let operation = Memory.claimOperations[flag.pos.roomName]
@@ -43,7 +83,7 @@ let pro = {
         if (changed) {
             operation.history.push({tick: Game.time, state: state});
             if (operation.history.length > 40) operation.history.shift();
-            if (global.Logger) {
+            if (global.Logger && state !== "PLANNER_FAILED") {
                 if (state.indexOf("BLOCKED_") == 0) Logger.warning("Claim", flag.pos.roomName, state);
                 else Logger.info("Claim", flag.pos.roomName, state);
             }
@@ -117,9 +157,12 @@ let pro = {
                 flag.memory.observerRoom = StationObserver.requestRoom(flag.pos.roomName, flag.memory.observerRoom)
                     || flag.memory.observerRoom;
             }
-            let constructionStatus = targetRoom && targetRoom.my
-                ? pro.ensureConstructionSites(targetRoom) : undefined;
             let ownedSpawns = pro.mySpawns(targetRoom);
+            const planner = targetRoom?.my && !ownedSpawns.length
+                && !targetRoom.memory.structMap?.[STRUCTURE_SPAWN]?.length
+                ? pro.ensureClaimBlueprint(targetRoom) : undefined;
+            let constructionStatus = targetRoom && targetRoom.my && (!planner || planner.ready)
+                ? pro.ensureConstructionSites(targetRoom) : {};
             // 残留结构必须先拆干净才能立工地（用户 2026-10-21）：
             // 别人的 spawn / extension 会占住位置，`createConstructionSite` 直接失败。
             // 原来 COMPLETE 只看「有自己的 spawn 了」就删旗 ⇒ 房间里的 tower/extension
@@ -141,7 +184,8 @@ let pro = {
                 // 别人的结构**直接 destroy**（用户 2026-10-21），不派 cleaner 爬过去拆。
                 // 实测 destroy() 在本房内对别人的结构返回 OK；一次调用即删，零 CPU、零寿命浪费。
                 let destroyed = pro.destroyForeignStructures(targetRoom);
-                pro.recordOperation(flag, cleanupTargets ? "CLEANING" : "BUILDING_SPAWN", {
+                pro.recordOperation(flag, planner?.state || (cleanupTargets ? "CLEANING" : "BUILDING_SPAWN"), {
+                    ...planner,
                     level: targetRoom.controller.level,
                     cleanupTargets: cleanupTargets,
                     destroyed: destroyed,
@@ -174,13 +218,9 @@ let pro = {
                     scouter: !!scouter,
                 });
             }else {
-                if(!Memory.rooms[flag.pos.roomName].structMap&&flag.room){ // 创建蓝图
-                    if(Game.cpu.bucket<9500){
-                        pro.recordOperation(flag, "WAITING_FOR_PLANNER_CPU", {bucket: Game.cpu.bucket});
-                        return;
-                    }
-                    pro.recordOperation(flag, "PLANNING", {bucket: Game.cpu.bucket});
-                    ManagerAutoPlanner.computeRoom(flag);
+                if(!Memory.rooms[flag.pos.roomName].structMap?.[STRUCTURE_SPAWN]?.length && flag.room){
+                    const planned = pro.ensureClaimBlueprint(flag.room);
+                    pro.recordOperation(flag, planned.state || "PLANNING", planned);
                 }else {
                     let spawnRoom = pro.getSpawnRoom(flag);
                     if(!spawnRoom){
