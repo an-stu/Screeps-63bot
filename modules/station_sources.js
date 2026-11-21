@@ -1348,9 +1348,16 @@ Creep.prototype.outerDefense = function () {
             return;
         }
 
-        let mineral = this.headTaskObj();
-        if (mineral && !this.pos.inRangeTo(mineral, 3)) {
-            this.moveTo(mineral)
+        // **没有窝可守时不许再朝任务目标（能量矿的容器）走**。
+        // 实测 shard2 E52S29（2026-11-21）：普通矿房 lair=0 ⇒ outerDefensePosts 返回空，
+        // 两只防守爬于是都朝同一个 station 容器走，每 tick 互相把对方挤开 ——
+        // 就是用户看到的「对穿/堵路」（两只位置逐 tick 互换）。
+        // 只有任务目标是**矿物/存款**（有 mineralType）时才需要贴上去守；
+        // 纯能量矿房就原地待命，等安静期到点退役。
+        let obj = this.headTaskObj();
+        let mineralTarget = obj && obj.mineralType !== undefined;
+        if (mineralTarget && !this.pos.inRangeTo(obj, 3)) {
+            this.moveTo(obj);
         }
     }
 };
@@ -4913,6 +4920,17 @@ let pro = {
         if (pro.defenseLairs(room).length) { delete creep.memory.idleSince; return false; }
         let hostiles = pro.defenseHostiles(room);
         if (hostiles.length) { delete creep.memory.idleSince; return false; }
+        // **超编立刻退**：编制 1 只却站着 2 只（历史遗留、或单个 invader 清完没退），
+        // 按 ttl 最长者留一只，其余立刻回收 —— 不用等 300 tick 安静期。
+        try {
+            let mates = pro.outerDefenseAssignments(room.name);
+            let quota = pro.outerDefenseQuota(room, room.name);
+            if (mates.length > quota) {
+                let keep = mates.slice().sort((a, b) =>
+                    (b.ticksToLive || 0) - (a.ticksToLive || 0) || (a.name < b.name ? -1 : 1))[0];
+                if (keep && keep.name !== creep.name) return true;
+            }
+        } catch (e) { /* 单元测试桩缺 FIND_* 全局：跳过超编判定，游戏里不会走到 */ }
         if (!creep.memory.idleSince) { creep.memory.idleSince = Game.time; return false; }
         return Game.time - creep.memory.idleSince > OUTER_DEFENDER_IDLE_RECYCLE;
     },
@@ -4952,13 +4970,9 @@ let pro = {
         if (invaders.length >= 2) return 1;
         // 单个 Invader：一只防守就够（用户 2026-11-18）。有 lair 的 keeper 房仍按
         // 「一爬管两窝」的旧口径，避免为了一只 invader 额外加编。
-        if (invaders.length === 1) {
-            let lairs = room.find(FIND_STRUCTURES).filter(s2 => s2.structureType == STRUCTURE_KEEPER_LAIR).length;
-            if (lairs) return Math.max(1, Math.min(4, Math.ceil(lairs / 2)));
-            let keeperCnt = hostiles.filter(c => c.owner && c.owner.username == "Source Keeper").length;
-            if (!keeperCnt) return 1; // 只有 1 个 invader、没有 keeper：一只防守就够
-            // 有 keeper 需要守窝：沿用下方 keeper 口径
-        }
+        // **单只 invader 一律 1 只防守**（用户 2026-11-21）。原来在 keeper 房会按
+        // 窝数加编到 2 —— 用户明确要 1 只。keeper-only 房仍按「一爬管两窝」。
+        if (invaders.length === 1) return 1;
         // 用户 2026-10-20：编制改成按 **lair 数量 ÷ 2**（一爬管两个窝），不再按 Source Keeper 数量 1:1。
         // 一个 source keeper 房是 **4 个 lair / 3 个源** —— 按源数或按 keeper 数都会算错：
         // 实测 W34N55 开局 3 只 keeper ⇒ 派了 3 只，清到只剩 1 只后第 3 只就白站（且没有退役逻辑）。

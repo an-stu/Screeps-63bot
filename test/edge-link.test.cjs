@@ -537,10 +537,12 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerDefenseQuota(invaderRoom(5)), 1, "5 只 Invader 也一样，一只 T3 碾压整个小队");
     assert.equal(S.outerDefenseQuota(invaderRoom(1)), 1,
         "只有 1 只 Invader 时一只防守就够（用户 2026-11-18，不再按基线 2 派两只）");
+    // 2026-11-21 改：**单只 invader 一律 1 只**（用户明确要求），keeper 房也不再加编。
+    // keeper-only 房（没有 invader）仍按「一爬管两窝 / 1:1」的口径。
     assert.equal(S.outerDefenseQuota({
         name: "W34N55",
         find: () => [1, 2, 3, 4].map(i => ({ owner: { username: i == 1 ? "Invader" : "Source Keeper" } })),
-    }), 3, "1 只 Invader + 3 只 keeper 不算 T3 小队场景，按 keeper 1:1 加编");
+    }), 1, "1 只 Invader + 3 只 keeper：只派 1 只防守（用户 2026-11-21）");
 
     // 派兵：编制按 keeper 加编，且**已经到岗的防守爬**必须算进数量
     //（旧实现按 spawnRoom.creeps 数，到岗的那只看不见 → 每 6 tick 白派一只）

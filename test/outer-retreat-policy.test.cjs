@@ -111,4 +111,26 @@ assert.ok(/outerDefenderIdleShouldRetire\(creep, room\) \{/.test(code), "必须�
     assert.ok(body.indexOf("outerRetreatCheck") < retireIdx, "撤退检查要排在退役之前（撤退优先）");
 }
 
+// ⑧ 没有窝可守时不许朝矿点容器走（对穿根因，用户 2026-11-21）
+//
+// shard2 E52S29：lair=0 ⇒ outerDefensePosts 返回空 ⇒ 两只防守爬都朝同一个
+// station 容器走，每 tick 互相挤开（位置逐 tick 互换）。
+{
+    const m = /Creep\.prototype\.outerDefense = function \(\) \{[\s\S]*?\n\};/.exec(code);
+    const body = m[0];
+    assert.ok(!/let mineral = this\.headTaskObj\(\);/.test(body), "旧的「无条件朝任务目标走」必须移除");
+    assert.ok(/let mineralTarget = obj && obj\.mineralType !== undefined;/.test(body),
+        "只有矿物/存款目标才值得贴上去守");
+    assert.ok(/if \(mineralTarget && !this\.pos\.inRangeTo\(obj, 3\)\)/.test(body),
+        "能量矿房待命时不再移动");
+}
+
+// ⑨ 超编立刻退役：编制 1 却站 2 只时，只留 ttl 最长的一只
+assert.ok(/if \(mates\.length > quota\) \{/.test(code), "必须有超编判定");
+assert.ok(/\(b\.ticksToLive \|\| 0\) - \(a\.ticksToLive \|\| 0\)/.test(code), "按 ttl 最长者留一只");
+
+// ⑩ 单只 invader 一律 1 只编制（不再按窝数加编）
+assert.ok(/if \(invaders\.length === 1\) return 1;/.test(code),
+    "单只 invader 必须直接返回 1（用户 2026-11-21）");
+
 console.log("outer retreat policy checks passed");
