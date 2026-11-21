@@ -1,10 +1,3 @@
-/**
- * lab 广场布局：原搜索找不到合法 4×4 区块时**跳过 lab 广场**，绝不在 (0-3,0-3)
- * 角落兜底（E55S29 实测：旧代码 labX/labY=0 → +1 后把整组 lab 铺到角落，
- * 低级自动建造随即在 (1,2)/(2,1)/(2,3) 之类角落格立 road 工地）。
- *
- * 用户 2026-11-21 定稿：找不到就不考虑（跳过），不做全图兜底搜索。
- */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -13,51 +6,185 @@ const vm = require("node:vm");
 const root = path.resolve(__dirname, "..");
 const src = fs.readFileSync(path.join(root, "modules", "manager_planner.js"), "utf8");
 const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+assert.ok(/if \(!labFound\) pro\.placeLabPlaza\(roomName, structMap/.test(code),
+    "原搜索失败后必须调用最终蓝图兜底");
+assert.ok(/if \(labFound\) \{/.test(code), "原搜索成功时仍保留核心区内 lab 广场");
+assert.ok(!/roomWalkable\.get\(bx \+ i, by \+ j\)/.test(code), "不得恢复旧的孤立全图扫描");
 
-// ① 必须有 labFound 标记，且只在 checkCnt==16（合法 4×4）时置真
-assert.ok(/let labFound = false/.test(code), "必须有 labFound 初始化为 false");
-assert.ok(/labFound = true/.test(code), "找到合法广场时必须置 labFound=true");
-const foundIdx = code.indexOf("labFound = true");
-const cntIdx = code.lastIndexOf("checkCnt==16", foundIdx);
-assert.ok(cntIdx > 0 && foundIdx - cntIdx < 200, "labFound 必须在 checkCnt==16 分支里置真");
+const start = src.indexOf("    placeLabPlaza (roomName, structMap, origin) {");
+const end = src.indexOf("\n    /**", start);
+assert.ok(start >= 0 && end > start, "提取 placeLabPlaza 失败");
+const method = src.slice(start, end).trim().replace(/,$/, "");
 
-// ② 不得再有全图兜底搜索（用户定稿：找不到就跳过）
-assert.ok(!/if \(!labFound\) \{/.test(code), "不得保留全图兜底搜索（找不到就跳过）");
-assert.ok(!/roomWalkable\.get\(bx \+ i, by \+ j\)/.test(code), "不得保留兜底搜索的 4×4 扫描");
+const ROOM = "E55S29";
+const posKey = (x, y) => `${x},${y}`;
 
-// ③ lab 广场 + 环绕道路的写入必须整体包在 if (labFound) 里
-const guardIdx = code.indexOf("if (labFound) {");
-assert.ok(guardIdx > 0, "lab 广场必须被 if (labFound) 包裹");
-const wallIdx = code.indexOf('structMap["rampart"]', guardIdx);
-assert.ok(wallIdx > guardIdx);
-const plaza = code.slice(guardIdx, wallIdx);
-assert.ok(/structMap\["lab"\]\.push/.test(plaza), "lab 写入必须在 guard 内");
-assert.ok(/structMap\["road"\]\.push/.test(plaza), "环绕道路写入必须在 guard 内");
-
-// ④ 行为模拟：找到 → 正常规划；找不到 → 零 lab / 零道路（角落兜底回归）
-const vm2 = vm;
-function runPlaza(found) {
-    const ctx = { structMap: { lab: [], road: [] } };
-    const snippet = `
-        let labX = 10, labY = 10, labChangeDirection = false;
-        ${found ? "" : "labX = 0; labY = 0;"}
-        let labs = ["☢☢-☢", "☢-☢-", "-☢-☢", "☢-☢☢"];
-        if (${found}) {
-        let vis = {};
-        for(let i=0;i<2;i++){ for(let j=0;j<2;j++){ vis[i+"_"+j]=1; let jj=labChangeDirection?j:1-j;
-            (labs[i+1].charAt(j+1)=='☢'?structMap["lab"]:structMap["road"]).push([labX+i,labY+jj]); } }
-        for(let i=-1;i<3;i++){ for(let j=-1;j<3;j++){ if(vis[i+"_"+j])continue; let jj=labChangeDirection?j:1-j;
-            (labs[i+1].charAt(j+1)=='☢'?structMap["lab"]:structMap["road"]).push([labX+i,labY+jj]); } }
+function load(walkable, room) {
+    class CostMatrix {
+        constructor(data) { this.data = data || new Map(); }
+        set(x, y, value) { this.data.set(posKey(x, y), value); }
+        get(x, y) { return this.data.get(posKey(x, y)) || 0; }
+        clone() { return new CostMatrix(new Map(this.data)); }
+    }
+    class RoomPosition {
+        constructor(x, y, roomName) { this.x = x; this.y = y; this.roomName = roomName; }
+    }
+    function search(origin, goal, options) {
+        const costs = options.roomCallback(goal.pos.roomName);
+        const startKey = posKey(origin.x, origin.y);
+        const goalKey = posKey(goal.pos.x, goal.pos.y);
+        const distances = new Map([[startKey, 0]]);
+        const previous = new Map();
+        const queue = [[0, origin.x, origin.y]];
+        while (queue.length) {
+            queue.sort((a, b) => a[0] - b[0]);
+            const [distance, x, y] = queue.shift();
+            const currentKey = posKey(x, y);
+            if (distance !== distances.get(currentKey)) continue;
+            if (currentKey === goalKey) {
+                const path = [];
+                let cursor = currentKey;
+                while (cursor !== startKey) {
+                    const [px, py] = cursor.split(",").map(Number);
+                    path.push(new RoomPosition(px, py, ROOM));
+                    cursor = previous.get(cursor);
+                }
+                return {path: path.reverse(), incomplete: false};
+            }
+            for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+                if (!dx && !dy) continue;
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= 50 || ny >= 50) continue;
+                const cost = costs.get(nx, ny);
+                if (cost >= 255) continue;
+                const nextKey = posKey(nx, ny);
+                const nextDistance = distance + cost;
+                if (nextDistance < (distances.has(nextKey) ? distances.get(nextKey) : Infinity)) {
+                    distances.set(nextKey, nextDistance);
+                    previous.set(nextKey, currentKey);
+                    queue.push([nextDistance, nx, ny]);
+                }
+            }
         }
-    `;
-    vm2.runInNewContext(snippet, ctx);
-    return ctx.structMap;
-}
-{
-    assert.ok(runPlaza(true).lab.length > 0, "找到广场时必须规划 lab");
-    const none = runPlaza(false);
-    assert.equal(none.lab.length, 0, "找不到时不得规划 lab");
-    assert.equal(none.road.length, 0, "找不到时不得写环绕道路（角落兜底回归）");
+        return {path: [], incomplete: true};
+    }
+    const ctx = {
+        Game: {rooms: room ? {[ROOM]: room} : {}},
+        Room: {Terrain: function () {
+            return {get: (x, y) => walkable.has(posKey(x, y)) ? 0 : 1};
+        }},
+        RoomPosition,
+        PathFinder: {CostMatrix, search},
+        FIND_STRUCTURES: 1,
+        STRUCTURE_ROAD: "road", STRUCTURE_RAMPART: "rampart",
+        STRUCTURE_EXTENSION: "extension", STRUCTURE_LAB: "lab",
+        TERRAIN_MASK_WALL: 1, TERRAIN_MASK_SWAMP: 2,
+    };
+    vm.runInNewContext(`globalThis.placeLabPlaza = function ${method}`, ctx,
+        {filename: "manager_planner.placeLabPlaza.js"});
+    return ctx.placeLabPlaza;
 }
 
-console.log("planner lab fallback: OK");
+function rectangle(x0, y0, x1, y1) {
+    const result = new Set();
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) result.add(posKey(x, y));
+    return result;
+}
+
+function assertConnected(origin, roads, targets) {
+    const roadSet = new Set(roads.map(p => posKey(p[0], p[1])));
+    const reached = new Set([posKey(origin.x, origin.y)]);
+    const queue = [[origin.x, origin.y]];
+    while (queue.length) {
+        const [x, y] = queue.shift();
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+            const k = posKey(x + dx, y + dy);
+            if (roadSet.has(k) && !reached.has(k)) {
+                reached.add(k);
+                queue.push([x + dx, y + dy]);
+            }
+        }
+    }
+    targets.forEach(p => assert.ok(reached.has(posKey(p[0], p[1])), `lab 道路未连通: ${p}`));
+}
+
+function assertReactionTopology(labs) {
+    let supported = false;
+    for (let a of labs) for (let b of labs) {
+        if (a === b) continue;
+        if (labs.every(p => Math.max(Math.abs(p[0] - a[0]), Math.abs(p[1] - a[1])) <= 2
+            && Math.max(Math.abs(p[0] - b[0]), Math.abs(p[1] - b[1])) <= 2)) supported = true;
+    }
+    assert.ok(supported, "必须存在两个输入 lab 能在 range 2 内覆盖其余 lab");
+}
+
+function assertValidLayout(result, map, origin, extensionCount) {
+    assert.ok(result, "必须找到 lab 广场");
+    assert.equal(map.lab.length, 10);
+    assert.equal(result.plazaRoads.length, 6);
+    assert.equal(map.extension.length, extensionCount, "迁移前后 extension 总数必须不变");
+    assert.equal(new Set(map.lab.map(p => posKey(p[0], p[1]))).size, 10, "lab 不得重叠");
+    const labSet = new Set(map.lab.map(p => posKey(p[0], p[1])));
+    map.road.forEach(p => assert.ok(!labSet.has(posKey(p[0], p[1])), "lab 不得压在道路上"));
+    map.extension.forEach(p => {
+        assert.ok(!labSet.has(posKey(p[0], p[1])), "extension 不得留在 lab 格");
+        assert.ok(!result.plazaRoads.some(r => r[0] === p[0] && r[1] === p[1]),
+            "extension 不得留在广场道路格");
+    });
+    assertConnected(origin, map.road, result.plazaRoads);
+    assertReactionTopology(map.lab);
+}
+
+{
+    const walkable = rectangle(1, 1, 48, 48);
+    const place = load(walkable);
+    const map = {road: [[10, 10]], extension: [], lab: [], storage: [[9, 10]]};
+    const result = place(ROOM, map, {x: 10, y: 10});
+    assertValidLayout(result, map, {x: 10, y: 10}, 0);
+    assert.equal(result.relocated.length, 0);
+}
+
+function constrainedFixture(room) {
+    const walkable = rectangle(20, 20, 23, 23);
+    [[19, 20], [19, 21], [18, 20], [18, 21]].forEach(p => walkable.add(posKey(p[0], p[1])));
+    const place = load(walkable, room);
+    const map = {road: [[19, 20]], extension: [[20, 20]], lab: []};
+    return {place, map};
+}
+
+{
+    const {place, map} = constrainedFixture();
+    const result = place(ROOM, map, {x: 19, y: 20});
+    assertValidLayout(result, map, {x: 19, y: 20}, 1);
+    assert.equal(result.relocated.length, 1, "唯一合法广场必须迁移未建 extension");
+    assert.deepEqual(Array.from(result.relocated[0].from), [20, 20]);
+    assert.ok(!map.extension.some(p => p[0] === 20 && p[1] === 20));
+}
+
+{
+    const built = {pos: {x: 20, y: 20}, structureType: "extension"};
+    const room = {extension: [built], constructionSite: [], lab: []};
+    const {place, map} = constrainedFixture(room);
+    const before = JSON.stringify(map);
+    assert.equal(place(ROOM, map, {x: 19, y: 20}), null, "已建成 extension 不得迁移");
+    assert.equal(JSON.stringify(map), before, "失败时蓝图必须原样不变");
+}
+
+{
+    const room = {extension: [], constructionSite: [{pos: {x: 20, y: 20}, structureType: "extension"}], lab: []};
+    const {place, map} = constrainedFixture(room);
+    const before = JSON.stringify(map);
+    assert.equal(place(ROOM, map, {x: 19, y: 20}), null, "已有 extension 工地不得静默迁移");
+    assert.equal(JSON.stringify(map), before);
+}
+
+{
+    const walkable = new Set([posKey(10, 10)]);
+    const place = load(walkable);
+    const map = {road: [[10, 10]], extension: [[20, 20]], lab: []};
+    const before = JSON.stringify(map);
+    assert.equal(place(ROOM, map, {x: 10, y: 10}), null);
+    assert.equal(JSON.stringify(map), before, "无解时不得写入半个广场");
+}
+
+console.log("planner lab placement: OK");

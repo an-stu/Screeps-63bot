@@ -581,6 +581,157 @@ let pro={
         return [unionFind,sizeMap,roomWalkable,nearWall,putAbleCacheMap,allCacheMap]
 
     },
+    placeLabPlaza (roomName, structMap, origin) {
+        let pair = p => Array.isArray(p) ? [p[0], p[1]] : [p.x, p.y];
+        let key = (x, y) => x * 50 + y;
+        let terrain = new Room.Terrain(roomName);
+        let terrainCost = (x, y) => {
+            let tile = terrain.get(x, y);
+            return tile == TERRAIN_MASK_WALL ? 255 : (tile == TERRAIN_MASK_SWAMP ? 4 : 2);
+        };
+        let room = Game.rooms[roomName];
+        let originalLabs = (structMap[STRUCTURE_LAB] || []).map(pair);
+        if (originalLabs.length || (room && room.lab && room.lab.length)) return null;
+
+        let fixed = new Set();
+        let protectedExtensions = new Set();
+        let roads = (structMap[STRUCTURE_ROAD] || []).map(pair);
+        let roadSet = new Set(roads.map(p => key(p[0], p[1])));
+        let extensions = (structMap[STRUCTURE_EXTENSION] || []).map(pair);
+        Object.keys(structMap).forEach(type => {
+            if (type == STRUCTURE_ROAD || type == STRUCTURE_RAMPART
+                || type == STRUCTURE_EXTENSION || type == STRUCTURE_LAB) return;
+            (structMap[type] || []).forEach(p => {
+                p = pair(p);
+                fixed.add(key(p[0], p[1]));
+            });
+        });
+        if (room) {
+            (room.extension || []).forEach(e => protectedExtensions.add(key(e.pos.x, e.pos.y)));
+            (room.constructionSite || []).filter(e => e.structureType == STRUCTURE_EXTENSION)
+                .forEach(e => protectedExtensions.add(key(e.pos.x, e.pos.y)));
+            protectedExtensions.forEach(k => fixed.add(k));
+            if (room.find) room.find(FIND_STRUCTURES).forEach(e => {
+                let k = key(e.pos.x, e.pos.y);
+                if (e.structureType == STRUCTURE_ROAD) roadSet.add(k);
+                else if (e.structureType == STRUCTURE_EXTENSION) {
+                    protectedExtensions.add(k);
+                    fixed.add(k);
+                } else if (e.structureType != STRUCTURE_RAMPART) fixed.add(k);
+            });
+            [room.controller, room.mineral].concat(room.source || []).forEach(e => {
+                if (e) fixed.add(key(e.pos.x, e.pos.y));
+            });
+        }
+        if (!roadSet.size) return null;
+        if (!roadSet.has(key(origin.x, origin.y))) {
+            let closest = Array.from(roadSet).map(k => [Math.floor(k / 50), k % 50]).sort((a, b) =>
+                Math.max(Math.abs(a[0] - origin.x), Math.abs(a[1] - origin.y))
+                - Math.max(Math.abs(b[0] - origin.x), Math.abs(b[1] - origin.y)))[0];
+            origin = {x: closest[0], y: closest[1]};
+        }
+
+        let template = ["☢☢-☢", "☢-☢-", "-☢-☢", "☢-☢☢"];
+        let candidates = [];
+        for (let x = 1; x <= 45; x++) for (let y = 1; y <= 45; y++) {
+            for (let flip of [false, true]) {
+                let labs = [], plazaRoads = [];
+                for (let i = -1; i < 3; i++) for (let j = -1; j < 3; j++) {
+                    let jj = flip ? j : 1 - j;
+                    let p = [x + i + 1, y + jj + 1];
+                    (template[i + 1].charAt(j + 1) == '☢' ? labs : plazaRoads).push(p);
+                }
+                let area = labs.concat(plazaRoads);
+                if (area.some(p => terrainCost(p[0], p[1]) == 255 || fixed.has(key(p[0], p[1])))) continue;
+                if (labs.some(p => roadSet.has(key(p[0], p[1])))) continue;
+                let areaKeys = new Set(area.map(p => key(p[0], p[1])));
+                let displaced = extensions.filter(p => areaKeys.has(key(p[0], p[1]))
+                    && !protectedExtensions.has(key(p[0], p[1])));
+                let nearRoad = plazaRoads.some(p => {
+                    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
+                        if (roadSet.has(key(p[0] + dx, p[1] + dy))) return true;
+                    return false;
+                });
+                let distance = Math.sqrt(Math.pow(origin.x - x - 1.5, 2) + Math.pow(origin.y - y - 1.5, 2));
+                candidates.push({x, y, flip, labs, plazaRoads, displaced, distance,
+                    score: distance + displaced.length * 0.75 - (nearRoad ? 1.5 : 0)});
+            }
+        }
+        candidates.sort((a, b) => a.score - b.score || a.distance - b.distance
+            || a.y - b.y || a.x - b.x || (a.flip ? 1 : -1));
+
+        let baseCosts = new PathFinder.CostMatrix;
+        for (let x = 0; x < 50; x++) for (let y = 0; y < 50; y++)
+            baseCosts.set(x, y, terrainCost(x, y));
+        fixed.forEach(k => baseCosts.set(Math.floor(k / 50), k % 50, 255));
+        extensions.forEach(p => baseCosts.set(p[0], p[1], 255));
+        roadSet.forEach(k => baseCosts.set(Math.floor(k / 50), k % 50, 1));
+
+        for (let attempt = 0; attempt < Math.min(24, candidates.length); attempt++) {
+            let candidate = candidates[attempt];
+            let costs = baseCosts.clone();
+            candidate.displaced.forEach(p => costs.set(p[0], p[1], terrainCost(p[0], p[1])));
+            candidate.labs.forEach(p => costs.set(p[0], p[1], 255));
+            candidate.plazaRoads.forEach(p => costs.set(p[0], p[1], 1));
+            let goals = candidate.plazaRoads.slice().sort((a, b) =>
+                Math.max(Math.abs(a[0] - origin.x), Math.abs(a[1] - origin.y))
+                - Math.max(Math.abs(b[0] - origin.x), Math.abs(b[1] - origin.y)));
+            let path = null;
+            for (let goal of goals) {
+                let result = PathFinder.search(new RoomPosition(origin.x, origin.y, roomName),
+                    {pos: new RoomPosition(goal[0], goal[1], roomName), range: 0},
+                    {roomCallback: () => costs, maxRooms: 1});
+                if (!result.incomplete) {
+                    path = result.path;
+                    break;
+                }
+            }
+            if (!path) continue;
+
+            let nextRoadSet = new Set(roadSet);
+            let addedRoads = [];
+            let addRoad = p => {
+                p = Array.isArray(p) ? p : [p.x, p.y];
+                let k = key(p[0], p[1]);
+                if (nextRoadSet.has(k)) return;
+                nextRoadSet.add(k);
+                addedRoads.push([p[0], p[1]]);
+            };
+            candidate.plazaRoads.forEach(addRoad);
+            path.forEach(addRoad);
+
+            let displacedKeys = new Set(candidate.displaced.map(p => key(p[0], p[1])));
+            let remainingExtensions = extensions.filter(p => !displacedKeys.has(key(p[0], p[1])));
+            let occupied = new Set(fixed);
+            remainingExtensions.forEach(p => occupied.add(key(p[0], p[1])));
+            candidate.labs.forEach(p => occupied.add(key(p[0], p[1])));
+            let replacementCandidates = [];
+            for (let x = 1; x <= 48; x++) for (let y = 1; y <= 48; y++) {
+                let k = key(x, y);
+                if (terrainCost(x, y) == 255 || occupied.has(k) || nextRoadSet.has(k)) continue;
+                let nearRoad = false;
+                for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
+                    if (nextRoadSet.has(key(x + dx, y + dy))) nearRoad = true;
+                if (!nearRoad) continue;
+                let distance = Math.sqrt(Math.pow(origin.x - x, 2) + Math.pow(origin.y - y, 2));
+                replacementCandidates.push({pos: [x, y], distance});
+            }
+            replacementCandidates.sort((a, b) => a.distance - b.distance
+                || a.pos[1] - b.pos[1] || a.pos[0] - b.pos[0]);
+            if (replacementCandidates.length < candidate.displaced.length) continue;
+            let replacements = replacementCandidates.slice(0, candidate.displaced.length).map(e => e.pos);
+
+            structMap[STRUCTURE_LAB] = candidate.labs;
+            structMap[STRUCTURE_ROAD] = roads.concat(addedRoads);
+            structMap[STRUCTURE_EXTENSION] = remainingExtensions.concat(replacements);
+            return {
+                x: candidate.x, y: candidate.y, flip: candidate.flip,
+                labs: candidate.labs, plazaRoads: candidate.plazaRoads, addedRoads,
+                relocated: candidate.displaced.map((p, i) => ({from: p, to: replacements[i]})),
+            };
+        }
+        return null;
+    },
     /**
      * 计算 分布图
      * 计算建筑的位置
@@ -746,10 +897,7 @@ let pro={
         let labX = 0
         let labY = 0
         let labDistance = 1e5
-        // 是否找到合法的 4×4 lab 广场。找不到时 labX/labY 保持 0，+1 后会在
-        // (0-3,0-3) 角落生成整组 lab + 环绕道路（E55S29 实测：随即低级自动建造
-        // 在 (1,2)/(2,1)/(2,3) 之类的角落格立了 road 工地）。
-        // 找不到就**不规划 lab 广场**，宁可没有也不在角落建垃圾。
+        // 优先使用核心区内广场；失败时在最终蓝图上调用可迁移未建 extension 的兜底。
         let labFound = false
         // innerPutAbleList.filter(e=>e.k>4).forEach(e=>{
         //     let x =e.x
@@ -850,8 +998,7 @@ let pro={
                 structMap["road"].push([storageX+i+j,storageY+i-j]) //仿射变换 [sin,cos,cos,-sin]
             }
         }
-        // 这里修改lab布局（只有找到合法 4×4 广场时才规划；否则整组跳过，
-        // 避免 labX/labY=0 的角落兜底把 lab 与环绕道路铺到 (0-3,0-3)）
+        // 核心区内搜索成功时先预留广场，避免后续 extension 占用。
         if (labFound) {
         let labs = [
             "☢☢-☢",
@@ -1178,6 +1325,7 @@ let pro={
 
         // let t = Game.cpu.getUsed()
         // Logger.log("PlannerData", Game.cpu.getUsed()-t)
+        if (!labFound) pro.placeLabPlaza(roomName, structMap, {x: storageX, y: storageY});
         pro.dismiss()
 
         // HelperVisual.showRoomStructures(roomName,structMap)
