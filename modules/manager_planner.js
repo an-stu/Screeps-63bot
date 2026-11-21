@@ -746,6 +746,11 @@ let pro={
         let labX = 0
         let labY = 0
         let labDistance = 1e5
+        // 是否找到合法的 4×4 lab 广场。找不到时 labX/labY 保持 0，+1 后会在
+        // (0-3,0-3) 角落生成整组 lab + 环绕道路（E55S29 实测：随即低级自动建造
+        // 在 (1,2)/(2,1)/(2,3) 之类的角落格立了 road 工地）。
+        // 找不到就**不规划 lab 广场**，宁可没有也不在角落建垃圾。
+        let labFound = false
         // innerPutAbleList.filter(e=>e.k>4).forEach(e=>{
         //     let x =e.x
         //     let y =e.y
@@ -781,6 +786,7 @@ let pro={
                     labDistance = distance
                     labX = x
                     labY = y
+                    labFound = true
                 }
             }
         })
@@ -845,7 +851,9 @@ let pro={
                 structMap["road"].push([storageX+i+j,storageY+i-j]) //仿射变换 [sin,cos,cos,-sin]
             }
         }
-        // 这里修改lab布局
+        // 这里修改lab布局（只有找到合法 4×4 广场时才规划；否则整组跳过，
+        // 避免 labX/labY=0 的角落兜底把 lab 与环绕道路铺到 (0-3,0-3)）
+        if (labFound) {
         let labs = [
             "☢☢-☢",
             "☢-☢-",
@@ -880,6 +888,7 @@ let pro={
                 else
                     structMap["road"].push([labX+i,labY+jj])
             }
+        }
         }
 
         walls.forEach(e=>structMap["rampart"].push([e.x,e.y]))
