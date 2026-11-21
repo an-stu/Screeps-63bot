@@ -300,6 +300,7 @@ let pro={
         let room = Game.rooms[pos.roomName];
         let intentKey = pos.x+":"+pos.y;
         if(room._constructIntents&&room._constructIntents[intentKey])return false;
+        if ((room._construct_builed || 0) >= (room._blueprintTierSiteCeiling ?? Infinity)) return false;
         if (struct === STRUCTURE_ROAD && pro.roadWorkTiles(room).has(pos.y * 50 + pos.x)) return false;
         if(room.constructionSite.length+(room._construct_builed||0)<10){
             let head = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType == struct).head()
@@ -462,6 +463,82 @@ let pro={
         const structMap = room.memory.structMap;
         if (structMap?.[STRUCTURE_LAB]) pro.tryCreateStructs(room, structMap, STRUCTURE_LAB);
     },
+    /** A level change opens blueprint slots now, without recomputing a layout. */
+    tryBuildOnRclChange(room) {
+        if (!room.my || !room.memory?.structMap || !room.level) return;
+        const last = room.memory.blueprintTierBuild;
+        const tier = room.level;
+        if (!last || last.rcl !== tier) {
+            // Spread the first rollout over a few ticks; real upgrades run immediately.
+            room.memory.blueprintTierBuild = {rcl:tier, nextTick:Game.time+(last ? 0 : (room.hashCode() & 3))};
+        }
+        const check = room.memory.blueprintTierBuild;
+        if (MIN_CPU || Game.cpu.bucket <= 500 || check.nextTick == null || Game.time < check.nextTick) return;
+        // If an individual damaged blueprint throws, do not repeat it every tick.
+        check.nextTick = Game.time+61;
+        const result = pro.tryCurrentBlueprintTier(room);
+        check.state = result.state;
+        if (result.state === "complete") delete check.nextTick;
+        else check.nextTick = Game.time+(result.state === "blocked" ? 61 : 5);
+        return result;
+    },
+    /** Queue only approved positions at current RCL, keeping first-spawn and defense policies. */
+    tryCurrentBlueprintTier(room) {
+        const map = room.memory?.structMap;
+        if (!room.my || !map) return {state:"complete", placed:0};
+        const sites = room.constructionSite;
+        const start = room._construct_builed || 0;
+        const used = Game._blueprintTierSiteCount ?? (Game._blueprintTierSiteCount = Object.keys(Game.constructionSites || {}).length);
+        const budget = Math.min(100-used,10-sites.length-start);
+        if (budget <= 0) return {state:"queued", placed:0};
+        const priority = ["spawn","extension","tower","storage","container","link","terminal","extractor",
+            "lab","factory","observer","powerSpawn","nuker","road"];
+        let pending = false, queued = false;
+        room._blueprintTierSiteCeiling = start+budget;
+        try {
+            for (const type of priority) {
+                // Keep low-RCL bootstrap focus on the first spawn until it has been built.
+                if (type === "extension" && !room.find(FIND_MY_SPAWNS).length) {
+                    queued = !!map.spawn;
+                    break;
+                }
+                if (!map[type] || (type === "lab" && room.memory.autoBuildLabs === false)) continue;
+                const limit = CONTROLLER_STRUCTURES[type]?.[room.level] || 0;
+                if (!limit) continue;
+                const planned = Utils.decodeLayoutPositions(map[type]);
+                const structures = Array.isArray(room[type]) ? room[type] : (room[type] ? [room[type]] : []);
+                const existing = structures.concat(sites.filter(s=>s.structureType===type));
+                let missing;
+                if (type === "road") {
+                    const key = p => p.x+50*p.y;
+                    const occupied = new Set(existing.map(s=>key(s.pos)));
+                    const work = pro.roadWorkTiles(room);
+                    missing = planned.filter(p=>!occupied.has(key(p))&&!work.has(key(p))).length;
+                } else if (type === "container" && room.level < 6) {
+                    const near = (a,b) => Math.max(Math.abs(a.x-b.x),Math.abs(a.y-b.y))<=1;
+                    const targets = [...(room.source || []),room.controller].filter(s=>s?.pos);
+                    missing = targets.filter(t=>planned.some(p=>near(p,t.pos))
+                        && !existing.some(s=>near(s.pos,t.pos))).length;
+                } else {
+                    missing = Math.min(limit,planned.length)-existing.length;
+                }
+                if (missing <= 0) continue;
+                const before = room._construct_builed || 0;
+                if (before-start >= budget) { queued = true; break; }
+                pro.tryCreateStructs(room,map,type);
+                const added = (room._construct_builed || 0)-before;
+                if (added < missing) {
+                    if (added || (room._construct_builed || 0)-start >= budget) queued = true;
+                    else pending = true;
+                }
+            }
+        } finally {
+            delete room._blueprintTierSiteCeiling;
+            Game._blueprintTierSiteCount += (room._construct_builed || 0)-start;
+        }
+        const placed = (room._construct_builed || 0)-start;
+        return {placed,state:queued ? "queued" : pending ? "blocked" : "complete"};
+    },
     tryAutoBuildHighLevel (room){
         // min-CPU 模式下 worker（ROLE_PRIORITY -5）不执行，规划出的工地没人
         // 建：跳过 prune/例行扩建/道路补建，省下每个经济 pass 的扫描。
@@ -516,6 +593,7 @@ let pro={
         const occupied = new Set([...(room[STRUCTURE_ROAD] || []), ...sites].map(o => o.pos.y * 50 + o.pos.x));
         for (const p of Utils.decodeLayoutPositions(structMap[STRUCTURE_ROAD])) {
             if (sites.length + (room._construct_builed || 0) >= 10) break;
+            if ((room._construct_builed || 0) >= (room._blueprintTierSiteCeiling ?? Infinity)) break;
             const tile = p.y * 50 + p.x;
             if (!protectedTiles.has(tile) && !occupied.has(tile)) {
                 pro.tryCreateCons(new RoomPosition(p.x, p.y, room.name), STRUCTURE_ROAD);

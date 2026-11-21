@@ -121,10 +121,15 @@ const managerRooms = {
             HelperError.catchError(() => StrategyGCLRoom.exec(room), room.name);
         } else if (room.flags("minSizeRoom").length) {
             HelperError.catchError(() => StrategyMinSizeRoom.exec(room), room.name);
-        } else if (!room.storage || !room.storage.my || room.level < 4) {
-            HelperError.catchError(() => StrategyLowLevel.exec(room), room.name);
         } else {
-            HelperError.catchError(() => StrategyHighLevel.exec(room), room.name);
+            if (global.ManagerAutoPlanner && room.memory.structMap) {
+                HelperError.catchError(() => ManagerAutoPlanner.tryBuildOnRclChange(room), room.name+":blueprintTier");
+            }
+            if (!room.storage || !room.storage.my || room.level < 4) {
+                HelperError.catchError(() => StrategyLowLevel.exec(room), room.name);
+            } else {
+                HelperError.catchError(() => StrategyHighLevel.exec(room), room.name);
+            }
         }
 
         if (global.StrategyResourceBalance) {
