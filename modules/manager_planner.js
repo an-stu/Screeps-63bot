@@ -793,7 +793,6 @@ let pro={
         labX+=1
         labY+=1
 
-
         // visual.text("C", centerX,centerY+0.25, {color: 'green',opacity:0.99,font: 7})
         // visual.text("S", storageX,storageY+0.25, {color: 'blue',opacity:0.99,font: 7})
         // visual.text("L", labX+0.5,labY+0.75, {color: 'blue',opacity:0.99,font: 7})
