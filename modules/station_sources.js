@@ -1024,7 +1024,6 @@ Creep.prototype.coreBuster = function () {
 
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
-    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     // T3 强化的小队防守爬：目标房的 invader 清干净一段时间 → 回主房贴 spawn 回收。
     // 放在最前面：回收期间不再接战、不再巡逻，直接走人（见 squadDefenderShouldRecycle）。
     if (pro.squadDefenderShouldRecycle(this, task)) {
@@ -1096,7 +1095,8 @@ Creep.prototype.outerDefense = function () {
         // 否则各自的顺序不同会把 outerDefenseLairGroups 的缓存互相打掉（见 defenseLairs）。
         let allLairs = pro.defenseLairs(this.room);
         let hostileCreeps = pro.defenseHostiles(this.room)
-            .filter(e => allLairs.some(l => e.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS)
+            .filter(e => (e.owner && e.owner.username == "Invader") // invader 全房可打（用户 2026-11-18）
+                || allLairs.some(l => e.pos.getRangeTo(l.pos) <= OUTER_DEFENSE_GUARD_RADIUS)
                 || allies.some(c => c.pos.getRangeTo(e.pos) <= OUTER_DEFENSE_HELP_RADIUS));
         if (hostileCreeps.length) {
             // 分组纪律（用户 10-03 定稿）：**窝区威胁归它所在组的防守爬**；
@@ -2695,6 +2695,10 @@ let pro = {
         let hostiles = room.getHostileCreeps ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
         let n = hostiles.filter(e => e.owner && e.owner.username == "Invader").length;
         cache[room.name] = {t: Game.time, n: n};
+        // 供无视野时的编制决策使用（有变化或每 50 tick 落一次，避免 Memory 抖动）
+        let mem = Memory.rooms[room.name] || (Memory.rooms[room.name] = {});
+        let seen = mem.outerInvaderSeen;
+        if (!seen || seen.n !== n || Game.time - seen.t >= 50) mem.outerInvaderSeen = {n: n, t: Game.time};
         return n;
     },
     outerRetreatState(roomName) {
@@ -5030,7 +5034,7 @@ let pro = {
      * 例外：房里出现 ≥2 只 Invader 爬（远程风筝小队）时编制固定 **1** —— 那时
      * 防守爬会换 T3 远程体型，一只就够（见下面 invader 分支的说明）。
      */
-    outerDefenseQuota(room) {
+    outerDefenseQuota(room, roomName) {
         // 基线可用 Memory.marketSettings.outerDefenseBase 覆盖（缺省 2）：
         // 设成 1 = 只留一只防守爬兜整个房间。逐 tick 模拟（含地形/现有道路/受伤降速）
         // 显示单只走完 4 个窝的闭环只要 168 tick / 300（44% 余量）——**来得及**，
@@ -5040,7 +5044,14 @@ let pro = {
         let base = Number(Memory.marketSettings && Memory.marketSettings.outerDefenseBase)
             || OUTER_DEFENSE_TARGET_CNT;
         base = Math.max(1, Math.min(4, base));
-        if (!room) return base;
+        roomName = roomName || (room && room.name);
+        if (!room) {
+            // 无视野时用最近一次看到的 Invader 数（由 outerInvaderCount 写入）：
+            // 1 只 ⇒ 编制 1；≥2 ⇒ 1（强化小队）。
+            let seen = roomName && Memory.rooms[roomName] && Memory.rooms[roomName].outerInvaderSeen;
+            if (seen && seen.t && Game.time - seen.t < OUTER_HOSTILE_MEMORY_TICKS) return 1;
+            return base;
+        }
         let hostiles = room.find(FIND_HOSTILE_CREEPS);
         // invader **远程风筝小队**（≥2 只 Invader 爬）：防守爬这时会换成 T3 远程
         // 体型（getOuterHarDefenseBodyConfig 的 squadBody）—— 一只就是 880 dps +
@@ -5053,6 +5064,15 @@ let pro = {
         // 闸门仍按 2 判满，外矿生产会被永久锁死（allDefendersFull 那次的教训）。
         let invaders = hostiles.filter(c => c.owner && c.owner.username == "Invader");
         if (invaders.length >= 2) return 1;
+        // 单个 Invader：一只防守就够（用户 2026-11-18）。有 lair 的 keeper 房仍按
+        // 「一爬管两窝」的旧口径，避免为了一只 invader 额外加编。
+        if (invaders.length === 1) {
+            let lairs = room.find(FIND_STRUCTURES).filter(s2 => s2.structureType == STRUCTURE_KEEPER_LAIR).length;
+            if (lairs) return Math.max(1, Math.min(4, Math.ceil(lairs / 2)));
+            let keeperCnt = hostiles.filter(c => c.owner && c.owner.username == "Source Keeper").length;
+            if (!keeperCnt) return 1; // 只有 1 个 invader、没有 keeper：一只防守就够
+            // 有 keeper 需要守窝：沿用下方 keeper 口径
+        }
         // 用户 2026-10-20：编制改成按 **lair 数量 ÷ 2**（一爬管两个窝），不再按 Source Keeper 数量 1:1。
         // 一个 source keeper 房是 **4 个 lair / 3 个源** —— 按源数或按 keeper 数都会算错：
         // 实测 W34N55 开局 3 只 keeper ⇒ 派了 3 只，清到只剩 1 只后第 3 只就白站（且没有退役逻辑）。
@@ -5198,7 +5218,7 @@ let pro = {
         let defensers = pro.outerDefenseAssignments(targetName).slice();
         defensers.sort((a, b) => (a.ticksToLive || 9999) - (b.ticksToLive || 9999));
         let front = defensers.head();
-        let quota = pro.outerDefenseQuota(harRoom);
+        let quota = pro.outerDefenseQuota(harRoom, targetName);
 
         let needSpawn = false;
         let replacingFront = false;

@@ -100,13 +100,20 @@ assert.ok(/StationSources\.outerRetreatCheck\(targetRoomName\)\) continue;/.test
 assert.ok(/defenseCost > defenseCapacity/.test(src),
     "防守体型必须按出兵房容量收缩，避免低 RCL 房永远生不出防守锁死采运");
 for (const fn of ["Creep.prototype.harvestEnergyOuterKeeper = function () {",
-    "Creep.prototype.harvestEnergyOuterCarry = function () {",
-    "Creep.prototype.outerDefense = function () {"]) {
+    "Creep.prototype.harvestEnergyOuterCarry = function () {"]) {
     const idx = src.indexOf(fn);
     assert.ok(idx >= 0, fn + " 必须存在");
     assert.ok(src.slice(idx, idx + 400).includes("outerRetreatCheck"),
         fn + " 必须读取撤退状态");
 }
+assert.ok(!/Creep\.prototype\.outerDefense = function \(\) \{[\s\S]{0,300}outerRetreatCheck/.test(src),
+    "防守爬不得撤退：它必须去接战 invader");
+assert.ok(/e\.owner && e\.owner\.username == "Invader"\) \/\/ invader 全房可打/.test(src),
+    "invader 在全房任何位置都必须成为防守目标（不能只守窝区）");
+assert.ok(/if \(invaders\.length === 1\)/.test(src),
+    "单个 invader 的防守编制必须收敛到 1");
+assert.ok(/outerInvaderSeen/.test(src),
+    "无视野时用最近一次看到的 invader 数决定编制");
 assert.ok(!/outerInvaderCount\(harRoom\) >= 2\) return null;/.test(src),
     "≥2 invader 时必须允许派强化小队（不得再禁派）");
 assert.ok(src.includes("[RANGED_ATTACK]: 22"), "强化小队远程体型必须保留");

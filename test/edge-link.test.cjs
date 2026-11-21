@@ -779,8 +779,8 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerDefenseQuota(invaderRoom(2)), 1,
         "2 只 Invader 爬 → 编制 1：T3 小队一只就够（W35N55 实测白派两只）");
     assert.equal(S.outerDefenseQuota(invaderRoom(5)), 1, "5 只 Invader 也一样，一只 T3 碾压整个小队");
-    assert.equal(S.outerDefenseQuota(invaderRoom(1)), 2,
-        "只有 1 只 Invader 时不是风筝小队（不带 T3），仍按基线 2");
+    assert.equal(S.outerDefenseQuota(invaderRoom(1)), 1,
+        "只有 1 只 Invader 时一只防守就够（用户 2026-11-18，不再按基线 2 派两只）");
     assert.equal(S.outerDefenseQuota({
         name: "W34N55",
         find: () => [1, 2, 3, 4].map(i => ({ owner: { username: i == 1 ? "Invader" : "Source Keeper" } })),

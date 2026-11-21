@@ -219,7 +219,7 @@ let pro = {
             if (flag.memory.spawnRoom && flag.memory.spawnRoom != spawnRoom.name) continue;
             let room = Game.rooms[roomName];
             if (!pro.roomNeedsDefense(room, flag)) continue;   // 无威胁：0 编制，直接放行
-            let need = StationSources.outerDefenseQuota(room);
+            let need = StationSources.outerDefenseQuota(room, roomName);
             if (StationSources.outerDefenseAssignments(roomName).length < need) return false;
         }
         return true;
