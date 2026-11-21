@@ -1319,9 +1319,21 @@ Creep.prototype.outerDefense = function () {
             let wp = pro.outerDefensePatrolTarget(this, posts);
             // 贴着窝站（range 1）。隔三格是打不到刚出窝的 keeper 的，
             // 而且只有贴着才会成为「最近的爬」，把 keeper 钉在原地。
-            // （reusePath 由超级移动优化接管，传了也会被忽略，不传。）
-            if (wp && !this.pos.inRangeTo(wp.pos, 1)) {
-                this.moveTo(wp.pos, { range: 1 });
+            // **同组多只防守爬按名字序错开驻守距离**（用户 2026-11-21：待命时两只
+            // 一直对穿/堵路）。第 1 名贴窝 range1、第 2 名 range2、第 3 名 range3——
+            // 确定性、不来回换位，保证两只不同格；不同组各一只时 mates.length=1，
+            // 行为与原来完全一致（仍贴窝 range1）。
+            let standRange = 1;
+            let mates = pro.defenseAllies(this.room)
+                .filter(c => c.memory.role == "outerHarvestDefenser"
+                    && c.memory.defenseGroup === this.memory.defenseGroup)
+                .map(c => c.name).sort();
+            if (mates.length >= 2) {
+                let slot = mates.indexOf(this.name);
+                if (slot >= 0) standRange = 1 + (slot % 3);
+            }
+            if (wp && !this.pos.inRangeTo(wp.pos, standRange)) {
+                this.moveTo(wp.pos, { range: standRange });
             }
             return;
         }
