@@ -150,14 +150,17 @@ let pro={
                 })
             }
         }
-        const sourceTiles = Utils.sourceContainerTiles(structMap["container"], room.source);
-        structMap["road"] = structMap["road"].filter(({x,y}) => !sourceTiles.has(y * 50 + x));
+        for (const o of [room.controller, room.mineral, ...(room.source || [])]) {
+            if (o?.pos) costs.set(o.pos.x,o.pos.y,255);
+        }
+        const workTiles = Utils.roomContainerWorkTiles(room, {planned: structMap["container"] || []});
+        structMap["road"] = structMap["road"].filter(({x,y}) => !workTiles.has(y * 50 + x));
         structMap["road"].forEach(e=>{
-            costs.set(e.x,e.y,1)
+            if (costs.get(e.x,e.y) < 255) costs.set(e.x,e.y,1)
         })
-        Utils.preferOffSourceContainers(costs, sourceTiles);
-        structMap["container"].sort((a,b)=>Math.sqrt((a.x-storageX)*(a.x-storageX)+(a.y-storageY)*(a.y-storageY))-Math.sqrt((b.x-storageX)*(b.x-storageX)+(b.y-storageY)*(b.y-storageY)))
-        structMap["container"].forEach(e=>{
+        Utils.preferOffSourceContainers(costs, workTiles);
+        const containers = (structMap["container"] || []).slice().sort((a,b)=>Math.hypot(a.x-storageX,a.y-storageY)-Math.hypot(b.x-storageX,b.y-storageY));
+        containers.forEach(e=>{
             let ret = PathFinder.search(
                 new RoomPosition(storageX,storageY,room.name),
                 {pos:new RoomPosition(e.x,e.y,room.name),range:1},
@@ -166,8 +169,9 @@ let pro={
                     maxRooms:1
                 }
             )
+            if (ret.incomplete) return;
             ret.path.forEach(pos=>{
-                if(!sourceTiles.has(pos.y * 50 + pos.x) && costs.get(pos.x,pos.y) != 1){
+                if(!workTiles.has(pos.y * 50 + pos.x) && costs.get(pos.x,pos.y) != 1){
                     structMap['road'].push({x:pos.x,y:pos.y})
                     costs.set(pos.x,pos.y,1)
                 }
@@ -296,12 +300,7 @@ let pro={
         let room = Game.rooms[pos.roomName];
         let intentKey = pos.x+":"+pos.y;
         if(room._constructIntents&&room._constructIntents[intentKey])return false;
-        if (struct === STRUCTURE_ROAD && room.source?.length) {
-            const protectedTiles = room._sourceRoadProtectedTiles ?? (room._sourceRoadProtectedTiles =
-                Utils.sourceContainerTiles((room[STRUCTURE_CONTAINER] || []).concat(
-                    Utils.decodePosArray(room.memory?.structMap?.[STRUCTURE_CONTAINER] || "")), room.source));
-            if (protectedTiles.has(pos.y * 50 + pos.x)) return false;
-        }
+        if (struct === STRUCTURE_ROAD && pro.roadWorkTiles(room).has(pos.y * 50 + pos.x)) return false;
         if(room.constructionSite.length+(room._construct_builed||0)<10){
             let head = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType == struct).head()
             let site = pos.lookFor(LOOK_CONSTRUCTION_SITES).filter(e=>e.structureType == struct).head()
@@ -329,6 +328,7 @@ let pro={
         return false;
     },
     tryCreateStructs(room,structMap,struct,structCnt=2500){
+        if (struct === STRUCTURE_ROAD) return structMap?.[struct] && pro.tryCreateRoads(room, structMap);
         // Generic planning is also used by claim/cross-shard bootstrap. Below
         // RCL6 only containers serving an energy source or controller qualify.
         if (struct === STRUCTURE_CONTAINER && room.level < 6) {
@@ -485,15 +485,12 @@ let pro={
         if(Game.cpu.bucket>500&&room.memory.structMap && (extensionMissing || (Game.time+room.hashCode()) % 150 == 0)){
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
         }
-        // 道路补建：路消失/被打掉后不能等 600 tick。规划路数量 > 实际路+工地时，
-        // 每个 economy pass 都补工地（每 tick 最多 10 个，受全局工地上限约束）。
-        if (Game.cpu.bucket > 500 && room.memory.structMap && room.memory.structMap[STRUCTURE_ROAD]) {
-            let plannedRoadCnt = Utils.decodePosArray(room.memory.structMap[STRUCTURE_ROAD]).length || 0;
-            let currentRoadCnt = (room.road ? room.road.length : 0)
-                + room.constructionSite.filter(e => e.structureType == STRUCTURE_ROAD).length;
-            if (currentRoadCnt < plannedRoadCnt) {
-                pro.tryCreateStructs(room, room.memory.structMap, STRUCTURE_ROAD);
-            }
+        // Old off-plan roads must not hide missing bypasses. Spread exact
+        // position checks across economy passes instead of decoding every pass.
+        if (Game.cpu.bucket > 500 && room.memory.structMap?.[STRUCTURE_ROAD]
+            && Game.time >= (room.memory.nextBlueprintRoadCheck || 0)) {
+            room.memory.nextBlueprintRoadCheck = Game.time + 25 + (room.hashCode() & 7);
+            pro.tryCreateRoads(room, room.memory.structMap);
         }
         if((Game.time+room.hashCode()) % 600 == 0 && Game.cpu.bucket>500&&room.memory.structMap){ // 4级后600tick更新一次
             // 开始建 road 和 container
@@ -507,6 +504,153 @@ let pro={
                 // })
             })
         }
+    },
+    roadWorkTiles(room) {
+        return room._roadContainerWorkTiles || (room._roadContainerWorkTiles = Utils.roomContainerWorkTiles(room));
+    },
+    tryCreateRoads(room, structMap) {
+        if (!structMap?.[STRUCTURE_ROAD]) return;
+        const sites = room.constructionSite || [];
+        if (sites.length + (room._construct_builed || 0) >= 10) return;
+        const protectedTiles = pro.roadWorkTiles(room);
+        const occupied = new Set([...(room[STRUCTURE_ROAD] || []), ...sites].map(o => o.pos.y * 50 + o.pos.x));
+        for (const p of Utils.decodeLayoutPositions(structMap[STRUCTURE_ROAD])) {
+            if (sites.length + (room._construct_builed || 0) >= 10) break;
+            const tile = p.y * 50 + p.x;
+            if (!protectedTiles.has(tile) && !occupied.has(tile)) {
+                pro.tryCreateCons(new RoomPosition(p.x, p.y, room.name), STRUCTURE_ROAD);
+            }
+        }
+    },
+    /**
+     * Repair only the local road junction around each occupied work tile.
+     * A failed repair is transactional: keep the entire original junction.
+     * Roads as well as all eight normal walking directions are considered.
+     */
+    planWorkTileRoads(room) {
+        const layout = room.memory?.structMap;
+        const encoded = layout?.[STRUCTURE_ROAD];
+        const result = {roads:encoded, added:[], removed:[], retained:[]};
+        if (!encoded) return result;
+        const protectedTiles = pro.roadWorkTiles(room);
+        const code = p => { const q = p?.pos || p; return q?.y * 50 + q?.x; };
+        const roads = new Set(Utils.decodeLayoutPositions(encoded).map(code));
+        const sites = room.constructionSite || [];
+        const builtRoads = new Set((room[STRUCTURE_ROAD] || []).map(code));
+        const roadSites = new Set(sites.filter(s => s.my !== false && s.structureType === STRUCTURE_ROAD).map(code));
+        const conflicts = [...protectedTiles].filter(t => roads.has(t) || builtRoads.has(t) || roadSites.has(t)).sort((a,b) => a-b);
+        if (!conflicts.length) return result;
+        const blockers = new Set([code(room.controller), code(room.mineral), ...(room.source || []).map(code)]);
+        for (const [type, positions] of Object.entries(layout)) {
+            if (!OBSTACLE_OBJECT_TYPES.includes(type)) continue;
+            for (const p of Utils.decodeLayoutPositions(positions)) blockers.add(code(p));
+        }
+        const actual = room.getStructures ? room.getStructures() : room.find(FIND_STRUCTURES);
+        for (const s of actual.concat(sites)) {
+            if (OBSTACLE_OBJECT_TYPES.includes(s.structureType)
+                || s.structureType === STRUCTURE_RAMPART && !s.my && !s.isPublic) blockers.add(code(s));
+        }
+        const terrain = room.getTerrain();
+        let changed = false;
+        for (const tile of conflicts) {
+            const detour = pro.findWorkTileRoadBypass(tile, roads, builtRoads, protectedTiles, blockers, terrain);
+            if (!detour) { result.retained.push(tile); continue; }
+            changed = roads.delete(tile) || changed;
+            result.removed.push(tile);
+            for (const t of detour) {
+                if (!roads.has(t)) { roads.add(t); result.added.push(t); }
+            }
+        }
+        if (result.added.length || changed) {
+            result.roads = Utils.encodePosArray([...roads].map(t => ({x:t % 50, y:Math.floor(t / 50)})));
+        }
+        return result;
+    },
+    findWorkTileRoadBypass(tile, roads, builtRoads, protectedTiles, blockers, terrain) {
+        const cx = tile % 50, cy = Math.floor(tile / 50), radius = 3;
+        const local = new Map();
+        for (let y = Math.max(1, cy-radius); y <= Math.min(48, cy+radius); y++) {
+            for (let x = Math.max(1, cx-radius); x <= Math.min(48, cx+radius); x++) {
+                const t = y * 50 + x;
+                if (protectedTiles.has(t) || blockers.has(t)) continue;
+                const ground = terrain.get(x,y);
+                if (ground & TERRAIN_MASK_WALL) continue;
+                local.set(t, roads.has(t) || builtRoads.has(t) ? 1 : (ground & TERRAIN_MASK_SWAMP) ? 10 : 4);
+            }
+        }
+        const neighbors = t => {
+            const out = [], x = t % 50;
+            for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++) {
+                if ((!dx && !dy) || x+dx < 1 || x+dx > 48) continue;
+                const n = t + dy*50 + dx;
+                if (local.has(n)) out.push(n);
+            }
+            return out;
+        };
+        // Two occupied road tiles may be one shared bottleneck. Never delete
+        // them one at a time based on incomplete local connectivity evidence.
+        for (const t of protectedTiles) {
+            if (t !== tile && roads.has(t)
+                && Math.max(Math.abs(t % 50-cx), Math.abs(Math.floor(t / 50)-cy)) === 1) return undefined;
+        }
+        const endpoints = neighbors(tile).filter(t => roads.has(t));
+        if (endpoints.length < 2) return [];
+        const joined = new Set();
+        const addRoads = new Set();
+        const flood = start => {
+            const queue = [start];
+            joined.add(start);
+            for (let i=0; i<queue.length; i++) for (const n of neighbors(queue[i])) {
+                if (!joined.has(n) && (roads.has(n) || addRoads.has(n))) {
+                    joined.add(n);
+                    queue.push(n);
+                }
+            }
+        };
+        flood(endpoints[0]);
+        while (endpoints.some(t => !joined.has(t))) {
+            const pending = new Map([...joined].map(t => [t,0]));
+            const previous = new Map(), visited = new Set();
+            const goals = new Set(endpoints.filter(t => !joined.has(t)));
+            let found;
+            while (pending.size) {
+                let current, best = Infinity;
+                for (const [t,d] of pending) if (d < best) { current=t; best=d; }
+                pending.delete(current);
+                visited.add(current);
+                if (goals.has(current)) { found=current; break; }
+                for (const n of neighbors(current)) {
+                    const d = best + local.get(n);
+                    if (visited.has(n) || d >= (pending.get(n) ?? Infinity)) continue;
+                    pending.set(n,d);
+                    previous.set(n,current);
+                }
+            }
+            if (found === undefined) return undefined;
+            let t = found;
+            while (!joined.has(t)) {
+                if (!roads.has(t)) addRoads.add(t);
+                t = previous.get(t);
+            }
+            flood(t);
+        }
+        return [...addRoads];
+    },
+    updateWorkTileRoads(rooms) {
+        const due = rooms.filter(r => r.my && r.memory.structMap?.[STRUCTURE_ROAD]
+            && (r.memory.workTileRoads?.version !== 1 || r.memory.workTileRoads.next <= Game.time));
+        const room = due.find(r => r.memory.workTileRoads?.version !== 1) || due[0];
+        if (!room) return;
+        const start = Game.cpu.getUsed();
+        const result = pro.planWorkTileRoads(room);
+        if (result.roads !== room.memory.structMap[STRUCTURE_ROAD]) {
+            room.memory.structMap[STRUCTURE_ROAD] = result.roads;
+            delete room._plannedRoadSet;
+            delete room.memory.nextBlueprintRoadCheck;
+        }
+        room.memory.workTileRoads = {version:1, tick:Game.time, next:Game.time+3000,
+            added:result.added, removed:result.removed, retained:result.retained,
+            cpu:Math.round((Game.cpu.getUsed()-start)*1000)/1000};
     },
     exec (){
         pro.computeAnyRoom();

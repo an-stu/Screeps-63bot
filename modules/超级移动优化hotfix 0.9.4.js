@@ -430,8 +430,10 @@ function generateCostMatrix(room, pos) {
         x = object.pos.x; y = object.pos.y;
         noStructureCostMat.set(x, y, unWalkableCCost);
     }
+    const sites = room.controller && (room.controller.my || room.controller.safeMode)
+        ? room.find(FIND_CONSTRUCTION_SITES) : room.constructionSite || [];
     if (room.controller && (room.controller.my || room.controller.safeMode)) {  // 自己的工地不能踩
-        for (let consSite of room.find(FIND_CONSTRUCTION_SITES)) {
+        for (let consSite of sites) {
             if (obstacles.has(consSite.structureType)) {
                 x = consSite.pos.x; y = consSite.pos.y;
                 noStructureCostMat.set(x, y, unWalkableCCost);
@@ -474,12 +476,12 @@ function generateCostMatrix(room, pos) {
         }
     }
 
-    const sourceContainers = totalStructures.filter(s => s.structureType === STRUCTURE_CONTAINER);
-    const plannedContainers = room.controller?.my && room.memory?.structMap?.[STRUCTURE_CONTAINER];
-    if (plannedContainers) sourceContainers.push(...Utils.decodePosArray(plannedContainers));
-    const sourceTiles = Utils.sourceContainerTiles(sourceContainers, sources);
-    Utils.preferOffSourceContainers(noStructureCostMat, sourceTiles);
-    Utils.preferOffSourceContainers(structureCostMat, sourceTiles);
+    const containers = totalStructures.filter(s => s.structureType === STRUCTURE_CONTAINER);
+    const planned = room.controller?.my
+        ? Utils.decodeLayoutPositions(room.memory?.structMap?.[STRUCTURE_CONTAINER]) : [];
+    const workTiles = Utils.roomContainerWorkTiles(room, {containers, sites, sources, planned});
+    Utils.preferOffSourceContainers(noStructureCostMat, workTiles);
+    Utils.preferOffSourceContainers(structureCostMat, workTiles);
 
     costMatrixCache[room.name] = {
         roomName: room.name,

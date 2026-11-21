@@ -145,6 +145,12 @@ let pro = {
         if (!MIN_CPU && global.StrategyMarket && isCpuFeatureEnabled("market")
             && HelperCpuUsed.shouldRun(100, OPTIONAL_CPU_OFFSETS.marketAutoBuy))
             HelperError.catchError(() => StrategyMarket.autoBuy());
+        // Migrate existing roads independently of the optional full planner.
+        // At most one room per slot, only with spare CPU; never replan buildings.
+        const workTileInterval = Game.cpu.bucket > 6000 ? 5 : 13;
+        if (!MIN_CPU && global.ManagerAutoPlanner && Game.time % workTileInterval === 4
+            && Game.cpu.bucket > 3000 && Game.cpu.getUsed() < Game.cpu.limit)
+            HelperError.catchError(() => ManagerAutoPlanner.updateWorkTileRoads(objects.rooms), "workTileRoads");
         if (!MIN_CPU && global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")
             && Game.cpu.bucket >= 6000
             && HelperCpuUsed.shouldRun(25, OPTIONAL_CPU_OFFSETS.autoPlanner))

@@ -45,7 +45,7 @@ const terrain = {get: (x, y) => walls.has(x + ":" + y) ? WALL : 0};
 
 const structures = [
     {structureType: "container", pos: {x: 33, y: 11}},
-    {id: "upgC", structureType: "container", pos: {x: 30, y: 16}},
+    {id: "upgC", structureType: "container", pos: {x: 30, y: 16, roomName: "E41S29"}},
     {structureType: "road", pos: {x: 33, y: 12}},
     {structureType: "road", pos: {x: 34, y: 12}},
     {structureType: "road", pos: {x: 35, y: 12}},
@@ -57,6 +57,7 @@ const sites = [
     {structureType: "road", pos: {x: 34, y: 13}},
     {structureType: "road", pos: {x: 35, y: 13}},
     {structureType: "container", pos: {x: 21, y: 20}},
+    {structureType: "container", pos: {x: 29, y: 17}},
 ];
 const sources = [
     {id: "src1", pos: {x: 34, y: 11}},
@@ -70,7 +71,7 @@ const upgradeCreeps = [
 const room = {
     name: "E41S29",
     memory: {stationUpgrade: {container: "upgC"}, structMap: {container: "planned"}},
-    controller: {id: "ctrl"},
+    controller: {id: "ctrl", my: true, pos: {x: 30, y: 17}},
     getStructures: () => structures,
     constructionSite: sites,
     find: type => type === 104 ? sources : (type === 102 ? upgradeCreeps : []),
@@ -88,7 +89,7 @@ const sandbox = {
     OUTER_ROAD_WORK_TILE_COST: 8,
     OUTER_ROAD_SOURCE_CONTAINER_COST: 40,
     PathFinder: {CostMatrix},
-    Utils: {decodePosArray: value => value === "planned" ? [{x: 19, y: 20}] : []},
+    Utils: {decodePosArray: value => value === "planned" ? [{x: 19, y: 20}, {x: 29, y: 18}] : []},
     Game: {rooms: {"E41S29": room}, map: {getRoomTerrain: () => terrain},
         getObjectById: id => id === "upgC" ? structures[1] : null},
     console: {log() {}},
@@ -106,7 +107,9 @@ assert.equal(cm.get(21, 20), 40, "源容器工地格同样要软惩罚");
 assert.equal(cm.get(19, 20), 40, "蓝图内尚未立工地的源容器格也要软惩罚");
 
 // 1b) 升级容器格 + upgrader 当前站位同样保护
-assert.equal(cm.get(30, 16), 8, "升级容器格（upgrader 补给位）必须抬高");
+assert.equal(cm.get(30, 16), 40, "升级容器格（upgrader 补给位）必须抬高");
+assert.equal(cm.get(29, 17), 40, "升级容器工地同样避让");
+assert.equal(cm.get(29, 18), 40, "升级容器蓝图同样避让");
 assert.equal(cm.get(31, 16), 8, "upgrader 当前站位（memory.upgradePosition）必须抬高");
 assert.equal(cm.get(32, 16), 2, "控制器附近普通格不受影响");
 assert.equal(cm.get(36, 16), 1, "worker 的临时升级站位不得把 road 抬价（只有专职 upgrader 才保护）");

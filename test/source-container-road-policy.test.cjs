@@ -1,5 +1,5 @@
-// Source keeper work tiles are walkable, but roads and ordinary traffic should
-// prefer a short detour around them. Coordinates are the live E34S29 layout.
+// Source and controller containers are fixed worker positions: roads may pass
+// through them at a soft path cost, but the planner must not build roads there.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -21,9 +21,8 @@ function extractMethod(source, header) {
     throw new Error("unterminated " + header);
 }
 
-const sourceTilesMethod = extractMethod(utilsSrc, "sourceContainerTiles(containers, sources)");
-const preferMethod = extractMethod(utilsSrc, "preferOffSourceContainers(matrix, sourceTiles)");
 const tryCreateConsMethod = extractMethod(plannerSrc, "tryCreateCons(pos,struct){");
+const roadWorkTilesMethod = extractMethod(plannerSrc, "roadWorkTiles(room) {");
 
 class CostMatrix {
     constructor() { this.costs = new Map(); }
@@ -38,73 +37,105 @@ const sandbox = {
     LOOK_CONSTRUCTION_SITES: "sites",
     OK: 0,
     CostMatrix,
-    Game: {rooms: {}, time: 1, constructionSites: {}},
-    Utils: {
-        decodePosArray(value) { return value === "planned" ? plannedContainers : []; },
-    },
+    Game: {rooms: {}, time: 1, constructionSites: {}, getObjectById: id => id === "upgC" ? upgradeContainer : null},
 };
-const plannedContainers = [
-    {x: 39, y: 42}, // second source container (blueprint slot)
-    {x: 35, y: 5},  // mineral container: must not be classified as a keeper tile
-];
+sandbox.global = sandbox;
+vm.runInNewContext(utilsSrc, sandbox);
 vm.runInNewContext(
-    "Array.prototype.head=function(){return this[0]}; this.copyArray=a=>Array.from(a);"
-    + "var Utils=Object.assign(Utils,{" + [sourceTilesMethod, preferMethod].join(",\n") + "});"
-    + "var pro={" + tryCreateConsMethod + "};",
+    "Array.prototype.head=function(){return this[0]};"
+    + "this.testPlanner={" + roadWorkTilesMethod + ","
+    + tryCreateConsMethod.replace(/\bpro\./g, "testPlanner.") + "};",
     sandbox,
 );
 
-const UtilsUnderTest = sandbox.Utils;
-
-// Live layout: sources (41,24), (40,43); their containers (40,24), (39,42).
-// The controller/upgrader container (28,25) and mineral container (35,5) are
-// intentionally present in the same container list but are not source work tiles.
-const sourcePositions = [{x: 41, y: 24}, {x: 40, y: 43}];
-const containers = [
-    {pos: {x: 40, y: 24}},
-    {x: 28, y: 25},
-    [39, 42],
-    {x: 35, y: 5},
-];
-const sourceTiles = UtilsUnderTest.sourceContainerTiles(containers, sourcePositions);
+const Utils = sandbox.Utils;
 const tile = (x, y) => y * 50 + x;
+const sourcePositions = [
+    {x: 41, y: 24},
+    {x: 40, y: 43},
+    {x: 18, y: 18},
+];
+const upgradeContainer = {id: "upgC", structureType: "container", pos: {x: 28, y: 25, roomName: "E34S29"}};
+const builtSourceContainer = {pos: {x: 40, y: 24}};
+const plannedSourceContainer = {x: 39, y: 42};
+const ownSiteSourceContainer = {structureType: "container", my: true, pos: {x: 17, y: 17}};
+const mineralContainer = {pos: {x: 35, y: 5}};
+const controller = {my: true, pos: {x: 27, y: 25}};
 
-assert.equal(sourceTiles.size, 2, "only the two energy-source containers are protected");
-assert.ok(sourceTiles.has(tile(40, 24)), "E34S29 source A container is protected");
-assert.ok(sourceTiles.has(tile(39, 42)), "E34S29 source B container is protected");
-assert.ok(!sourceTiles.has(tile(28, 25)), "the upgrade container is not a source work tile");
-assert.ok(!sourceTiles.has(tile(35, 5)), "the mineral container is not a source work tile");
-assert.ok(!sourceTiles.has(tile(39, 24)), "the planned link is not misclassified as a source container");
+// Keep the legacy source-only helper available for callers that need the
+// narrower classification; the combined helper adds controller work tiles.
+const legacySourceTiles = Utils.sourceContainerTiles(
+    [builtSourceContainer, plannedSourceContainer, ownSiteSourceContainer, upgradeContainer, mineralContainer],
+    sourcePositions,
+);
+assert.equal(legacySourceTiles.size, 3, "legacy helper continues to classify only source-adjacent containers");
+assert.ok(legacySourceTiles.has(tile(40, 24)));
+assert.ok(legacySourceTiles.has(tile(39, 42)));
+assert.ok(legacySourceTiles.has(tile(17, 17)));
+assert.ok(!legacySourceTiles.has(tile(28, 25)), "legacy source-only classification excludes the controller container");
+assert.ok(!legacySourceTiles.has(tile(35, 5)), "mineral containers are not source work tiles");
 
-// Preserve blocked structures, discourage even an existing road on the source
-// container, and leave non-source road costs alone.
+const directWorkTiles = Utils.containerWorkTiles(
+    [builtSourceContainer, plannedSourceContainer, ownSiteSourceContainer, upgradeContainer, mineralContainer],
+    sourcePositions,
+    controller,
+    upgradeContainer,
+);
+for (const key of [tile(40, 24), tile(39, 42), tile(17, 17), tile(28, 25)]) {
+    assert.ok(directWorkTiles.has(key), "combined work-tile helper includes " + key);
+}
+assert.ok(!directWorkTiles.has(tile(35, 5)), "combined work-tile helper leaves the mineral container alone");
+
+// The room-level helper must merge built containers, encoded blueprint slots,
+// and our own container sites before applying source/controller adjacency.
+const plannedLayout = Utils.encodePosArray([
+    plannedSourceContainer,
+    {x: 35, y: 5}, // mineral slot: deliberately not adjacent to an energy source
+]);
+const room = {
+    name: "E34S29",
+    my: true,
+    memory: {structMap: {container: plannedLayout}, stationUpgrade: {container: "upgC"}},
+    source: sourcePositions.map(pos => ({pos})),
+    controller,
+    container: [builtSourceContainer, upgradeContainer, mineralContainer],
+    constructionSite: [ownSiteSourceContainer],
+};
+const roomWorkTiles = Utils.roomContainerWorkTiles(room);
+for (const key of [tile(40, 24), tile(39, 42), tile(17, 17), tile(28, 25)]) {
+    assert.ok(roomWorkTiles.has(key), "room helper includes built/planned/site/controller tile " + key);
+}
+assert.ok(!roomWorkTiles.has(tile(35, 5)), "room helper does not turn the mineral container into a work tile");
+
+// Softly discourage roads through any work tile without making it impassable;
+// existing blocked cells must stay blocked and non-work mineral traffic is intact.
 const costs = new CostMatrix();
-costs.set(40, 24, 1); // existing road through source A container
-costs.set(39, 42, 2); // unroaded source B container
-costs.set(28, 25, 1); // upgrade-container tile
-costs.set(35, 5, 1);  // mineral-container tile
-costs.set(39, 24, 255); // planned link must remain impassable
-UtilsUnderTest.preferOffSourceContainers(costs, sourceTiles);
-assert.equal(costs.get(40, 24), 40, "source-container road cost is raised to the soft penalty");
-assert.equal(costs.get(39, 42), 40, "unroaded source-container tile receives the same penalty");
-assert.equal(costs.get(28, 25), 1, "upgrade container is not penalized");
-assert.equal(costs.get(35, 5), 1, "mineral container is not penalized");
-assert.equal(costs.get(39, 24), 255, "the existing link exclusion is not overwritten");
+costs.set(40, 24, 1); // existing road through a built source container
+costs.set(39, 42, 2); // planned source work tile
+costs.set(17, 17, 3); // own container construction site
+costs.set(28, 25, 1); // controller-adjacent upgrade container
+costs.set(35, 5, 1);  // mineral container
+costs.set(39, 24, 255); // an existing obstacle must never be softened
+Utils.preferOffSourceContainers(costs, roomWorkTiles);
+assert.equal(costs.get(40, 24), 40, "built source-container road gets the soft penalty");
+assert.equal(costs.get(39, 42), 40, "planned source work tile gets the soft penalty");
+assert.equal(costs.get(17, 17), 40, "own source-container site gets the soft penalty");
+assert.equal(costs.get(28, 25), 40, "controller-adjacent upgrade container gets the soft penalty");
+assert.equal(costs.get(35, 5), 1, "mineral container cost remains unchanged");
+assert.equal(costs.get(39, 24), 255, "existing obstacle stays impassable");
 
-// Small local Dijkstra using Screeps' 8-way/Chebyshev movement and the matrix
-// above. This makes the live route choice explicit: (40,23) -> (39,23) ->
-// (38,24) -> (39,25) is cheaper than crossing the keeper's (40,24) tile.
-function shortestPath(start, goal, range = 0) {
-    const open = [{x: start.x, y: start.y, cost: 0, path: []}];
-    const best = new Map([[tile(start.x, start.y), 0]]);
-    const bounds = {minX: 37, maxX: 41, minY: 22, maxY: 26};
+// A worker can still path directly onto its fixed work tile: the 40 cost is a
+// preference, not a hard block (255). This uses Screeps' 8-way movement cost.
+function shortestPathCost(start, goal) {
+    const keyOf = p => tile(p.x, p.y);
+    const open = [{x: start.x, y: start.y, cost: 0}];
+    const best = new Map([[keyOf(start), 0]]);
+    const bounds = {minX: 38, maxX: 41, minY: 22, maxY: 25};
     while (open.length) {
         open.sort((a, b) => a.cost - b.cost);
         const current = open.shift();
-        if (current.cost !== best.get(tile(current.x, current.y))) continue;
-        if (Math.max(Math.abs(current.x - goal.x), Math.abs(current.y - goal.y)) <= range) {
-            return {cost: current.cost, path: current.path};
-        }
+        if (current.cost !== best.get(keyOf(current))) continue;
+        if (current.x === goal.x && current.y === goal.y) return current.cost;
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 if (!dx && !dy) continue;
@@ -116,49 +147,37 @@ function shortestPath(start, goal, range = 0) {
                 const key = tile(x, y);
                 if (nextCost >= (best.get(key) ?? Infinity)) continue;
                 best.set(key, nextCost);
-                open.push({x, y, cost: nextCost, path: current.path.concat([{x, y}])});
+                open.push({x, y, cost: nextCost});
             }
         }
     }
-    return undefined;
+    return Infinity;
 }
+assert.equal(shortestPathCost({x: 39, y: 23}, {x: 40, y: 24}), 40,
+    "the directly-entered source work tile is reachable at the soft cost");
 
-const bypass = shortestPath({x: 40, y: 23}, {x: 39, y: 25});
-assert.ok(bypass, "the existing road approach still reaches the intended downstream goal");
-assert.ok(bypass.path.some(p => p.x === 39 && p.y === 23), "route uses the first candidate bypass tile");
-assert.ok(bypass.path.some(p => p.x === 38 && p.y === 24), "route uses the second candidate bypass tile");
-assert.ok(!bypass.path.some(p => p.x === 40 && p.y === 24), "route avoids the source container");
-assert.ok(!bypass.path.some(p => p.x === 39 && p.y === 24), "route still avoids the planned link");
-
-const endpoint = shortestPath({x: 38, y: 24}, {x: 40, y: 24}, 1);
-assert.ok(endpoint, "the source-container endpoint remains reachable at range 1");
-assert.ok(!endpoint.path.some(p => p.x === 40 && p.y === 24), "range-1 endpoint does not require entering the container");
-
-// Construction-time guard also uses the source-only classification: never put
-// a road site on either source container, but keep the bypass available.
+// Construction-time guard uses the same combined set. It protects source and
+// upgrade work tiles regardless of whether the source tile is built, planned,
+// or represented by our own construction site, but permits a nearby bypass.
 const created = [];
-const room = {
-    source: sourcePositions.map(pos => ({pos})),
-    container: [{pos: {x: 40, y: 24}}, {pos: {x: 28, y: 25}}],
-    memory: {structMap: {container: "planned"}},
-    constructionSite: [],
-    lookForAt() { return []; },
-    getPositionAt(x, y) {
-        return {
-            x, y, roomName: "E34S29",
-            lookFor() { return sandbox.copyArray([]); },
-            createConstructionSite(structureType) { created.push({x, y, structureType}); return 0; },
-        };
-    },
-};
-sandbox.Game.rooms.E34S29 = room;
+room.lookForAt = () => [];
+room.getPositionAt = (x, y) => ({
+    x, y, roomName: room.name,
+    lookFor() { return vm.runInNewContext("[]", sandbox); },
+    createConstructionSite(structureType) { created.push({x, y, structureType}); return 0; },
+});
+sandbox.Game.rooms[room.name] = room;
 const pos = (x, y) => room.getPositionAt(x, y);
-assert.equal(sandbox.pro.tryCreateCons(pos(40, 24), "road"), false,
-    "do not create road on the existing source container");
-assert.equal(sandbox.pro.tryCreateCons(pos(39, 42), "road"), false,
-    "do not create road on the planned source container");
-assert.equal(sandbox.pro.tryCreateCons(pos(39, 23), "road"), true,
+assert.equal(sandbox.testPlanner.tryCreateCons(pos(40, 24), "road"), false,
+    "do not create a road on a built source container");
+assert.equal(sandbox.testPlanner.tryCreateCons(pos(39, 42), "road"), false,
+    "do not create a road on a planned source work tile");
+assert.equal(sandbox.testPlanner.tryCreateCons(pos(17, 17), "road"), false,
+    "do not create a road on an owned source-container site");
+assert.equal(sandbox.testPlanner.tryCreateCons(pos(28, 25), "road"), false,
+    "do not create a road on the controller-adjacent upgrade container");
+assert.equal(sandbox.testPlanner.tryCreateCons(pos(39, 23), "road"), true,
     "the candidate bypass remains eligible for road construction");
 assert.deepEqual(created, [{x: 39, y: 23, structureType: "road"}]);
 
-console.log("source container road policy: OK");
+console.log("source and controller container road policy: OK");

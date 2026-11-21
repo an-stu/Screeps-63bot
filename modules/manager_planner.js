@@ -1085,12 +1085,13 @@ let pro={
                 })
             }
         }
-        const sourceTiles = Utils.sourceContainerTiles(structMap["container"], objects.slice(2));
-        structMap["road"] = structMap["road"].filter(([x,y]) => !sourceTiles.has(y * 50 + x));
+        for (const p of objects) costs.set(p.x,p.y,255);
+        const workTiles = Utils.containerWorkTiles(structMap["container"], objects.slice(2), objects[0]);
+        structMap["road"] = structMap["road"].filter(([x,y]) => !workTiles.has(y * 50 + x));
         structMap["road"].forEach(e=>{
-            costs.set(e[0],e[1],1)
+            if (costs.get(e[0],e[1]) < 255) costs.set(e[0],e[1],1)
         })
-        Utils.preferOffSourceContainers(costs, sourceTiles);
+        Utils.preferOffSourceContainers(costs, workTiles);
         // for(let i=0;i<50;i++){
         //     for(let j=0;j<50;j++){
         //         new RoomVisual(roomName).text(costs.get(i,j),new RoomPosition(i,j,roomName))
@@ -1106,8 +1107,9 @@ let pro={
                     maxRooms:1
                 }
             )
+            if (ret.incomplete) return;
             ret.path.forEach(pos=>{
-                if(!sourceTiles.has(pos.y * 50 + pos.x) && costs.get(pos.x,pos.y) != 1){
+                if(!workTiles.has(pos.y * 50 + pos.x) && costs.get(pos.x,pos.y) != 1){
                     structMap['road'].push([pos.x,pos.y])
                     costs.set(pos.x,pos.y,1)
                 }

@@ -2247,13 +2247,14 @@ let pro = {
         // 实测 (22,30) 上 nuker 与己方 rampart 共存，判定成可走，寻路直接穿过 nuker。
         return !structures.some(s => !pro.outerRoadStructureWalkable(s));
     },
-    /** Build source-container tile positions once per visible room and tick. */
+    /** Energy-source and upgrade-container work tiles, once per visible room and tick. */
     outerRoadSourceContainerTileSet(room) {
         if (!room) return new Set();
         let cached = room._outerRoadSourceContainerTileCache;
         if (cached && cached.tick == Game.time) return cached.tiles;
         let sources = room.find ? (room.find(FIND_SOURCES) || []) : (room.source || []);
-        if (!sources.length) {
+        let controller = room.controller?.my || room.my ? room.controller : undefined;
+        if (!sources.length && !controller) {
             let empty = new Set();
             room._outerRoadSourceContainerTileCache = {tick: Game.time, tiles: empty};
             return empty;
@@ -2277,24 +2278,31 @@ let pro = {
             containerTiles.add((p.x != undefined ? p.x : p[0]) + ":" + (p.y != undefined ? p.y : p[1]));
         });
         let tiles = new Set();
-        sources.forEach(src => {
+        const addTile = (x,y) => {
+            let key = x + ":" + y;
+            if (!containerTiles.has(key)) return;
+            let at = structuresByTile[key] || [];
+            if (!at.some(s => !pro.outerRoadStructureWalkable(s))) tiles.add(key);
+        };
+        sources.concat(controller ? [controller] : []).forEach(src => {
             let pos = src.pos || src;
             for (let dx = -1; dx <= 1; dx++) {
                 for (let dy = -1; dy <= 1; dy++) {
                     let x = pos.x + dx, y = pos.y + dy;
                     if (x < 0 || x > 49 || y < 0 || y > 49) continue;
-                    let key = x + ":" + y;
-                    if (!containerTiles.has(key)) continue;
-                    let at = structuresByTile[key] || [];
-                    if (at.some(s => !pro.outerRoadStructureWalkable(s))) continue;
-                    tiles.add(key);
+                    if (dx || dy) addTile(x,y);
                 }
             }
         });
+        let upgradeId = controller && room.memory?.stationUpgrade?.container;
+        let upgrade = upgradeId && Game.getObjectById(upgradeId);
+        if (upgrade?.structureType === STRUCTURE_CONTAINER && upgrade.pos?.roomName === room.name) {
+            addTile(upgrade.pos.x,upgrade.pos.y);
+        }
         room._outerRoadSourceContainerTileCache = {tick: Game.time, tiles: tiles};
         return tiles;
     },
-    /** Visible source-container tiles on a route, excluding this mine's start. */
+    /** Visible container work tiles on a route, excluding this mine's start. */
     outerRoadSourceContainerPassThroughs(path, data) {
         let ownContainer = data && data.container && data.container.pos ? data.container
             : (data && data.container && Game.getObjectById ? Game.getObjectById(data.container) : undefined);
@@ -2460,32 +2468,20 @@ let pro = {
             if (cm.get(site.pos.x, site.pos.y) >= 254) return;   // 该格有不可走建筑，保持封死
             cm.set(site.pos.x, site.pos.y, 1);
         });
-        // 源容器格（包括尚未建成的蓝图点）软惩罚 40，优先让外矿道路绕过 keeper
-        // 的站位；仍可走，不会封住本矿自己的路线起点。邻格道路继续复用代价 1。
+        // 源/升级容器（含蓝图和工地）代价 40；仍可走，邻格道路继续复用。
         pro.outerRoadSourceContainerTileSet(room).forEach(key => {
             let xy = key.split(":");
             let x = Number(xy[0]), y = Number(xy[1]);
-            if (cm.get(x, y) < 254) cm.set(x, y, OUTER_ROAD_SOURCE_CONTAINER_COST);
+            if (cm.get(x, y) < OUTER_ROAD_SOURCE_CONTAINER_COST) cm.set(x, y, OUTER_ROAD_SOURCE_CONTAINER_COST);
         });
-        // 升级容器 + 正在使用的 upgrader 站位同样抬高：
-        // 外矿路线不该穿过控制器旁的升级工位（用户 2026-11-18）。
-        // 位置是动态的（creep.memory.upgradePosition，控制器 3 格内择优），
-        // 所以两者都写；只在重算路线时采样一次，不会造成每 tick 抖动。
-        let upgradeStation = (global.StationUpgrade && StationUpgrade.stationName) || "stationUpgrade";
-        let upgradeMem = room.memory && room.memory[upgradeStation];
-        if (upgradeMem && upgradeMem[STRUCTURE_CONTAINER]) {
-            let upgradeContainer = Game.getObjectById(upgradeMem[STRUCTURE_CONTAINER]);
-            if (upgradeContainer && upgradeContainer.pos && cm.get(upgradeContainer.pos.x, upgradeContainer.pos.y) < 254) {
-                cm.set(upgradeContainer.pos.x, upgradeContainer.pos.y, OUTER_ROAD_WORK_TILE_COST);
-            }
-        }
+        // 动态 upgrader 站位另加轻惩罚，不覆盖容器格上的高代价。
         room.find(FIND_MY_CREEPS).forEach(creep => {
             // 只保护**专职 upgrader** 的站位：worker 的临时 upgradePosition
             // （降级应急升级等）不该把 road 抬价、逼外矿路线绕行（用户 2026-11-18）。
             if (!creep.memory || creep.memory.role != "upgrader") return;
             let pos = creep.memory.upgradePosition;
             if (!pos || !room.controller || pos.controllerId != room.controller.id) return;
-            if (cm.get(pos.x, pos.y) >= 254) return;
+            if (cm.get(pos.x, pos.y) >= OUTER_ROAD_WORK_TILE_COST) return;
             cm.set(pos.x, pos.y, OUTER_ROAD_WORK_TILE_COST);
         });
         return cm;
@@ -3116,6 +3112,7 @@ let pro = {
             // 被「可走建筑」（容器 / 己方 rampart）占位：不需要也不该再铺路
             // （rampart 上不能盖路）。判定与代价矩阵同一份，见 outerRoadTileWalkable。
             if (structures.length && pro.outerRoadTileWalkable(structures)) continue;
+            if (pro.outerRoadSourceContainerTileSet(room).has(p.x + ":" + p.y)) continue;
             data.roadComplete = false;
             return false;
         }
@@ -3150,7 +3147,9 @@ let pro = {
     /** 蓝图保护：该位置规划了非道路建筑则不修路 */
     roadBlockedByBlueprint(pos) {
         let room = Game.rooms[pos.roomName];
-        if (!room || !room.memory || !room.memory.structMap) return false;
+        if (!room) return false;
+        if (pro.outerRoadSourceContainerTileSet(room).has(pos.x + ":" + pos.y)) return true;
+        if (!room.memory || !room.memory.structMap) return false;
         if (!room._plannedBlockedSet) {
             room._plannedBlockedSet = new Set();
             for (let type in room.memory.structMap) {

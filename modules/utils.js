@@ -82,6 +82,31 @@ let pro={
         }
         return tiles;
     },
+    decodeLayoutPositions(value) {
+        if (typeof value === "string") return pro.decodePosArray(value);
+        return Array.isArray(value) ? value.map(p => Array.isArray(p) ? {x:p[0], y:p[1]} : p) : [];
+    },
+    /** Fixed container work positions, not every container (e.g. mineral or Lab). */
+    containerWorkTiles(containers, sources, controller, upgradeContainer) {
+        const origin = controller?.pos || controller;
+        const tiles = pro.sourceContainerTiles(containers, origin ? [...(sources || []), origin] : sources);
+        const up = upgradeContainer?.pos || upgradeContainer;
+        if (up && Number.isInteger(up.x) && up.x >= 0 && up.x < 50
+            && Number.isInteger(up.y) && up.y >= 0 && up.y < 50) tiles.add(up.y * 50 + up.x);
+        return tiles;
+    },
+    roomContainerWorkTiles(room, options) {
+        const built = options?.containers || room[STRUCTURE_CONTAINER] || [];
+        const sites = options?.sites || room.constructionSite || [];
+        const planned = options?.planned ?? pro.decodeLayoutPositions(room.memory?.structMap?.[STRUCTURE_CONTAINER]);
+        const candidates = built.concat(planned, sites.filter(s => s.structureType === STRUCTURE_CONTAINER && s.my !== false));
+        const ownController = room.controller?.my || room.my ? room.controller : undefined;
+        const upgradeId = ownController && room.memory?.stationUpgrade?.container;
+        const registered = upgradeId && Game.getObjectById(upgradeId);
+        const upgrade = registered?.structureType === STRUCTURE_CONTAINER && registered?.pos?.roomName === room.name
+            ? registered : undefined;
+        return pro.containerWorkTiles(candidates, options?.sources || room.source, ownController, upgrade);
+    },
     preferOffSourceContainers(matrix, sourceTiles) {
         for (const tile of sourceTiles) {
             const x = tile % 50, y = Math.floor(tile / 50), cost = matrix.get(x, y);
