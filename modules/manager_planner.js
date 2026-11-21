@@ -746,6 +746,11 @@ let pro={
         let labX = 0
         let labY = 0
         let labDistance = 1e5
+        // 是否找到合法的 4×4 lab 广场。找不到时 labX/labY 保持 0，+1 后会在
+        // (0-3,0-3) 角落生成整组 lab + 环绕道路（E55S29 实测：随即低级自动建造
+        // 在 (1,2)/(2,1)/(2,3) 之类的角落格立了 road 工地）。
+        // 找不到就**不规划 lab 广场**，宁可没有也不在角落建垃圾。
+        let labFound = false
         // innerPutAbleList.filter(e=>e.k>4).forEach(e=>{
         //     let x =e.x
         //     let y =e.y
@@ -781,12 +786,12 @@ let pro={
                     labDistance = distance
                     labX = x
                     labY = y
+                    labFound = true
                 }
             }
         })
         labX+=1
         labY+=1
-
 
         // visual.text("C", centerX,centerY+0.25, {color: 'green',opacity:0.99,font: 7})
         // visual.text("S", storageX,storageY+0.25, {color: 'blue',opacity:0.99,font: 7})
@@ -845,7 +850,9 @@ let pro={
                 structMap["road"].push([storageX+i+j,storageY+i-j]) //仿射变换 [sin,cos,cos,-sin]
             }
         }
-        // 这里修改lab布局
+        // 这里修改lab布局（只有找到合法 4×4 广场时才规划；否则整组跳过，
+        // 避免 labX/labY=0 的角落兜底把 lab 与环绕道路铺到 (0-3,0-3)）
+        if (labFound) {
         let labs = [
             "☢☢-☢",
             "☢-☢-",
@@ -880,6 +887,7 @@ let pro={
                 else
                     structMap["road"].push([labX+i,labY+jj])
             }
+        }
         }
 
         walls.forEach(e=>structMap["rampart"].push([e.x,e.y]))
@@ -1077,9 +1085,12 @@ let pro={
                 })
             }
         }
+        const sourceTiles = Utils.sourceContainerTiles(structMap["container"], objects.slice(2));
+        structMap["road"] = structMap["road"].filter(([x,y]) => !sourceTiles.has(y * 50 + x));
         structMap["road"].forEach(e=>{
             costs.set(e[0],e[1],1)
         })
+        Utils.preferOffSourceContainers(costs, sourceTiles);
         // for(let i=0;i<50;i++){
         //     for(let j=0;j<50;j++){
         //         new RoomVisual(roomName).text(costs.get(i,j),new RoomPosition(i,j,roomName))
@@ -1096,7 +1107,7 @@ let pro={
                 }
             )
             ret.path.forEach(pos=>{
-                if(costs.get(pos.x,pos.y) != 1){
+                if(!sourceTiles.has(pos.y * 50 + pos.x) && costs.get(pos.x,pos.y) != 1){
                     structMap['road'].push([pos.x,pos.y])
                     costs.set(pos.x,pos.y,1)
                 }

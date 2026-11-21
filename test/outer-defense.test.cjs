@@ -200,7 +200,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
         rangedAttack(t) { calls.push(["rangedAttack", t && t.id]); return this.rangedRet === undefined ? CONSTANTS.OK : this.rangedRet; },
         heal(t) { calls.push(["heal", t === this ? "self" : (t && t.id)]); return CONSTANTS.OK; },
         rangedHeal(t) { calls.push(["rangedHeal", t && t.id]); return CONSTANTS.OK; },
-        moveTo(t) { calls.push(["moveTo", (t.pos || t) && (t.pos || t).x, (t.pos || t) && (t.pos || t).y]); return CONSTANTS.OK; },
+        moveTo(t, opts) { const p = (t && t.pos) || t; calls.push(["moveTo", p && p.x, p && p.y, opts]); return CONSTANTS.OK; },
         move(dir) { calls.push(["move", dir]); return CONSTANTS.OK; },
         goTo() { calls.push(["goTo"]); return CONSTANTS.OK; },
         suicide() { calls.push(["suicide"]); },
@@ -864,5 +864,43 @@ console.log("outer defense checks passed");
         "只允许 defenseLairs 内部自建列表；别处自建会让缓存键漂移（曾经因此每 tick 重跑整组寻路）");
     assert.ok(/let lairs = pro\.defenseLairs\(room\)/.test(codeOnly),
         "outerDefensePosts 必须走 defenseLairs");
+}
+
+
+// === 同组两只待命防守爬按名字序错开驻守距离（用户 2026-11-21：两只一直对穿/堵路） ===
+{
+    const ctx = loadStation();
+    const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
+    ctx.StationSources.outerDefensePosts = () => [lair];
+    ctx.StationSources.outerDefensePatrolTarget = () => lair;
+    const defA = makeCreep(ctx, { x: 30, y: 14, memory: { role: "outerHarvestDefenser", defenseGroup: 0 } });
+    defA.name = "a";
+    const defB = makeCreep(ctx, { x: 32, y: 14, memory: { role: "outerHarvestDefenser", defenseGroup: 0 } });
+    defB.name = "b";
+    ctx.StationSources.defenseAllies = () => [defA, defB];
+    ctx.StationSources.defenseHostiles = () => [];
+    const room = { name: "W34N55", find: () => [] };
+    defA.room = room;
+    defB.room = room;
+    ctx.Creep.prototype.outerDefense.call(defA);
+    ctx.Creep.prototype.outerDefense.call(defB);
+    const mvA = defA.calls.find(c => c[0] === "moveTo");
+    const mvB = defB.calls.find(c => c[0] === "moveTo");
+    assert.ok(mvA && mvB, "两只都该走向岗位");
+    assert.equal(mvA[3] && mvA[3].range, 1, "名字序第 1 名贴窝 range1");
+    assert.equal(mvB[3] && mvB[3].range, 2, "名字序第 2 名退到 range2（不同格，不再对穿/堵路）");
+
+    // 不同组各一只（mates=1）→ 行为不变：贴窝 range1
+    const ctx2 = loadStation();
+    ctx2.StationSources.outerDefensePosts = () => [lair];
+    ctx2.StationSources.outerDefensePatrolTarget = () => lair;
+    const solo = makeCreep(ctx2, { x: 30, y: 14, memory: { role: "outerHarvestDefenser", defenseGroup: 0 } });
+    solo.name = "solo";
+    ctx2.StationSources.defenseAllies = () => [solo];
+    ctx2.StationSources.defenseHostiles = () => [];
+    solo.room = { name: "W34N55", find: () => [] };
+    ctx2.Creep.prototype.outerDefense.call(solo);
+    const mvSolo = solo.calls.find(c => c[0] === "moveTo");
+    assert.equal(mvSolo[3] && mvSolo[3].range, 1, "单只防守爬仍贴窝 range1（行为不变）");
 }
 

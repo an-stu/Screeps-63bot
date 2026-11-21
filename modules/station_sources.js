@@ -281,6 +281,14 @@ const OUTER_CARRIER_TRIP = 1700;
 const OUTER_CARRIER_PRESPAWN = 100;
 
 /**
+ * 外矿搬运爬改绑冷��（tick）。用户 2026-11-17："远的车多近的少、反复横跳浪费
+ * 时间"——空车每 tick 按容器瞬时存量决定改绑，会在两矿点之间来回掉头。改绑后
+ * 至少稳定服务这么久才允许再次改绑：远矿点往返约 2×pathTime≈200 tick，400 约
+ * 两趟，足以让分配稳定下来。
+ */
+const OUTER_REBIND_COOLDOWN = 400;
+
+/**
  * 源再生周期（官方常量 ENERGY_REGEN_TIME）：energyCapacity 在 300 tick 内连续
  * 回填完毕，速率恒定 = capacity/300（保留房 10/tick，未保留房 5/tick）。
  * `ticksToRegeneration` 只是 300→0 的倒计时，**不是**分母。
@@ -502,6 +510,7 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
 
 Creep.prototype.harvestMineralOuterKeeper = function () {
     let task = this.headTask();
+    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     // 矿物记录挂在 StationMineral.stationName（一房一条、不按 id 分桶），
     // 不是本模块的 "stationSources"。原来按 [pro.stationName][task["id"]] 取，
     // 拿到的是 undefined，下一行 station["container"] 必定抛 TypeError ——
@@ -931,6 +940,7 @@ Creep.prototype.harvestEnergy = function () {
 /** 预定 */
 Creep.prototype.reserveOuterHar = function () {
     let task = this.headTask();
+    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     if (task.roomName != this.room.name) {
         this.goTo(task); // reserver 目标是控制器，不走矿区道路
     } else {
@@ -1024,6 +1034,7 @@ Creep.prototype.coreBuster = function () {
 
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
+    if (pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
     // T3 强化的小队防守爬：目标房的 invader 清干净一段时间 → 回主房贴 spawn 回收。
     // 放在最前面：回收期间不再接战、不再巡逻，直接走人（见 squadDefenderShouldRecycle）。
     if (pro.squadDefenderShouldRecycle(this, task)) {
@@ -1311,9 +1322,21 @@ Creep.prototype.outerDefense = function () {
             let wp = pro.outerDefensePatrolTarget(this, posts);
             // 贴着窝站（range 1）。隔三格是打不到刚出窝的 keeper 的，
             // 而且只有贴着才会成为「最近的爬」，把 keeper 钉在原地。
-            // （reusePath 由超级移动优化接管，传了也会被忽略，不传。）
-            if (wp && !this.pos.inRangeTo(wp.pos, 1)) {
-                this.moveTo(wp.pos, { range: 1 });
+            // **同组多只防守爬按名字序错开驻守距离**（用户 2026-11-21：待命时两只
+            // 一直对穿/堵路）。第 1 名贴窝 range1、第 2 名 range2、第 3 名 range3——
+            // 确定性、不来回换位，保证两只不同格；不同组各一只时 mates.length=1，
+            // 行为与原来完全一致（仍贴窝 range1）。
+            let standRange = 1;
+            let mates = pro.defenseAllies(this.room)
+                .filter(c => c.memory.role == "outerHarvestDefenser"
+                    && c.memory.defenseGroup === this.memory.defenseGroup)
+                .map(c => c.name).sort();
+            if (mates.length >= 2) {
+                let slot = mates.indexOf(this.name);
+                if (slot >= 0) standRange = 1 + (slot % 3);
+            }
+            if (wp && !this.pos.inRangeTo(wp.pos, standRange)) {
+                this.moveTo(wp.pos, { range: standRange });
             }
             return;
         }
@@ -1576,7 +1599,12 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         // 另一个 ≥800（≥半整车）有货的矿点——阈值防抖：两边都低时不动，两辆
         // 空车不会互相倒腾。改写是**就地**的（task 对象直接换 id/x/y/stationId），
         // 保留栈位与下方 roadBuilder 子任务；returnPathIndex 作废走新路。
-        if (this.storeEmpty()) {
+        // 改绑只在**矿区房里**、且距上次改绑超过冷却期才做（用户 2026-11-17：
+        // 空车在半路按容器瞬时波动反复掉头，远的矿点 drain 慢更常满而把车吸过去，
+        // 近的矿点反而缺车。途中先按自己的绑定抵达矿区，到了再看要不要换边；
+        // rebindAt 冷却防止到达新矿点后又立刻换回去）。
+        if (this.storeEmpty() && this.pos.roomName == task.roomName
+            && !(task.rebindAt && Game.time - task.rebindAt < OUTER_REBIND_COOLDOWN)) {
             let pinnedId = task.id;   // 先捕获：carry 任务就地改写后 task.id 会变
             let myData = rm[pro.stationName][pinnedId];
             let myCt = myData && myData[STRUCTURE_CONTAINER] ? Game.getObjectById(myData[STRUCTURE_CONTAINER]) : null;
@@ -1625,6 +1653,7 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 // there is exactly one registration at the new source. Older copies
                 // at still earlier targets are pruned in the quota-time validation.
                 pro.migrateOuterCarrierRegistration(myData, best, this.id);
+                task.rebindAt = Game.time;
                 return this.execLastTask();
             }
         }
@@ -2723,7 +2752,7 @@ let pro = {
         }
         return pro.outerRetreatState(roomName);
     },
-    /** 撤退：沿缓存外矿路线朝主房走（+1）；keeper 丢能量减重。 */
+    /** 撤退：沿缓存外矿路线朝主房走（+1）；没路线就直接朝 har_<home> 的主房走人。 */
     outerRetreatMove(creep, dropEnergy) {
         let task = creep.headTask();
         if (!task) return;
@@ -2731,11 +2760,27 @@ let pro = {
             && Memory.rooms[task.roomName][pro.stationName][task.id];
         if (dropEnergy && creep.store && creep.store[RESOURCE_ENERGY] > 0) creep.drop(RESOURCE_ENERGY);
         if (pro.moveOuterCarrierOnRoad(creep, task, data, 1)) return;
+        // 兜底：从外矿旗 har_<home> 找到主房，跨房直接离开（moveTo 支持跨房）
+        let home = pro.outerHomeRoom(task.roomName);
+        if (home && home != creep.pos.roomName) {
+            return creep.moveTo(new RoomPosition(25, 25, home));
+        }
         let hunter = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
         if (hunter) {
             let step = PathFinder.search(creep.pos, {pos:hunter.pos, range:8}, {flee:true, maxRooms:1}).path[0];
             if (step) return pro.defenseStep(creep, new RoomPosition(step.x, step.y, creep.room.name), 0);
         }
+    },
+    /** 外矿房对应的主房：读放在该矿区、名字为 har_<home> 的旗。 */
+    outerHomeRoom(mineRoom) {
+        for (let name in Game.flags) {
+            let flag = Game.flags[name];
+            if (flag.pos.roomName == mineRoom && name.indexOf("har_") == 0) {
+                let home = name.slice(4).split("_")[0];
+                if (home) return home;
+            }
+        }
+        return null;
     },
     /**
      * Advance a normal outer carrier one waypoint along its cached road.
@@ -5207,6 +5252,8 @@ let pro = {
         if (spawnRoom.spawnFailure) return null;
         let targetName = roomName.name || roomName;
         let harRoom = Game.rooms[targetName];
+        // 用户 2026-11-18：≥2 Invader 全员离房，不派防守（单只才派 1 只）。
+        if (harRoom && pro.outerInvaderCount(harRoom) >= 2) return null;
         let sourceMemory = Memory.rooms[targetName];
         let data = sourceMemory && sourceMemory[pro.stationName]
             && _.values(sourceMemory[pro.stationName]).find(e => e && e.id);

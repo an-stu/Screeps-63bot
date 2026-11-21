@@ -915,6 +915,7 @@ let pro = {
         // 房间总数/interval（13/7 ≈ 2）个房跑 pass，方差显著变小。
         if (Game.time % economyInterval != pro.economySlot(room, economyInterval)) return;
         if (global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")) ManagerAutoPlanner.tryAutoBuildHighLevel(room);
+        else if (global.ManagerAutoPlanner && room.memory.autoBuildLabs === true) ManagerAutoPlanner.tryAutoBuildPinnedLabs(room);
 
 
         // transformLink 已移到 exec 开头每 tick 执行（0.78.190）
