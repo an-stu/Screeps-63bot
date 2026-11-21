@@ -1,3 +1,10 @@
+## v0.78.300 — 外矿多 Invader：所有爬直接离房
+
+- **≥2 Invader**：不派防守，keeper / carrier / 矿物 keeper / reserver / 防守爬**全部离房**回主房；撤退沿缓存外矿路线（+1），没有路线时从 `har_<home>` 旗解析主房并直接跨房走人（keeper 丢能量减重）。
+- **1 个 Invader**：只派 **1 只**防守（编制=1；有 keeper/lair 的房沿用一爬管两窝），房内任何位置的 Invader 都是有效目标；防守爬不再因撤退状态跑路。
+- 撤退状态 `Memory.rooms[room].outerRetreat`：≥2 进入；<2 持续 100 tick 解除；失去视野 5000 tick 硬过期；撤退期间整矿派发暂停。
+- 回归：outer-retreat-policy（五种外矿爬均撤退、≥2 禁派防守、单 invader 编制=1）与 edge-link 编制断言更新。
+
 ## v0.78.299 — Lab 蓝图单房启用，主房道路绕开矿工容器
 
 - RCL6 起，显式设置 `Memory.rooms[room].autoBuildLabs = true` 的房间可按现有蓝图分级建 Lab，无需打开整 shard 的自动规划。Lab 角色继续按反应几何识别；受控蓝图不自动创建蓝图外 unboost 容器。保留 30 tick 布局缓存，降级或 Lab 丢失时安全重新识别。
