@@ -4946,14 +4946,13 @@ let pro = {
         base = Math.max(1, Math.min(4, base));
         roomName = roomName || (room && room.name);
         if (!room) {
-            // 无视野时用最近一次看到的数据（outerInvaderCount / defenseLairs 写入）：
             let mem = (roomName && Memory.rooms[roomName]) || {};
-            let seen = mem.outerInvaderSeen;
-            if (seen && seen.n >= 1) return 1;                    // 看到过 invader ⇒ 1 只
+            // **keeper 房优先按缓存的窝数算**：顺序颠倒的话，「看到过 1 只 invader ⇒ 1」
+            // 会把中九房（4 窝）压到 1 只 —— 那套编制逻辑属于普通外矿房，不能混用。
             let lairs = Number(mem.outerLairCount) || 0;
-            if (lairs) return Math.max(base, Math.min(4, Math.ceil(lairs / 2)));   // keeper 房按窝数
-            // **普通矿房默认 1 只**（用户 2026-11-21：只有一个 invader 时一只就够）。
-            // 原来退回 base=2，而「没视野」正是外矿最常见状态 ⇒ 单 invader 房间长期派 2 只。
+            if (lairs) return Math.max(base, Math.min(4, Math.ceil(lairs / 2)));
+            // 普通外矿房（没有 lair 记录）：一只防守就够，不凭想象加派。
+            // 「没视野」正是外矿最常见状态，旧实现退回 base=2 ⇒ 单 invader 房间长期派 2 只。
             return 1;
         }
         let hostiles = room.find(FIND_HOSTILE_CREEPS);
@@ -4970,9 +4969,18 @@ let pro = {
         if (invaders.length >= 2) return 1;
         // 单个 Invader：一只防守就够（用户 2026-11-18）。有 lair 的 keeper 房仍按
         // 「一爬管两窝」的旧口径，避免为了一只 invader 额外加编。
-        // **单只 invader 一律 1 只防守**（用户 2026-11-21）。原来在 keeper 房会按
-        // 窝数加编到 2 —— 用户明确要 1 只。keeper-only 房仍按「一爬管两窝」。
-        if (invaders.length === 1) return 1;
+        // **单只 invader：两类房间要分开算**（用户 2026-11-21 纠正）。
+        //
+        //   · 中九 keeper 房（有 lair）：防守对象是 **keeper**（每 300 tick 出窝），
+        //     编制按窝数「一爬管两窝」算，单只 invader 只影响「谁去打它」，
+        //     **不压缩编制** —— 压到 1 只等于让一只爬同时守 4 个窝再兼打 invader。
+        //   · 普通外矿房（无 lair）：单只 invader 就是全部威胁，一只防守足够。
+        if (invaders.length === 1) {
+            let lairs = room.find(FIND_STRUCTURES)
+                .filter(s2 => s2.structureType == STRUCTURE_KEEPER_LAIR).length;
+            if (lairs) return Math.max(1, Math.min(4, Math.ceil(lairs / 2)));
+            return 1;
+        }
         // 用户 2026-10-20：编制改成按 **lair 数量 ÷ 2**（一爬管两个窝），不再按 Source Keeper 数量 1:1。
         // 一个 source keeper 房是 **4 个 lair / 3 个源** —— 按源数或按 keeper 数都会算错：
         // 实测 W34N55 开局 3 只 keeper ⇒ 派了 3 只，清到只剩 1 只后第 3 只就白站（且没有退役逻辑）。

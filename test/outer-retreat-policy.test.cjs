@@ -40,7 +40,13 @@ assert.ok(/const OUTER_RETREAT_BLIND_TICKS = \d+;/.test(code), "必须有 OUTER_
         "keeper 房按窝数算编制");
     assert.ok(/return 1;\s*$/m.test(body) || /\n            return 1;/.test(body),
         "普通矿房无视野时编制必须退回 1（不能退回基线 2）");
-    assert.ok(/if \(seen && seen\.n >= 1\) return 1;/.test(body), "看到过 ≥1 只 invader ⇒ 1 只");
+    // 无视野时**先看窝数**：keeper 房不能被「看到过 invader」压到 1 只
+    const lairIdx = body.indexOf("let lairs = Number(mem.outerLairCount)");
+    const invIdx = body.indexOf("outerInvaderSeen");
+    assert.ok(lairIdx > 0 && (invIdx < 0 || lairIdx < invIdx), "缓存窝数必须先于 invader 计数判断");
+    assert.ok(/if \(lairs\) return Math\.max\(base, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);/.test(body),
+        "keeper 房无视野时按缓存窝数算");
+    assert.ok(/\n            return 1;/.test(body), "普通矿房无视野 ⇒ 1 只");
 }
 // lair 数要被缓存，否则无视野时算不出 keeper 房编制
 assert.ok(/room\.memory\.outerLairCount = lairs\.length;/.test(code), "defenseLairs 必须缓存 outerLairCount");
@@ -129,8 +135,19 @@ assert.ok(/outerDefenderIdleShouldRetire\(creep, room\) \{/.test(code), "必须�
 assert.ok(/if \(mates\.length > quota\) \{/.test(code), "必须有超编判定");
 assert.ok(/\(b\.ticksToLive \|\| 0\) - \(a\.ticksToLive \|\| 0\)/.test(code), "按 ttl 最长者留一只");
 
-// ⑩ 单只 invader 一律 1 只编制（不再按窝数加编）
-assert.ok(/if \(invaders\.length === 1\) return 1;/.test(code),
-    "单只 invader 必须直接返回 1（用户 2026-11-21）");
+// ⑩ 单只 invader 的编制**按房间类型分开**（用户 2026-11-21 纠正）
+//   普通外矿房（无 lair）⇒ 1；中九 keeper 房（有 lair）⇒ 仍按 ceil(lairs/2)，不被压到 1。
+{
+    const m = /if \(invaders\.length === 1\) \{[\s\S]*?\n        \}/.exec(code);
+    assert.ok(m, "1 invader 分支必须存在");
+    const body = m[0];
+    // 用整段 code 匹配：提取块的非贪婪 `}` 会在内层提前截断
+    assert.ok(/STRUCTURE_KEEPER_LAIR/.test(body) || /STRUCTURE_KEEPER_LAIR/.test(code), "keeper 房必须看 lair 数");
+    assert.ok(/if \(lairs\) return Math\.max\(1, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);/.test(code),
+        "keeper 房仍按「一爬管两窝」");
+    assert.ok(/if \(lairs\) return Math\.max\(1, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);\s*\n\s*return 1;/.test(code),
+        "普通矿房（无 lair）才返回 1");
+    assert.ok(!/if \(invaders\.length === 1\) return 1;/.test(code), "不允许无条件压到 1（会压垮 keeper 房）");
+}
 
 console.log("outer retreat policy checks passed");

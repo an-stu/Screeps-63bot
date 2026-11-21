@@ -1,3 +1,23 @@
+## v0.78.311 — 编制回归：keeper 房的编制不能被「单 invader」压到 1
+
+用户 2026-11-21 纠正：**有 lair 的中九外矿房和普通外矿房是两套完全不同的逻辑**，
+0.78.306 把「单只 invader ⇒ 编制 1」无条件套到所有房间，等于让一只爬同时守 4 个窝
+再兼打 invader —— 那是错的。
+
+现在按房间类型分层（`outerDefenseQuota`）：
+- **普通外矿房（无 lair）**：单只 invader 就是全部威胁 ⇒ **1 只**（用户 2026-11-21 的规则）。
+- **中九 keeper 房（有 lair）**：防守对象是 keeper，编制仍按 `ceil(lairs / 2)`（一爬管两窝），
+  单只 invader 只决定「谁去打它」，**不压缩编制**；≥2 invader 时两类房间一致 ⇒ 1（撤退政策接管）。
+- **无视野**时顺序也改了：**先看缓存窝数**（`outerLairCount`），再谈 invader —— 否则
+  「看到过 1 只 invader ⇒ 1」会把 4 窝的 keeper 房压到 1 只。
+
+0.78.306 里其余三条（待命不朝能量容器走 / 超编立刻退役 / 撤退盲态与探头）都是**与房间类型无关**
+的通用修复，保留；`outerDefenderIdleShouldRetire` 本来就有 `defenseLairs().length ⇒ 永不退役`
+的守卫，keeper 房不受影响。
+
+测试：`edge-link` 增加三类对照（普通房 1 invader ⇒ 1；keeper 房 4 窝 + 1 invader ⇒ 2；
+≥2 invader ⇒ 1），`outer-retreat-policy` 同步断言「不允许无条件压到 1」。全量 104 个测试通过。
+
 ## v0.78.310 — 占领蓝图失败告警、按分片调整经济调度
 
 - 新房确认归属后，同 shard 与跨 shard 的自动建房共用蓝图检测。规划器失败或没有有效 Spawn 位时，输出黄色告警，写入 `claimLog(roomName)` 并在 250 tick 后重试。同一故障不刷屏，缺视野或 CPU 不足只显示等待。

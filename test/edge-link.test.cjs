@@ -537,12 +537,20 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerDefenseQuota(invaderRoom(5)), 1, "5 只 Invader 也一样，一只 T3 碾压整个小队");
     assert.equal(S.outerDefenseQuota(invaderRoom(1)), 1,
         "只有 1 只 Invader 时一只防守就够（用户 2026-11-18，不再按基线 2 派两只）");
-    // 2026-11-21 改：**单只 invader 一律 1 只**（用户明确要求），keeper 房也不再加编。
-    // keeper-only 房（没有 invader）仍按「一爬管两窝 / 1:1」的口径。
-    assert.equal(S.outerDefenseQuota({
+    // **两类房间的编制逻辑不能混用**（用户 2026-11-21 纠正）：
+    //   普通外矿房（无 lair）：单 invader = 全部威胁 ⇒ 1 只；
+    //   中九 keeper 房（有 lair）：防守对象是 keeper，编制按窝数，invader 不压缩编制。
+    const mixedRoom = (invaderCnt, lairCnt) => ({
         name: "W34N55",
-        find: () => [1, 2, 3, 4].map(i => ({ owner: { username: i == 1 ? "Invader" : "Source Keeper" } })),
-    }), 1, "1 只 Invader + 3 只 keeper：只派 1 只防守（用户 2026-11-21）");
+        find: type => type === CONSTANTS.FIND_STRUCTURES
+            ? Array.from({ length: lairCnt }, () => ({ structureType: CONSTANTS.STRUCTURE_KEEPER_LAIR }))
+            : Array.from({ length: invaderCnt }, () => ({ owner: { username: "Invader" } })),
+    });
+    assert.equal(S.outerDefenseQuota(mixedRoom(1, 0)), 1, "普通矿房 + 1 invader → 1 只");
+    assert.equal(S.outerDefenseQuota(mixedRoom(1, 4)), 2,
+        "keeper 房（4 窝）+ 1 invader → 仍按 ceil(4/2)=2，invader 不压缩编制");
+    assert.equal(S.outerDefenseQuota(mixedRoom(2, 4)), 1,
+        "≥2 invader（小队）→ 编制 1，由撤退政策接管（两类房间一致）");
 
     // 派兵：编制按 keeper 加编，且**已经到岗的防守爬**必须算进数量
     //（旧实现按 spawnRoom.creeps 数，到岗的那只看不见 → 每 6 tick 白派一只）
