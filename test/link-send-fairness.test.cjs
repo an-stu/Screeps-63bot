@@ -28,8 +28,12 @@ const m = src.match(/\n {4}transformLink\(room\) \{[\s\S]*?\n {4}\},/);
 assert.ok(m, "station_carry.transformLink 必须存在");
 const fnSrc = m[0];
 
-function makeLink(energy) {
-    return {
+/** 造一个带 legacy edgeLink 记忆的「两矿点 × 2 link + hub」房间。 */
+function buildRoom() {
+    const sends = [];
+    const makeLink = (energy, id) => ({
+        id,
+        structureType: "link",
         store: {
             energy,
             getFreeCapacity: () => 800 - energy,
@@ -38,28 +42,26 @@ function makeLink(energy) {
         },
         cooldown: 0,
         transferEnergy(target) {
-            let amt = Math.min(this.store.energy, 800 - target.store.energy);
+            const amt = Math.min(this.store.energy, 800 - target.store.energy);
             if (amt <= 0) return -8;
             this.store.energy -= amt;
             target.store.energy += amt;
+            sends.push([this.id, target.id]);
             return 0;
         },
-    };
-}
-
-/** 造一个「两矿点 × 2 link + hub + 升级 link」的房间，返回可观察的实体表。 */
-function buildRoom() {
+    });
     const world = {
-        hub: makeLink(0),
-        upgrade: makeLink(100),        // 非空 ⇒ 不会走升级 link 那条分支
-        A: { link: makeLink(800), link2: makeLink(800), container: { store: { energy: 2000 } } },
-        B: { link: makeLink(800), link2: makeLink(800), container: { store: { energy: 2000 } } },
+        edge: makeLink(800, "edge"),   // 存量 Memory 注册值，已不应再参与发送
+        hub: makeLink(0, "hub"),
+        upgrade: makeLink(100, "upgrade"),
+        A: { link: makeLink(800, "A_link"), link2: makeLink(800, "A_link2"), container: { store: { energy: 2000 } } },
+        B: { link: makeLink(800, "B_link"), link2: makeLink(800, "B_link2"), container: { store: { energy: 2000 } } },
     };
     const room = {
         name: "T1",
         memory: {
             stationUpgrade: { link: "upgrade" },
-            stationCarry: { link: "hub", edgeLink: null },
+            stationCarry: { link: "hub", edgeLink: "edge" },
             stationSources: {
                 // 键序固定：A 永远在 B 前面（这就是原实现的遍历顺序）
                 A: { id: "sA", link: "A_link", link2: "A_link2", container: "A_ct" },
@@ -68,12 +70,13 @@ function buildRoom() {
         },
     };
     const byId = {
+        edge: world.edge,
         hub: world.hub,
         upgrade: world.upgrade,
         A_link: world.A.link, A_link2: world.A.link2, A_ct: world.A.container,
         B_link: world.B.link, B_link2: world.B.link2, B_ct: world.B.container,
     };
-    return { world, room, byId };
+    return { world, room, byId, sends };
 }
 
 function makeCtx(byId, sourceOverride) {
@@ -83,7 +86,7 @@ function makeCtx(byId, sourceOverride) {
         STRUCTURE_LINK: "link",
         STRUCTURE_CONTAINER: "container",
         RESOURCE_ENERGY: "energy",
-        OUTER_EDGE_LINK_SEND: 400,
+        OUTER_EDGE_LINK_SEND: 400, // 留在桩里：若旧分支复活，负对照必须真的能触发它
         StationUpgrade: { stationName: "stationUpgrade" },
         StationSources: { stationName: "stationSources" },
         _: { values: obj => Object.keys(obj).map(k => obj[k]) },
@@ -97,6 +100,17 @@ function makeCtx(byId, sourceOverride) {
 }
 
 function run() {
+    {
+        const { room, byId, sends } = buildRoom();
+        const ctx = makeCtx(byId);
+        ctx.transformLink(room);
+        assert.equal(sends.some(([from]) => from === "edge"), false,
+            "a legacy registered edge link must never send");
+        assert.equal(sends.length, 1, "the ordinary source link must retain the hub's empty capacity");
+        assert.ok(sends[0][0] === "A_link" || sends[0][0] === "B_link");
+        assert.equal(sends[0][1], "hub", "the ordinary source link must send to the hub");
+    }
+
     const { world, room, byId } = buildRoom();
     const ctx = makeCtx(byId);
     const sentBy = [];
