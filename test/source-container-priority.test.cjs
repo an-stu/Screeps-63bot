@@ -44,7 +44,7 @@ const sandbox = {
     console: {log() {}},
 };
 vm.runInNewContext("Array.prototype.head=function(){return this[0]}; Array.prototype.take=function(n){return this.slice(0,n)}; function copyArray(a){return Array.from(a)}; var Utils={decodePosArray:()=>copyArray(planned)}; var pro = { "
-    + [priorityMethod, genericMethod, typeMethod, lowLevelMethod, highLevelMethod, "pruneOutOfTierExtensionSites(){}", "tryCreateLabRamparts(){}"].join(",") + " };", sandbox);
+    + [priorityMethod, genericMethod, typeMethod, lowLevelMethod, highLevelMethod, "pruneOutOfTierExtensionSites(){}"].join(",") + " };", sandbox);
 
 function makeRoom(opts = {}) {
     const created = [];
