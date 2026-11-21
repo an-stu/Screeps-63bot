@@ -1,3 +1,23 @@
+## v0.78.304 — 只剩一只 upgrader 时站到升级容器上
+
+用户 2026-11-21：单人 upgrader 要尽可能站在 upgrade container 那一格。
+
+原来 `getUpgradePosition` 按「同时够到 link 与容器」的评分挑格（`supplyPenalty` /
+`supplyRange` / 路面 / 距离 / 择序），选出来的常常是容器**旁边** —— 每趟取能量都要挪一格，
+`withdraw` 还容易差一格白跑。单人没有站位争抢，直接站容器上：withdraw 距离 0、相邻 link 也够得到，
+取完不用动。
+
+实现（`station_upgrade.js: getUpgradePosition`）：
+- 房内可用 upgrader ≤ 1 且 supplyTargets 里有容器，且**容器在控制器 3 格内**
+  （`upgradeController` 有效距离 3，站远了就升不了级）→ 直接返回容器格并写入
+  `memory.upgradePosition`；
+- 容器格已被**别人**预占时不抢（多人场景照旧走原评分）；
+- 没有容器、或容器超出 3 格 → 完全退回原逻辑。
+- 顺带修掉一个真 bug：距离要用 `controller.pos`（游戏对象本身没有 x/y，直接传对象会得到 NaN）。
+
+测试：新增 `test/upgrader-container-stance.test.cjs`（单人站容器 / 双人不抢 / 超出 3 格回退 /
+无容器回退 / 自己预占幂等）。全量 103 个测试通过。
+
 ## v0.78.303 — 外矿防守：撤退盲态、单 invader 编制、闲置退役
 
 在 0.78.301/302（卸货改 storage、退役边缘 link、源容器格软代价 40）之上，补外矿防守的四个洞：

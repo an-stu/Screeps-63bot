@@ -312,6 +312,29 @@ let pro = {
     getUpgradePosition(creep, controller, supplyTargets = []) {
         if (!controller) return undefined;
         let reservations = getUpgradeReservations(creep.room, controller);
+        // **只剩一只 upgrader 时，尽可能站到升级容器那一格上**（用户 2026-11-21）。
+        //
+        // 理由：单人时没有站位争抢，站在容器上 `withdraw(container)` 是 0 距离
+        // （每 tick 必成，不会因为「差一格」白跑），而且不用为了同时够到 link/容器
+        // 反复挪位。多人时才需要摊开到不同格（reservations 那套）。
+        //
+        // 条件是**硬约束**：容器必须在控制器 3 格内（`upgradeController` 有效距离 3），
+        // 否则站上去就升不了级 —— 那种房间退回原来的选点逻辑。
+        if (typeof creep.room.creeps == "function") {
+            let upgraders = creep.room.creeps("upgrader", false).filter(e => e && !e.spawning);
+            let container = supplyTargets.find(t => t && t.structureType == STRUCTURE_CONTAINER);
+            // 注意取 controller.pos：游戏对象本身没有 x/y，直接传对象会得到 NaN
+            let ctrlPos = controller.pos || controller;
+            if (upgraders.length <= 1 && container && container.pos
+                && container.pos.getRangeTo(ctrlPos) <= 3) {
+                let key = container.pos.x + ":" + container.pos.y;
+                if (!reservations[key] || reservations[key] == creep.name) {
+                    reservations[key] = creep.name;
+                    creep.memory.upgradePosition = { x: container.pos.x, y: container.pos.y, controllerId: controller.id };
+                    return container.pos;
+                }
+            }
+        }
         let stored = creep.memory.upgradePosition;
         if (stored && stored.controllerId == controller.id) {
             let position = new RoomPosition(stored.x, stored.y, creep.room.name);
