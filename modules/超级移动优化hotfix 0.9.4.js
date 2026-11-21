@@ -422,7 +422,8 @@ function generateCostMatrix(room, pos) {
     let noStructureCostMat = new PathFinder.CostMatrix; // 不考虑可破坏的建筑，但是要考虑墙上资源点和无敌的3种建筑，可能还有其他不能走的？
     let structureCostMat = new PathFinder.CostMatrix;   // 在noStructrue的基础上加上所有不可行走的建筑
     let totalStructures = room.find(FIND_STRUCTURES);
-    let 修路也没用的墙点 = [].concat(room.find(FIND_SOURCES), room.find(FIND_MINERALS), room.find(FIND_DEPOSITS));
+    const sources = room.find(FIND_SOURCES);
+    let 修路也没用的墙点 = [].concat(sources, room.find(FIND_MINERALS), room.find(FIND_DEPOSITS));
     let x, y, noviceWall, deployingCore, centralPortal;
     let clearDelay = Infinity;
     for (let object of 修路也没用的墙点) {
@@ -472,6 +473,13 @@ function generateCostMatrix(room, pos) {
             structureCostMat.set(s.pos.x, s.pos.y, unWalkableCCost);
         }
     }
+
+    const sourceContainers = totalStructures.filter(s => s.structureType === STRUCTURE_CONTAINER);
+    const plannedContainers = room.controller?.my && room.memory?.structMap?.[STRUCTURE_CONTAINER];
+    if (plannedContainers) sourceContainers.push(...Utils.decodePosArray(plannedContainers));
+    const sourceTiles = Utils.sourceContainerTiles(sourceContainers, sources);
+    Utils.preferOffSourceContainers(noStructureCostMat, sourceTiles);
+    Utils.preferOffSourceContainers(structureCostMat, sourceTiles);
 
     costMatrixCache[room.name] = {
         roomName: room.name,

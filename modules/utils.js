@@ -65,6 +65,31 @@ let pro={
         }
         return out;
     },
+    // Only containers adjacent to energy sources are keeper work tiles,
+    // not every container in the blueprint.
+    sourceContainerTiles(containers, sources) {
+        const tiles = new Set();
+        const sourcePositions = (sources || []).filter(Boolean).map(source => source.pos || source);
+        for (const item of containers || []) {
+            if (!item) continue;
+            const pos = item.pos || item;
+            const x = Array.isArray(pos) ? pos[0] : pos.x;
+            const y = Array.isArray(pos) ? pos[1] : pos.y;
+            if (Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < 50 && y >= 0 && y < 50
+                && sourcePositions.some(source => Math.max(Math.abs(source.x - x), Math.abs(source.y - y)) === 1)) {
+                tiles.add(y * 50 + x);
+            }
+        }
+        return tiles;
+    },
+    preferOffSourceContainers(matrix, sourceTiles) {
+        for (const tile of sourceTiles) {
+            const x = tile % 50, y = Math.floor(tile / 50), cost = matrix.get(x, y);
+            // A keeper can still enter its own container, but traffic should
+            // pay for a modest detour rather than cross its work position.
+            if (cost < 40) matrix.set(x, y, 40);
+        }
+    },
     hashCode (str){
         let hash = 5381;
         for (let i = 0; i < str.length; i++) {

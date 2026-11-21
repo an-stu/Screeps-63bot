@@ -380,7 +380,8 @@ let pro={
      */
     checkUnboostContainer (room,centerLabs){
         let labs = centerLabs.map(id=>Game.getObjectById(id))
-        if(labs.length!=2 || !labs[0].pos.isNearTo(labs[1]))return undefined;
+        if(labs.length!=2 || !labs[0] || !labs[1] || !labs[0].pos || !labs[1].pos
+            || !labs[0].pos.isNearTo(labs[1]))return undefined;
         for(let container of room.container){
             let cnt = 0
             for(let lab of labs){
@@ -388,13 +389,23 @@ let pro={
             }
             if(cnt == 2) return container
         }
+        // Explicit lab-blueprint opt-in keeps StationLab's fallback container
+        // inside the blueprint. Legacy rooms retain the historical auto-place.
+        let plannedContainerTiles;
+        if(room.memory && room.memory.autoBuildLabs === true){
+            let encoded = room.memory.structMap && room.memory.structMap[STRUCTURE_CONTAINER];
+            let planned = encoded ? Utils.decodePosArray(encoded) : [];
+            plannedContainerTiles = new Set(planned.map(e=>e.x+":"+e.y));
+            if(!plannedContainerTiles.size)return undefined;
+        }
         let x = labs[0].pos.x;
         let y = labs[0].pos.y;
         for(let i=-1;i<=1;i++){
             for(let j=-1;j<=1;j++) {
                 if(i||j){
                     let pos = new RoomPosition(x+i,y+j,room.name)
-                    if(pos.isNearTo(labs[1])&&pos.walkable()){
+                    if(pos.isNearTo(labs[1])&&pos.walkable()
+                        && (!plannedContainerTiles || plannedContainerTiles.has(pos.x+":"+pos.y))){
                         if(pos.lookFor(LOOK_CONSTRUCTION_SITES).length==0)pos.createConstructionSite(STRUCTURE_CONTAINER)
                         return undefined;
                     }
@@ -405,59 +416,116 @@ let pro={
     },
     checkLabs (room) {
         if(!room.my)return;
-        // lab 布局几乎不变：30 tick 检查一次足够（原来每 tick 跑
-        // room.lab.filter + 12 次 getObjectById，10 lab 房间约 0.1 CPU/tick）。
-        // 非检查 tick 复用上次结果（房间对象每 tick 重建，缓存挂 memory）
+        // Layout discovery is throttled to 30 ticks. Check the room's RCL before
+        // touching room.lab so the ordinary cached tick stays allocation-free.
         let labMem = room.memory[pro.stationName] || (room.memory[pro.stationName] = {});
         let cached = labMem._labCheckedTick;
-        if (cached && Game.time - cached < 30
-            && labMem.centerLabs && labMem.centerLabs.length == 2 && labMem.otherLabs && labMem.otherLabs.length) {
-            return true;
+        let cachedCenters = labMem.centerLabs;
+        let cachedOthers = labMem.otherLabs;
+        let cachedLayout = cachedCenters && cachedCenters.length == 2
+            && cachedOthers && cachedOthers.length > 0;
+        let cachedNoLayout = labMem._labCheckedNoLayout === true;
+        if(cached && Game.time-cached<30 && labMem._labCheckedLevel === room.level){
+            if(cachedLayout && !cachedNoLayout)return true;
+            if(!cachedLayout && cachedNoLayout)return false;
         }
+
         let obj = labMem
         obj["centerLabs"]=obj["centerLabs"]||[]
         obj["otherLabs"]=obj["otherLabs"]||[]
-        let labCnt = (obj["centerLabs"].concat(obj["otherLabs"])).filter(id=>Game.getObjectById(id)).length
-        let historyCnt = obj["centerLabs"].length+obj["otherLabs"].length
         let notCheckActive = room.level >= 8 || CONTROLLER_STRUCTURES[STRUCTURE_LAB][room.level] >= room.lab.length
         let labs = room.lab.filter(e=>notCheckActive||e.isActive()).sort((a,b)=>a.id<b.id) //  先按id排序
-        if(labs.length>=3&&labCnt!=labs.length||historyCnt!=labCnt){
-            obj.task = []
-            let centerLabs = [undefined,undefined,[]];//[labA,labB,Cnt]
+        let activeLabIds = new Set(labs.map(e=>e.id));
+        let selectedIds = obj["centerLabs"].concat(obj["otherLabs"]);
+        let selectedLabsStillActive = selectedIds.length > 0
+            && selectedIds.every(id=>activeLabIds.has(id));
 
-            for(let i=0;i<labs.length;i++){
-                let labA = labs[i]
-                for(let j=i+1;j<labs.length;j++){
-                    let labB = labs[j]
-                    let otherLabs = []
-                    // if(labA.pos.inRangeTo(labB,5))
-                    if(labA.pos.isNearTo(labB))
-                        labs.forEach(labC=>{
-                            if(labC!=labA&&labC!=labB&&labA.pos.inRangeTo(labC,2)&&labB.pos.inRangeTo(labC,2)){
-                                otherLabs.push(labC)
-                            }
-                        })
-                    if(otherLabs.length>centerLabs[2].length){
-                        centerLabs = [labA,labB,otherLabs]
+        let previousCenters = obj["centerLabs"].slice();
+        let previousOthers = obj["otherLabs"].slice();
+        if(labs.length<3){
+            // Rooms with no cached labs need no per-tick rewrites. If a prior
+            // layout went inactive (for example after an RCL downgrade), clear
+            // it once and let the negative cache hold until the next rescan.
+            if(selectedIds.length || obj["reacting"] || (obj["stat"] && obj["stat"]!='clear')){
+                obj.task = [];
+                obj["centerLabs"] = [];
+                obj["otherLabs"] = [];
+                obj["unboostContainer"] = undefined;
+                obj["stat"] = 'clear';
+                delete obj["reacting"];
+            }
+            obj._labCheckedNoLayout = true;
+            obj._labCheckedLevel = room.level;
+            obj._labCheckedLabCount = labs.length;
+            obj._labCheckedTick = Game.time;
+            return false;
+        }else{
+            let labCnt = selectedIds.filter(id=>Game.getObjectById(id)).length;
+            let historyCnt = selectedIds.length;
+            if(labCnt!=labs.length || historyCnt!=labCnt || !selectedLabsStillActive
+                || labMem._labCheckedLevel !== room.level || labMem._labCheckedLabCount !== labs.length){
+                let centerLabs = [undefined,undefined,[]];//[labA,labB,Cnt]
+                let previousPairValid = previousCenters.length == 2
+                    && activeLabIds.has(previousCenters[0]) && activeLabIds.has(previousCenters[1]);
+                let previousA = previousPairValid ? labs.find(e=>e.id==previousCenters[0]) : undefined;
+                let previousB = previousPairValid ? labs.find(e=>e.id==previousCenters[1]) : undefined;
+                // Seed with the prior pair when it is still geometrically valid.
+                // Equal-scoring layouts then retain the centers (and reagent order).
+                if(previousA && previousB && previousA.pos.isNearTo(previousB)){
+                    let previousOthers = labs.filter(labC=>labC!=previousA&&labC!=previousB
+                        && previousA.pos.inRangeTo(labC,2)&&previousB.pos.inRangeTo(labC,2));
+                    if(previousOthers.length){
+                        centerLabs = [previousA,previousB,previousOthers];
                     }
                 }
+                for(let i=0;i<labs.length;i++){
+                    let labA = labs[i]
+                    for(let j=i+1;j<labs.length;j++){
+                        let labB = labs[j]
+                        let otherLabs = []
+                        // Keep the existing adjacent-center / range-2 geometry rule.
+                        if(labA.pos.isNearTo(labB))
+                            labs.forEach(labC=>{
+                                if(labC!=labA&&labC!=labB&&labA.pos.inRangeTo(labC,2)&&labB.pos.inRangeTo(labC,2)){
+                                    otherLabs.push(labC)
+                                }
+                            })
+                        if(otherLabs.length>centerLabs[2].length){
+                            centerLabs = [labA,labB,otherLabs]
+                        }
+                    }
+                }
+                if(centerLabs[0]){
+                    obj.centerLabs = [centerLabs[0].id,centerLabs[1].id]
+                    obj.otherLabs = centerLabs[2].map(e=>e.id)
+                }else{
+                    obj.centerLabs = []
+                    obj.otherLabs = []
+                }
+                let sameCenters = previousCenters.length==2 && obj.centerLabs.length==2
+                    && previousCenters[0]==obj.centerLabs[0] && previousCenters[1]==obj.centerLabs[1];
+                let sameOthers = previousOthers.length==obj.otherLabs.length
+                    && previousOthers.every(id=>obj.otherLabs.includes(id));
+                if(!sameCenters || !sameOthers){
+                    obj.task = [];
+                    obj["unboostContainer"] = undefined;
+                }
+                if(!sameCenters){
+                    obj["stat"] = 'clear';
+                    delete obj["reacting"];
+                }
             }
-            if(centerLabs[0]){
-                obj.centerLabs = [centerLabs[0].id,centerLabs[1].id]
-                obj.otherLabs = centerLabs[2].map(e=>e.id)
-            }else{
-                obj.centerLabs = []
-                obj.otherLabs = []
-            }
-            // room.memory[pro.stationName] = obj
         }
-        if(labCnt>=3){
+        obj._labCheckedNoLayout = !(obj["centerLabs"].length==2 && obj["otherLabs"].length>0);
+        if(labs.length>=3 && obj["centerLabs"].length==2){
             if(!Game.getObjectById(obj["unboostContainer"])){ // change by an_w
                 obj["unboostContainer"]=undefined
                 let container = pro.checkUnboostContainer(room,obj.centerLabs);
                 if(container)obj["unboostContainer"] = container.id
             }
         }
+        obj._labCheckedLevel = room.level;
+        obj._labCheckedLabCount = labs.length;
         let ok = obj["centerLabs"].length==2&&obj["otherLabs"].length;
         obj._labCheckedTick = Game.time;
         return ok
@@ -655,11 +723,12 @@ let pro={
             if ((Game.time + room.hashCode()) % 2 != 0) return;
             let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
             let centerLabs = obj.centerLabs.map(id => Game.getObjectById(id))
-            // lab 被拆后 centerLabs 里有死 id（30 tick 缓存窗口内）：null 裸取
-            // .store 抛 TypeError，reacting 状态机整段失效。有死 id 时先回 clear，
-            // 等 checkLabs 重扫（30 tick）清理。
-            if(centerLabs.some(e => !e)){
+            // Layout cache can expire between checks, so react defensively to a
+            // destroyed center or output lab and let checkLabs rebuild next tick.
+            if(centerLabs.some(e => !e) || otherLabs.some(e => !e)){
                 obj["stat"] = 'clear'
+                delete obj["reacting"];
+                delete obj._labCheckedTick;
                 return;
             }
             if(obj["stat"]=='clear'||obj["stat"]==undefined){

@@ -150,9 +150,12 @@ let pro={
                 })
             }
         }
+        const sourceTiles = Utils.sourceContainerTiles(structMap["container"], room.source);
+        structMap["road"] = structMap["road"].filter(({x,y}) => !sourceTiles.has(y * 50 + x));
         structMap["road"].forEach(e=>{
             costs.set(e.x,e.y,1)
         })
+        Utils.preferOffSourceContainers(costs, sourceTiles);
         structMap["container"].sort((a,b)=>Math.sqrt((a.x-storageX)*(a.x-storageX)+(a.y-storageY)*(a.y-storageY))-Math.sqrt((b.x-storageX)*(b.x-storageX)+(b.y-storageY)*(b.y-storageY)))
         structMap["container"].forEach(e=>{
             let ret = PathFinder.search(
@@ -164,7 +167,7 @@ let pro={
                 }
             )
             ret.path.forEach(pos=>{
-                if(costs.get(pos.x,pos.y) != 1){
+                if(!sourceTiles.has(pos.y * 50 + pos.x) && costs.get(pos.x,pos.y) != 1){
                     structMap['road'].push({x:pos.x,y:pos.y})
                     costs.set(pos.x,pos.y,1)
                 }
@@ -293,6 +296,12 @@ let pro={
         let room = Game.rooms[pos.roomName];
         let intentKey = pos.x+":"+pos.y;
         if(room._constructIntents&&room._constructIntents[intentKey])return false;
+        if (struct === STRUCTURE_ROAD && room.source?.length) {
+            const protectedTiles = room._sourceRoadProtectedTiles ?? (room._sourceRoadProtectedTiles =
+                Utils.sourceContainerTiles((room[STRUCTURE_CONTAINER] || []).concat(
+                    Utils.decodePosArray(room.memory?.structMap?.[STRUCTURE_CONTAINER] || "")), room.source));
+            if (protectedTiles.has(pos.y * 50 + pos.x)) return false;
+        }
         if(room.constructionSite.length+(room._construct_builed||0)<10){
             let head = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType == struct).head()
             let site = pos.lookFor(LOOK_CONSTRUCTION_SITES).filter(e=>e.structureType == struct).head()
@@ -443,6 +452,15 @@ let pro={
                 // room.memory.structMap[STRUCTURE_STORAGE].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_STORAGE)})
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_ROAD);
         }
+    },
+    tryAutoBuildPinnedLabs(room) {
+        // An explicitly approved room may build existing lab blueprint
+        // points without turning on the shard-wide planner. 17 is coprime
+        // with the economy pass (7/14 ticks).
+        if (!room.my || room.memory.autoBuildLabs !== true || room.level < 6
+            || MIN_CPU || Game.cpu.bucket <= 500 || (Game.time + room.hashCode()) % 17) return;
+        const structMap = room.memory.structMap;
+        if (structMap?.[STRUCTURE_LAB]) pro.tryCreateStructs(room, structMap, STRUCTURE_LAB);
     },
     tryAutoBuildHighLevel (room){
         // min-CPU 模式下 worker（ROLE_PRIORITY -5）不执行，规划出的工地没人
