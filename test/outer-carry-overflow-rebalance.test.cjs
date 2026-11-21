@@ -109,7 +109,7 @@ function setup(eA, eB) {
         store: { [ctx.RESOURCE_ENERGY]: 0, getFreeCapacity: () => 1600 },
         memory: { tasks: [task] },
         room: { name: ROOM },
-        pos: { x: 28, y: 5, isNearTo: () => false, inRangeTo: () => false },
+        pos: { x: 28, y: 5, roomName: ROOM, isNearTo: () => false, inRangeTo: () => false },
     };
     // 改绑决策之后才会走到的辅助函数，桩掉，避免用例依赖走位/待命逻辑
     ctx.StationSources.outerCarryShouldHold = () => false;
@@ -152,6 +152,26 @@ function setup(eA, eB) {
     const { ctx, creep, task } = setup(0, 100);
     ctx.Creep.prototype.harvestEnergyOuterCarry.call(creep);
     assert.equal(task.id, MINE_A, "两侧都没货时不许改绑");
+}
+
+// ⑥ 途中不改绑：车还没到矿区（pos 不在任务房）⇒ 即使别处顶格也不换边（防半路掉头）。
+{
+    const { ctx, creep, task } = setup(700, 2000);
+    creep.pos.roomName = "W26N58";   // 还在路上
+    ctx.Creep.prototype.harvestEnergyOuterCarry.call(creep);
+    assert.equal(task.id, MINE_A, "空车在途中不得改绑：先按绑定抵达矿区再决策（防反复横跳）");
+}
+
+// ⑦ 改绑冷却：刚改绑过的车（400 tick 内）不许再换边；冷却期满后恢复。
+{
+    const { ctx, creep, task } = setup(700, 2000);
+    task.rebindAt = ctx.Game.time - 10;   // 刚改绑不久
+    ctx.Creep.prototype.harvestEnergyOuterCarry.call(creep);
+    assert.equal(task.id, MINE_A, "改绑后 400 tick 内不得再改绑（防到达新矿点后立刻换回去）");
+    task.rebindAt = ctx.Game.time - 401;  // 冷却过期
+    ctx.Creep.prototype.harvestEnergyOuterCarry.call(creep);
+    assert.equal(task.id, MINE_B, "冷却期满后按条件正常改绑");
+    assert.equal(task.rebindAt, ctx.Game.time, "改绑时记录 rebindAt 冷却起点");
 }
 
 console.log("outer carry overflow rebalance checks passed");

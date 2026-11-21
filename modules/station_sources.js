@@ -281,6 +281,14 @@ const OUTER_CARRIER_TRIP = 1700;
 const OUTER_CARRIER_PRESPAWN = 100;
 
 /**
+ * 外矿搬运爬改绑冷��（tick）。用户 2026-11-17："远的车多近的少、反复横跳浪费
+ * 时间"——空车每 tick 按容器瞬时存量决定改绑，会在两矿点之间来回掉头。改绑后
+ * 至少稳定服务这么久才允许再次改绑：远矿点往返约 2×pathTime≈200 tick，400 约
+ * 两趟，足以让分配稳定下来。
+ */
+const OUTER_REBIND_COOLDOWN = 400;
+
+/**
  * 源再生周期（官方常量 ENERGY_REGEN_TIME）：energyCapacity 在 300 tick 内连续
  * 回填完毕，速率恒定 = capacity/300（保留房 10/tick，未保留房 5/tick）。
  * `ticksToRegeneration` 只是 300→0 的倒计时，**不是**分母。
@@ -1576,7 +1584,12 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
         // 另一个 ≥800（≥半整车）有货的矿点——阈值防抖：两边都低时不动，两辆
         // 空车不会互相倒腾。改写是**就地**的（task 对象直接换 id/x/y/stationId），
         // 保留栈位与下方 roadBuilder 子任务；returnPathIndex 作废走新路。
-        if (this.storeEmpty()) {
+        // 改绑只在**矿区房里**、且距上次改绑超过冷却期才做（用户 2026-11-17：
+        // 空车在半路按容器瞬时波动反复掉头，远的矿点 drain 慢更常满而把车吸过去，
+        // 近的矿点反而缺车。途中先按自己的绑定抵达矿区，到了再看要不要换边；
+        // rebindAt 冷却防止到达新矿点后又立刻换回去）。
+        if (this.storeEmpty() && this.pos.roomName == task.roomName
+            && !(task.rebindAt && Game.time - task.rebindAt < OUTER_REBIND_COOLDOWN)) {
             let pinnedId = task.id;   // 先捕获：carry 任务就地改写后 task.id 会变
             let myData = rm[pro.stationName][pinnedId];
             let myCt = myData && myData[STRUCTURE_CONTAINER] ? Game.getObjectById(myData[STRUCTURE_CONTAINER]) : null;
@@ -1625,6 +1638,7 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
                 // there is exactly one registration at the new source. Older copies
                 // at still earlier targets are pruned in the quota-time validation.
                 pro.migrateOuterCarrierRegistration(myData, best, this.id);
+                task.rebindAt = Game.time;
                 return this.execLastTask();
             }
         }
