@@ -1,3 +1,23 @@
+## v0.78.314 — PB 任务撤旗后，搬运手与攻击手也要有出口
+
+`StrategyPowerBank.exec` 删旗只有两条路径（`powerBank` 被打掉/过期、mission data 失效），
+两条都等于任务结束。0.78.247 只给 `HealerPB` 补了「旗没了 ⇒ `recycleCreep`」这条出口，
+`carrierPB` 与 `AttackerPB` 一直是漏的 —— 2026-11-23 巡检在 shard3 抓到整队搁浅：
+
+- **2 只 4,200 hits 的 PBCarrier**（`shard3_84429366_1` / `shard3_84429456_1`）空车停在已死任务房
+  E50S21 的 `(39,0)` / `(39,49)`，跨房界来回走位，`task.id` 指向已消失的 power bank，ttl 954/1,044
+  一直烧；`carrierPB` 里 `Game.flags[...]` 为 undefined ⇒ 末尾整段被跳过 ⇒ 什么都不做。
+- **1 只 PBer（AttackerPB）** `shard3_84429489_1` 在 E50S20 `(40,48)` 每 6 tick 重算路径、零位移
+  577 tick：它的 suicide 分支带了 `task.roomName == this.room.name` 条件，在途永远走不到。
+
+修法（不碰任何优先级/波次闸）：
+- `carrierPB`：空车 + 旗没了 ⇒ `popTask` + `recycleCreep`（自带跨房走位）；`mainRoom()` 取不到
+  才 `suicide`。**地上/残骸里有 power 时仍先收货**，任务结束不许把 power 丢掉。
+- `AttackerPB`：旗没了就地 `suicide`（与它原有的房内分支同一处理），不再朝死目标走位。
+
+测试：`pb-carrier-orphan-recycle`（空车回收 / 无主房自杀 / 旗在不动任务链 / 有 power 先收货 ×2 /
+攻击手在途自杀 / 攻击手旗在不动）。
+
 ## v0.78.313 — RCL 升级立即按现有蓝图排工地
 
 - 自有普通房间升级时，不等例行规划或经济调度周期，直接检查现有蓝图的当前等级槽位。受房间/全局工地配额约束时保留待建状态，不超等级，也不重新算完整布局。

@@ -57,7 +57,15 @@ Creep.prototype.AttackerPB = function () {
     //     this.goTo(task);
     // }else{
     let flag = Game.flags[task.flagName];
-    let healer = flag && flag.memory.healer && flag.memory.healer[this.headTask().index]
+    // 旗没了 = 任务结束：`StrategyPowerBank.exec` 删旗只有两条路径（powerBank 被打掉/
+    // 过期、mission data 失效），两条都说明这只攻击手已经无活可干。原来只在
+    // **已经站在任务房里**时 suicide（见下面的 `!powerBank && task.roomName == room`），
+    // 在途或卡在房界的爬会一直 `goTo` 一个已消失的目标：2026-11-23 实测
+    // shard3_84429489_1 在 E50S20 (40,48) 每 6 tick 重算一次路径、零位移 577 tick，
+    // ttl 还在从 1,101 往下烧，任务表里的死 id 也一直留着。旗没了就地自杀，
+    // 与房内分支保持同一处理。
+    if (!flag) return this.suicide();
+    let healer = flag.memory.healer && flag.memory.healer[this.headTask().index]
     healer = Game.getObjectById(healer)
     // this.say(healer&&!this.pos.isCrossRoomNearTo(healer))
     if (flag && !healer && this.room.my) return;
@@ -214,21 +222,30 @@ Creep.prototype.carrierPB = function () {
             this.pickup(power);
         } else {
             let flag = Game.flags[task.flagName];
-            if (flag) {
-                if (this.hits == this.hitsMax) {
-                    //血满的直接走过去
-                    let powerBank = Game.getObjectById(flag.memory.id)
-                    if (powerBank && !this.pos.inRangeTo(powerBank, 4)) {
-                        this.moveTo(powerBank);
-                    } else {
-                        this.memory.dontPullMe = this.ticksToLive % 4 != 0;
-                    }
+            // 旗没了 = 任务结束（同 HealerPB 0.78.247 那条出口）。这里原来什么都不做：
+            // `flag` 为 undefined ⇒ 整个分支被跳过 ⇒ 空车停在死目标房里发呆，
+            // 任务表里的 powerBank 死 id 也一直留着。2026-11-23 实测 E50S21：
+            // 2 只 4,200 hits 的 PBCarrier（ttl 954/1,044）在 (39,0)/(39,49) 之间
+            // 跨房界来回走位，任务 id 指向已消失的 power bank。按用户 10-10
+            // 「任务要么不做、要么做完」：空车回主房回收（不能白烧一只 RCL8 体型）；
+            // 没有主房可回（视野丢失/房间易主）就自杀，别留永动闲爬。
+            if (!flag) {
+                if (!this.mainRoom()) return this.suicide();
+                return this.popTask().addTask(UtilsTask.taskData("recycleCreep")).execLastTask();
+            }
+            if (this.hits == this.hitsMax) {
+                //血满的直接走过去
+                let powerBank = Game.getObjectById(flag.memory.id)
+                if (powerBank && !this.pos.inRangeTo(powerBank, 4)) {
+                    this.moveTo(powerBank);
                 } else {
-                    // 如果血没满找人帮忙
-                    let healer = _.values(flag.memory.healer || {}).map(e => Game.getObjectById(e)).find(e => e);
-                    if (healer && !this.pos.isNearTo(healer)) this.moveTo(healer);
-                    else this.memory.dontPullMe = this.ticksToLive % 4 != 0;
+                    this.memory.dontPullMe = this.ticksToLive % 4 != 0;
                 }
+            } else {
+                // 如果血没满找人帮忙
+                let healer = _.values(flag.memory.healer || {}).map(e => Game.getObjectById(e)).find(e => e);
+                if (healer && !this.pos.isNearTo(healer)) this.moveTo(healer);
+                else this.memory.dontPullMe = this.ticksToLive % 4 != 0;
             }
         }
 
