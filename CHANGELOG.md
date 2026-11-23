@@ -1,3 +1,25 @@
+## v0.78.319 — 外矿路端点交回 goTo 兜底（修复 E33S29 外矿静默停产）
+
+- `StationSources.moveOuterCarrierOnRoad`：车正好站在缓存路的**端点格**上时不再
+  「就地成功」。原写法把 index 夹到 `[0, len-1]` 后照常 `moveToOuterRoadPoint`，
+  而它的 point 就是自己脚下 ⇒ 内部 `range == 0` 直接 `return OK` ⇒ 本函数把
+  「走成功」报给调用方，`if (!moveOuterCarrierOnRoad(...)) goTo(容器)` 这条
+  **唯一出口永不触发**（与 0.78.224 的裸 move 同病：报成功但一格没走）。
+- 为什么会站在端点上：缓存路两端的工作格被 `spliceOuterRoadWorkTiles` 故意裁掉
+  （源/容器周围要留给 keeper 站桩），所以 `path[0]` 离卸货口还有 1~2 格，最后一格
+  历来由调用方的 goTo 完成 —— 这条路本身没问题，问题在于出口被吞掉了。
+- 现场（shard2 E33S29，`har_E34S29` 旗在）：源满 3,000、容器 (35,23) 满 2,000、
+  地面 113 能量按 1/tick 衰减；4 只空车 + 1 只 keeper 全钉在 `path[0]=(35,21)`
+  （距容器 2 格），两只车每十几 tick 互换 (35,21)/(36,20)，因此连「零位移」判据
+  都看不见，脚本两档全绿。
+- 改法：端点处（`index + direction` 越界且脚下就是端点路点）`return false`，
+  只放弃本 tick 的缓存路、**不作废共享路线**（invalidate 仍只挂在 NO_PATH 上），
+  下一 tick 照常可用。中段推进、回程端（+1 走到最后一点）、站在端点上反向离开
+  三种情形行为不变。
+- 测试 `outer-road-endpoint-fallback`：端点返回 false / 中段照旧推进 /
+  回程端同样兜底 / 端点上反向离开不受误伤，外加负对照（把守卫退回旧写法，
+  同一组输入必须「返回 true 且一次 moveTo 都不调」）。
+
 ## v0.78.318 — 升级容器补给优先于源容器搬运（修复 W31N51 进度冻结）
 
 - `StrategyHighLevel.carrierManager` 里「升级容器补给」从**源容器 → storage 派发之后**

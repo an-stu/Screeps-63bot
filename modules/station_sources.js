@@ -2981,7 +2981,26 @@ let pro = {
                 ? Math.max(Math.abs(point.x - creep.pos.x), Math.abs(point.y - creep.pos.y)) : 999;
         }
         if (range == 0) {
-            index += direction;
+            // ── 走到路线尽头：必须交回调用方的 goTo 兜底（0.78.319）────────────
+            // 缓存路的**两端工作格是被故意裁掉的**（`spliceOuterRoadWorkTiles`：
+            // 源/容器周围要留给 keeper 站桩），所以 `path[0]` 离卸货口还有 1~2 格，
+            // 最后一格历来由调用方的 `if (!moveOuterCarrierOnRoad(...)) goTo(容器)`
+            // 兜底（见 `harvestEnergyOuterCarry` 的最终进近分支）。
+            //
+            // 原来的写法是把 index 夹到 [0, len-1] 后就地 moveToOuterRoadPoint：
+            // 车正好站在端点格时 point 就是自己脚下 → 里面 `range == 0` 直接
+            // `return OK` → 本函数把「走成功」报给调用方 → 兜底永不触发。
+            // 实测 2026-11-24 shard2 E33S29 矿点：4 只空车 + 1 只 keeper 全钉在
+            // path[0]=(35,21)（容器在 (35,23)，源满 3,000、容器满 2,000、地面
+            // 113 能量 1/tick 衰减），两只车每十几 tick 互换 (35,21)/(36,20)
+            // 让「不动」判据也看不见 —— 整个外矿房静默停产。
+            //
+            // 端点上没有下一格路点 = 这段路已经到头，唯一的出口是原生 goTo
+            // （它能让路/对穿/绕一格）。这里 return false 只是「本 tick 不走缓存路」，
+            // 不作废共享路线（invalidate 只挂在 NO_PATH 上），下一 tick 照常可用。
+            let next = index + (direction == 1 ? 1 : -1);
+            if (next < 0 || next >= path.length) return false;
+            index = next;
         }
         index = Math.max(0, Math.min(index, path.length - 1));
         task.returnPathIndex = index;
