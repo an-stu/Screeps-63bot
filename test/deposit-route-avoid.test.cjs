@@ -56,6 +56,17 @@ assert.ok(!rooms.includes("W19N13"), "注释里的房间名被当成名单成员
 // 4) 负对照 B：deposit 目标房不能被拉黑，否则任务永远到不了
 assert.ok(!rooms.includes("W31N60"), "W31N60 是 deposit 目标房，不能被 avoidRooms 拉黑");
 
+// 4b) 已被我们占领的房间必须从静态名单移除；否则房内 moveTo 全部 ERR_NO_PATH
+assert.ok(!rooms.includes("E47S29"), "E47S29 已是己方房间，不得留在 avoidRooms");
+
+// 4c) 己方控制房永远不豁免：即使旧名单/临时名单残留，也不能锁死房内寻路
+assert.ok(/function isAvoidedRoom\(roomName\) \{[\s\S]{0,120}!\(Game\.rooms\[roomName\] && Game\.rooms\[roomName\]\.my\)/.test(clean),
+    "避免判定必须排除当前己方房间");
+for (const callback of ["routeCallback", "bypassRoomCallback", "roomCallback"]) {
+    assert.ok(new RegExp("function " + callback + "[\\s\\S]{0,160}isAvoidedRoom\\(").test(clean),
+        callback + " 必须使用己方房间豁免判定");
+}
+
 // 5) 名单进入运行时映射的方式没被改坏（Memory 追加 + 载入时建 map）
 assert.ok(/avoidRooms\s*=\s*avoidRooms\.reduce/.test(clean), "avoidRooms 必须在载入时转成 map");
 assert.ok(

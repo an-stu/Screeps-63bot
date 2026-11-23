@@ -84,7 +84,7 @@ let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路�
 let hostileCostMatrixClearDelay = 500; // 自动清理相应时间前创建的其他玩家房间的costMatrix
 let coreLayoutRange = 3; // 核心布局半径，在离storage这个范围内频繁检查对穿（减少堵路的等待
 let avoidRooms = [
-    "W35N51", "W33N51", "W32N52", "W31N53", "W29N56", "W28N56", "E55S33", "E56S33", "E56S38", "W21N54", 'E59S29', 'E47S29', 'W36N52',
+    "W35N51", "W33N51", "W32N52", "W31N53", "W29N56", "W28N56", "E55S33", "E56S33", "E56S38", "W21N54", 'E59S29', 'W36N52',
     // W31N59：Daozen 的 RCL8 塔房，W31N55 → W31N60(silicon deposit) 的**最短路必经**。
     // 2026-11-13 实测：3 只 deposit 爬（2×22WORK 采集 + 1×23CARRY 搬运）在 (17,48) 南入口
     // 被塔打死（墓碑 ttd 167/176/189，约同 tick 团灭），18,875 能量车白扔；
@@ -512,7 +512,7 @@ function generateCostMatrix(room, pos) {
             }
             if (pos) {  // 如果知道自己的pos
                 for (let direction in neighbors) {
-                    if (!(neighbors[direction] in avoidRooms)) {
+                    if (!isAvoidedRoom(neighbors[direction])) {
                         let exits = room.find(+direction);
                         if (PathFinder.search(pos, exits, { maxRooms: 1, roomCallback: () => noStructureCostMat }).incomplete) {    // 此路不通
                             avoidRooms[neighbors[direction]] = 1;
@@ -622,8 +622,11 @@ function trySwap(creep, pos, bypassHostileCreeps, ignoreCreeps) {     // ERR_NOT
 }
 
 let temporalAvoidFrom, temporalAvoidTo;
+function isAvoidedRoom(roomName) {
+    return roomName in avoidRooms && !(Game.rooms[roomName] && Game.rooms[roomName].my);
+}
 function routeCallback(nextRoomName, fromRoomName) {    // 避开avoidRooms设置了的
-    if (nextRoomName in avoidRooms) {
+    if (isAvoidedRoom(nextRoomName)) {
         //Logger.log("Move", 'Infinity at ' + nextRoomName);
         return Infinity;
     }
@@ -656,7 +659,7 @@ function checkTemporalAvoidExit(pos, room, costMat) {    // 用于记录因creep
     let neighbors = Game.map.describeExits(room.name);
     temporalAvoidFrom = temporalAvoidTo = '';   // 清空旧数据
     for (let direction in neighbors) {
-        if (!(neighbors[direction] in avoidRooms)) {
+        if (!isAvoidedRoom(neighbors[direction])) {
             for (let direction in neighbors) {
                 let exits = room.find(+direction);
                 if (PathFinder.search(pos, exits, {
@@ -682,7 +685,7 @@ function bypassMy(creep) {
 }
 let bypassRoomName, bypassCostMat, bypassIgnoreCondition, userCostCallback, costMat, route;
 function bypassRoomCallback(roomName) {
-    if (roomName in avoidRooms) {
+    if (isAvoidedRoom(roomName)) {
         return false;
     }
     if (roomName == bypassRoomName) {     // 在findTemporalRoute函数里刚刚建立了costMatrix
@@ -802,7 +805,7 @@ let findPathIgnoreCondition;
  * @returns {{[roomName:string]:1}}
  */
 function roomCallback(roomName) {
-    if (roomName in avoidRooms) {
+    if (isAvoidedRoom(roomName)) {
         return false;
     }
 

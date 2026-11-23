@@ -1,3 +1,14 @@
+## v0.78.315 — 己方控制房自动豁免移动回避名单（修复 E47S29 全房不动）
+
+- E47S29 曾被硬编码进 `avoidRooms`；该名单在载入时转成对象后，同房 `moveTo`
+  的 PathFinder 回调会直接返回不可通行。实测 keeper 远距离移动返回 ERR_NO_PATH(-2)，
+  但引擎原生 `findPathTo` 有 7 步路径；只有 1 格内移动绕过寻路才能成功。
+- E47S29 的 keeper/worker 因此有任务却长期停在 spawn 旁；两个源容器满 2000、
+  10 个 extension 全空、spawn 251/300、塔 8 能量。运行时解除回避后 keeper 立即
+  走向矿点、worker 取得 50 能量，确认根因。
+- 修复：从静态名单移除 E47S29；`isAvoidedRoom` 对所有当前己方控制房自动豁免，
+  即使旧名单或 `Memory.betterMoveAvoidRooms` 残留也不会再锁死房内寻路。
+
 ## v0.78.314 — PB 任务撤旗后，搬运手与攻击手也要有出口
 
 `StrategyPowerBank.exec` 删旗只有两条路径（`powerBank` 被打掉/过期、mission data 失效），
