@@ -80,4 +80,120 @@ const high = highSource
     assert.equal(empty.tasks[0]?.id, "upgradeContainer", "塔不需要补能时仍派升级任务");
 }
 
+// ── 升级补给必须在「源容器 → storage」派发之前（有限缓冲先于无限下沉）──
+//
+// 2026-11-23 W31N51（shard2、RCL4、无升级 link、storage 21 万）实测：carrierTarget=3，
+// 两个源容器（1,976 / 774）每 pass 各吃掉一只，第三只也被 `carryEnergyAuto` 补位 ⇒
+// 升级容器恒 0、8 只 upgrader 抱 0 能量站了 280+ tick、控制器进度冻结在 197,416，
+// 而 `StationUpgrade.generatorFillEnergyTask` 单独调用完全正常（返回 fillRes）。
+// 根因是同一 pass 内的派发顺序：它排在源容器搬运后面，就永远只剩"空池"。
+{
+    const fillCall = high.indexOf("StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY)");
+    const towerLoop = high.indexOf("if (fillTowerTasks.length) {");
+    const sourceHaul = high.indexOf('let emptyPool = room.creeps("carrier")');
+    assert.ok(fillCall >= 0 && towerLoop >= 0 && sourceHaul >= 0, "三个锚点都必须存在");
+    assert.ok(fillCall > towerLoop,
+        "升级补给必须在塔之后（10-27 事故：抢在 hive/塔之前会把唯一一只车抽走）");
+    assert.ok(fillCall < sourceHaul,
+        "升级补给必须在 `let emptyPool`（源容器 → storage 派发）之前：那一段会吃掉每一个"
+        + "空闲空手 carrier，排在它后面等于永远轮不到（W31N51 容器恒 0、进度冻结 280+ tick）");
+}
+
+// ── 行为：源容器抢不走升级容器的最后一只车 ──
+{
+    const makeCarrier = (id, energy) => ({
+        name: id,
+        store: {energy, getCapacity: () => 400},
+        ticksToLive: 1000,
+        isFree() { return !this.tasks.length; },
+        storeEmpty() { return !this.store.energy; },
+        storeContainsEnergyOtherResType: () => false,
+        fillAllMainRoomStorage() { this.tasks.push({taskName: "fillRes", id: "storage"}); },
+        addTask(task) { this.tasks.push(...(Array.isArray(task) ? task : [task])); },
+        getPartCnt: () => 8,
+        tasks: [],
+    });
+    let upgradeNeeds = true;
+    const makeSandbox = () => {
+        const box = {
+            Game: {time: 1, getObjectById: id => ({store: {energy: id === "src1" ? 1976 : 774}})},
+            RESOURCE_ENERGY: "energy", CARRY: "carry",
+            _: {values: value => Object.values(value)},
+            StationHive: {HiveNeedToFill: () => false},
+            StationTower: {generatorFillEnergyTasks: () => []},
+            StationSources: {stationName: "stationSources", generatorCarryEnergyFromLinkTask: () => []},
+            StationCarry: {generatorCarryStorageEnergyTask: () => [], generatorFillPowerSpawnTask: () => []},
+            StationMineral: {generatorCarryMineralTask: () => []},
+            UtilsTask: {task: (target, name) => ({taskName: name, id: "auto"})},
+            StationUpgrade: {
+                generatorFillEnergyTask: () => upgradeNeeds ? [{taskName: "fillRes", id: "upgradeContainer"}] : [],
+            },
+        };
+        box.global = box;
+        vm.runInNewContext(highSource, box);
+        box.StrategyHighLevel.cleanDirtyContainers = () => {};
+        return box;
+    };
+    const makeRoom = carries => ({
+        name: "W31N51", level: 4, hashCode: () => 0, link: [],
+        storage: {store: {getFreeCapacity: () => 50000}},
+        memory: {stationSources: {one: {container: "src1"}, two: {container: "src2"}}},
+        creeps: role => role === "carrier" ? carries : (role === "harvestEnergyKeeper" ? [{}] : []),
+    });
+
+    // 3 只车 + 2 个有货的源容器 + 升级容器饿着：必须有一个车拿到升级补给
+    {
+        const box = makeSandbox();
+        const carries = [makeCarrier("a", 0), makeCarrier("b", 0), makeCarrier("c", 0)];
+        box.StrategyHighLevel.carrierManager(makeRoom(carries));
+        const upg = carries.filter(c => c.tasks.some(t => t.id === "upgradeContainer"));
+        const src = carries.filter(c => c.tasks.some(t => t.taskName === "carryEnergyAuto"));
+        assert.equal(upg.length, 1, "升级容器必须有恰好 1 只车（不能被源容器全部吃掉）");
+        assert.equal(src.length, 2, "剩下的运力仍要派去源容器，不许把搬运全抽走");
+    }
+
+    // 关键现场：**同一时刻只有 1 只车空闲**，而两个源容器都有货。
+    // 修复前这一只必被源容器搬运吃掉（`availableLoads` 有 2 条，循环把空池吃干），
+    // 升级容器永远拿不到车 —— 这正是 W31N51 连续 280+ tick 的真实形态。
+    {
+        const box = makeSandbox();
+        const makes = [makeCarrier("busy1", 400), makeCarrier("busy2", 800), makeCarrier("idle", 0)];
+        makes[0].tasks.push({taskName: "fillRes", id: "storage"});
+        makes[1].tasks.push({taskName: "carryEnergyAuto", id: "auto"});
+        box.StrategyHighLevel.carrierManager(makeRoom(makes));
+        assert.equal(makes[2].tasks[0]?.id, "upgradeContainer",
+            "唯一一只空闲车必须先补升级容器（有限缓冲），不能被源容器搬运吃掉");
+    }
+
+    // 负对照：升级容器不需要补时，三只车全部回到源容器搬运
+    {
+        upgradeNeeds = false;
+        const box = makeSandbox();
+        const carries = [makeCarrier("a", 0), makeCarrier("b", 0), makeCarrier("c", 0)];
+        box.StrategyHighLevel.carrierManager(makeRoom(carries));
+        assert.equal(carries.filter(c => c.tasks.some(t => t.id === "upgradeContainer")).length, 0,
+            "容器满时不许再占车");
+        assert.equal(carries.filter(c => c.tasks.some(t => t.taskName === "carryEnergyAuto")).length, 2,
+            "容器满时的派发应与修复前一致（运力回到源容器）");
+        upgradeNeeds = true;
+    }
+
+    // 退化情形「只剩 1 个执行者」：hive 已满 ⇒ 这一只先补升级容器（有限缓冲），
+    // 容器满后自动回到源容器搬运 —— 不许把它永久钉在升级容器上。
+    {
+        const box = makeSandbox();
+        const only = [makeCarrier("solo", 0)];
+        box.StrategyHighLevel.carrierManager(makeRoom(only));
+        assert.equal(only[0].tasks[0]?.id, "upgradeContainer", "唯一一只车应先补有限缓冲");
+
+        upgradeNeeds = false;
+        const box2 = makeSandbox();
+        const solo2 = [makeCarrier("solo", 0)];
+        box2.StrategyHighLevel.carrierManager(makeRoom(solo2));
+        assert.equal(solo2[0].tasks[0]?.taskName, "carryEnergyAuto",
+            "容器满了以后唯一一只车必须回到源容器搬运");
+        upgradeNeeds = true;
+    }
+}
+
 console.log("upgrade fill priority checks passed");

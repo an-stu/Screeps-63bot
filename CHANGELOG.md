@@ -1,3 +1,20 @@
+## v0.78.318 — 升级容器补给优先于源容器搬运（修复 W31N51 进度冻结）
+
+- `StrategyHighLevel.carrierManager` 里「升级容器补给」从**源容器 → storage 派发之后**
+  挪到**之前**（仍在 hive 与塔之后，10-27 的顺序约束不变）。原来那段会把每一个空闲空手
+  carrier 都用 `carryEnergyAuto` 吃掉，升级容器只能吃剩饭 ⇒ 编制刚好等于「矿点 + 1」的房
+  永远轮不到它。
+- 现场（shard2 W31N51，RCL4、无升级 link、storage 21 万能量）：3 只 carrier 的编制
+  `max(2, ceil((2 矿点 + 2 keeper)/2)) + 1 = 3`，两个源容器（1,976 / 774）每 pass 各吃一只、
+  第三只被补位 ⇒ 升级容器恒 0/2,000，8 只 upgrader 抱 0 能量干站，控制器进度冻结在
+  197,416 **280+ tick**。单独调用 `StationUpgrade.generatorFillEnergyTask` 是正常的
+  （返回 fillRes），所以问题不在补给函数，而在同一 pass 内的派发顺序。
+- 顺序改为按 MEMORY「有限缓冲先于无限下沉」：升级容器满（含 `room.used` 预订）时
+  `generatorFillEnergyTask` 自己返回空，车立刻回落到源容器搬运，不会长期占车。
+- 测试 `upgrade-fill-priority` 增：顺序钉子（必须在 `let emptyPool` 之前）、
+  「只有一个空闲车时先补升级容器」（旧代码下确实失败）、容器满时的负对照、
+  以及「只剩 1 个执行者」的退化情形（容器满后回到源容器）。
+
 ## v0.78.317 — 修正交货位缓存的线上空值
 
 - 线上 Room 有时将未设置的自定义缓存读为 `null`。仅复用已验证的站位对象；缓存为空时重新计算，确保 W31N51 的专用交货位和入口实际生效。补充线上空值形态的回归。

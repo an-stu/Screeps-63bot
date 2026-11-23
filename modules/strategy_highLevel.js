@@ -513,6 +513,34 @@ let pro = {
                 if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
             }
         }
+        // ── 升级容器补给：**有限缓冲先于无限下沉**（MEMORY「十条」第 4 条） ──
+        //
+        // 位置约束两条，方向相反，别随手挪：
+        //   · 必须在 hive（上面）与塔（上一段）**之后** —— 2026-10-27 事故：把它插到
+        //     carrierManager 最前面，把 W26N58 唯一一只车抽去填控制器容器，
+        //     spawn/extension 永远填不满 ⇒ keeper 付不起孵化费 ⇒ 全房停摆。
+        //   · 必须在「源容器 → storage」的搬运派发**之前** —— 那一段会把**每一个**
+        //     空闲空手 carrier 都用 `carryEnergyAuto` 吃掉，而 storage 是无限下沉、
+        //     升级容器只有 2,000 缓冲。排在它后面就等于「永远轮不到」。
+        //
+        // 2026-11-23 W31N51 实测（RCL4、无 link、storage 21 万能量）：三只 carrier 的
+        // 编制 `carrierTarget = max(2, ceil((2 矿点 + 2 keeper)/2)) + 1(无升级 link) = 3`，
+        // 2 个源容器（1,976 / 774）每 pass 各吃掉一只，第三只被 `carryEnergyAuto` 补位
+        // ⇒ 升级容器恒 0、8 只 upgrader 抱 0 能量干站、控制器进度冻结在 197,416
+        // **280+ tick**；而 `StationUpgrade.generatorFillEnergyTask` 直接调用是正常的
+        // （返回 fillRes）。同一 pass 内的派发顺序就是根因。
+        //
+        // 不会持续占车：容器（含 `room.used` 预订）达到 2,000 时
+        // `generatorFillEnergyTask` 自己返回空数组，车立刻回落到源容器搬运。
+        if (!fillTowerTasks.length) {
+            let upgradeFreeCarries = room.creeps("carrier").filter(e => e.isFree() && e.ticksToLive > 50);
+            if (upgradeFreeCarries.length) {
+                // 先取承运爬、再按它的真实容量预订（head 算量 + pop 派活会错配）
+                let carrier = upgradeFreeCarries.pop();
+                let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50);
+                if (upgFill.length) carrier.addTask(upgFill);
+            }
+        }
         // hive（spawn/extension）不需要能量时，才把 carrier 的剩余能量放回 storage；
         // 否则能量优先喂 hive，避免 spawn/ext 饥饿导致无法产爬
         if (!StationHive.HiveNeedToFill(room)) {
@@ -574,23 +602,8 @@ let pro = {
         pro.pickTasksMap[room.name] = pickTasks;
 
 
-        // 分配升级的运送 —— **必须放在 StorageCarryEnergyTasks 门之外**。
-        //
-        // 2026-10-23 实测 W26N58（RCL4、刚建好 storage、还没有 link）：
-        // hive 已满（1300/1300）而房内无 link ⇒ `generatorCarryStorageEnergyTask`
-        // 返回空 ⇒ 下面整段 `if (StorageCarryEnergyTasks.length)` 被跳过 ⇒
-        // 升级容器长期 0/2000、upgrader 站在上面抱着 0 能量（ttl 只剩 220）、
-        // 控制器进度冻结在 115,043 二十多个 tick。这已经是同一类问题第三次出现
-        // （前两次在 strategy_lowLevel：塔抢走搬运、填充排在后面）。
-        //
-        // `fillRes` 自带「空手先去 storage 取货」的分支（prototype_creep.js:626），
-        // 所以这里给空手搬运也有效。
-        if (!fillTowerTasks.length && freeCarries.length) {
-            // 同上：先取承运爬再按它的容量预订
-            let carrier = freeCarries.pop();
-            let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50);
-            if (upgFill.length) carrier.addTask(upgFill);
-        }
+        // 升级容器的补给已在塔之后、源容器搬运之前派发（见上面的长注释）：
+        // 这里**不要**再派一次，否则同一只车会被重复预订，也会掩盖那条顺序约束。
 
         if (StorageCarryEnergyTasks.length) {
             if (!freeCarries.length) return;
