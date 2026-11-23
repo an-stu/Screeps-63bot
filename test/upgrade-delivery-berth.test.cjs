@@ -40,6 +40,8 @@ function makeWorld({atBerth = [], terrain = 0} = {}) {
     const buffer = {id:"buffer-id",structureType:"container",pos:new RoomPosition(45,28,"W31N51"),
         store:{energy:0,getFreeCapacity:()=>2000}};
     const room = {
+        _upgradeDeliveryPosition:null,
+        _upgradeDeliveryApproach:null,
         name:"W31N51",
         memory:{stationUpgrade:{container:buffer.id,deliveryPosition:{
             x:45,y:27,container:buffer.id,approach:{x:46,y:26},

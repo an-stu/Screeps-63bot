@@ -332,20 +332,21 @@ let pro = {
     getDeliveryPosition(room, target) {
         const station = room?.memory?.[pro.stationName], cfg = station?.deliveryPosition;
         if (!cfg?.container || cfg.container !== station.container || (target && target.id !== cfg.container)) return;
-        if (room._upgradeDeliveryPosition !== undefined) return room._upgradeDeliveryPosition || undefined;
-        room._upgradeDeliveryPosition = null;
+        // Live Room wrappers may return null for an unset custom property.
+        if (room._upgradeDeliveryPosition) return room._upgradeDeliveryPosition;
         const buffer = target || Game.getObjectById(cfg.container);
         if (!buffer?.pos || buffer.structureType !== STRUCTURE_CONTAINER || buffer.pos.roomName !== room.name) return;
         const result = pro.getDeliveryTile(room,cfg,buffer.pos);
-        room._upgradeDeliveryPosition = result || null;
+        if (result) room._upgradeDeliveryPosition = result;
         return result;
     },
     getDeliveryApproach(room, delivery) {
         const cfg = room.memory[pro.stationName]?.deliveryPosition?.approach;
         if (!cfg) return;
-        if (room._upgradeDeliveryApproach === undefined)
-            room._upgradeDeliveryApproach = pro.getDeliveryTile(room,cfg,delivery) || null;
-        return room._upgradeDeliveryApproach || undefined;
+        if (room._upgradeDeliveryApproach) return room._upgradeDeliveryApproach;
+        const result = pro.getDeliveryTile(room,cfg,delivery);
+        if (result) room._upgradeDeliveryApproach = result;
+        return result;
     },
     getUpgradePosition(creep, controller, supplyTargets = []) {
         if (!controller) return undefined;
