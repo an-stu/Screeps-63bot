@@ -64,9 +64,11 @@ function isControllerUpgradeTask(creep, controller) {
     return task && task.id == controller.id && (task.taskName == "upgrade" || task.taskName == "upgradeKeeper");
 }
 
-function getUpgradeReservations(room, controller) {
+function getUpgradeReservations(room, controller, delivery, approach) {
     if (room._upgradePositionReservations) return room._upgradePositionReservations;
     let reservations = {};
+    if (delivery) reservations[delivery.x + ":" + delivery.y] = true;
+    if (approach) reservations[approach.x + ":" + approach.y] = true;
     room.find(FIND_MY_CREEPS).filter(creep => isControllerUpgradeTask(creep, controller))
         .sort((left, right) => left.name.localeCompare(right.name)).forEach(creep => {
             let data = creep.memory.upgradePosition;
@@ -209,6 +211,12 @@ Creep.prototype.upgradeKeeper = function () {
     let link = Game.getObjectById(ms["link"]);
     let container = Game.getObjectById(ms["container"]);
     let upgradePosition = pro.getUpgradePosition(this, obj, [link, container].filter(Boolean));
+    const delivery = ms.deliveryPosition && container && pro.getDeliveryPosition(mainRoom, container);
+    const approach = delivery && pro.getDeliveryApproach(mainRoom, delivery);
+    if (delivery && (this.pos.isEqualTo(delivery) || approach && this.pos.isEqualTo(approach))) {
+        this.memory.dontPullMe = false;
+        if (upgradePosition) return this.moveTo(upgradePosition, {range:0, reusePath:20});
+    }
 
     if (this.store[RESOURCE_ENERGY] > 0) {
         { // 存储 <1w 不再阻止升级：总能量闸门已由 main.js shouldRunCreep(30k/60k) 控制
@@ -250,7 +258,8 @@ Creep.prototype.upgradeKeeper = function () {
         } else if (!link || this.store.getUsedCapacity(RESOURCE_ENERGY) <= workParts) {
             let result = this.withdraw(container, RESOURCE_ENERGY);
             if (result == ERR_NOT_IN_RANGE) {
-                this.moveTo(container, { visualizePathStyle: { stroke: '#ffffff' } });
+                if (!delivery) this.moveTo(container, { visualizePathStyle: { stroke: '#ffffff' } });
+                else if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20});
                 moved = true;
             }
         }
@@ -309,9 +318,42 @@ let pro = {
         }
         return true;
     },
+    getDeliveryTile(room, cfg, adjacent) {
+        if (!cfg || !Number.isInteger(cfg.x) || !Number.isInteger(cfg.y) || cfg.x<1 || cfg.x>48 || cfg.y<1 || cfg.y>48
+            || Math.max(Math.abs(cfg.x-adjacent.x),Math.abs(cfg.y-adjacent.y)) !== 1
+            || (Game.map.getRoomTerrain(room.name).get(cfg.x,cfg.y) & TERRAIN_MASK_WALL)) return;
+        const p = new RoomPosition(cfg.x,cfg.y,room.name);
+        if (p.lookFor(LOOK_STRUCTURES).some(s=>s.structureType===STRUCTURE_CONTROLLER
+            || (s.structureType===STRUCTURE_RAMPART ? !s.my && !s.isPublic
+                : OBSTACLE_OBJECT_TYPES.includes(s.structureType)))) return;
+        return p;
+    },
+    /** Optional delivery square pinned to the current controller container. */
+    getDeliveryPosition(room, target) {
+        const station = room?.memory?.[pro.stationName], cfg = station?.deliveryPosition;
+        if (!cfg?.container || cfg.container !== station.container || (target && target.id !== cfg.container)) return;
+        if (room._upgradeDeliveryPosition !== undefined) return room._upgradeDeliveryPosition || undefined;
+        room._upgradeDeliveryPosition = null;
+        const buffer = target || Game.getObjectById(cfg.container);
+        if (!buffer?.pos || buffer.structureType !== STRUCTURE_CONTAINER || buffer.pos.roomName !== room.name) return;
+        const result = pro.getDeliveryTile(room,cfg,buffer.pos);
+        room._upgradeDeliveryPosition = result || null;
+        return result;
+    },
+    getDeliveryApproach(room, delivery) {
+        const cfg = room.memory[pro.stationName]?.deliveryPosition?.approach;
+        if (!cfg) return;
+        if (room._upgradeDeliveryApproach === undefined)
+            room._upgradeDeliveryApproach = pro.getDeliveryTile(room,cfg,delivery) || null;
+        return room._upgradeDeliveryApproach || undefined;
+    },
     getUpgradePosition(creep, controller, supplyTargets = []) {
         if (!controller) return undefined;
-        let reservations = getUpgradeReservations(creep.room, controller);
+        const delivery = creep.room.memory?.[pro.stationName]?.deliveryPosition && pro.getDeliveryPosition(creep.room);
+        const approach = delivery && pro.getDeliveryApproach(creep.room,delivery);
+        const deliveryKey = delivery && delivery.x+":"+delivery.y;
+        const approachKey = approach && approach.x+":"+approach.y;
+        let reservations = getUpgradeReservations(creep.room, controller, delivery, approach);
         // **只剩一只 upgrader 时，尽可能站到升级容器那一格上**（用户 2026-11-21）。
         //
         // 理由：单人时没有站位争抢，站在容器上 `withdraw(container)` 是 0 距离
@@ -339,7 +381,7 @@ let pro = {
         if (stored && stored.controllerId == controller.id) {
             let position = new RoomPosition(stored.x, stored.y, creep.room.name);
             let key = position.x + ":" + position.y;
-            if (reservations[key] == creep.name) return position;
+            if (key !== deliveryKey && key !== approachKey && reservations[key] == creep.name) return position;
         }
 
         let candidates = [];
@@ -347,7 +389,7 @@ let pro = {
             for (let y = Math.max(1, controller.pos.y - 3); y <= Math.min(48, controller.pos.y + 3); y++) {
                 let position = new RoomPosition(x, y, creep.room.name);
                 let key = x + ":" + y;
-                if (reservations[key] || !isWalkableUpgradePosition(position, controller)) continue;
+                if (key === deliveryKey || key === approachKey || reservations[key] || !isWalkableUpgradePosition(position, controller)) continue;
                 let supplyRanges = supplyTargets.map(target => position.getRangeTo(target));
                 let supplyPenalty = supplyRanges.filter(range => range > 1).length;
                 let supplyRange = supplyRanges.reduce((sum, range) => sum + range, 0);

@@ -736,7 +736,10 @@ Creep.prototype.fillRes = function () {
     }
 
     if (this.room.name != task.roomName || !this.pos.isNearTo(obj)) {
-        this.moveTo(task, { reusePath: 20, visualizePathStyle: { stroke: '#67ffed' } })
+        const delivery = task.resType === RESOURCE_ENERGY && this.room.name === task.roomName
+            && typeof StationUpgrade !== "undefined" && StationUpgrade.getDeliveryPosition?.(this.room,obj);
+        if (delivery) this.moveTo(delivery, {range:0,reusePath:20,visualizePathStyle:{stroke:'#67ffed'}});
+        else this.moveTo(task, { reusePath: 20, visualizePathStyle: { stroke: '#67ffed' } });
         this._move_res_active = true
     }
     if (this._move_res_active) return;
