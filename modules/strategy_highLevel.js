@@ -450,6 +450,32 @@ let pro = {
             .filter(e => e.isFree() && !e.storeEmpty() && e.storeContainsEnergyOtherResType())
             .forEach(e => e.fillAllMainRoomStorage());
     },
+    /**
+     * 给「空手车 + 光秃秃的 fillRes 任务」补一个**取能**任务。
+     *
+     * `Creep.prototype.fillRes` 开头就判 `this.store[task.resType] == 0` 然后
+     * `popTask()`（prototype_creep.js:731）—— 空手车拿到不带取能的 fillRes，
+     * 下一 tick 会把任务**原地丢掉**，这次派发等于没发生，车回到空闲池等下一 pass。
+     * 它唯一的自救是 :723 那条重定向：空手 + 本房 mass store（storage/terminal）
+     * 里够一整车时改去取 storage。**storage 干、能量全压在源容器里的房就完全没有出路。**
+     *
+     * 实测 2026-11-24 shard2 E56S29（RCL4、storage 在 0~770 之间摆、三个容器合计 3.4k、
+     * 没有 terminal）：插桩 26 tick 内 `StationUpgrade.generatorFillEnergyTask` 被调用
+     * 9 次，同一窗口「空手车执行 fillRes」也正好 9 次 —— **9/9 全部被丢弃**；升级容器
+     * 在 616→368 之间被抽干，塔停在 587 反复生成补能任务却拿不到能量，同房 3 只 carrier
+     * 里常有 2 只任务为空站着。W31N51（storage 10 万）不受影响，正是因为有 storage 可重定向。
+     *
+     * 顺序不能反：addTask 是**栈**，后加的**先**执行，所以取能任务必须在 fillRes 之后加
+     * （与上面 hive 分支 `addTask(fillHive)` + `addTask(carryEnergyAuto)` 同一写法）。
+     *
+     * @param creep            已拿到 fillRes 的空手 carrier
+     * @param storageCarryTasks 有现成的 storage→hive 链就用它（保持原行为），没有则退回自取
+     */
+    attachPickupForEmptyFill(creep, storageCarryTasks) {
+        if (!creep.storeEmpty()) return;
+        if (storageCarryTasks && storageCarryTasks.length) creep.addTask(storageCarryTasks);
+        else creep.addTask(UtilsTask.task(creep, "carryEnergyAuto"));
+    },
     carrierManager(room) {
         // 先把「载着非能量货的空转搬运」放出去（见 dumpNonEnergyCargo）。
         // 必须放在 hive 分支**之前**：hive 缺能时该分支会 `return`，错过就再也轮不到。
@@ -484,7 +510,7 @@ let pro = {
             if (fillTowerTasks.length && freeCarries.length) {
                 let creep = freeCarries.pop();
                 creep.addTask(fillTowerTasks.shift());
-                if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
+                pro.attachPickupForEmptyFill(creep, StorageCarryEnergyTasks);
             }
             if (StationHive.HiveNeedToFill(room)) return;
             freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
@@ -510,7 +536,7 @@ let pro = {
             while (fillTowerTasks.length && freeCarries.length) {
                 let creep = freeCarries.pop();
                 creep.addTask(fillTowerTasks.shift());
-                if (creep.storeEmpty() && StorageCarryEnergyTasks.length) creep.addTask(StorageCarryEnergyTasks);
+                pro.attachPickupForEmptyFill(creep, StorageCarryEnergyTasks);
             }
         }
         // ── 升级容器补给：**有限缓冲先于无限下沉**（MEMORY「十条」第 4 条） ──
@@ -538,7 +564,14 @@ let pro = {
                 // 先取承运爬、再按它的真实容量预订（head 算量 + pop 派活会错配）
                 let carrier = upgradeFreeCarries.pop();
                 let upgFill = StationUpgrade.generatorFillEnergyTask(room.name, carrier.getPartCnt(CARRY) * 50);
-                if (upgFill.length) carrier.addTask(upgFill);
+                if (upgFill.length) {
+                    carrier.addTask(upgFill);
+                    // 升级容器在无 storage 的房（RCL4 早期）最容易撞上「空手车丢任务」：
+                    // 这里必须配取能任务，否则 fillRes 下一 tick 自行 pop（见
+                    // attachPickupForEmptyFill 的实测记录）。不给 storage 链 ——
+                    // 那条链送到的是 hive，不是升级容器。
+                    pro.attachPickupForEmptyFill(carrier, null);
+                }
             }
         }
         // hive（spawn/extension）不需要能量时，才把 carrier 的剩余能量放回 storage；

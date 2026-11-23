@@ -62,6 +62,7 @@ const high = highSource
         StationSources: {generatorCarryEnergyFromLinkTask: () => []},
         StationCarry: {generatorCarryStorageEnergyTask: () => [], generatorFillPowerSpawnTask: () => []},
         StationUpgrade: {generatorFillEnergyTask: () => [{id: "upgradeContainer"}]},
+        UtilsTask: {task: (target, name) => ({taskName: name, id: "auto"})},
     };
     sandbox.global = sandbox;
     vm.runInNewContext(highSource, sandbox);
@@ -147,7 +148,10 @@ const high = highSource
         const carries = [makeCarrier("a", 0), makeCarrier("b", 0), makeCarrier("c", 0)];
         box.StrategyHighLevel.carrierManager(makeRoom(carries));
         const upg = carries.filter(c => c.tasks.some(t => t.id === "upgradeContainer"));
-        const src = carries.filter(c => c.tasks.some(t => t.taskName === "carryEnergyAuto"));
+        // 源容器派发：「只有一条 carryEnergyAuto」的车 = 只拿了搬运任务的那些。
+        // 升级容器那只车现在会**多一条**取能任务（见 attachPickupForEmptyFill），
+        // 所以不能再用「有 carryEnergyAuto 的车数」当运力计数。
+        const src = carries.filter(c => c.tasks.length === 1 && c.tasks[0].taskName === "carryEnergyAuto");
         assert.equal(upg.length, 1, "升级容器必须有恰好 1 只车（不能被源容器全部吃掉）");
         assert.equal(src.length, 2, "剩下的运力仍要派去源容器，不许把搬运全抽走");
     }
@@ -193,6 +197,88 @@ const high = highSource
         assert.equal(solo2[0].tasks[0]?.taskName, "carryEnergyAuto",
             "容器满了以后唯一一只车必须回到源容器搬运");
         upgradeNeeds = true;
+    }
+}
+
+// ── 空手车拿到「光秃秃的 fillRes」会当场丢掉（2026-11-24 shard2 E56S29）──
+//
+// `Creep.prototype.fillRes` 开头就判 `this.store[resType] == 0` 然后 popTask，
+// 它唯一的自救是从 mass store（storage/terminal）重定向取能。**storage 干、
+// 能量全在源容器里的 RCL4 房**（E56S29：storage 0~770、三个容器合计 3.4k、无 terminal）
+// 两条路都走不通 ⇒ 派发被丢弃。插桩实测：26 tick 内 `generatorFillEnergyTask` 被调 9 次，
+// 空手车执行 fillRes 也正好 9 次 —— 9/9 全丢，升级容器从 616 被抽到 368，
+// 塔停在 587 反复生成补能任务却拿不到能量。
+// 修法：凡是把 fillRes 派给空手车，都必须**后加**一条取能任务（addTask 是栈，后加先跑）。
+{
+    const makeCarrier = (id, energy) => ({
+        name: id,
+        tasks: [],
+        store: {energy, getCapacity: () => 400},
+        ticksToLive: 1000,
+        isFree() { return !this.tasks.length; },
+        storeEmpty() { return !this.store.energy; },
+        storeContainsEnergyOtherResType: () => false,
+        fillAllMainRoomStorage() { this.tasks.push({taskName: "fillRes", id: "storage"}); },
+        addTask(task) { this.tasks.push(...(Array.isArray(task) ? task : [task])); },
+        getPartCnt: () => 8,
+    });
+    const box = (towerNeeds) => {
+        const b = {
+            Game: {time: 1, getObjectById: () => null},
+            RESOURCE_ENERGY: "energy", CARRY: "carry",
+            _: {values: v => Object.values(v)},
+            StationHive: {HiveNeedToFill: () => false},
+            StationTower: {generatorFillEnergyTasks: () => towerNeeds ? [{taskName: "fillRes", id: "tower"}] : []},
+            StationSources: {stationName: "stationSources", generatorCarryEnergyFromLinkTask: () => []},
+            // storage 搬运链为空 = E56S29 的现场（storage 里不够一整车）
+            StationCarry: {generatorCarryStorageEnergyTask: () => [], generatorFillPowerSpawnTask: () => []},
+            StationMineral: {generatorCarryMineralTask: () => []},
+            UtilsTask: {task: (target, name) => ({taskName: name, id: "auto"})},
+            StationUpgrade: {generatorFillEnergyTask: () => [{taskName: "fillRes", id: "upgradeContainer"}]},
+        };
+        b.global = b;
+        vm.runInNewContext(highSource, b);
+        b.StrategyHighLevel.cleanDirtyContainers = () => {};
+        return b;
+    };
+    const room = carries => ({
+        name: "E56S29", level: 8, hashCode: () => 0, link: [],
+        storage: {store: {getFreeCapacity: () => 50000}},
+        memory: {},
+        creeps: role => role === "carrier" ? carries : [],
+    });
+
+    // 升级容器补给：空手车必须同时拿到取能任务，且取能排在 fillRes **之后**（先跑）
+    {
+        const b = box(false);
+        const c = [makeCarrier("solo", 0)];
+        b.StrategyHighLevel.carrierManager(room(c));
+        assert.equal(c[0].tasks.length, 2, "空手车必须同时拿到 fillRes 与取能任务");
+        assert.equal(c[0].tasks[0].id, "upgradeContainer", "fillRes 在栈底");
+        assert.equal(c[0].tasks[1].taskName, "carryEnergyAuto", "取能任务必须在栈顶（先执行）");
+    }
+    // 塔补给：同一处缺陷（storage 搬运链为空时原来同样丢任务）
+    {
+        const b = box(true);
+        const c = [makeCarrier("solo", 0)];
+        b.StrategyHighLevel.carrierManager(room(c));
+        assert.equal(c[0].tasks[0].id, "tower", "塔优先");
+        assert.equal(c[0].tasks[1].taskName, "carryEnergyAuto", "空手车补塔也必须带取能");
+    }
+    // 负对照：本来就有载荷的车不许被塞取能任务（它自己就是能量来源）
+    {
+        const b = box(false);
+        const c = [makeCarrier("loaded", 300)];
+        b.StrategyHighLevel.carrierManager(room(c));
+        assert.equal(c[0].tasks.length, 1, "带载荷的车只拿 fillRes，不许再挂取能");
+        assert.equal(c[0].tasks[0].id, "upgradeContainer");
+    }
+    // 源码钉子：两处塔派发都必须走 helper，不许留着「只挂 storage 链」的裸写法
+    {
+        const raw = highSource.match(/if \(creep\.storeEmpty\(\) && StorageCarryEnergyTasks\.length\) creep\.addTask\(StorageCarryEnergyTasks\)/g);
+        assert.equal(raw, null, "塔派发必须走 attachPickupForEmptyFill，裸写法会让 storage 干的房丢任务");
+        const calls = highSource.match(/pro\.attachPickupForEmptyFill\(/g) || [];
+        assert.ok(calls.length >= 3, "塔 ×2 + 升级容器 ×1 都应调用 attachPickupForEmptyFill");
     }
 }
 

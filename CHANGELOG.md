@@ -1,3 +1,26 @@
+## v0.78.320 — 空手车补能任务（修复塔/升级容器派发被 fillRes 自行丢弃）
+
+- `StrategyHighLevel` 新增 `attachPickupForEmptyFill(creep, storageCarryTasks)`：
+  凡是把 `fillRes` 派给**空手** carrier，都在栈顶补一条取能任务
+  （有 `generatorCarryStorageEnergyTask` 就用现成的 storage→hive 链，否则退回
+  `carryEnergyAuto` 自取）。调用点两处：塔派发 ×2（hive 分支的塔保底 + 主塔循环）、
+  升级容器补给 ×1。
+- 根因：`Creep.prototype.fillRes` 开头就判 `this.store[resType] == 0` 然后 `popTask()`
+  —— 空手车拿到不带取能的 fillRes，下一 tick **原地丢掉**，这次派发等于没发生。
+  它唯一的自救是 `prototype_creep.js:723` 的重定向：空手 + 本房 mass store 里够一整车
+  时改去 storage 取。**storage 干、能量全压在源容器里的房两条路都不通。**
+- 现场（shard2 E56S29，RCL4、无 terminal、storage 在 0~770 之间摆、三个容器合计 3.4k）：
+  运行时插桩 26 tick 内 `StationUpgrade.generatorFillEnergyTask` 被调用 9 次，
+  同一窗口「空手车执行 fillRes」也正好 9 次 —— **9/9 全部被丢弃**；升级容器被抽到 368，
+  塔停在 587 反复生成补能任务却拿不到能量，同房 3 只 carrier 里常有 2 只任务为空站着。
+  对照：W31N51（storage 10 万）不受影响，正是因为有 storage 可重定向。
+- 顺序不变：取能任务必须**后加**（addTask 是栈，后加先跑），与 hive 分支
+  `addTask(fillHive)` + `addTask(carryEnergyAuto)` 同一写法；塔仍排在升级容器之前，
+  10-27 的 spawn 优先级约束与 11-23 的「有限缓冲先于无限下沉」都没有改动。
+- 测试 `upgrade-fill-priority` 增 4 组：升级容器空手车必须拿到取能任务且取能排在栈顶、
+  塔派发同修、带载荷的车不许被塞取能（负对照）、源码钉子（两处塔派发必须走 helper）。
+  负对照在旧代码下确实因行为失败（实测 `tasks.length` 1 !== 2）。
+
 ## v0.78.319 — 外矿路端点交回 goTo 兜底（修复 E33S29 外矿静默停产）
 
 - `StationSources.moveOuterCarrierOnRoad`：车正好站在缓存路的**端点格**上时不再
