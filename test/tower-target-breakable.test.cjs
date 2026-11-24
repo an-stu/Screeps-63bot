@@ -43,16 +43,22 @@ const RANGED_ATTACK = "ranged_attack";
 
 /**
  * 敌对爬桩。
- * @param {object} o {id, hits, hitsMax, heal, attack, ranged, towerDamage}
- * towerDamage = 我方每座塔对它的单 tick 伤害（由场景直接给定，不重算距离）。
+ * @param {object} o {id, hits, hitsMax, heal, attack, ranged, owner, x, y}
  */
 function hostile(o) {
     const counts = { [HEAL]: o.heal || 0, [ATTACK]: o.attack || 0, [RANGED_ATTACK]: o.ranged || 0 };
+    const pos = {
+        x: o.x || 0,
+        y: o.y || 0,
+        isNearTo(t) { return Math.max(Math.abs(this.x - t.x), Math.abs(this.y - t.y)) <= 1; },
+    };
     return {
         id: o.id,
         hits: o.hits,
         hitsMax: o.hitsMax || 5000,
         body: [],
+        owner: o.owner === null ? null : { username: o.owner || "SomePlayer" },
+        pos,
         getActiveBodyparts: t => counts[t] || 0,
         // 自愈：12 血/tick × HEAL 部件
         possibleHealDamage: () => (counts[HEAL] || 0) * 12,
@@ -125,8 +131,9 @@ Array.prototype.minBy = function (fn) {
 
 // ── 1. 现场复现：单塔 150 伤 vs 25-HEAL 奶妈（自愈 300）⇒ 必须改打攻击手 ──
 {
-    const healer = hostile({ id: "healer", hits: 5000, hitsMax: 5000, heal: 25 });
-    const attacker = hostile({ id: "attacker", hits: 5000, hitsMax: 5000, attack: 2, ranged: 3 });
+    // 实测站位：奶妈 (42,39)、攻击手 (42,36)，相距 3 格 ⇒ 奶妈够不着，攻击手真的会掉血
+    const healer = hostile({ id: "healer", hits: 5000, hitsMax: 5000, heal: 25, owner: "Invader", x: 42, y: 39 });
+    const attacker = hostile({ id: "attacker", hits: 5000, hitsMax: 5000, attack: 2, ranged: 3, owner: "Invader", x: 42, y: 36 });
     const attacked = runTower({ towers: 1, towerDamage: 150, hostiles: [healer, attacker] });
     assert.equal(attacked.length, 1, "塔必须开火");
     assert.equal(attacked[0], "attacker",
@@ -135,8 +142,8 @@ Array.prototype.minBy = function (fn) {
 
 // ── 2. 塔够多（6×600=3,600 > 300 自愈）⇒ 仍然先打奶妈，原意图不许回退 ──
 {
-    const healer = hostile({ id: "healer", hits: 5000, hitsMax: 5000, heal: 25 });
-    const attacker = hostile({ id: "attacker", hits: 5000, hitsMax: 5000, attack: 2, ranged: 3 });
+    const healer = hostile({ id: "healer", hits: 5000, hitsMax: 5000, heal: 25, owner: "Invader", x: 42, y: 39 });
+    const attacker = hostile({ id: "attacker", hits: 5000, hitsMax: 5000, attack: 2, ranged: 3, owner: "Invader", x: 42, y: 36 });
     const attacked = runTower({ towers: 6, towerDamage: 600, hostiles: [healer, attacker] });
     assert.equal(attacked[0], "healer", "打得穿的奶妈仍是第一目标（奶妈不死，坦克被奶住永远打不掉）");
 }
@@ -157,6 +164,25 @@ Array.prototype.minBy = function (fn) {
     const big = hostile({ id: "big", hits: 5000, hitsMax: 5000, attack: 4, ranged: 2 });
     const attacked = runTower({ towers: 1, towerDamage: 150, hostiles: [small, big] });
     assert.equal(attacked[0], "big", "没有奶妈时按威胁（对我们造成的伤害）排序，不是按残血比例");
+}
+
+// ── 5. 奶妈贴身奶着攻击手（有效自愈 300 > 单塔 150）⇒ NPC 也打不穿，必须停火省电 ──
+//
+// 实测后果：E56S29 的塔在 100 tick 内从 730 打到 0，15,000 伤害全被奶回去，
+// 房间彻底没有防御；停下来存电，等它们走进 ≤5 格（600 伤）才打才是正解。
+{
+    const healer = hostile({ id: "healer", hits: 5000, hitsMax: 5000, heal: 25, owner: "Invader", x: 10, y: 10 });
+    const attacker = hostile({ id: "attacker", hits: 5000, hitsMax: 5000, attack: 2, ranged: 3, owner: "Invader", x: 11, y: 10 });
+    const attacked = runTower({ towers: 1, towerDamage: 150, hostiles: [healer, attacker] });
+    assert.equal(attacked.length, 0, "NPC 全体打不穿时必须停火，不许把电打空（旧代码这里每 tick 都在打 healer）");
+}
+
+// ── 6. 打不穿的是**玩家**部队 ⇒ 保留削血（逼奶妈贴身、压缩机动），不许停火 ──
+{
+    const healer = hostile({ id: "healer", hits: 4850, hitsMax: 5000, heal: 25, owner: "EnemyPlayer", x: 10, y: 10 });
+    const attacker = hostile({ id: "attacker", hits: 5000, hitsMax: 5000, attack: 2, ranged: 3, owner: "EnemyPlayer", x: 11, y: 10 });
+    const attacked = runTower({ towers: 1, towerDamage: 150, hostiles: [healer, attacker] });
+    assert.equal(attacked.length, 1, "玩家部队打不穿也照打（削血有意义）");
 }
 
 console.log("tower target breakable checks passed");

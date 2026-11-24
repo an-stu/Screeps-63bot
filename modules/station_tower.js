@@ -104,17 +104,34 @@ let pro={
             //（一只 2,400→400，另一只 1,000→400）。先在「打得死」的目标里选，
             // 一个都没有才退回老逻辑（此时乱打与专打奶妈等价）。
             const towerDmgOn = (creep) => room.tower.reduce((s, t) => s + (t.getDamageTo ? t.getDamageTo(creep) : 0), 0);
-            const canBreak = (creep) => {
-                let heal = creep.getActiveBodyparts(HEAL) > 0
-                    ? (creep.possibleHealDamage ? creep.possibleHealDamage(1, false) : creep.getActiveBodyparts(HEAL) * 12)
-                    : 0;
-                return towerDmgOn(creep) > heal;
+            const selfHealOf = (creep) => creep.getActiveBodyparts(HEAL) > 0
+                ? (creep.possibleHealDamage ? creep.possibleHealDamage(1, false) : creep.getActiveBodyparts(HEAL) * 12)
+                : 0;
+            // 有效自愈 = 自己的 HEAL + **贴身的敌对奶妈**（HEAL 只能奶 1 格内的目标）。
+            // 只算自己的 HEAL 是不够的：E56S29 那只攻击手自己 0 HEAL，但 25-HEAL 的
+            // 奶妈贴着它奶 300/tick ⇒ 单塔 150 伤照样打不动，塔却会把 1,000 电打空
+            // （实测 100 tick 内 730→0，全被奶回去），整房彻底失去防御。
+            const effectiveHeal = (creep) => {
+                let heal = selfHealOf(creep);
+                for (let h of hostiles) {
+                    if (h === creep || h.getActiveBodyparts(HEAL) <= 0) continue;
+                    if (h.pos && h.pos.isNearTo && h.pos.isNearTo(creep.pos)) heal += selfHealOf(h);
+                }
+                return heal;
             };
+            const canBreak = (creep) => towerDmgOn(creep) > effectiveHeal(creep);
             const threatOf = (creep) => creep.possibleDamage
                 ? creep.possibleDamage(false, 3, true)
                 : creep.getActiveBodyparts(ATTACK) + creep.getActiveBodyparts(RANGED_ATTACK);
+            // NPC（Invader / Source Keeper）的奶是**免费且无限**的：打不穿就是纯烧电。
+            // 玩家部队不同，削血能逼对方奶妈贴身、压缩其机动，保留老的削血逻辑。
+            const isNpc = (creep) => {
+                let owner = creep.owner && creep.owner.username;
+                return owner == "Invader" || owner == "Source Keeper";
+            };
             let healer = hostiles.length ? hostiles.find(e => e.getActiveBodyparts(HEAL) > 0) : undefined;
             let focus = undefined;
+            let holdFire = false;
             if (healer && !canBreak(healer)) healer = undefined;  // 打不穿的奶妈不是目标
             if (healer) {
                 focus = healer;
@@ -122,6 +139,8 @@ let pro={
                 // 没有（可击穿的）奶妈：先打「正在伤害我们」的那只，威胁相同时先补刀残血的。
                 focus = hostiles.filter(canBreak)
                     .sort((a, b) => (threatOf(b) - threatOf(a)) || (a.hits - b.hits)).head();
+                // 一只都打不穿、且全是 NPC ⇒ 这一 tick 不开火（省下电等它们走近再打）
+                holdFire = !focus && hostiles.every(isNpc);
             }
 
             room.tower.filter(e=>!e._used).forEach(tower => {
@@ -136,6 +155,8 @@ let pro={
                     if (focus) {
                         tower.attack(focus)
                         lastAttackCreepMap[room.name] = focus
+                    } else if (holdFire) {
+                        // 打不死的 NPC：留着电，等它们走进 ≤5 格（600 伤）或者奶妈离开再打
                     } else {
                         let headHostiles = hostiles.head()
                         let lastTickHealAble = headHostiles.id==lastAttack.id&&lastAttack.hits<=headHostiles.hits// 上一秒奶不回去
