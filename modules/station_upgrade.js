@@ -69,6 +69,8 @@ function getUpgradeReservations(room, controller, delivery, approach) {
     let reservations = {};
     if (delivery) reservations[delivery.x + ":" + delivery.y] = true;
     if (approach) reservations[approach.x + ":" + approach.y] = true;
+    const traffic = room.memory?.[pro.stationName]?.transitTiles ? pro.getTransitTiles(room) : undefined;
+    if (traffic) for (const key of traffic) reservations[key] = true;
     room.find(FIND_MY_CREEPS).filter(creep => isControllerUpgradeTask(creep, controller))
         .sort((left, right) => left.name.localeCompare(right.name)).forEach(creep => {
             let data = creep.memory.upgradePosition;
@@ -213,9 +215,13 @@ Creep.prototype.upgradeKeeper = function () {
     let upgradePosition = pro.getUpgradePosition(this, obj, [link, container].filter(Boolean));
     const delivery = ms.deliveryPosition && container && pro.getDeliveryPosition(mainRoom, container);
     const approach = delivery && pro.getDeliveryApproach(mainRoom, delivery);
-    if (delivery && (this.pos.isEqualTo(delivery) || approach && this.pos.isEqualTo(approach))) {
+    const traffic = ms.transitTiles && this.room.name === mainRoom.name ? pro.getTransitTiles(mainRoom) : undefined;
+    if ((delivery && (this.pos.isEqualTo(delivery) || approach && this.pos.isEqualTo(approach)))
+        || traffic?.has(this.pos.x+":"+this.pos.y)) {
         this.memory.dontPullMe = false;
-        if (upgradePosition) return this.moveTo(upgradePosition, {range:0, reusePath:20});
+        if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20});
+        if (traffic) this.memory.dontPullMe = false;
+        if (upgradePosition || traffic) return;
     }
 
     if (this.store[RESOURCE_ENERGY] > 0) {
@@ -244,8 +250,10 @@ Creep.prototype.upgradeKeeper = function () {
         if (link && (link._upgrade_used || 0) <= link.store[RESOURCE_ENERGY] && link.store[RESOURCE_ENERGY] > 0) {
             let result = this.withdraw(link, RESOURCE_ENERGY);
             if (result == ERR_NOT_IN_RANGE) {
-                this.moveTo(link, { visualizePathStyle: { stroke: '#ffffff' } });
-                moved = true;
+                if (!traffic) {
+                    this.moveTo(link, { visualizePathStyle: { stroke: '#ffffff' } });
+                    moved = true;
+                }
             } else {
                 link._upgrade_used = (link._upgrade_used || 0) + this.store.getFreeCapacity(RESOURCE_ENERGY)
                 isWithdrawLink = true
@@ -258,15 +266,15 @@ Creep.prototype.upgradeKeeper = function () {
         } else if (!link || this.store.getUsedCapacity(RESOURCE_ENERGY) <= workParts) {
             let result = this.withdraw(container, RESOURCE_ENERGY);
             if (result == ERR_NOT_IN_RANGE) {
-                if (!delivery) this.moveTo(container, { visualizePathStyle: { stroke: '#ffffff' } });
-                else if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20});
+                if (!delivery && !traffic) this.moveTo(container, { visualizePathStyle: { stroke: '#ffffff' } });
+                else if (upgradePosition && !this.pos.isEqualTo(upgradePosition)) this.moveTo(upgradePosition, {range:0, reusePath:20});
                 moved = true;
             }
         }
     }
     if (!moved && upgradePosition && !this.pos.isEqualTo(upgradePosition)) {
         this.moveTo(upgradePosition, {range:0, reusePath:20});
-    } else if (!moved && container && !this.pos.isEqualTo(container) && ms["creeps"].length <= 1) {
+    } else if (!moved && !traffic && container && !this.pos.isEqualTo(container) && ms["creeps"].length <= 1) {
         this.moveTo(container);
     }
     if (upgradePosition && this.pos.isEqualTo(upgradePosition)) this.memory.dontPullMe = true;
@@ -348,12 +356,61 @@ let pro = {
         if (result) room._upgradeDeliveryApproach = result;
         return result;
     },
+    /** Optional protected through-lane, decoded once on each live Room. */
+    getTransitTiles(room) {
+        const packed = room?.memory?.[pro.stationName]?.transitTiles;
+        if (typeof packed !== "string" || !packed) return;
+        if (!room._upgradeTransitTiles) {
+            room._upgradeTransitTiles = new Set(Utils.decodePosArray(packed)
+                .filter(p=>Number.isInteger(p.x)&&Number.isInteger(p.y)&&p.x>0&&p.x<49&&p.y>0&&p.y<49)
+                .map(p=>p.x+":"+p.y));
+        }
+        return room._upgradeTransitTiles;
+    },
+    /** Park taskless local haulers and empty taskless outer haulers off lanes. */
+    parkIdleCarrier(creep) {
+        const room = creep.room, station = room?.memory?.[pro.stationName];
+        if (!room?.my || !room.controller || (!station?.transitTiles && !station?.deliveryPosition)
+            || creep.spawning || creep.memory.tasks?.length !== 0
+            || (creep.memory.role !== "carrier"
+                && (creep.memory.role !== "outerHarvestEnergyCarrier" || !creep.storeEmpty()))) return false;
+        const traffic = pro.getTransitTiles(room);
+        const delivery = station.deliveryPosition && pro.getDeliveryPosition(room);
+        const approach = delivery && pro.getDeliveryApproach(room,delivery);
+        const blocked = p => traffic?.has(p.x+":"+p.y) || delivery && p.isEqualTo(delivery) || approach && p.isEqualTo(approach);
+        if (!blocked(creep.pos)) return false;
+        creep.memory.dontPullMe = false;
+        if (creep._lastTrafficParkTick === Game.time) return false;
+        creep._lastTrafficParkTick = Game.time;
+        const reserved = getUpgradeReservations(room,room.controller,delivery,approach);
+        const claimed = room._upgradeTrafficParking || (room._upgradeTrafficParking = new Set());
+        let best, score = Infinity;
+        for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
+            const x=creep.pos.x+dx,y=creep.pos.y+dy,key=x+":"+y;
+            if ((!dx&&!dy)||x<1||x>48||y<1||y>48||reserved[key]||claimed.has(key)) continue;
+            const p=new RoomPosition(x,y,room.name);
+            if (blocked(p)||!p.walkable(true)||p.lookFor(LOOK_CONSTRUCTION_SITES).length
+                || room.source?.some(s=>p.isEqualTo(s.pos))||room.mineral?.pos&&p.isEqualTo(room.mineral.pos)) continue;
+            const st=p.lookFor(LOOK_STRUCTURES);
+            if (st.some(o=>o.structureType===STRUCTURE_CONTAINER)) continue;
+            const cost=(st.some(o=>o.structureType===STRUCTURE_ROAD)?4:0)+
+                (p.inRangeTo(room.controller,3)?1:0);
+            if(cost<score){best=p;score=cost;}
+        }
+        if(!best)return false;
+        claimed.add(best.x+":"+best.y);
+        creep.moveTo(best,{range:0,reusePath:2,ignoreCreeps:false});
+        // BetterMove may set a stuck pin; idle crawlers should stay movable.
+        creep.memory.dontPullMe = false;
+        return true;
+    },
     getUpgradePosition(creep, controller, supplyTargets = []) {
         if (!controller) return undefined;
         const delivery = creep.room.memory?.[pro.stationName]?.deliveryPosition && pro.getDeliveryPosition(creep.room);
         const approach = delivery && pro.getDeliveryApproach(creep.room,delivery);
         const deliveryKey = delivery && delivery.x+":"+delivery.y;
         const approachKey = approach && approach.x+":"+approach.y;
+        const traffic = creep.room.memory?.[pro.stationName]?.transitTiles ? pro.getTransitTiles(creep.room) : undefined;
         let reservations = getUpgradeReservations(creep.room, controller, delivery, approach);
         // **只剩一只 upgrader 时，尽可能站到升级容器那一格上**（用户 2026-11-21）。
         //
@@ -371,7 +428,7 @@ let pro = {
             if (upgraders.length <= 1 && container && container.pos
                 && container.pos.getRangeTo(ctrlPos) <= 3) {
                 let key = container.pos.x + ":" + container.pos.y;
-                if (!reservations[key] || reservations[key] == creep.name) {
+                if (!traffic?.has(key) && (!reservations[key] || reservations[key] == creep.name)) {
                     reservations[key] = creep.name;
                     creep.memory.upgradePosition = { x: container.pos.x, y: container.pos.y, controllerId: controller.id };
                     return container.pos;
@@ -382,7 +439,7 @@ let pro = {
         if (stored && stored.controllerId == controller.id) {
             let position = new RoomPosition(stored.x, stored.y, creep.room.name);
             let key = position.x + ":" + position.y;
-            if (key !== deliveryKey && key !== approachKey && reservations[key] == creep.name) return position;
+            if (key !== deliveryKey && key !== approachKey && !traffic?.has(key) && reservations[key] == creep.name) return position;
         }
 
         let candidates = [];
@@ -390,7 +447,8 @@ let pro = {
             for (let y = Math.max(1, controller.pos.y - 3); y <= Math.min(48, controller.pos.y + 3); y++) {
                 let position = new RoomPosition(x, y, creep.room.name);
                 let key = x + ":" + y;
-                if (key === deliveryKey || key === approachKey || reservations[key] || !isWalkableUpgradePosition(position, controller)) continue;
+                if (key === deliveryKey || key === approachKey || traffic?.has(key) || reservations[key]
+                    || !isWalkableUpgradePosition(position, controller)) continue;
                 let supplyRanges = supplyTargets.map(target => position.getRangeTo(target));
                 let supplyPenalty = supplyRanges.filter(range => range > 1).length;
                 let supplyRange = supplyRanges.reduce((sum, range) => sum + range, 0);

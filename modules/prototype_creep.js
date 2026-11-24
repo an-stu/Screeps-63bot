@@ -277,6 +277,8 @@ Creep.prototype.execLastTask = function () {
             if (typeof this[taskName] == "function") this[taskName]();
         } else {
             this.memory.dontPullMe = false;
+            if ((this.memory.role === "carrier" || this.memory.role === "outerHarvestEnergyCarrier")
+                && global.StationUpgrade) StationUpgrade.parkIdleCarrier?.(this);
         }
     } finally {
         this._taskExecDepth = depth - 1;
