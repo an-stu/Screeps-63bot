@@ -68,6 +68,36 @@ let pro = {
             available.shift().addTask(StationSources.generatorReleaseAbleHarTask(room.memory[StationSources.stationName][source.id]));
         }
     },
+    /**
+     * 无 storage 的低级房：空手 worker 的**低门槛**取能流（0.78.322）。
+     *
+     * 为什么必须单独一条：本房 carry 门槛是 300（`carryMin`，为 2000 容量容器 +
+     * 满装 carrier 定的），而 RCL4 的 worker 只有 250 容量、一趟取 100~200 就能
+     * 开工。两条流共用 300 门槛时，carrier 每个 pass 会把 ≥300 的单子认领干净，
+     * worker 永远排不上；而空手 worker 就算拿到 `buildConst` 也会被它自己的
+     * `storeEmpty()` 当场弹掉（`buildConst` 只允许载货 worker 施工）。
+     *
+     * 实测 E47S29（shard2 / RCL4 / 无 storage）：4 个工地 10 分钟 0 进度
+     * （其中一个 extension 恒 0/3000）、hive 1150/1150 顶格、塔 950/1000、
+     * 3 只 worker 全程空手无任务，而两个源容器在 192~384 之间来回 —— 能量明明
+     * 有，就是没有一条流能流到 worker 手里。
+     *
+     * 只在本房「没有 storage 且有工地」时启用（有 storage 的房走现成的
+     * storage→工地链，不要在这里抢）；本 pass 已经派给 carrier 的容器要排除，
+     * 否则两边奔同一个容器、后到的白跑一趟。
+     */
+    lowThresholdWorkerPickup(room, minEnergy = 100) {
+        if (room.storage) return [];
+        if (!room.constructionSite || !room.constructionSite.length) return [];
+        const claimed = {};
+        (room.creeps("carrier") || []).forEach(creep => {
+            (creep.memory.tasks || []).forEach(task => {
+                if (task && task.id) claimed[task.id] = 1;
+            });
+        });
+        return StationSources.generatorCarryEnergyTask(room, minEnergy)
+            .filter(list => list && list.length && !claimed[list[0].id]);
+    },
     needsDowngradeProtection(room) {
         const controller = room.controller;
         return !!(room.spawn.length && controller && !controller.upgradeBlocked
@@ -329,11 +359,17 @@ let pro = {
 
             // 剩下的给 worker 搬运。容器没货时也去捡地上的掉落（keeper 满仓溢出），
             // 捡满后下一 tick 会按「hive 优先」填进去 —— 低级房不能只靠 carrier。
+            // 第三条出口（0.78.322）：上面两条都被 carrier 吃干净时，worker 用自己的
+            // 100 门槛再取一次源容器 —— 没有它，工地会在「hive 顶格 + 源容器 200 上下」
+            // 这种房里永久冻结（见 lowThresholdWorkerPickup 的注释）。
+            const workerPickup = pro.lowThresholdWorkerPickup(room);
             workers.filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (carryTasks.length) {
                     creep.addTask(carryTasks.pop())
                 } else if (pickTasks.length) {
                     creep.addTask(pickTasks.shift())
+                } else if (workerPickup.length) {
+                    creep.addTask(workerPickup.pop())
                 }
             })
 

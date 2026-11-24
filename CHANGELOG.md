@@ -1,3 +1,24 @@
+## v0.78.322 — 低级房空手 worker 的第三条取能出口（修复工地永久冻结）
+
+- `StrategyLowLevel.lowThresholdWorkerPickup(room, minEnergy = 100)`：无 storage 且有
+  工地的房间，给空手 worker 单独一条 **100 门槛**的源容器取能流；已在本 pass 派给
+  carrier 的容器按 `memory.tasks[].id` 排除，避免两边奔同一个容器白跑。
+- 根因：低级房 carry 门槛是 300（为 2000 容量容器 + 满装 carrier 定的），RCL4 的
+  worker 只有 250 容量。两条流共用 300 门槛 ⇒ carrier 每个 pass 把 ≥300 的单子认领
+  干净，worker 永远排不上；而空手 worker 即使拿到 `buildConst`，也会被
+  `buildConst` 里的 `storeEmpty()` 当场弹掉（只允许载货 worker 施工）。
+  ⇒ 能量有、工地有、worker 有，但三条路互不相通。
+- 现场（shard2 E47S29，RCL4、无 storage、17 个 extension）：4 个工地 10 分钟
+  0 进度（其中一个 extension 恒 0/3000、storage 工地恒 10,430/30,000），
+  hive 1150/1150 顶格、塔 950/1000，3 只 worker 全程空手无任务，两个源容器在
+  192~384 之间来回摆动（`generatorCarryEnergyTask(room,300)` 连采 6 次全为空）。
+- 位置不变：新出口排在 `carryTasks`（大单）与 `pickTasks`（掉落）**之后**，
+  hive → 塔 → 升级容器的派发顺序、spawn 优先级、修墙配对全部未动。
+- 测试 `lowlevel-worker-build-pickup`：接线钉子（helper 必须在 worker 派活前算、
+  必须在 carryTasks 之后）+ 行为 5 组（只派 carrier 够不到的那个容器 / 认领排除 /
+  有 storage 返回空 / 无工地返回空 / 无认领时两个都可见）+ 线上门槛语义钉子。
+  负对照在旧代码下因行为失败（helper 不存在 ⇒ TypeError）。
+
 ## v0.78.321 — 控制器旁外矿干线不停车
 
 - 为有堵塞的房间预留已验证的外矿通行路段。升级爬不再固定占用这些格，释放过去保留的旧站位；没有配置的房间继续使用原来的升级逻辑。
