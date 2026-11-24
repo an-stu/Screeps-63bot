@@ -1,3 +1,17 @@
+## v0.78.323 — 塔不许把整轮火力喂给打不穿的奶妈
+
+- `StationTower.exec` 选目标前先算「全房塔伤 vs 目标自愈」：奶妈自愈 ≥ 全房单 tick
+  塔伤时，**不再**把它当第一目标（原实现是无条件分支），改打威胁最大且打得死的敌人；
+  一个能打死的目标都没有时退回原逻辑（补刀 head / 每 15 tick 随机扫射），行为不变。
+- 现场（shard2 E56S29，RCL4、只有 1 座塔、塔在 (12,16)）：Invader A 带 25×HEAL
+  （自愈 300 血/tick）站在离塔 21~30 格，单塔每 tick 只有 150 伤
+  （`WarDamageCal.calTowerDamage` 对 >20 格一律按 150）⇒ A 的血在 5,000/4,850
+  之间摆、永远打不死；Invader B（2×ATTACK + 3×RANGED_ATTACK、0 HEAL）同一片区域
+  一滴血不掉，把本房 4 只爬打到带伤（一只 2,400→400、一只 1,000→400，三采样持续掉血）。
+- 测试 `tower-target-breakable`：现场复现（单塔 150 伤 ⇒ 必须打 attacker）+ 6 塔
+  3,600 伤仍先打奶妈（原意图不回退）+ 只剩打不死的目标时退回老逻辑 + 无奶妈按威胁
+  排序。负对照在旧代码下因行为失败（打的是 healer）。
+
 ## v0.78.322 — 低级房空手 worker 的第三条取能出口（修复工地永久冻结）
 
 - `StrategyLowLevel.lowThresholdWorkerPickup(room, minEnergy = 100)`：无 storage 且有

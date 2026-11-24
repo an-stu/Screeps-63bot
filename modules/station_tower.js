@@ -95,7 +95,34 @@ let pro={
             let lastAttack = lastAttackCreepMap[room.name]
             // 优先打奶妈：奶妈不死，坦克被奶住永远打不掉。对整个房间只找一次，
             // 避免每座塔重复 find。
+            //
+            // ⚠️ 但「优先打奶妈」必须加一道**打不打得穿**的闸（2026-11-25 shard2 E56S29）：
+            // 那只 Invader 带 25 个 HEAL（自愈 300 血/tick），而该房只有 1 座塔、
+            // 交战距离 21~30 格 ⇒ 每 tick 150 伤（calTowerDamage 对 >20 格一律按 150）
+            // ⇒ **永远打不死**。原实现无条件把每一发都喂给它（血在 5,000/4,850 之间摆），
+            // 旁边 2-ATTACK+3-RANGED 的小队成员一滴血不掉，把本房 4 只爬打到带伤
+            //（一只 2,400→400，另一只 1,000→400）。先在「打得死」的目标里选，
+            // 一个都没有才退回老逻辑（此时乱打与专打奶妈等价）。
+            const towerDmgOn = (creep) => room.tower.reduce((s, t) => s + (t.getDamageTo ? t.getDamageTo(creep) : 0), 0);
+            const canBreak = (creep) => {
+                let heal = creep.getActiveBodyparts(HEAL) > 0
+                    ? (creep.possibleHealDamage ? creep.possibleHealDamage(1, false) : creep.getActiveBodyparts(HEAL) * 12)
+                    : 0;
+                return towerDmgOn(creep) > heal;
+            };
+            const threatOf = (creep) => creep.possibleDamage
+                ? creep.possibleDamage(false, 3, true)
+                : creep.getActiveBodyparts(ATTACK) + creep.getActiveBodyparts(RANGED_ATTACK);
             let healer = hostiles.length ? hostiles.find(e => e.getActiveBodyparts(HEAL) > 0) : undefined;
+            let focus = undefined;
+            if (healer && !canBreak(healer)) healer = undefined;  // 打不穿的奶妈不是目标
+            if (healer) {
+                focus = healer;
+            } else if (hostiles.length) {
+                // 没有（可击穿的）奶妈：先打「正在伤害我们」的那只，威胁相同时先补刀残血的。
+                focus = hostiles.filter(canBreak)
+                    .sort((a, b) => (threatOf(b) - threatOf(a)) || (a.hits - b.hits)).head();
+            }
 
             room.tower.filter(e=>!e._used).forEach(tower => {
 
@@ -106,9 +133,9 @@ let pro={
                 }
 
                 if(hostiles.length){
-                    if (healer) {
-                        tower.attack(healer)
-                        lastAttackCreepMap[room.name] = healer
+                    if (focus) {
+                        tower.attack(focus)
+                        lastAttackCreepMap[room.name] = focus
                     } else {
                         let headHostiles = hostiles.head()
                         let lastTickHealAble = headHostiles.id==lastAttack.id&&lastAttack.hits<=headHostiles.hits// 上一秒奶不回去
