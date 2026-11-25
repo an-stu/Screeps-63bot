@@ -275,10 +275,16 @@ Creep.prototype.execLastTask = function () {
             // Leave such a task intact for a later module restore, but never turn it
             // into an exception on every tick.
             if (typeof this[taskName] == "function") this[taskName]();
-        } else {
-            this.memory.dontPullMe = false;
-            if ((this.memory.role === "carrier" || this.memory.role === "outerHarvestEnergyCarrier")
-                && global.StationUpgrade) StationUpgrade.parkIdleCarrier?.(this);
+        }
+        // Check after the whole stack unwinds: some handlers pop their last
+        // task without recursing. A completed delivery can step aside this
+        // tick, while the next real task's movement must take precedence.
+        if (depth === 1) {
+            const idle = this.memory.tasks.length === 0;
+            if ((idle || this.memory.dontPullMe)
+                && (this.memory.role === "carrier" || this.memory.role === "outerHarvestEnergyCarrier")
+                && global.StationUpgrade) StationUpgrade.clearCarrierTraffic?.(this);
+            if (idle && this.memory.dontPullMe) this.memory.dontPullMe = false;
         }
     } finally {
         this._taskExecDepth = depth - 1;

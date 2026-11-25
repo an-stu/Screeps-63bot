@@ -367,41 +367,64 @@ let pro = {
         }
         return room._upgradeTransitTiles;
     },
-    /** Park taskless local haulers and empty taskless outer haulers off lanes. */
-    parkIdleCarrier(creep) {
+    /** Keep carriers pullable on protected lanes and park them when idle. */
+    clearCarrierTraffic(creep) {
         const room = creep.room, station = room?.memory?.[pro.stationName];
         if (!room?.my || !room.controller || (!station?.transitTiles && !station?.deliveryPosition)
-            || creep.spawning || creep.memory.tasks?.length !== 0
-            || (creep.memory.role !== "carrier"
-                && (creep.memory.role !== "outerHarvestEnergyCarrier" || !creep.storeEmpty()))) return false;
+            || creep.spawning || (creep.memory.role !== "carrier"
+                && creep.memory.role !== "outerHarvestEnergyCarrier")) return false;
         const traffic = pro.getTransitTiles(room);
         const delivery = station.deliveryPosition && pro.getDeliveryPosition(room);
         const approach = delivery && pro.getDeliveryApproach(room,delivery);
-        const blocked = p => traffic?.has(p.x+":"+p.y) || delivery && p.isEqualTo(delivery) || approach && p.isEqualTo(approach);
-        if (!blocked(creep.pos)) return false;
-        creep.memory.dontPullMe = false;
-        if (creep._lastTrafficParkTick === Game.time) return false;
-        creep._lastTrafficParkTick = Game.time;
+        const tileKey = p => p.x + ":" + p.y;
+        const deliveryKey = delivery && tileKey(delivery), approachKey = approach && tileKey(approach);
+        const isLane = key => traffic?.has(key) || key === deliveryKey || key === approachKey;
+        if (!isLane(tileKey(creep.pos))) return false;
+        if (creep.memory.dontPullMe) creep.memory.dontPullMe = false;
+        if (creep.memory.tasks?.length !== 0 || creep.fatigue > 0
+            || (creep.memory.role === "outerHarvestEnergyCarrier" && !creep.storeEmpty())) return false;
+
         const reserved = getUpgradeReservations(room,room.controller,delivery,approach);
         const claimed = room._upgradeTrafficParking || (room._upgradeTrafficParking = new Set());
-        let best, score = Infinity;
-        for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
-            const x=creep.pos.x+dx,y=creep.pos.y+dy,key=x+":"+y;
-            if ((!dx&&!dy)||x<1||x>48||y<1||y>48||reserved[key]||claimed.has(key)) continue;
-            const p=new RoomPosition(x,y,room.name);
-            if (blocked(p)||!p.walkable(true)||p.lookFor(LOOK_CONSTRUCTION_SITES).length
-                || room.source?.some(s=>p.isEqualTo(s.pos))||room.mineral?.pos&&p.isEqualTo(room.mineral.pos)) continue;
-            const st=p.lookFor(LOOK_STRUCTURES);
-            if (st.some(o=>o.structureType===STRUCTURE_CONTAINER)) continue;
-            const cost=(st.some(o=>o.structureType===STRUCTURE_ROAD)?4:0)+
-                (p.inRangeTo(room.controller,3)?1:0);
-            if(cost<score){best=p;score=cost;}
+        const sources = room.source, mineral = room.mineral?.pos;
+        const adjacent = (origin, onLane) => {
+            let best, score = Infinity;
+            const laneSteps = [];
+            for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+                const x = origin.x + dx, y = origin.y + dy, key = x + ":" + y;
+                if ((!dx && !dy) || x < 1 || x > 48 || y < 1 || y > 48 || claimed.has(key)) continue;
+                if (onLane) {
+                    if (!traffic?.has(key) || key === deliveryKey || key === approachKey
+                        || (x === creep.pos.x && y === creep.pos.y)) continue;
+                } else if (isLane(key) || reserved[key]) continue;
+                const p = new RoomPosition(x,y,room.name);
+                if (!p.walkable(true) || p.lookFor(LOOK_POWER_CREEPS).length || p.lookFor(LOOK_CONSTRUCTION_SITES).length
+                    || sources?.some(s => p.isEqualTo(s.pos)) || (mineral && p.isEqualTo(mineral))) continue;
+                const structures = p.lookFor(LOOK_STRUCTURES);
+                if (structures.some(o => o.structureType === STRUCTURE_CONTAINER)) continue;
+                if (onLane) laneSteps.push(p);
+                else {
+                    const cost = (structures.some(o => o.structureType === STRUCTURE_ROAD) ? 4 : 0)
+                        + (p.inRangeTo(room.controller,3) ? 1 : 0);
+                    if (cost < score) { best = p; score = cost; }
+                }
+            }
+            return onLane ? laneSteps : best;
+        };
+        let step = adjacent(creep.pos, false), turnout = step;
+        if (!step) {
+            // At a one-wide loading point, advance one free lane square only
+            // if a free turnout is available beside it. Never start a search.
+            for (const next of adjacent(creep.pos, true)) {
+                turnout = adjacent(next, false);
+                if (turnout) { step = next; break; }
+            }
         }
-        if(!best)return false;
-        claimed.add(best.x+":"+best.y);
-        creep.moveTo(best,{range:0,reusePath:2,ignoreCreeps:false});
-        // BetterMove may set a stuck pin; idle crawlers should stay movable.
-        creep.memory.dontPullMe = false;
+        // BetterMove's adjacent range:0 fast path records this step (so a
+        // later swap won't overwrite it) without calling PathFinder.
+        if (!step || creep.moveTo(step, {range:0, ignoreCreeps:false}) !== OK) return false;
+        claimed.add(tileKey(step));
+        claimed.add(tileKey(turnout));
         return true;
     },
     getUpgradePosition(creep, controller, supplyTargets = []) {
