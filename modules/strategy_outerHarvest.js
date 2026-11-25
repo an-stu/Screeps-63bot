@@ -383,25 +383,32 @@ let pro = {
                 Memory.outerPaused[targetRoomName] = Game.time + OUTER_CONGESTION_PAUSE_TICKS;
                 continue;
             }
-            // 撤退政策（用户 2026-11-18 / 2026-11-21）：Invader ≥2 时**所有爬**离房 ——
-            // 包括防守兵与 core/tower 专队，不再往里填人（旧实现是「防守兵照派」，
-            // 派进去的兵当 tick 就被撤退掉，在房界来回走 = 「卡着」）。
-            // 清到 <2 并稳定 100 tick 后自动解除，keeper/carrier 回流。
-            //
-            // **必须放在派兵之前**：放在后面时防守兵/core 专队仍会被派进战区。
-            if (typeof StationSources != "undefined" && StationSources
-                && StationSources.outerRetreatCheck && StationSources.outerRetreatCheck(targetRoomName)) {
-                pro.retreatProbe(flag, spawnRoom, targetRoomName);
-                continue;
-            }
+            // 撤退政策（用户 2026-11-26）：任何 Invader 出现时，除 defenser 外的
+            // 所有外矿爬都先回主房等待。**恰好 1 只** Invader 时仍派/保留 1 只
+            // defenser 进场清理；**≥2 只**时完全不派防守，只由侦察探头持续确认，
+            // 直到房里 Invader 清零才恢复生产。
+            let outerRetreat = typeof StationSources != "undefined" && StationSources
+                && StationSources.outerRetreatCheck
+                ? StationSources.outerRetreatCheck(targetRoomName) : null;
             if (Memory.rooms[targetRoomName]) {
                 // 按**实际威胁**判断，而不是按旗名/房间类别（见 roomNeedsDefense）
                 let isInvader = pro.roomNeedsDefense(Game.rooms[targetRoomName], flag);
-                StationSources.trySpawnOuterDefenser(targetRoomName, spawnRoom, isInvader);
-                // core 专队：房里有 invaderCore 就派一队去拆（规模按 core 等级）。
-                pro.spawnCoreBuster(targetRoomName, spawnRoom);
-                // invader 塔（lv2 core 部署后留下）：派小近战专职拆掉。
-                pro.spawnTowerBuster(targetRoomName, spawnRoom);
+                // trySpawnOuterDefenser 自己会在 ≥2 时拒绝出兵；这里让它排在任何
+                // 撤退 continue 之前，保证单 Invader 的战区仍有 defenser 进场。
+                if (isInvader || outerRetreat) {
+                    StationSources.trySpawnOuterDefenser(targetRoomName, spawnRoom,
+                        isInvader || !!outerRetreat);
+                }
+                if (!outerRetreat) {
+                    // core 专队：房里有 invaderCore 就派一队去拆（规模按 core 等级）。
+                    pro.spawnCoreBuster(targetRoomName, spawnRoom);
+                    // invader 塔（lv2 core 部署后留下）：派小近战专职拆掉。
+                    pro.spawnTowerBuster(targetRoomName, spawnRoom);
+                }
+            }
+            if (outerRetreat) {
+                pro.retreatProbe(flag, spawnRoom, targetRoomName);
+                continue;
             }
             // Scout 只负责首次建立 source Memory。已有坐标、container ID 与路径
             // 后，keeper 本身可以直接走入不可见的矿区；为重新拿视野而多派 scout

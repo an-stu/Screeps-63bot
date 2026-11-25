@@ -32,21 +32,10 @@ const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
 /** keeper 撤离触发距离：敌对爬进入该半径且无防守爬接战就撤（Overmind flee 语义） */
 const OUTER_KEEPER_FLEE_RANGE = 6;
 /**
- * 外矿撤退政策（用户 2026-11-18）：Invader **=1 可派防守打，≥2 全员撤出**。
- * 撤退状态存 Memory（不依赖视野），Invader 降到 <2 并持续 100 tick 后解除；
- * 完全失去视野时 5000 tick 硬过期，避免永久停矿。
+ * 外矿撤退政策（用户 2026-11-26）：**任何 Invader 在场**，所有采运爬立即回主房
+ * 等待；defenser 留场清理。只有房间重新可见且 Invader 数为 0（defenser 清完或
+ * 侦察兵确认）才解除，失去视野期间不得自动解除。
  */
-const OUTER_RETREAT_CLEAR_TICKS = 100;
-const OUTER_RETREAT_STALE_TICKS = 5000;
-/**
- * 撤退期间**完全失去视野**的宽限（tick）。
- *
- * 全员撤出后房里没人 → 没有视野 → `outerRetreatCheck` 数不到 invader → 撤退状态
- * 永远解除不了，只能等 5000 tick 硬过期（≈4.3 小时停矿）。盲态超过这个宽限就
- * 作废撤退，让生产链重新派爬进房拿视野（进去看到 ≥2 会当 tick 重新落闸），
- * 同时 strategy_outerHarvest 会在盲态期间派 1-MOVE 探头。
- */
-const OUTER_RETREAT_BLIND_TICKS = 250;
 /**
  * 无威胁的普通矿房，防守爬安静多少 tick 后退役（回收成能量）。
  *
@@ -1035,7 +1024,9 @@ Creep.prototype.coreBuster = function () {
 
 Creep.prototype.outerDefense = function () {
     let task = this.headTask();
-    if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove(this, false);
+    // 单个 Invader 由 defenser 留场清理；≥2 时防守爬也先回主房，只派侦察确认清零。
+    let retreat = task && pro.outerRetreatCheck(task.roomName);
+    if (retreat && retreat.count >= 2) return pro.outerRetreatMove(this, false);
     // T3 强化的小队防守爬：目标房的 invader 清干净一段时间 → 回主房贴 spawn 回收。
     // 放在最前面：回收期间不再接战、不再巡逻，直接走人（见 squadDefenderShouldRecycle）。
     if (pro.squadDefenderShouldRecycle(this, task)) {
@@ -1255,13 +1246,10 @@ Creep.prototype.outerDefense = function () {
                 }
                 // 账算得赢（或对手会追人退不掉）→ 贴脸对拼，输出最大化
                 let ret = this.attack(em);
-                if (ret == OK) {
-                    // Overmind attackAndChase：贴身命中后**同 tick 往目标方向推一格** ——
-                    // 目标这一步若往后退，我们照样保持贴身（不推就白丢一轮输出；
-                    // 目标不动时这一格移动会被引擎自然取消，没有代价）。
-                    this.move(this.pos.getDirectionTo(em.pos));
-                    return;
-                }
+                // 贴身命中后**原地攻击，不再朝目标格移动**（用户 2026-11-26）。
+                // 旧实现照搬 Overmind attackAndChase，每 tick 都发一次向敌方位的
+                // move；双方一起迈步时会互换位置/反复对穿，命中节奏被打断。
+                if (ret == OK) return;
                 if (ret != ERR_NO_BODYPART) {
                     pro.defenseStep(this, em, 1);
                 }
@@ -2931,10 +2919,7 @@ let pro = {
     },
     outerRetreatState(roomName) {
         let mem = Memory.rooms && Memory.rooms[roomName];
-        let retreat = mem && mem.outerRetreat;
-        if (!retreat) return null;
-        if (Game.time - retreat.tick > OUTER_RETREAT_STALE_TICKS) { delete mem.outerRetreat; return null; }
-        return retreat;
+        return (mem && mem.outerRetreat) || null;
     },
     outerRetreatCheck(roomOrName) {
         let rooms = Game.rooms || {};
@@ -2944,15 +2929,10 @@ let pro = {
         let mem = Memory.rooms[roomName] || (Memory.rooms[roomName] = {});
         if (room) {
             let count = pro.outerInvaderCount(room);
-            if (count >= 2) mem.outerRetreat = {tick: Game.time, count: count};
-            else if (mem.outerRetreat && Game.time - mem.outerRetreat.tick >= OUTER_RETREAT_CLEAR_TICKS) {
-                delete mem.outerRetreat;
-            }
-        } else if (mem.outerRetreat && Game.time - mem.outerRetreat.tick > OUTER_RETREAT_BLIND_TICKS) {
-            // 没视野的宽限：全员撤出后没人能数 invader，旧实现只能等 5000 tick
-            // 硬过期（≈4.3 小时停矿）。宽限一到就作废撤退，让爬重新进房拿视野。
-            delete mem.outerRetreat;
+            if (count >= 1) mem.outerRetreat = {tick: Game.time, count: count};
+            else if (mem.outerRetreat) delete mem.outerRetreat;
         }
+        // 没视野时保留状态，必须等 defenser 或侦察兵实际看到 0 个 Invader 才解除。
         return pro.outerRetreatState(roomName);
     },
     /** 撤退：沿缓存外矿路线朝主房走（+1）；没路线就直接朝 har_<home> 的主房走人。 */
@@ -5270,7 +5250,10 @@ let pro = {
         if (spawnRoom.spawnFailure) return null;
         let targetName = roomName.name || roomName;
         let harRoom = Game.rooms[targetName];
-        // 用户 2026-11-18：≥2 Invader 全员离房，不派防守（单只才派 1 只）。
+        // 用户 2026-11-26：≥2 Invader 不派任何防守，只撤退+侦察直到确认清零；
+        // 单只 Invader 才派 1 只 defenser 清理。
+        let retreat = pro.outerRetreatState(targetName);
+        if (retreat && retreat.count >= 2) return null;
         if (harRoom && pro.outerInvaderCount(harRoom) >= 2) return null;
         let sourceMemory = Memory.rooms[targetName];
         let data = sourceMemory && sourceMemory[pro.stationName]

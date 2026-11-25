@@ -1,3 +1,15 @@
+## v0.78.330 — 外矿遇 Invader 全员撤退；defenser 单挑且贴身不移动
+
+- 用户 2026-11-26 定稿：任何 Invader 出现，除 defenser 外的所有外矿采运/辅助爬
+  先回主房等待。恰好 1 只 Invader 时由 defenser 留场清理；≥2 只时连 defenser 也不派，
+  只靠侦察探头持续确认，直到实际看到 Invader=0 才恢复生产。
+- 撤退解除不再依赖失视野超时：必须由 defenser 或侦察兵在有视野时数到 0。
+  defenser 在 1 只时不受撤退状态影响，≥2 只时才回主房。
+- 战斗修复：近战 defenser 命中相邻 Invader 后不再额外 `move` 推向目标格；
+  旧 `attackAndChase` 会在双方同时迈步时互换位置、反复对穿，打断攻击节奏。
+- 回归：outer-retreat-policy 重写为「1 打 / 2+ 只侦察」；outer-defense 增加
+  「相邻命中后无 move/moveTo」钉子。
+
 ## v0.78.329 — 低 RCL 体型策略：满配优先，仅 worker+carrier 双缺才救急
 
 - 用户 2026-11-26：低 RCL 房出现 `2WORK+1CARRY+1MOVE` 采集爬，临时 hive 低能量

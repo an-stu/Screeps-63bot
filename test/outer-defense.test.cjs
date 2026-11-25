@@ -478,7 +478,7 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
 }
 
 {
-    // === outerDefense：贴身命中后同 tick 往目标方向推一格（Overmind attackAndChase） ===
+    // === outerDefense：贴身命中后原地攻击，不得再向目标格移动（用户 2026-11-26） ===
     const ctx = loadStation();
     const lair = { structureType: "keeperLair", pos: makePos(41, 14, "W34N55") };
     ctx.StationSources.outerDefensePosts = () => [lair];
@@ -495,8 +495,8 @@ function makeCreep(ctx, { x, y, hits = 5000, hitsMax = 5000, body = [], memory =
     def.pos.roomRef = room;
     ctx.Creep.prototype.outerDefense.call(def);
     assert.ok(def.calls.some(c => c[0] === "attack" && c[1] === "k1"), "贴身就打");
-    assert.ok(def.calls.some(c => c[0] === "move"),
-        "命中后同 tick 往目标方向推一格：目标这一步退开也不会丢输出");
+    assert.ok(!def.calls.some(c => c[0] === "move"),
+        "命中后必须原地攻击：再 move 会与目标对穿/互换位置，白白丢攻击节奏");
 }
 
 {
@@ -904,3 +904,45 @@ console.log("outer defense checks passed");
     assert.equal(mvSolo[3] && mvSolo[3].range, 1, "单只防守爬仍贴窝 range1（行为不变）");
 }
 
+
+{
+    // === 贴身命中后必须原地攻击：不得再向目标格 move（用户 2026-11-26）===
+    // 旧实现照搬 attackAndChase，每 tick 命中后再 move 向敌方方位；两边同时
+    // 迈步时会互换位置/反复对穿，攻击节奏被自己的移动意图打乱。
+    const ctx = loadStation();
+    const invader = {
+        id: "inv1",
+        owner: { username: "Invader" },
+        body: [{ type: "attack" }],
+        hits: 300, hitsMax: 1000,
+        pos: makePos(40, 15, "W34N55"),
+        getActiveBodyparts(type) { return type == "attack" ? 1 : 0; },
+    };
+    const defender = makeCreep(ctx, {
+        x: 41, y: 15, hits: 5000, hitsMax: 5000,
+        body: [{ type: "move" }, { type: "attack" }, { type: "heal" }],
+        memory: { role: "outerHarvestDefenser", targetId: "inv1" },
+    });
+    const room = {
+        name: "W34N55",
+        find(c) {
+            if (c == CONSTANTS.FIND_HOSTILE_CREEPS) return [invader];
+            if (c == CONSTANTS.FIND_MY_CREEPS) return [defender];
+            if (c == CONSTANTS.FIND_HOSTILE_STRUCTURES) return [];
+            return [];
+        },
+    };
+    defender.room = room;
+    defender.pos.roomRef = room;
+    defender.headTask = () => ({ taskName: "outerDefense", id: "src1", roomName: "W34N55", x: 40, y: 15 });
+    ctx.Game.getObjectById = id => (id == "inv1" ? invader : null);
+    ctx.StationSources.outerDefensePosts = () => [];
+    ctx.Creep.prototype.outerDefense.call(defender);
+    assert.ok(defender.calls.some(c => c[0] === "attack" && c[1] === "inv1"),
+        "贴身时每 tick 都必须 attack");
+    assert.ok(!defender.calls.some(c => c[0] === "move"),
+        "命中后不得再发 move，否则会与 Invader 对穿/换位");
+    assert.ok(!defender.calls.some(c => c[0] === "moveTo"),
+        "已经相邻时不得再 moveTo");
+}
+console.log("outer defense adjacent combat: stay put and attack");

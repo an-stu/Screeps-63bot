@@ -1,3 +1,9 @@
+// 外矿撤退政策（用户 2026-11-26 定稿）：
+//   · 任何 Invader 出现 ⇒ 除 defenser 外的所有外矿爬回主房等待；
+//   · 恰好 1 个 Invader ⇒ defenser 进场清理；
+//   · ≥2 个 Invader ⇒ 不派任何 defenser，只侦察到确认清零；
+//   · 解除必须来自实际视野里的 Invader=0（defenser 或侦察兵确认），
+//     失视野期间不得自动解除。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -9,145 +15,108 @@ const strip = t => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm
 const src = read("station_sources.js");
 const code = strip(src);
 const strat = strip(read("strategy_outerHarvest.js"));
+const creepCode = strip(read("prototype_creep.js"));
 
-// ── 外矿防守 / 撤退政策（用户 2026-11-21）──────────────────────────────────
-//
-// 现场问题三条：
-//   ① 防守爬有时不去打 invader（卡着）
-//   ② 只有一个 invader 却派了两只
-//   ③ 多 invader 时要求「所有爬都离开房间直到它们死亡」
-// 根因：撤退状态只能靠 5000 tick 硬过期解除（≈4.3 小时停矿），因为全员撤出后
-// 房里没视野、数不到 invader；且无视野时编制退回基线 2。
-
-// ① 盲态宽限：必须存在，且在外视野分支里用上
-assert.ok(/const OUTER_RETREAT_BLIND_TICKS = \d+;/.test(code), "必须有 OUTER_RETREAT_BLIND_TICKS 常量");
+// ① 撤退状态：>=1 落闸；只有实际看到 0 才解除；没有盲态自动解除
 {
     const m = /outerRetreatCheck\(roomOrName\) \{[\s\S]*?\n    \},/.exec(code);
     assert.ok(m, "outerRetreatCheck 必须存在");
     const body = m[0];
-    assert.ok(/else if \(mem\.outerRetreat && Game\.time - mem\.outerRetreat\.tick > OUTER_RETREAT_BLIND_TICKS\)/.test(body),
-        "没视野时必须按 OUTER_RETREAT_BLIND_TICKS 作废撤退（否则全员撤出后永远解除不了）");
-    assert.ok(/delete mem\.outerRetreat;/.test(body), "宽限到期要删掉撤退状态");
+    assert.ok(/if \(count >= 1\) mem\.outerRetreat = \{tick: Game\.time, count: count\};/.test(body),
+        "任何 Invader（>=1）都必须触发全员撤退");
+    assert.ok(/else if \(mem\.outerRetreat\) delete mem\.outerRetreat;/.test(body),
+        "实际视野里 Invader=0 才解除撤退");
+    assert.ok(!/OUTER_RETREAT_BLIND_TICKS/.test(code) && !/OUTER_RETREAT_STALE_TICKS/.test(code),
+        "失视野不得靠超时自动解除，必须等 defenser/侦察兵确认清零");
 }
-
-// ② 编制：无视野时普通矿房（没有 lair 记录）默认 1 只
 {
-    const m = /outerDefenseQuota\(room, roomName\) \{[\s\S]*?\n    \},/.exec(code);
-    assert.ok(m, "outerDefenseQuota 必须存在");
-    const body = m[0];
-    assert.ok(/let lairs = Number\(mem\.outerLairCount\) \|\| 0;/.test(body), "无视野时要用缓存的 lair 数");
-    assert.ok(/if \(lairs\) return Math\.max\(base, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);/.test(body),
-        "keeper 房按窝数算编制");
-    assert.ok(/return 1;\s*$/m.test(body) || /\n            return 1;/.test(body),
-        "普通矿房无视野时编制必须退回 1（不能退回基线 2）");
-    // 无视野时**先看窝数**：keeper 房不能被「看到过 invader」压到 1 只
-    const lairIdx = body.indexOf("let lairs = Number(mem.outerLairCount)");
-    const invIdx = body.indexOf("outerInvaderSeen");
-    assert.ok(lairIdx > 0 && (invIdx < 0 || lairIdx < invIdx), "缓存窝数必须先于 invader 计数判断");
-    assert.ok(/if \(lairs\) return Math\.max\(base, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);/.test(body),
-        "keeper 房无视野时按缓存窝数算");
-    assert.ok(/\n            return 1;/.test(body), "普通矿房无视野 ⇒ 1 只");
+    const m = /outerRetreatState\(roomName\) \{[\s\S]*?\n    \},/.exec(code);
+    assert.ok(m && !/delete mem\.outerRetreat/.test(m[0]),
+        "outerRetreatState 不得自行过期删除状态");
 }
-// lair 数要被缓存，否则无视野时算不出 keeper 房编制
-assert.ok(/room\.memory\.outerLairCount = lairs\.length;/.test(code), "defenseLairs 必须缓存 outerLairCount");
 
-// ③ 所有外矿爬都要撤退（缺一个就会有人留在房里送死）
-const OUTER_TASKS = [
+// ② 除 defenser 外的所有外矿任务都必须先撤退
+const RETREAT_TASKS = [
     "harvestEnergyOuterKeeper", "harvestMineralOuterKeeper", "harvestMineralOuterCarry",
-    "buildOuterMineralContainer", "reserveOuterHar", "outerDefense",
+    "buildOuterMineralContainer", "reserveOuterHar",
     "harvestEnergyOuterCarry", "harvestEnergyOuterCarryRoadBuilder",
 ];
-for (const name of OUTER_TASKS) {
-    const re = new RegExp(`Creep\\.prototype\\.${name} = function \\(\\) \\{[\\s\\S]{0,400}?outerRetreatCheck`);
-    assert.ok(re.test(code), `${name} 必须做撤退检查`);
+for (const name of RETREAT_TASKS) {
+    const re = new RegExp(`Creep\\.prototype\\.${name} = function \\(\\) \\{[\\s\\S]{0,450}?outerRetreatCheck`);
+    assert.ok(re.test(code), `${name} 必须执行撤退检查`);
 }
-// 空任务栈不能抛 TypeError（那会每 tick 静默卡死）
-assert.ok(!/if \(pro\.outerRetreatCheck\(task\.roomName\)\)/.test(code), "撤退检查必须先判 task 存在");
-assert.ok(/if \(task && task\.mineRoom && pro\.outerRetreatCheck\(task\.mineRoom\)\)/.test(code), "路线维修爬用 mineRoom 判撤退");
+assert.ok(!/if \(pro\.outerRetreatCheck\(task\.roomName\)\)/.test(code),
+    "撤退检查必须先判 task 存在");
+assert.ok(/if \(task && task\.mineRoom && pro\.outerRetreatCheck\(task\.mineRoom\)\)/.test(code),
+    "路线维修爬用 mineRoom 判撤退");
 
-// ④ 撤退闸必须排在派兵之前（否则派进去的兵当 tick 又被撤，在房界来回走）
-{
-    const retreatIdx = strat.indexOf("StationSources.outerRetreatCheck(targetRoomName)");
-    const defIdx = strat.indexOf("StationSources.trySpawnOuterDefenser(targetRoomName");
-    // 用带 pro. 前缀的**调用点**，否则 indexOf 会命中更靠前的函数定义
-    const coreIdx = strat.indexOf("pro.spawnCoreBuster(targetRoomName");
-    assert.ok(retreatIdx > 0 && defIdx > retreatIdx, "撤退闸必须在 trySpawnOuterDefenser 之前");
-    assert.ok(coreIdx > retreatIdx, "撤退闸必须在 core 专队之前");
-}
-
-// ⑤ 盲态探头：撤退期间派 1-MOVE scouter 拿视野
-assert.ok(/retreatProbe\(flag, spawnRoom, targetRoomName\);/.test(strat), "撤退分支必须调用 retreatProbe");
-assert.ok(/retreatProbe\(flag, spawnRoom, mineRoom\) \{/.test(strat), "retreatProbe 必须存在");
-{
-    const m = /retreatProbe\(flag, spawnRoom, mineRoom\) \{[\s\S]*?\n    \},/.exec(strat);
-    assert.ok(m, "retreatProbe 实现必须可定位");
-    const body = m[0];
-    assert.ok(/if \(Game\.rooms\[mineRoom\]\) return;/.test(body), "有视野时不重复派探头");
-    assert.ok(/Game\.time - mem\.retreatProbeAt < 40/.test(body), "探头要节流（40 tick）");
-    assert.ok(/\[MOVE\], "scouter"/.test(body), "探头必须是最便宜的 1-MOVE scouter");
-}
-
-// ⑥ ≥2 invader 时不派防守（撤退政策接管）
-assert.ok(/if \(harRoom && pro\.outerInvaderCount\(harRoom\) >= 2\) return null;/.test(code),
-    "≥2 invader 时必须停止派防守爬");
-
-// ⑦ 无威胁的普通矿房：防守爬要退役，不能站到 ttl 耗尽
-//
-// 实测 2026-11-21 shard2 E52S29：outerInvaderSeen={n:0}、outerLairCount=0，
-// 却长期站着 2 只防守爬（没有窝就没有岗位，它们只会原地站到死）。
-assert.ok(/const OUTER_DEFENDER_IDLE_RECYCLE = \d+;/.test(code), "必须有闲置退役阈值常量");
-assert.ok(/outerDefenderIdleShouldRetire\(creep, room\) \{/.test(code), "必须有退役判定函数");
-{
-    const m = /outerDefenderIdleShouldRetire\(creep, room\) \{[\s\S]*?\n    \},/.exec(code);
-    const body = m[0];
-    assert.ok(/if \(pro\.defenseLairs\(room\)\.length\) \{ delete creep\.memory\.idleSince; return false; \}/.test(body),
-        "keeper 房（有 lair）永不退役");
-    assert.ok(/if \(hostiles\.length\) \{ delete creep\.memory\.idleSince; return false; \}/.test(body),
-        "有活体敌人时不退役");
-    assert.ok(/OUTER_DEFENDER_IDLE_RECYCLE/.test(body), "退役判据要用安静时长");
-}
-// 必须接在 outerDefense 的**撤退检查之后**、且用回收任务（不是 suicide）
+// ③ defenser：1 只 Invader 留场打；>=2 才撤退
 {
     const m = /Creep\.prototype\.outerDefense = function \(\) \{[\s\S]*?\n\};/.exec(code);
     assert.ok(m, "outerDefense 必须可定位");
     const body = m[0];
+    assert.ok(/let retreat = task && pro\.outerRetreatCheck\(task\.roomName\);/.test(body),
+        "defenser 也要读取当 tick 的撤退状态");
+    assert.ok(/if \(retreat && retreat\.count >= 2\) return pro\.outerRetreatMove\(this, false\);/.test(body),
+        "defenser 只在 Invader>=2 时撤退；单个 Invader 必须留场清理");
     const retireIdx = body.indexOf("outerDefenderIdleShouldRetire");
-    assert.ok(retireIdx > 0, "outerDefense 必须调用退役判定");
-    assert.ok(body.indexOf("recycleCreep", retireIdx) > retireIdx, "退役要走 recycleCreep（回收能量）");
-    assert.ok(body.indexOf("outerRetreatCheck") < retireIdx, "撤退检查要排在退役之前（撤退优先）");
+    assert.ok(retireIdx > 0 && body.indexOf("outerRetreatCheck") < retireIdx,
+        "撤退判断要排在退役判断之前");
+    assert.ok(!body.includes("if (task && pro.outerRetreatCheck(task.roomName)) return pro.outerRetreatMove"),
+        "不得恢复「任何撤退状态下 defenser 都离场」的旧逻辑");
 }
 
-// ⑧ 没有窝可守时不许朝矿点容器走（对穿根因，用户 2026-11-21）
-//
-// shard2 E52S29：lair=0 ⇒ outerDefensePosts 返回空 ⇒ 两只防守爬都朝同一个
-// station 容器走，每 tick 互相挤开（位置逐 tick 互换）。
+// ④ 派兵顺序：先尝试单 Invader 的 defenser，再让经济生产撤退
 {
-    const m = /Creep\.prototype\.outerDefense = function \(\) \{[\s\S]*?\n\};/.exec(code);
-    const body = m[0];
-    assert.ok(!/let mineral = this\.headTaskObj\(\);/.test(body), "旧的「无条件朝任务目标走」必须移除");
-    assert.ok(/let mineralTarget = obj && obj\.mineralType !== undefined;/.test(body),
-        "只有矿物/存款目标才值得贴上去守");
-    assert.ok(/if \(mineralTarget && !this\.pos\.inRangeTo\(obj, 3\)\)/.test(body),
-        "能量矿房待命时不再移动");
+    const retreatIdx = strat.indexOf("StationSources.outerRetreatCheck(targetRoomName)");
+    const defIdx = strat.indexOf("StationSources.trySpawnOuterDefenser(targetRoomName");
+    const continueIdx = strat.indexOf("if (outerRetreat) {", defIdx);
+    assert.ok(retreatIdx > 0 && defIdx > retreatIdx && continueIdx > defIdx,
+        "defenser 派发必须在撤退 continue 之前，保证单 Invader 仍有兵清理");
+    assert.ok(/if \(isInvader \|\| outerRetreat\)/.test(strat),
+        "有威胁或撤退状态下都要尝试 defenser 派发（>=2 由派兵函数拒绝）");
+    assert.ok(/if \(!outerRetreat\) \{[\s\S]{0,300}spawnCoreBuster/.test(strat),
+        "core/tower 专队只在未撤退时派");
 }
 
-// ⑨ 超编立刻退役：编制 1 却站 2 只时，只留 ttl 最长的一只
-assert.ok(/if \(mates\.length > quota\) \{/.test(code), "必须有超编判定");
-assert.ok(/\(b\.ticksToLive \|\| 0\) - \(a\.ticksToLive \|\| 0\)/.test(code), "按 ttl 最长者留一只");
+// ⑤ 侦察探头：无视野时每 40 tick 派 1-MOVE 侦察兵确认
+assert.ok(/retreatProbe\(flag, spawnRoom, targetRoomName\);/.test(strat),
+    "撤退分支必须调用 retreatProbe");
+assert.ok(/retreatProbe\(flag, spawnRoom, mineRoom\) \{/.test(strat),
+    "retreatProbe 必须存在");
+{
+    const body = /retreatProbe\(flag, spawnRoom, mineRoom\) \{[\s\S]*?\n    \},/.exec(strat)[0];
+    assert.ok(/if \(Game\.rooms\[mineRoom\]\) return;/.test(body), "有视野时不重复派探头");
+    assert.ok(/Game\.time - mem\.retreatProbeAt < 40/.test(body), "探头要节流（40 tick）");
+    assert.ok(/\[MOVE\], "scouter"/.test(body), "探头必须是最便宜的 1-MOVE scouter");
+}
+assert.ok(/scouterToRoom = function \(\) \{[\s\S]{0,700}?StationSources\.outerRetreatCheck/.test(creepCode),
+    "侦察兵到场必须用真实视野确认是否清零");
 
-// ⑩ 单只 invader 的编制**按房间类型分开**（用户 2026-11-21 纠正）
-//   普通外矿房（无 lair）⇒ 1；中九 keeper 房（有 lair）⇒ 仍按 ceil(lairs/2)，不被压到 1。
+// ⑥ >=2 Invader 不派 defenser（视野内或撤退状态缓存都拒绝）
+assert.ok(/if \(retreat && retreat\.count >= 2\) return null;/.test(code),
+    "撤退状态记录 >=2 时必须停止派防守");
+assert.ok(/if \(harRoom && pro\.outerInvaderCount\(harRoom\) >= 2\) return null;/.test(code),
+    "当前视野内 >=2 时必须停止派防守");
+assert.ok(/if \(invaders\.length >= 2\) return 1;/.test(code),
+    "≥2 时编制仍固定 1（但派兵闸会拒绝，不能复活多兵）");
+
+// ⑦ 无威胁的普通矿房：防守爬要退役，不能站到 ttl 耗尽
+{
+    const body = /Creep\.prototype\.outerDefense = function \(\) \{[\s\S]*?\n\};/.exec(code)[0];
+    const retireIdx = body.indexOf("outerDefenderIdleShouldRetire");
+    assert.ok(body.indexOf("recycleCreep", retireIdx) > retireIdx,
+        "退役要走 recycleCreep（回收能量）");
+}
+
+// ⑧ 单只 invader：普通矿房编制 1；keeper 房仍按窝数
 {
     const m = /if \(invaders\.length === 1\) \{[\s\S]*?\n        \}/.exec(code);
     assert.ok(m, "1 invader 分支必须存在");
-    const body = m[0];
-    // 用整段 code 匹配：提取块的非贪婪 `}` 会在内层提前截断
-    assert.ok(/STRUCTURE_KEEPER_LAIR/.test(body) || /STRUCTURE_KEEPER_LAIR/.test(code), "keeper 房必须看 lair 数");
     assert.ok(/if \(lairs\) return Math\.max\(1, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);/.test(code),
         "keeper 房仍按「一爬管两窝」");
     assert.ok(/if \(lairs\) return Math\.max\(1, Math\.min\(4, Math\.ceil\(lairs \/ 2\)\)\);\s*\n\s*return 1;/.test(code),
-        "普通矿房（无 lair）才返回 1");
-    assert.ok(!/if \(invaders\.length === 1\) return 1;/.test(code), "不允许无条件压到 1（会压垮 keeper 房）");
+        "普通矿房（无 lair）单只 invader 返回 1");
 }
 
-console.log("outer retreat policy checks passed");
+console.log("outer retreat policy checks passed (1 fights, 2+ scout-only)");

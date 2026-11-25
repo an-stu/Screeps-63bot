@@ -356,6 +356,13 @@ Creep.prototype.scouterToRoom = function () {
     let obj = this.memory.tasks.last();
     let position = new RoomPosition(25, 25, obj.roomName);
     if (this.room.name == obj.roomName) {
+        // 撤退探头到场：用当前视野确认 Invader 是否已完全消失；只有在已有
+        // 撤退状态时才回写，避免普通侦察任务无端创建外矿撤退标记。
+        if (global.StationSources && StationSources.outerRetreatState
+            && StationSources.outerRetreatState(this.room.name)
+            && StationSources.outerRetreatCheck) {
+            StationSources.outerRetreatCheck(this.room);
+        }
         this.suicide();//自杀！
     }
     if (!Memory.rooms[this.room.name] || !Memory.rooms[this.room.name][StationSources.stationName]) {
