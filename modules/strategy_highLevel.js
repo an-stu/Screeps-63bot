@@ -928,6 +928,10 @@ let pro = {
     },
     economyInterval() {
         if (MIN_CPU) return 10; // Emergency bucket protection on every shard.
+        // 任务派发不节流时（非 shard3 默认，或 Memory.taskDispatchThrottle=false）
+        // 房间经济 pass 每 tick 都跑：空闲爬完成旧任务后不会再等 3/5/7 tick。
+        let throttled = typeof taskDispatchThrottle == "undefined" ? true : !!taskDispatchThrottle;
+        if (!throttled) return 1;
         if (Game.shard?.name === "shard3") return Game.cpu.bucket < 5000 ? 14 : 7;
         return 5;
     },

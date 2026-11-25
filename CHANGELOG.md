@@ -1,3 +1,15 @@
+## v0.78.331 — 任务派发节流开关：shard3 省 CPU，其他 shard 每 tick 派发
+
+- 空窗根因不是 creep 执行，而是任务派发：RCL<3 房经济 pass `%3`、高 RCL 房
+  `economyInterval`（非 shard3 为 5、shard3 为 7/14）、拾取任务缓存 9 tick 才刷新。
+  空闲爬完成旧任务后只能等下一次 pass 才接新任务。
+- 新增 `Memory.taskDispatchThrottle`（每个 shard 各自 Memory）：
+  `true` 保持旧节流；`false` 让经济 pass 与拾取缓存每 tick 运行。
+  默认值仅 shard3 为 true，shard2/其他 shard 默认 false；main.init 每 tick 重读，
+  控制台修改下一 tick 生效。`MIN_CPU` 低桶保命模式仍对所有 shard 生效。
+- 回归：新增 task-dispatch-throttle 测试，覆盖 shard/开关组合与源码闸门；
+  shard-cadence 原行为保持不变。
+
 ## v0.78.330 — 外矿遇 Invader 全员撤退；defenser 单挑且贴身不移动
 
 - 用户 2026-11-26 定稿：任何 Invader 出现，除 defenser 外的所有外矿采运/辅助爬

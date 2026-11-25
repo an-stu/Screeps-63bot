@@ -5,6 +5,10 @@
 
 const DOWNGRADE_PROTECTION_TICKS = 5000;
 
+function isTaskDispatchThrottled() {
+    return typeof taskDispatchThrottle == "undefined" ? true : !!taskDispatchThrottle;
+}
+
 Creep.prototype.lowLevelDefense = function () {
     let em = this.pos.findClosestByPath(FIND_HOSTILE_CREEPS);
     if (em) {
@@ -31,7 +35,7 @@ let pro = {
     pickTasks(room, freeCarries, onlyEnergy = false) {
         // 捡起任务 9tick更新一次，比较耗时 缓存起来
         let pickTasks = pro.pickTasksMap[room.name] || []
-        if ((Game.time + room.hashCode()) % 9 == 0) {
+        if (!isTaskDispatchThrottled() || (Game.time + room.hashCode()) % 9 == 0) {
             pickTasks = StationCarry.generatorPickTask(room, onlyEnergy).concat(StationMineral.generatorCarryMineralTask(room))
         }
         if (freeCarries.length && pickTasks.length) { freeCarries.pop().addTask(pickTasks.shift()); }
@@ -126,7 +130,7 @@ let pro = {
         }
     },
     exec(room) {
-        if ((Game.time + room.hashCode()) % 3 != 0) {
+        if (isTaskDispatchThrottled() && (Game.time + room.hashCode()) % 3 != 0) {
             return
         }
         // 内层变量原来遮蔽外层：部件对象与字符串 MOVE 比较恒不等，

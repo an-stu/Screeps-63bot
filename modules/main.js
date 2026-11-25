@@ -30,6 +30,10 @@ let pro = {
         // 线上逐 tick 翻转（实测 1997↔2005），角色过滤/经济间隔随 tick 抖动。
         // global 跨 tick 持久（重载才清零），天然可做粘滞位。
         MIN_CPU = !!Memory.mincpu || (MIN_CPU ? Game.cpu.bucket < 2400 : Game.cpu.bucket < 2000);
+        // 每 tick 重读开关，修改 Memory.taskDispatchThrottle 后下一 tick 生效。
+        taskDispatchThrottle = typeof Memory.taskDispatchThrottle === "boolean"
+            ? Memory.taskDispatchThrottle
+            : Game.shard.name === "shard3";
         if (MIN_CPU && Game.time % 100 == 0) Logger.log("Core", "warning : min cpu on")
         let objects = getTickObjects();
         objects.rooms.forEach(room => room.used = {});
