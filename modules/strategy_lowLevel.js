@@ -107,9 +107,17 @@ let pro = {
         return !!(room.spawn.length && controller && !controller.upgradeBlocked
             && controller.ticksToDowngrade <= DOWNGRADE_PROTECTION_TICKS);
     },
+    needsRcl1RoadBypass(room) {
+        // Roads keep refilling the queue from the blueprint. Once essential
+        // construction is done, one worker can unlock RCL2 in parallel.
+        return !!(room.my && room.level === 1 && room.spawn.length && room.controller
+            && !room.controller.upgradeBlocked && room.constructionSite?.length
+            && room.constructionSite.every(site => site.structureType === STRUCTURE_ROAD)
+            && !StationHive.HiveNeedToFill(room));
+    },
     assignDowngradeProtection(room, workers, urgent = pro.needsDowngradeProtection(room)) {
         if (!urgent) return;
-        // 临近降级只保留一只应急 worker；优先空闲满载者，必要时中断施工。
+        // 优先升级只保留一只有能量的 worker；优先空闲者，必要时中断施工。
         if (workers.some(worker => {
             const task = worker.lastTask();
             return task && task.taskName === "upgrade" && task.id === room.controller.id && !worker.storeEmpty();
@@ -161,7 +169,8 @@ let pro = {
                 });
                 return;
             }
-            pro.assignDowngradeProtection(room, room.creeps("worker"));
+            pro.assignDowngradeProtection(room, room.creeps("worker"),
+                pro.needsDowngradeProtection(room) || pro.needsRcl1RoadBypass(room));
             // if((Game.time+room.hashCode()) % 150 == 0  && Game.cpu.bucket>50 && room.memory.structMap){
             //     room.memory.structMap[STRUCTURE_SPAWN].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_SPAWN)})
             //     room.memory.structMap[STRUCTURE_EXTENSION].take(10).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_EXTENSION)})
