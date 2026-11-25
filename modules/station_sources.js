@@ -1533,6 +1533,17 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
             pathIndex = pro.nextRoadPathIndex(roadPath, this.pos).index;
         } else if (dist == 0) {
             pathIndex += roadDir; // 到达当前路点，前进
+        } else if (pro.outerRoadPointOccupied(this, wp)) {
+            // 站在路点旁边、而路点被别的爬长期占着（keeper 站容器格是常态，
+            // 容器格又常常就是 `path[0]`）：旧代码在 dist==1 时既不前进也不
+            // 跳过，每 tick moveTo 到那一格 → 引擎「目标格被占」静默取消 →
+            // 报 OK 但一格没走，直到 outerRoadStuck 攒到 25 才靠「作废整条
+            // 共享路线 + 原生 moveTo」脱身（每趟回程白烧 ~25 tick）。
+            // 实测 2026-11-25 shard2 E57S29 矿点：满载车轮流卡在 (24,5)→(25,4)
+            // 与 (30,20)→(31,21)，两个目标格都是 keeper 站桩的容器。
+            // 路点只是路由提示 ⇒ 沿路线跳一格（最多 3 格，防连环占位）。
+            let skip = pro.skipOccupiedRoadPoint(roadPath, pathIndex, roadDir, this, 3);
+            if (skip >= 0) pathIndex = skip;
         }
         pathIndex = Math.max(0, Math.min(pathIndex, roadPath.length - 1));
         task.pathIndex = pathIndex;
@@ -2953,6 +2964,36 @@ let pro = {
         return null;
     },
     /**
+     * 这个路点格是不是被**别的爬**占着（典型：keeper 站在容器格上挖矿）。
+     *
+     * 缓存路是从**矿区容器格**开始寻路的，所以 `path[0]` 经常就是容器本身；
+     * 而 keeper 的岗位恰恰是容器格（`harvestEnergyOuterKeeper` 站桩挖矿），
+     * 于是「路点」与「永久占位」是同一个格子。`creep.moveTo(point, {range:0})`
+     * 在这种情况下返回 OK、但引擎会把「走进被占格」这一步静默取消 —— 车看起来
+     * 每 tick 都在走，实际一格没动（与 0.78.224 的裸 move 完全同病）。
+     * 只能靠 `outerRoadStuck` 攒到 25 才由「作废整条共享路线 + 原生 moveTo」脱身。
+     */
+    outerRoadPointOccupied(creep, point) {
+        if (!point || point.roomName != creep.pos.roomName) return false;
+        let room = creep.room;
+        if (!room || !room.lookForAt) return false;
+        let there = room.lookForAt(LOOK_CREEPS, point.x, point.y) || [];
+        return there.some(c => c && c.name != creep.name);
+    },
+    /**
+     * 沿路线跳过被别的爬占住的连续路点，返回新的 index。
+     * 越界或连跳 `maxSteps` 格都还占着 ⇒ 返回 -1（调用方自己决定兜底方式）。
+     */
+    skipOccupiedRoadPoint(path, index, direction, creep, maxSteps) {
+        for (let step = 1; step <= (maxSteps || 1); step++) {
+            let skip = index + step * direction;
+            if (skip < 0 || skip >= path.length) return -1;
+            if (pro.outerRoadPointOccupied(creep, path[skip])) continue;
+            return skip;
+        }
+        return -1;
+    },
+    /**
      * Advance a normal outer carrier one waypoint along its cached road.
      * `direction` is +1 for mine -> Storage and -1 for Storage -> mine.
      * Returns false only when the cache cannot be used, allowing the caller
@@ -3001,6 +3042,24 @@ let pro = {
             let next = index + (direction == 1 ? 1 : -1);
             if (next < 0 || next >= path.length) return false;
             index = next;
+        }
+        // ── 路点被别的爬占住：沿路线跳过这一格（0.78.325）────────────────────
+        // 车辆停在容器**旁边**（range 1）、而路点就是容器格时，旧代码既不前进
+        // 也不跳过，每 tick 往那一格 moveTo：引擎静默取消 → 报 OK 但一格没走。
+        // 实测 2026-11-25 shard2 E57S29 两个矿点：4 只满载车轮流卡在
+        // `(24,5)→(25,4)` / `(30,20)→(31,21)`（两格都是容器，keeper 站桩），
+        // `outerRoadStuck` 一路涨到 19~24，到 25 才作废整条共享路线 + 原生 moveTo
+        // 脱身 —— 每趟回程白烧 ~25 tick，还把同矿点所有车共用的缓存路一起删掉。
+        // 路点只是路由提示，站在旁边就够（装/卸货都是 range 1），跳一格即可。
+        let here = path[index];
+        let near = here && here.roomName == creep.pos.roomName
+            ? Math.max(Math.abs(here.x - creep.pos.x), Math.abs(here.y - creep.pos.y)) : 999;
+        if (here && near <= 1 && pro.outerRoadPointOccupied(creep, here)) {
+            // 这一侧已经没有下一格可跳 = 路点就是路线端点：同端点的处理，
+            // 交回调用方的 goTo 兜底（原生寻路能绕一格 / 对穿）。
+            let skip = pro.skipOccupiedRoadPoint(path, index, direction, creep, 1);
+            if (skip < 0) return false;
+            index = skip;
         }
         index = Math.max(0, Math.min(index, path.length - 1));
         task.returnPathIndex = index;

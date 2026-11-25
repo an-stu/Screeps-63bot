@@ -1,3 +1,23 @@
+## v0.78.325 — 外矿路点被 keeper 占住时跳格，不再干等到作废整条路线
+
+- 现场（2026-11-25 shard2 E57S29）：两个矿点的**容器格就是 `path[0]`**，而 keeper 的
+  岗位恰恰是容器格（站桩挖矿）。满载车回程时停在容器**旁边**（range 1），`pathIndex`
+  仍是 0 ⇒ 旧代码 `dist == 1` 既不前进也不跳过，每 tick `moveTo(容器格)`：引擎
+  「目标格被占」把这一步静默取消 ⇒ 返回 OK 但一格没走（与 0.78.224 的裸 move 同病）。
+  实测 `outerRoadStuck` 涨到 19~24（`(24,5)→(25,4)`、`(30,20)→(31,21)`，两格都是
+  keeper 站着的容器），直到 25 才靠「作废整条共享路线 + 原生 moveTo」脱身 ——
+  每趟回程白烧 ~25 tick，还把同矿点所有车共用的缓存路一起删掉（跟着重算、重铺）。
+- 修法：新增 `outerRoadPointOccupied(creep, point)`（路点格是否被**别的爬**占着）与
+  `skipOccupiedRoadPoint(path, index, dir, creep, maxSteps)`；两处推进都改用它
+  —— `moveOuterCarrierOnRoad`（普通搬运/撤退）与 `harvestEnergyOuterCarryRoadBuilder`
+  的 `pathIndex` 推进（最多跳 3 格，防连环占位）。路点只是路由提示，装/卸货都是
+  range 1，站在旁边就够。
+- 端点仍交回 goTo：被占的路点正好是本侧最后一格时 `return false`（同 0.78.319 的端点
+  处理），原生寻路能绕一格/对穿，绝不原地报成功。
+- 测试 `outer-road-waypoint-occupied`：跳过被占路点并朝下一格走 / 负对照（去掉跳过块
+  必须复现「往被占格 moveTo 且报成功」）/ 没人站着不跳格 / 端点被占交回 goTo /
+  连跳上限 / roadBuilder 分支接线。负对照在旧代码下因行为失败。
+
 ## v0.78.324 — 有效自愈要算贴身奶妈；NPC 打不穿就停火省电
 
 - 承 v0.78.323：`canBreak` 只看目标**自己**的 HEAL 是不够的。0.78.323 部署后实测
