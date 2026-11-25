@@ -267,10 +267,10 @@ let shouldRunCreep = function (creep) {
     return true;
 }
 
-// shard3 保持每 100 tick 检查一次；其他 shard（如 shard2）每 tick 检查，
-// bucket 一回到 10000 就立刻兑换 pixel，不再白等最多 99 tick。
+// shard3 完全不兑换 pixel（保留满桶做 20 CPU 的缓冲）；其他 shard 每 tick
+// 检查，bucket 一到 10000 就立即兑换。
 let shouldExchangePixel = function () {
-    return Game.shard.name === "shard3" ? Game.time % 100 == 0 : true;
+    return Game.shard.name !== "shard3";
 }
 
 let updateCodeHealth = function () {
@@ -380,7 +380,7 @@ let main = function () {
     updateCodeHealth();
     HelperTelemetrySegment.exec();
     // CPU 账户管理（每个 shard 独立执行）：
-    //  - 满桶转 pixel：bucket >= 10000 时 generatePixel（10,000 bucket/个）。
+    //  - 满桶转 pixel：仅 shard0/1/2；shard3 保留满桶，不调用 generatePixel。
     //  - **不自动续 CPU unlock**：实测每次 unlock 调用都会扣一张券（不是文档
     //    暗示的"有效期内 ERR_FULL 不消耗"），而且代码在每个 shard 上各跑一次
     //    ⇒ 2026-11-16 10 张券被连扣到 6 张。unlock 续期改为手动/监控触发。

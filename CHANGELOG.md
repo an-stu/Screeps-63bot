@@ -1,3 +1,9 @@
+## v0.78.333 — shard3 完全不兑换 pixel，仅其他 shard 满桶兑换
+
+- 用户 2026-11-26 定稿：shard3 的满桶保留给 20 CPU 缓冲，任何 tick 都不调用
+  `generatePixel()`；shard0/1/2 每 tick 检查，bucket=10000 立即兑换。
+- 回归：pixel-exchange 测试改为断言 shard3 永不兑换、其他 shard 始终允许。
+
 ## v0.78.332 — shard2 等非 shard3 满桶后每 tick 兑换 pixel
 
 - 旧逻辑所有 shard 都只在 `Game.time % 100 == 0` 检查 `generatePixel()`；shard2
