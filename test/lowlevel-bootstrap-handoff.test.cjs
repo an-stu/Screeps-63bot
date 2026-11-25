@@ -88,15 +88,24 @@ test("one direct worker per source until the keeper is on a built source contain
     assert.equal(a.lastTask(), undefined, "ordinary workers stop receiving new direct-harvest tasks after handoff");
 });
 
-test("a registered miner and an idle carrier do not suppress an affordable rescue worker", () => {
-    const w = makeRoom();
-    w.run();
-    assert.equal(w.spawns.length, 1);
-    assert.equal(w.spawns[0].role, "worker");
-    assert.equal(w.spawns[0].body[0], 200);
-    const tooPoor = makeRoom({roomEnergy: 199});
+test("an idle carrier suppresses the tiny rescue worker", () => {
+    const withCarrier = makeRoom();
+    withCarrier.run();
+    assert.equal(withCarrier.spawns.length, 0,
+        "worker 缺失但还有 carrier 时不得再生产小体型应急 worker");
+
+    const tooPoor = makeRoom({carriers: [], roomEnergy: 199});
     tooPoor.run();
-    assert.equal(tooPoor.spawns.length, 0);
+    assert.equal(tooPoor.spawns.length, 0, "连最低救急体型都付不起时不得硬造");
+});
+
+test("worker and carrier both missing spawns the largest affordable bootstrap worker", () => {
+    const depleted = makeRoom({carriers: [], roomEnergy: 500});
+    depleted.run();
+    assert.equal(depleted.spawns.length, 1);
+    assert.equal(depleted.spawns[0].role, "worker");
+    assert.equal(depleted.spawns[0].body[0], 500,
+        "极端缺爬时应使用当前可负担的最大体型，而不是固定 200");
 });
 
 test("downgrade timer sends just one loaded worker to upgrade without a controller container", () => {

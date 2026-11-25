@@ -34,6 +34,7 @@ function load(spawned) {
         StationUpgrade: {}, StationMineral: {}, StationObserver: {}, StationTower: {},
         StationLab: {}, StationFactory: {}, StrategyOuterHarvest: {}, ManagerFlags: {},
         ManagerCreeps: { calcBodyPart: (o) => Object.keys(o).flatMap(k => Array(o[k]).fill(k)) },
+        Utils: { getBodyEnergyNeed: body => body.length * 50 },
         isCpuFeatureEnabled: () => true,
         MIN_CPU: false,
         OK: 0, CARRY: "carry", MOVE: "move", WORK: "work",

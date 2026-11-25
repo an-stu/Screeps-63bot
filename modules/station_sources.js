@@ -3754,22 +3754,8 @@ let pro = {
                 && inc.body.filter(p => p.type === WORK).length < capacityWork
                 && budgetNow >= capacityCost;
             if ((inc && inc.ticksToLive <= lead) || mine.length == 0 || undersized) {
-                // 空 hive 阶段满配 keeper 要 3650 能量，spawn 永远付不起 ⇒ 按能量收缩体型。
-                //
-                // ⚠️ **本房 keeper 不许再把预算抬到 550**（2026-11-06 W26N58 实测）。
-                // 550 是 2WORK+2MOVE+1CARRY 的成本，抬这个下限的初衷是「别造废爬」，
-                // 但它把「付不起」变成了**每 pass 静默失败 + spawnFailure**：
-                // RCL6 单 spawn 房 hive 只有 2,300，1 只 carrier 一边补 40 个 extension、
-                // 一边被 keeper/upgrader 抽取，hive 长期在 300~500 打转 ⇒ 550 恒付不起。
-                // 铁证：两只 keeper 出生 84095966（ttl 1500，84097466 死光）后**连续 650 tick
-                // 一只都补不出来**，全房零收入（storage 99,115 一动不动），W26N59 外矿
-                // 也跟着掉到 1 只 keeper（`__outerWhy=keeper<src1<2`）。而 hive 一冲到 650
-                // （84098118）立刻就孵出一只 keeper —— 卡的就是这条 550 线。
-                // 与 0.78.193 的 upgrader 下限 600→300（f704f98）同一病根：MEMORY 第 5 条
-                // 「阈值不能写死成大房量级」。
-                //
-                // 本房按**本 tick 真剩余的能量**定体型（1 组 = 2WORK+1MOVE+1CARRY = 300）；
-                // 外矿 keeper 仍保留 550 下限（要飞外矿、可能要扛 source keeper，小体型是送人头）。
+                // 正常补员按房间容量取满配；临时 hive 低能量只在 worker + carrier
+                // 同时为零时允许缩成当前预算内最大的救急体型（用户 2026-11-26）。
                 let budgetLeft = spawnRoom.currentEnergyAvailable;
                 if (budgetLeft == undefined) budgetLeft = spawnRoom.getEnergyAvailable
                     ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
@@ -3778,9 +3764,18 @@ let pro = {
                 // 当下余额锁成 WORK2 的小体型（E51S29 实测收入被锁死在 4/tick）。
                 // 只有「一只 keeper 都没有」的救急场景才按当前能量缩小，
                 // 避免断档（见 test/keeper-affordable-body 的零收入现场）。
-                let energyBudget = roomName == spawnRoom.name
-                    ? (inc ? spawnRoom.getEnergyCapacityAvailable() : Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft))
-                    : Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550));
+                // 临时 hive 低能量不再缩体型：只要房里还有 worker 或 carrier，就等满容量。
+                // 只有 worker + carrier 同时为零（收入与搬运全断）才允许救急缩体型。
+                let depleted = !spawnRoom.creeps("worker", false).length
+                    && !spawnRoom.creeps("carrier", false).length;
+                let energyBudget;
+                if (inc || !depleted) {
+                    energyBudget = spawnRoom.getEnergyCapacityAvailable();
+                } else if (roomName == spawnRoom.name) {
+                    energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft);
+                } else {
+                    energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550));
+                }
                 let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
                 // 连 1 组（300）都付不起时 getHarvesterBodyConfig 返回**空体型**，
                 // spawnCreep([]) 是 ERR_INVALID_ARGS；而它算出来的体型也常比预算贵

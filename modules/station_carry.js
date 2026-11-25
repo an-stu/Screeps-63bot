@@ -38,25 +38,21 @@ let pro = {
         return tasks;
     },
     /**
-     * @param bodyBudget 可选：**本 tick 真能花出去**的能量上限（见
-     *        `StrategyHighLevel.spawnTickBudget`）。不给就按本房满容量算 ——
-     *        那正是 2026-11-01 W26N58 的坑：RCL6 容量 2,300，hive 被 keeper /
-     *        外矿搬运反复抽到 600~1,750，按 2,300 算出的体型
-     *        `StationHive.trySpawn` 一律付不起、静默 `return undefined`，
-     *        于是「闸门放行、就是不生」，从外面看和闸门没通过完全一样。
+     * 正常补员固定按房间容量取满配；bodyBudget 只在 worker+carrier 双缺的
+     * 救急分支生效。调用方用本 tick 预算判断「付不起就等」。
      */
     getCarrierBodyConfig(room, bodyBudget) {
         let totalEnergy = room.getEnergyCapacityAvailable(room);
         let body = [CARRY, CARRY, MOVE];
         let bodyEnergy = Utils.getBodyEnergyNeed(body)
         let num = 0
-        // 仅当 keeper 和 carrier 都缺失（房间挨饿/bootstrap 阶段）时，按实际可用能量
+        // 仅当 worker 和 carrier 都缺失（房间挨饿/bootstrap 阶段）时，按实际可用能量
         // 定身体并保证最小 300 能量；正常运行用完整的按容量配置
-        let starving = room.creeps("harvestEnergyKeeper", false).length == 0
+        let starving = room.creeps("worker", false).length == 0
             && room.creeps("carrier", false).length == 0;
         let budget = starving ? Math.max(300, Math.min(totalEnergy, room.energyAvailable)) : totalEnergy;
-        // 体型只能按「付得起」定：上限夹到本 tick 可花的能量，下限保 300（2 组）。
-        if (bodyBudget !== undefined) budget = Math.max(300, Math.min(budget, bodyBudget));
+        // 只有救急分支允许按本 tick 预算缩小；正常补员必须满配，付不起就等。
+        if (starving && bodyBudget !== undefined) budget = Math.max(300, Math.min(budget, bodyBudget));
         for (let i = 1; i * bodyEnergy <= budget; i++) {
             if (num >= 17) break;
             num += 1

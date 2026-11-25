@@ -221,15 +221,15 @@ let pro = {
             // hive，否则 keeper/loader 谁也付不起。原顺序是 worker/upgrader 先吃满
             // 预算，hive 800 时一只工人就把能量花光，keeper 与 carrier 同 pass 都排不上。
             const hasWorker = room.creeps("worker", false).length > 0;
-            // 有 carrier 却没有可搬的源容器时，也必须保留一条自采自用的启动链。
-            if (!hasWorker && (!room.creeps("carrier", false).length || downgradeUrgent
-                || (!room.storage && fallbackSources.length > 0 && fallbackSources.length === room.source.length))) {
+            // 应急 worker 只在 worker 与 carrier 同时为零时生产；临时 hive 低能量
+            // 不再触发小体型。能量够多大就用多大，避免 1W1C1M 长期占编制。
+            if (!hasWorker && !room.creeps("carrier", false).length) {
                 let rescueBudget = room.currentEnergyAvailable === undefined
                     ? room.getEnergyAvailable() : room.currentEnergyAvailable;
                 if (rescueBudget >= 200) {
                     room.spawnFailure = false;
                     StationHive.trySpawn(room, room.name,
-                        StationWork.getMiddleLevelWorkerBodyConfig(room, Math.min(rescueBudget, 200)), "worker", []);
+                        StationWork.getMiddleLevelWorkerBodyConfig(room, rescueBudget), "worker", []);
                 }
             }
 

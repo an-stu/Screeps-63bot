@@ -13,7 +13,7 @@ const workSrc = fs.readFileSync(path.join(root, "modules/station_work.js"), "utf
 
 // 1) 孵化顺序：收入 keeper 最先，其次 carrier；worker/upgrader 之后
 const order = [
-    ["worker-rescue", lowSrc.indexOf("Math.min(rescueBudget, 200)")],
+    ["worker-rescue", lowSrc.indexOf("getMiddleLevelWorkerBodyConfig(room, rescueBudget)")],
     ["keeper", lowSrc.indexOf("StationSources.trySpawnHarKeeper(room);")],
     ["carrier", lowSrc.indexOf("StationCarry.getCarrierBodyConfig(room)")],
     ["worker", lowSrc.indexOf("StationWork.getMiddleLevelWorkerBodyConfig(room)")],

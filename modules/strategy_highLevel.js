@@ -125,7 +125,8 @@ let pro = {
             // 体型按「本 tick 付得起」定（见 spawnTickBudget）：按满容量算的体型在
             // hive 未满时会被 trySpawn 静默吞掉，还会把 spawnFailure 置真挡住后面的
             // carrier / 外矿补员。
-            let body = StationWork.getMiddleLevelWorkerBodyConfig(room, pro.spawnTickBudget(room));
+            let body = StationWork.getMiddleLevelWorkerBodyConfig(room);
+            if (Utils.getBodyEnergyNeed(body) > pro.spawnTickBudget(room)) return;
             let partCnt = body.filter(e => e == WORK).length;
             let boostLevel = noBoost ? -1 : (global.StationLab ? StationLab.boostAbleLevel(room, "build", partCnt, 1) : -1);
             let isBoost = !noBoost && room.creeps("carrier").length && boostLevel >= 0;
@@ -136,7 +137,8 @@ let pro = {
         }
         let spawnHighLevelWorker = () => {
             if (!global.StationLab) return spawnWorker();
-            let body = StationWork.getHighLevelWorkerBodyConfig(room, pro.spawnTickBudget(room));
+            let body = StationWork.getHighLevelWorkerBodyConfig(room);
+            if (Utils.getBodyEnergyNeed(body) > pro.spawnTickBudget(room)) return;
             let boostRes = { [BOOST_RES["build"][1]]: 30 * 30, [BOOST_RES["fatigue"][1]]: 10 * 30, [BOOST_RES["capacity"][1]]: 10 * 30 }
             if (body.filter(e => e == WORK).length != 30 || !StationLab.boostAble(room, boostRes) || room.creeps("carrier").length == 0)
                 return spawnWorker();
@@ -695,6 +697,7 @@ let pro = {
         let carrierList = room.creeps("carrier", false)
             .filter(e => !e.body || e.body.some(p => p.type == CARRY));
         let carrierCnt = carrierList.length;
+        let workerCnt = room.creeps("worker", false).length;
         // keeper 先跑时，昂贵体型失败会把 spawnFailure 锁住整个 tick；
         // carrier 分支按当前真实可用能量重算，避免便宜的 bootstrap carrier 被挡住。
         let spawnCarrierNow = function (body) {
@@ -703,6 +706,7 @@ let pro = {
             // "carrier" 把 hive 补给线彻底卡死）。宁可这一轮不补，等能量够了
             // 由后面按满配体型的几条分支来造。
             if (!body || !body.some(p => p === CARRY)) return;
+            if (Utils.getBodyEnergyNeed(body) > pro.spawnTickBudget(room)) return;
             room.spawnFailure = false;
             // **不要清 `room.currentEnergyAvailable`。** 它是本 tick 的孵化预算缓存
             // （首个 trySpawn 初始化、每次成功孵化扣减），而 `room.energyAvailable`
@@ -762,12 +766,11 @@ let pro = {
                 if (deficit > cap * 0.3 && busyCnt >= carrierCnt - 1) carrierTarget += 2;
             }
         }
-        // 死房自救：没有 carrier、hive 缺能、可用能量 ≤750 时每个 economy
-        // pass 立即评估，不再受 %10 与 %7 对齐的偶发限制。
-        // 有存量能量可搬 → 150 能量 bootstrap carrier（≤300）；
-        // 没有存量能量 → 300 能量 worker 直接挖矿（保底预算 ≤300）。
-        if (StationHive.HiveNeedToFill(room)
-            && room.energyAvailable >= 150 && room.energyAvailable < 750) {
+        // 极端自救：只有 worker 与 carrier **同时为零**才立即评估。
+        // 有存量能量 → 当前预算内最大的 carrier；没有存量 → 当前预算内最大的 worker。
+        if (workerCnt == 0 && carrierCnt == 0
+            && StationHive.HiveNeedToFill(room)
+            && room.energyAvailable >= 200) {
             // 可用存量 = terminal 全部 + storage 超过 2000 的部分 + container/link。
             // storage 只有几百能量时 carrier 取不出来，应改生 worker 挖矿。
             let terminalEnergy = room.terminal ? (room.terminal.store[RESOURCE_ENERGY] || 0) : 0;
@@ -775,21 +778,19 @@ let pro = {
             let containerEnergy = room.container.reduce((a, c) => a + (c.store[RESOURCE_ENERGY] || 0), 0);
             let linkEnergy = room.link.reduce((a, l) => a + (l.store[RESOURCE_ENERGY] || 0), 0);
             let haulableEnergy = terminalEnergy + storageUsable + containerEnergy + linkEnergy;
-            let noEnergyProducer = room.creeps("harvestEnergyKeeper", false).length == 0
-                && room.creeps("worker", false).length == 0;
-            if (carrierCnt <= 0 && haulableEnergy > 0) {
-                let bootBody = ManagerCreeps.calcBodyPart({ [CARRY]: 2, [MOVE]: 1 });
-                spawnCarrierNow(bootBody);
-            } else if (noEnergyProducer && haulableEnergy <= 0 && room.energyAvailable >= 200) {
-                let workerBody = room.energyAvailable >= 300
-                    ? ManagerCreeps.calcBodyPart({ [WORK]: 2, [CARRY]: 1, [MOVE]: 1 })
-                    : ManagerCreeps.calcBodyPart({ [WORK]: 1, [CARRY]: 1, [MOVE]: 1 });
+            let noEnergyProducer = room.creeps("harvestEnergyKeeper", false).length == 0;
+            if (haulableEnergy > 0) {
+                spawnCarrierNow(StationCarry.getCarrierBodyConfig(room));
+            } else if (noEnergyProducer && room.energyAvailable >= 200) {
+                let workerBody = StationWork.getMiddleLevelWorkerBodyConfig(room);
                 let harData = _.values(room.memory[StationSources.stationName] || {}).find(d => d && d.id);
                 let bootTasks = harData ? StationSources.generatorReleaseAbleHarTask(harData) : [];
-                room.spawnFailure = false;
-                // 同 spawnCarrierNow：只解粘滞标记，**不动**孵化预算缓存
-                // （`room.energyAvailable` 在本 tick 内不反映刚花掉的能量）。
-                StationHive.trySpawn(room, room.name, workerBody, "worker", bootTasks);
+                if (Utils.getBodyEnergyNeed(workerBody) <= pro.spawnTickBudget(room)) {
+                    room.spawnFailure = false;
+                    // 同 spawnCarrierNow：只解粘滞标记，**不动**孵化预算缓存
+                    // （`room.energyAvailable` 在本 tick 内不反映刚花掉的能量）。
+                    StationHive.trySpawn(room, room.name, workerBody, "worker", bootTasks);
+                }
             }
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
@@ -805,25 +806,18 @@ let pro = {
         // 第 3 只 —— 与 upgrader 那个坑同一形态（MEMORY 第 16 条）。
         // 折算后 RCL8 仍是 2,500（行为不变），RCL5/6 分别是 1,080 / 1,380。
         let carrierBodyMinEnergy = Math.min(2500, (room.energyCapacityAvailable || 0) * 0.6);
-        if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 50 == 0
-            && StationHive.HiveNeedToFill(room) && room.energyAvailable >= 750 && room.energyAvailable < carrierBodyMinEnergy) {
-            let emergencyBody = ManagerCreeps.calcBodyPart({ [MOVE]: 5, [CARRY]: 10 });
-            spawnCarrierNow(emergencyBody);
-            if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
-            room.memory.carryBusy.push(0)
-            return;
-        }
+        // 正常补员不再生产 750 应急小 carrrier：hive 临时低能量时等满配。
         // hive 缺口 + 能量已够满配 carrier：不等 avgBusy 门槛（空 hive 时
         // avgBusy 常年在 0.85 以下，单 carrier 永远等不到第二只）。
         if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 25 == 0
             && StationHive.HiveNeedToFill(room) && room.energyAvailable >= carrierBodyMinEnergy) {
-            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)));
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room));
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
         }
         if (starved && carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 100 == 0) {
-            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)))
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room))
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
@@ -854,7 +848,7 @@ let pro = {
             aliveCarrierCnt < carrierTarget &&
             !(StationHive.HiveNeedToFill(room) && room.energyAvailable < carrierBodyMinEnergy) &&
             haulerSaturated)) {
-            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room, pro.spawnTickBudget(room)))
+            spawnCarrierNow(StationCarry.getCarrierBodyConfig(room))
         }
         if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
         room.memory.carryBusy.push(room.creeps("carrier").filter(e => !e.isFree()).reduce((a) => a + 1, 0))

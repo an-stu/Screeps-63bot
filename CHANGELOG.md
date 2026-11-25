@@ -1,3 +1,16 @@
+## v0.78.329 — 低 RCL 体型策略：满配优先，仅 worker+carrier 双缺才救急
+
+- 用户 2026-11-26：低 RCL 房出现 `2WORK+1CARRY+1MOVE` 采集爬，临时 hive 低能量
+  不应触发生成小体型；应急爬只在能量枯竭且 worker/carrier 同时为零时生产。
+- 根因：本房 keeper 无在岗个体时，`trySpawnHarKeeper` 按当 tick 剩余能量算体型；
+  300 能量正好生成 1C2W1M。此外低级 worker、carrier 和高级房的 150/300/750 应急
+  分支也会按临时余额缩体型。
+- 修复：worker/carrier/keeper 正常补员一律按房间容量满配，付不起就等，不缩体型；
+  只有 worker 与 carrier 同时为零才启用救急分支，并取当前预算内最大体型。
+  删除 150/300/750 固定小体型和 750 应急 carrier。
+- 回归：spawn-body-budget、keeper-affordable-body、lowlevel-bootstrap-handoff、
+  lowlevel-spawn-unstick 等按新策略更新；保留旧缩体型逻辑作为负对照。
+
 ## v0.78.328 — 外矿沿路行进的爬不再被派到「自己脚下」当路点
 
 - 现场（2026-11-25 shard2 E57S29）：一格宽的缓存路上 6 只车反向对撞（3 满载回程 +

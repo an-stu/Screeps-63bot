@@ -12,7 +12,8 @@ let pro={
     /** 还没有 800 的时候 */
     getLowLevelWorkerBodyConfig (room,caseEnergyLess = true){
         let totalEnergy = room.getEnergyCapacityAvailable(room);
-        if(!room.creeps("worker").length&&caseEnergyLess)totalEnergy = room.getEnergyAvailable(room);
+        let depleted = !room.creeps("worker", false).length && !room.creeps("carrier", false).length;
+        if(depleted && caseEnergyLess)totalEnergy = room.getEnergyAvailable(room);
         let body = [WORK,CARRY,MOVE,MOVE];
         let bodyEnergy = Utils.getBodyEnergyNeed(body)
         let out= []
@@ -25,19 +26,14 @@ let pro={
         return out
     },
     /**
-     * @param bodyBudget 可选：**本 tick 真能花出去**的能量上限（见
-     *        `StrategyHighLevel.spawnTickBudget`）。不给就按本房满容量算 ——
-     *        RCL5/6 的 hive 被 keeper / 外矿搬运反复抽干时，按满容量算出的
-     *        体型 `StationHive.trySpawn` 付不起、静默失败，还会把这个 tick 的
-     *        `spawnFailure` 置真、连带挡住后面的 carrier。
+     * 正常补员固定按房间容量取满配；bodyBudget 只在 worker+carrier 双缺的
+     * 救急分支生效。调用方用本 tick 预算判断「付不起就等」，不再缩小体型。
      */
     getMiddleLevelWorkerBodyConfig (room, bodyBudget){
-        let totalEnergy = room.getEnergyCapacityAvailable(room);
-        if (room.creeps("worker", false).length + room.creeps("carrier", false).length == 0) {
-            totalEnergy = room.getEnergyAvailable(room);
-        }
-        // 体型只能按「付得起」定：上限夹到本 tick 可花的能量，下限保 1 组 200。
-        if (bodyBudget !== undefined) totalEnergy = Math.max(200, Math.min(totalEnergy, bodyBudget));
+        let depleted = room.creeps("worker", false).length + room.creeps("carrier", false).length == 0;
+        let totalEnergy = depleted ? room.getEnergyAvailable(room) : room.getEnergyCapacityAvailable(room);
+        // 只有 worker+carrier 全没了才允许按预算缩成救急体型；正常运行一律满配。
+        if (depleted && bodyBudget !== undefined) totalEnergy = Math.max(200, Math.min(totalEnergy, bodyBudget));
         let body = [WORK,CARRY,MOVE];
         let bodyEnergy = Utils.getBodyEnergyNeed(body)
         let num = 0
@@ -50,12 +46,11 @@ let pro={
     },
     /** 超过800 的时候 */
     getHighLevelWorkerBodyConfig (room, bodyBudget){
-        let totalEnergy = room.getEnergyCapacityAvailable(room);
-        if (bodyBudget !== undefined) totalEnergy = Math.min(totalEnergy, bodyBudget);
+        let depleted = room.creeps("worker", false).length + room.creeps("carrier", false).length == 0;
+        let totalEnergy = depleted ? room.getEnergyAvailable(room) : room.getEnergyCapacityAvailable(room);
         let body = ManagerCreeps.calcBodyPart({  [WORK]: 30 ,[CARRY]: 10 ,[MOVE]: 10 });
-        if (room.creeps("worker", false).length + room.creeps("carrier", false).length == 0||
-            Utils.getBodyEnergyNeed(body)>totalEnergy) {
-            return pro.getMiddleLevelWorkerBodyConfig(room, bodyBudget)
+        if (depleted || Utils.getBodyEnergyNeed(body)>totalEnergy) {
+            return pro.getMiddleLevelWorkerBodyConfig(room, depleted ? bodyBudget : undefined)
         }
         return body
     },

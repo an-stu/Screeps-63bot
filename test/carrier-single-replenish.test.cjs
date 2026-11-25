@@ -52,6 +52,7 @@ function load() {
         StationUpgrade: { stationName: "stationUpgrade" },
         StationLab: { boostAbleLevel: () => -1 },
         ManagerCreeps: { calcBodyPart: () => ["carry", "carry", "move"] },
+        Utils: { getBodyEnergyNeed: body => body.length * 50 },
         UtilsTask: { task: (obj, taskName, regFun, ops) => Object.assign({ taskName }, ops || {}) },
     };
     ctx.global = ctx;

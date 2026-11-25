@@ -88,7 +88,7 @@ function loadStation(code) {
  * 本房矿点、**一只 keeper 都没有**（现场：两只同时老死）。
  * trySpawn 按线上语义：付不起就静默失败。
  */
-function runForHive(code, hive) {
+function runForHive(code, hive, hasOtherCreeps = false) {
     const ctx = loadStation(code);
     const S = ctx.StationSources;
     const stationName = S.stationName;
@@ -103,7 +103,8 @@ function runForHive(code, hive) {
         energyAvailable: hive,
         getEnergyAvailable: () => hive,
         getEnergyCapacityAvailable: () => 2300,
-        creeps: () => [],
+        creeps: role => hasOtherCreeps && (role == "worker" || role == "carrier")
+            ? [{ spawning: false, ticksToLive: 1000 }] : [],
         find: () => [],
     };
     S.outerMineStarvesSpawnRoom = () => false;
@@ -150,15 +151,19 @@ for (const hive of [100, 200, 250]) {
     }
 }
 
-// ── 5. 负对照：把预算改回 550 下限（并且去掉付得起守卫），第 1 条现场必须孵不出来 ──
+// ── 5. 房内仍有 worker/carrier 时，hive 临时低能量不得产小 keeper ──────────
+assert.equal(runForHive(src, 400, true).length, 0,
+    "有 worker 或 carrier 时，hive 400 必须等满配 keeper，不得退化成 WORK2 小体型");
+
+// ── 6. 负对照：强行忽略「双缺」判据并去掉付得起守卫，就会出现 300 小 keeper ──
 const OLD_UPPER = src
-    // 单行子串替换（文件是 CRLF，跨行匹配会失败）
-    .replace("(inc ? spawnRoom.getEnergyCapacityAvailable() : Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft))",
-        "Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550))")
+    .replace(/let depleted = [\s\S]{0,180}?spawnRoom\.creeps\("carrier", false\)\.length;/, "let depleted = true;")
     .replace("if (bodyCost > budgetLeft) return;", "");
 assert.notEqual(OLD_UPPER, src, "负对照的源码替换必须命中");
-assert.match(OLD_UPPER, /Math\.max\(budgetLeft, 550\)/, "预算必须回到 550 下限");
-assert.equal(runForHive(OLD_UPPER, 400).filter(c => c.spend <= 400).length, 0,
-    "旧写法（下限 550 ⇒ 550 体型）在 hive 400 时确实孵不出来 —— 这就是 650 tick 的零收入");
+assert.match(OLD_UPPER, /let depleted = true;/, "负对照必须强制进入缩体型分支");
+const negative = runForHive(OLD_UPPER, 400, true);
+assert.equal(negative.length, 1);
+assert.equal(negative[0].spend, 300,
+    "旧逻辑在 hive 400 时确实会产 2WORK+1CARRY+1MOVE 小 keeper");
 
 console.log("keeper body: OK (home keeper sized by the energy actually left, no 550 floor lock)");

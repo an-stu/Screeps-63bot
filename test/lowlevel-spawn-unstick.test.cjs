@@ -61,11 +61,21 @@ const room = {
 const rich = sandbox.StationWork.getMiddleLevelWorkerBodyConfig(room);
 assert.equal(sandbox.Utils.getBodyEnergyNeed(rich), 800, "满容量时保持 4 组 800 体型");
 
-const poor = sandbox.StationWork.getMiddleLevelWorkerBodyConfig(room, 400);
-assert.equal(sandbox.Utils.getBodyEnergyNeed(poor), 400, "预算 400 时只能要 2 组 400 体型");
-assert.equal(poor.filter(p => p === "work").length, 2);
+const budgeted = sandbox.StationWork.getMiddleLevelWorkerBodyConfig(room, 400);
+assert.equal(sandbox.Utils.getBodyEnergyNeed(budgeted), 800,
+    "房里已有 worker 时，临时预算低也不得缩体型（付不起就等）");
 
-const floor = sandbox.StationWork.getMiddleLevelWorkerBodyConfig(room, 0);
-assert.equal(sandbox.Utils.getBodyEnergyNeed(floor), 200, "预算再低也保 1 组 200，避免空体型");
+const depleted = {
+    getEnergyCapacityAvailable: () => 800,
+    getEnergyAvailable: () => 400,
+    creeps: () => [],
+};
+const emergency = sandbox.StationWork.getMiddleLevelWorkerBodyConfig(depleted, 400);
+assert.equal(sandbox.Utils.getBodyEnergyNeed(emergency), 400,
+    "worker+carrier 都为零时才允许按救急预算生成 2 组 400 体型");
+assert.equal(emergency.filter(p => p === "work").length, 2);
+
+const floor = sandbox.StationWork.getMiddleLevelWorkerBodyConfig(depleted, 0);
+assert.equal(sandbox.Utils.getBodyEnergyNeed(floor), 200, "救急预算再低也保 1 组 200，避免空体型");
 
 console.log("low-level spawns respect the tick budget and unstick the carrier queue");

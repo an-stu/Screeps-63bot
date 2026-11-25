@@ -7,20 +7,15 @@
  * **后面的** carrier / 外矿补员一起吞掉。所以「按满容量算体型」不是一个保守的写法，
  * 它是「hive 不满格就一只都生不出来」。
  *
- * 本轮修的是同一形态的三处（上一轮已修 upgrader，见 upgrader-affordable-body）：
- *   ① `strategy_highLevel.workerManager`：`HiveNeedToFill && energyAvailable < 2500`
- *      写死 2,500（RCL8 的量级）。RCL6 容量只有 2,300 ⇒ 恒真 ⇒ **hive 一缺能就永不出
- *      worker**，RCL6 房连自己的工地都盖不动。
- *   ② 同一个函数里 worker 的体型按 `getEnergyCapacityAvailable()` 算（2,300），
- *      门槛放行了也付不起。
- *   ③ `trySpawnCarrier`：`>= 2500` 的「按满配补」分支对 cap ≤ 2,500 的房**永不可达**，
- *      只剩 750 的应急小爬；「缺能就不许走 avgBusy 那条」的闸也是写死 2,500。
+ * 用户 2026-11-26 定稿：正常补员必须尽量大体型；hive 临时低能量**不得**缩成
+ * 小爬，付不起就等。只有 worker 与 carrier 同时为零的极端缺爬阶段才允许使用
+ * 当前预算内的救急体型。
  *
  * 这里锁住四件事：
- *   ① 体型函数带预算时造价 ≤ 预算；不带预算时仍按容量（负对照：忽略预算参数即失败）
- *   ② RCL6 / hive 1,500 / 有工地 ⇒ worker 必须能派，且体型付得起（旧代码一只都不派）
- *   ③ RCL6 / hive 1,500 ⇒ carrier 走「按预算满配」而不是写死的 750 应急小爬
- *   ④ RCL8 回归：门槛与体型与旧行为完全一致（2,500），别为了修小房把大房改弱
+ *   ① 普通 worker/carrier 体型函数忽略临时预算，正常房始终按容量满配
+ *   ② RCL6 / hive 1,500 / 无 worker+carrier ⇒ 救急 worker 可出且付得起
+ *   ③ RCL6 / hive 1,500 / 已有 carrier ⇒ 不再出 750 小爬；等 hive 达到满配再出
+ *   ④ RCL8 回归：满配体型保持 2,500
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -146,7 +141,7 @@ function mkRoom({ level = 6, cap = 2300, avail = 1500, storageEnergy = 49066, si
     };
 }
 
-// ── ① 体型函数：带预算就必须按预算收缩 ─────────────────────────────────────
+// ── ① 普通房忽略临时预算，始终返回容量满配 ─────────────────────────────────
 {
     const ctx = loadModules(makeCtx([]), ["station_carry.js", "station_work.js"]);
 
@@ -155,19 +150,29 @@ function mkRoom({ level = 6, cap = 2300, avail = 1500, storageEnergy = 49066, si
 
     const fullCarrier = ctx.StationCarry.getCarrierBodyConfig(rich);
     const budgetCarrier = ctx.StationCarry.getCarrierBodyConfig(cheap, 600);
-    assert.equal(bodyCost(fullCarrier), 2250,
-        "不带预算时仍按本房容量 2,300 算（既有行为，别改）");
-    assert.ok(bodyCost(budgetCarrier) <= 600,
-        "带预算 600 时体型必须付得起，否则 trySpawn 静默失败：cost=" + bodyCost(budgetCarrier));
-    assert.ok(budgetCarrier.includes("carry"), "收缩后必须还有 CARRY 部件：" + JSON.stringify(budgetCarrier));
+    assert.equal(bodyCost(fullCarrier), 2250, "正常房 carrier 按本房容量 2,300 满配");
+    assert.equal(bodyCost(budgetCarrier), 2250,
+        "临时预算 600 不得把正常补员缩成小 carrier；付不起应由调用方等待");
 
-    // 房里有 carrier 时 worker 体型才走「按容量」那条（一只都没有时是 bootstrap 分支）
     const fullWorker = ctx.StationWork.getMiddleLevelWorkerBodyConfig(mkRoom({ sites: 1, carriers: 2 }));
     const budgetWorker = ctx.StationWork.getMiddleLevelWorkerBodyConfig(mkRoom({ sites: 1, carriers: 2 }), 400);
-    assert.equal(bodyCost(fullWorker), 2200, "不带预算时 worker 仍按容量 2,300 算");
-    assert.ok(bodyCost(budgetWorker) <= 400,
-        "带预算 400 时 worker 体型必须付得起：cost=" + bodyCost(budgetWorker));
-    assert.ok(budgetWorker.includes("work"), "收缩后必须有 WORK 部件");
+    assert.equal(bodyCost(fullWorker), 2200, "正常房 worker 按容量 2,300 满配");
+    assert.equal(bodyCost(budgetWorker), 2200,
+        "临时预算 400 不得把正常 worker 缩成小体型");
+
+    const lowFull = ctx.StationWork.getLowLevelWorkerBodyConfig(
+        mkRoom({ cap: 800, avail: 250, workers: 1, carriers: 1 }));
+    assert.equal(bodyCost(lowFull), 750,
+        "RCL<3 房只要还有 worker/carrier，低 hive 也必须按容量满配");
+    const lowEmergency = ctx.StationWork.getLowLevelWorkerBodyConfig(
+        mkRoom({ cap: 800, avail: 250, workers: 0, carriers: 0 }));
+    assert.equal(bodyCost(lowEmergency), 250,
+        "worker+carrier 双缺时才允许用当前 250 能量出救急 worker");
+
+    const noCarrierButWorker = ctx.StationCarry.getCarrierBodyConfig(
+        mkRoom({ cap: 2300, workers: 1, carriers: 0, keepers: 1 }), 600);
+    assert.equal(bodyCost(noCarrierButWorker), 2250,
+        "还有 worker 时 carrier 也必须满配，临时预算不得缩体型");
 }
 
 // ── ② RCL6 / hive 1,500 / 有工地 ⇒ worker 必须派得出来且付得起 ─────────────
@@ -176,26 +181,26 @@ function mkRoom({ level = 6, cap = 2300, avail = 1500, storageEnergy = 49066, si
     const ctx = loadModules(makeCtx(spawned), ["station_carry.js", "station_work.js", "strategy_highLevel.js"]);
     ctx.StrategyHighLevel.workerManager(mkRoom({ sites: 2, avail: 1500, cap: 2300 }));
 
-    assert.equal(spawned.length, 1,
-        "hive 1,500（cap 2,300 的 65%）不该挡住 worker：旧门槛写死 2,500 对 RCL6 恒真，"
-        + "整房 0 worker、自己的工地永远盖不动");
+    assert.equal(spawned.length, 1, "worker+carrier 双缺时必须能出救急 worker");
     assert.equal(spawned[0].role, "worker");
     assert.ok(spawned[0].ok,
-        "体型必须 ≤ 本 tick 可用能量，否则 trySpawn 静默失败并把 spawnFailure 置真"
+        "救急体型必须 ≤ 本 tick 可用能量"
         + `：cost=${spawned[0].cost} avail=${spawned[0].avail}`);
 }
 
-// ── ③ RCL6 / hive 1,500 ⇒ carrier 走「按预算满配」，不是写死的 750 小爬 ─────
+// ── ③ 已有 carrier 时 hive 不足：等满配，不再生产 750 小爬 ─────────────────
 {
     const spawned = [];
     const ctx = loadModules(makeCtx(spawned), ["station_carry.js", "station_work.js", "strategy_highLevel.js"]);
     ctx.StrategyHighLevel.trySpawnCarrier(mkRoom({ carriers: 2, avail: 1500, cap: 2300 }));
+    assert.equal(spawned.length, 0,
+        "房里有 carrier、hive 只有 1,500 时必须等满配，不得再产 750 小 carrier");
 
-    assert.equal(spawned.length, 1, "hive 有缺口 + 编制不满，必须补一只 carrier");
-    assert.ok(spawned[0].ok, `体型必须付得起：cost=${spawned[0].cost} avail=${spawned[0].avail}`);
-    assert.ok(spawned[0].cost > 750,
-        "必须走「按预算满配」那条分支（旧代码 >= 2500 对 RCL6 永不可达，"
-        + `只剩 750 的应急小爬）：cost=${spawned[0].cost}`);
+    const full = [];
+    const fullCtx = loadModules(makeCtx(full), ["station_carry.js", "station_work.js", "strategy_highLevel.js"]);
+    fullCtx.StrategyHighLevel.trySpawnCarrier(mkRoom({ carriers: 2, avail: 2300, cap: 2300 }));
+    assert.equal(full.length, 1, "hive 达到满配后应补一只 carrier");
+    assert.equal(full[0].cost, 2250, "补员必须是满配体型，不是 750 应急小爬");
 }
 
 // ── ④ RCL8 回归：门槛与体型与旧行为一致（2,500 满配）───────────────────────
@@ -210,23 +215,23 @@ function mkRoom({ level = 6, cap = 2300, avail = 1500, storageEnergy = 49066, si
         "RCL8 的满配体型必须还是 2,500（33 CARRY + 17 MOVE），别为了修小房改大房");
 }
 
-// ── ⑤ 源码断言：门槛按容量折算、体型带预算调用 ───────────────────────────
+// ── ⑤ 源码断言：正常体型满配，预算只用于拒绝/极端救急 ─────────────────────
 {
     const high = strip(read("strategy_highLevel.js"));
     assert.ok(high.includes("spawnTickBudget(room)"),
-        "体型必须按 spawnTickBudget（本 tick 可花的钱）算");
+        "付得起性仍必须按 spawnTickBudget（本 tick 可花的钱）判断");
     assert.ok(!/room\.energyAvailable\s*<\s*2500\b/.test(high),
         "负对照：不许再出现写死的 room.energyAvailable < 2500");
     assert.ok(!/room\.energyAvailable\s*>=\s*2500\b/.test(high),
-        "负对照：不许再出现写死的 room.energyAvailable >= 2500（对 cap ≤ 2,500 的房永不可达）");
+        "负对照：不许再出现写死的 room.energyAvailable >= 2500");
     assert.ok(/carrierBodyMinEnergy\s*=\s*Math\.min\(2500,\s*\(room\.energyCapacityAvailable \|\| 0\) \* 0\.6\)/.test(high),
         "carrier 的「够满配」门槛必须按本房容量折算");
-    assert.ok(high.includes("Math.min(2500, room.energyCapacityAvailable * 0.5)"),
-        "worker 的空 hive 保护门槛必须按本房容量折算");
-    assert.ok(!high.includes("getCarrierBodyConfig(room)"),
-        "负对照：carrier 体型必须带预算调用，不许再有无预算的 getCarrierBodyConfig(room)");
-    assert.ok(!high.includes("getMiddleLevelWorkerBodyConfig(room)"),
-        "负对照：worker 体型必须带预算调用");
+    assert.ok(high.includes("workerCnt == 0 && carrierCnt == 0"),
+        "只有 worker+carrier 双缺才允许救急分支");
+    assert.ok(!high.includes("getCarrierBodyConfig(room, pro.spawnTickBudget(room))"),
+        "正常 carrier 不得再按临时预算缩体型");
+    assert.ok(!high.includes("getMiddleLevelWorkerBodyConfig(room, pro.spawnTickBudget(room))"),
+        "正常 worker 不得再按临时预算缩体型");
 }
 
 console.log("spawn-body-budget: passed");
