@@ -10,6 +10,14 @@ let MAX_GCL = 150;
  */
 let UPGRADER_REPLACE_PRESPAWN = 50;
 let CONTROLLER_SIGN_VERSION = 2;
+/**
+ * 控制器签名「签不住」时的冷却窗口（tick）。
+ *
+ * 新生区/保护区里服务器每 tick 把控制器签回系统口吻，客户端 `signController()`
+ * 依然返回 OK。签名是纯装饰，绝不能因此冻结负责签名的爬（见 `trySignController`）。
+ * 窗口到期自动重试一次：新生区结束后无需人工清 Memory。
+ */
+let CONTROLLER_SIGN_BLOCK_TICKS = 10000;
 let CONTROLLER_SIGNS = [
     "明月松间照，清泉石上流。",
     "海上生明月，天涯共此时。",
@@ -296,8 +304,38 @@ let pro = {
     trySignController(creep) {
         let room = creep.room;
         let controller = room.controller;
+        if (!controller || !room.memory) return false;
+        let memory = room.memory;
+        // 签名**不可能生效**的房间（新生区 / 保护区）：服务器每 tick 把控制器
+        // 重新签回系统口吻（"A new Novice or Respawn Area is being planned…"）。
+        //
+        // 客户端**看不出**这件事：`creep.signController()` 返回 OK(0)，下一个 tick
+        // 控制器的 sign 又变回系统的。旧代码只认「签的不是我们」⇒ 每 tick 都
+        // `return true`（本次 tick 的执行权被签名吃掉），而负责签名的那只爬是
+        // 「离控制器最近的 worker」——它就被永久冻结在任务链上。
+        //
+        // 2026-11-26 shard2 E51S26 实测：`shard2_78376045_2` 从控制器刚占下来就
+        // 被选为 signer，任务栈里一条 `pickupRes` 指向早已消失的掉落物，2900+ tick
+        // 零位移、一次 `popTask` 都没发生；同房 4 只 worker 只剩 3 只干活。
+        // E58S26 同样被系统签着，第一批援建 worker 一靠近控制器就会这样冻结。
+        //
+        // 判据：**上一 tick 我们签过且拿到 OK、这一 tick 又不是我们的口吻** ⇒ 盖不住，
+        // 记一个冷却窗口（默认 10,000 tick）彻底停手。窗口到期会自动重试一次，
+        // 新生区结束后无需人工清 Memory。
+        if (memory.signBlockedUntil > Game.time) return false;
         let desired = room._controllerSignText || (room._controllerSignText = controllerSignFor(room.name));
-        if (controller.sign && controller.sign.username == WHO_AM_I && controller.sign.text == desired) return false;
+        if (controller.sign && controller.sign.username == WHO_AM_I && controller.sign.text == desired) {
+            delete memory.signPendingTick;
+            delete memory.signBlockedUntil;
+            return false;
+        }
+        if (memory.signPendingTick && Game.time > memory.signPendingTick) {
+            delete memory.signPendingTick;
+            memory.signBlockedUntil = Game.time + CONTROLLER_SIGN_BLOCK_TICKS;
+            if (global.Logger) Logger.warning("Upgrade", "Controller sign does not stick, giving up", room.name,
+                memory.signBlockedUntil);
+            return false;
+        }
         if (!room._controllerSignerId) {
             let candidates = room.find(FIND_MY_CREEPS).filter(unit => !unit.spawning && unit.getActiveBodyparts(MOVE) > 0);
             candidates.sort((left, right) => {
@@ -315,9 +353,14 @@ let pro = {
         }
         let result = creep.signController(controller, desired);
         if (result == OK) {
-            room.memory.controllerSignVersion = CONTROLLER_SIGN_VERSION;
-            room.memory.controllerSignText = desired;
+            memory.controllerSignVersion = CONTROLLER_SIGN_VERSION;
+            memory.controllerSignText = desired;
+            // 记录「签过」的时刻：下一 tick 如果签名又不是我们的口吻，就是盖不住。
+            memory.signPendingTick = Game.time;
             Logger.info("Upgrade", "Controller signed", room.name, desired);
+        } else if (result != ERR_NOT_IN_RANGE) {
+            // 引擎直接拒绝（不在范围内已由上面的 isNearTo 挡掉）⇒ 同样别再反复试。
+            memory.signBlockedUntil = Game.time + CONTROLLER_SIGN_BLOCK_TICKS;
         }
         return true;
     },

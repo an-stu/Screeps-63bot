@@ -1,3 +1,17 @@
+## v0.78.334 — 签名签不住时不再永久冻结执行者
+
+- 现场（shard2 E51S26，2026-11-26）：控制器被系统口吻签着（新生区/保护区），
+  `shard2_78376045_2` 从占房起就被选为 signer，任务栈里一条 `pickupRes` 指向早已
+  消失的掉落物，2900+ tick 零位移、一次 `popTask` 都没发生（同房 4 只 worker 只剩 3 只干活）。
+- 根因：`creep.signController()` 在签不住的房间仍返回 OK（下一 tick 服务器把控制器
+  签回系统口吻），旧 `trySignController` 只判「当前签名不是我们的」，于是每 tick
+  `return true` 吃掉本 tick 执行权 ⇒ 唯一负责签名的爬被永久冻结。
+- 修法：签完记 `signPendingTick`；下一 tick 若签名又不是我们的口吻 ⇒ 判定「盖不住」，
+  记 `signBlockedUntil = now + 10000` 停手（到期自动重试一次，新生区结束无需人工清
+  Memory）；`signController` 返回非 OK 也进同一冷却。执行者的任务不再被装饰性签名吞掉。
+- 回归：新增 `test/controller-sign-stick.test.cjs` 8 组，负对照（无 pending 记账 = 旧判据）
+  在同样现场仍返回 true，证明冻结来自「没有记账」。
+
 ## v0.78.333 — shard3 完全不兑换 pixel，仅其他 shard 满桶兑换
 
 - 用户 2026-11-26 定稿：shard3 的满桶保留给 20 CPU 缓冲，任何 tick 都不调用
