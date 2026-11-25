@@ -1,3 +1,25 @@
+## v0.78.328 — 外矿沿路行进的爬不再被派到「自己脚下」当路点
+
+- 现场（2026-11-25 shard2 E57S29）：一格宽的缓存路上 6 只车反向对撞（3 满载回程 +
+  3 空车进矿），`(2,10)`/`(3,10)` 两只每十几 tick 互换位置，两个矿点容器**双双顶满
+  2,000**，吞吐归零 100+ tick；`outerRoadStuck` 恒为 0，所以「卡 3 tick 交 BetterMove」
+  「卡 25 tick 作废路线」两道脱困闸门**一次都没响**。
+- 逐 tick 抓到的事实：满载车 `(2,10)` 连续 13+ tick `outerRoadMoveTarget == "…:2:10"`
+  —— **它脚下的那一格**。而 `moveToOuterRoadPoint` 见到 `range == 0` 直接 `return OK`
+  （那是「到达终点」的语义）⇒ 这一 tick 一次 `creep.moveTo` 都没发。
+- 为什么这等于死锁：对穿 / 让路 / 绕一格**全靠 moveTo 触发**（BetterMove 的交通逻辑
+  挂在 moveTo 上）。不发 moveTo 的爬等于从交通系统里消失 —— 对向那只永远配不上对，
+  两边一起钉死；`lastPos` / `outerRoadStuck` 也都停在 0，任何「不动」判据都看不见。
+- 产生路径：`dist == 0` 分支做 `pathIndex += roadDir` 前进一格，若这一格已在路线端点
+  之外，紧随的 `Math.min(index, len-1)` 又把它**夹回端点** —— 而端点格正是自己脚下。
+  「前进」被无声撤销。
+- 修法（`harvestEnergyOuterCarryRoadBuilder`）：沿路行进时若算出的路点正是自己脚下
+  ⇒ 沿路线再推一格；已经到端点 ⇒ 交回 `moveTo(target)` 原生寻路（与
+  `moveOuterCarrierOnRoad` 的「走到路线尽头」同一条兜底）。两种情形都保证这一 tick
+  一定发出一次移动。只动这一处，不改缓存路本身、不改派车配额与优先级。
+- 测试 `outer-road-own-tile-waypoint`：端点被夹回自己脚下必须 `moveTo(target)` /
+  负对照（拆掉这段后同一组输入**一次 moveTo 都不发**）/ 反向 `roadDir=-1` 同判据。
+
 ## v0.78.327 — 升级爬可短暂借道取能，取完回到非干线站位
 
 - 修复 shard2 E41S29、E51S29 在升级容器有库存时，范围外的升级爬却因干线保护一直空载挂起的问题。干线仍不参与固定站位选择，但缺能时可接近有货的容器或 link；取能成功当 tick 即返回站位，不在干线上挂机或设阻挡标记。

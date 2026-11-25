@@ -1548,6 +1548,28 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         pathIndex = Math.max(0, Math.min(pathIndex, roadPath.length - 1));
         task.pathIndex = pathIndex;
         wp = roadPath[pathIndex];
+        // ── 走路的爬不许被派到「自己脚下」当路点（0.78.328）──────────────────
+        // `moveToOuterRoadPoint` 见到 range==0 会直接 return OK —— 那是给「到达
+        // 终点」用的语义。可它一旦落在**沿路行进**的中间路上，这一 tick 就一次
+        // `creep.moveTo` 都没发：对穿/让路/绕一格全靠 moveTo 触发，不发就等于从
+        // 交通系统里消失，对向的车永远配不上对，单格宽的路直接死锁。
+        // 实测 2026-11-25 shard2 E57S29：满载车 (2,10) 连续 13+ tick
+        // `outerRoadMoveTarget` 就是自己脚下，位置一格没动，`outerRoadStuck`
+        // 还因为目标/位置没变而停在 0（脱困闸门全不响）；同一条路上 6 只车
+        // （3 满载回程 + 3 空车进矿）反向对撞 100+ tick，两个容器双双顶满 2,000。
+        //   · 前方还有路点 ⇒ 沿路线再推一格（只推一格）；
+        //   · 已经推到端点 ⇒ 交回任务目标的原生寻路（与 moveOuterCarrierOnRoad
+        //     的「走到路线尽头」同一条兜底，绝不静默 return OK）。
+        if (wp.roomName == this.pos.roomName && wp.x == this.pos.x && wp.y == this.pos.y) {
+            let ahead = pathIndex + roadDir;
+            if (ahead >= 0 && ahead < roadPath.length) {
+                pathIndex = ahead;
+                task.pathIndex = pathIndex;
+                wp = roadPath[pathIndex];
+            } else {
+                return this.moveTo(target, { reusePath: 5, visualizePathStyle: { stroke: '#fffa00' } });
+            }
+        }
         // 只操作缓存路线的当前/相邻路点。Creep 在被挤开或跨房转向时不能
         // 顺手在偏离路线的格子铺路，否则会消耗全局 construction site 配额。
         let onRoadPath = [pathIndex - 1, pathIndex, pathIndex + 1].some(i => {
