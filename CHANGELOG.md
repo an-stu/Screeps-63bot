@@ -1,3 +1,11 @@
+## v0.78.332 — shard2 等非 shard3 满桶后每 tick 兑换 pixel
+
+- 旧逻辑所有 shard 都只在 `Game.time % 100 == 0` 检查 `generatePixel()`；shard2
+  的 bucket 回满后最多要等 99 tick 才转换。
+- 现在 shard3 保持 100 tick 检查；非 shard3（如 shard2）每 tick 检查，bucket
+  一到 10000 立即兑换 pixel，不浪费满桶时间。
+- 回归：新增 pixel-exchange 测试，覆盖 shard2 每 tick、shard3 每 100 tick 的节奏。
+
 ## v0.78.331 — 任务派发节流开关：shard3 省 CPU，其他 shard 每 tick 派发
 
 - 空窗根因不是 creep 执行，而是任务派发：RCL<3 房经济 pass `%3`、高 RCL 房

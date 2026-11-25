@@ -267,6 +267,12 @@ let shouldRunCreep = function (creep) {
     return true;
 }
 
+// shard3 保持每 100 tick 检查一次；其他 shard（如 shard2）每 tick 检查，
+// bucket 一回到 10000 就立刻兑换 pixel，不再白等最多 99 tick。
+let shouldExchangePixel = function () {
+    return Game.shard.name === "shard3" ? Game.time % 100 == 0 : true;
+}
+
 let updateCodeHealth = function () {
     // 97-tick 采样与 20-tick 健康快照错位：把本 tick 的相位采样先落盘，
     // 否则 codeHealth.phases 只能每 lcm(97,20)=1940 tick 才更新一次。
@@ -378,10 +384,9 @@ let main = function () {
     //  - **不自动续 CPU unlock**：实测每次 unlock 调用都会扣一张券（不是文档
     //    暗示的"有效期内 ERR_FULL 不消耗"），而且代码在每个 shard 上各跑一次
     //    ⇒ 2026-11-16 10 张券被连扣到 6 张。unlock 续期改为手动/监控触发。
-    if (Game.time % 100 == 0) {
-        if (Game.cpu.bucket >= 10000 && typeof Game.cpu.generatePixel == "function") {
-            Game.cpu.generatePixel();
-        }
+    if (shouldExchangePixel()
+        && Game.cpu.bucket >= 10000 && typeof Game.cpu.generatePixel == "function") {
+        Game.cpu.generatePixel();
     }
     if (Game.time % 20) return;
   
