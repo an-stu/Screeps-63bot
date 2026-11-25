@@ -213,15 +213,13 @@ Creep.prototype.upgradeKeeper = function () {
     let link = Game.getObjectById(ms["link"]);
     let container = Game.getObjectById(ms["container"]);
     let upgradePosition = pro.getUpgradePosition(this, obj, [link, container].filter(Boolean));
-    const delivery = ms.deliveryPosition && container && pro.getDeliveryPosition(mainRoom, container);
-    const approach = delivery && pro.getDeliveryApproach(mainRoom, delivery);
-    const traffic = ms.transitTiles && this.room.name === mainRoom.name ? pro.getTransitTiles(mainRoom) : undefined;
-    if ((delivery && (this.pos.isEqualTo(delivery) || approach && this.pos.isEqualTo(approach)))
-        || traffic?.has(this.pos.x+":"+this.pos.y)) {
-        this.memory.dontPullMe = false;
-        if (upgradePosition) this.moveTo(upgradePosition, {range:0, reusePath:20});
-        if (traffic) this.memory.dontPullMe = false;
-        if (upgradePosition || traffic) return;
+    if (obj && this.room.name === mainRoom.name && (ms.transitTiles || ms.deliveryPosition)) {
+        const traffic = pro.getTransitTiles(mainRoom);
+        const delivery = ms.deliveryPosition && pro.getDeliveryPosition(mainRoom, container);
+        if (traffic?.size || delivery) {
+            const approach = delivery && pro.getDeliveryApproach(mainRoom, delivery);
+            return pro.upgradeWithTraffic(this, obj, upgradePosition, link, container, traffic, delivery, approach);
+        }
     }
 
     if (this.store[RESOURCE_ENERGY] > 0) {
@@ -250,10 +248,8 @@ Creep.prototype.upgradeKeeper = function () {
         if (link && (link._upgrade_used || 0) <= link.store[RESOURCE_ENERGY] && link.store[RESOURCE_ENERGY] > 0) {
             let result = this.withdraw(link, RESOURCE_ENERGY);
             if (result == ERR_NOT_IN_RANGE) {
-                if (!traffic) {
-                    this.moveTo(link, { visualizePathStyle: { stroke: '#ffffff' } });
-                    moved = true;
-                }
+                this.moveTo(link, { visualizePathStyle: { stroke: '#ffffff' } });
+                moved = true;
             } else {
                 link._upgrade_used = (link._upgrade_used || 0) + this.store.getFreeCapacity(RESOURCE_ENERGY)
                 isWithdrawLink = true
@@ -264,17 +260,16 @@ Creep.prototype.upgradeKeeper = function () {
                 this.transfer(container, RESOURCE_ENERGY, carryParts * 50 - workParts * 2)
             }
         } else if (!link || this.store.getUsedCapacity(RESOURCE_ENERGY) <= workParts) {
-            let result = this.withdraw(container, RESOURCE_ENERGY);
+            let result = container && this.withdraw(container, RESOURCE_ENERGY);
             if (result == ERR_NOT_IN_RANGE) {
-                if (!delivery && !traffic) this.moveTo(container, { visualizePathStyle: { stroke: '#ffffff' } });
-                else if (upgradePosition && !this.pos.isEqualTo(upgradePosition)) this.moveTo(upgradePosition, {range:0, reusePath:20});
+                this.moveTo(container, { visualizePathStyle: { stroke: '#ffffff' } });
                 moved = true;
             }
         }
     }
     if (!moved && upgradePosition && !this.pos.isEqualTo(upgradePosition)) {
         this.moveTo(upgradePosition, {range:0, reusePath:20});
-    } else if (!moved && !traffic && container && !this.pos.isEqualTo(container) && ms["creeps"].length <= 1) {
+    } else if (!moved && container && !this.pos.isEqualTo(container) && ms["creeps"].length <= 1) {
         this.moveTo(container);
     }
     if (upgradePosition && this.pos.isEqualTo(upgradePosition)) this.memory.dontPullMe = true;
@@ -367,6 +362,83 @@ let pro = {
         }
         return room._upgradeTransitTiles;
     },
+    /** Positions for transit may be used to refill, but never as fixed stands. */
+    upgradeWithTraffic(creep, controller, stand, link, container, traffic, delivery, approach) {
+        const pos = creep.pos, memory = creep.memory;
+        const onLane = traffic?.has(pos.x + ":" + pos.y)
+            || (delivery && pos.isEqualTo(delivery)) || (approach && pos.isEqualTo(approach));
+        const atStand = stand && pos.isEqualTo(stand);
+        const energy = creep.store[RESOURCE_ENERGY];
+        const work = creep.getPartCnt(WORK);
+        const needEnergy = energy <= work;
+        const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
+        const bufferFree = container?.store.getFreeCapacity(RESOURCE_ENERGY) || 0;
+        const feedBuffer = link && bufferFree > creep.getPartCnt(CARRY) * 100;
+        let refillTarget, fallbackSupply, refillRange = Infinity, withdrew = false;
+        if (free > 0 && (needEnergy || feedBuffer)) {
+            for (const supply of [link, container]) {
+                if (!supply || (supply === container && !needEnergy)) continue;
+                const amount = Math.min(free, supply.store[RESOURCE_ENERGY] - (supply._upgrade_used || 0));
+                if (!(amount > 0)) continue;
+                const range = pos.getRangeTo(supply);
+                if (range <= 1) {
+                    if (creep.withdraw(supply, RESOURCE_ENERGY, amount) !== OK) continue;
+                    supply._upgrade_used = (supply._upgrade_used || 0) + amount;
+                    withdrew = true;
+                    // A creep already adjacent to both can pass surplus link
+                    // energy into the buffer without making a separate trip.
+                    if (supply === link && feedBuffer && !onLane && pos.isNearTo(container) && energy > work * 2) {
+                        creep.transfer(container, RESOURCE_ENERGY, Math.min(bufferFree, energy - work * 2));
+                    }
+                    break;
+                }
+                // If we already have some energy on the lane, return to work
+                // instead of crossing it again for a second refill target.
+                if (needEnergy && (!onLane || energy === 0)) {
+                    if (range < refillRange) {
+                        fallbackSupply = refillTarget;
+                        refillTarget = supply;
+                        refillRange = range;
+                    } else fallbackSupply = supply;
+                }
+            }
+        }
+
+        const canWorkHere = !onLane && pos.inRangeTo(controller, 3);
+        if (canWorkHere && energy > 0) {
+            creep.upgradeController(controller);
+            if (memory.needUnboost === undefined) memory.needUnboost = creep.body.filter(part => part.boost).length;
+            if (!memory.concated) {
+                creep.concatStationUpgrade();
+                memory.concated = true;
+            }
+            if (creep.ticksToLive % 7 === 0 && container && container.hits < container.hitsMax * 0.9
+                && pos.inRangeTo(container, 3)) creep.repair(container);
+        }
+
+        let headingForSupply = false;
+        if (!withdrew && refillTarget) {
+            const options = {range:1, reusePath:12};
+            let move = creep.moveTo(refillTarget, options);
+            if (move === ERR_NO_PATH && fallbackSupply) move = creep.moveTo(fallbackSupply, options);
+            headingForSupply = move === OK || move === ERR_TIRED;
+        }
+        if (!headingForSupply && stand && !atStand) {
+            // Movement and withdrawal can execute together. Leave the lane
+            // immediately on pickup, without waiting for Store to update.
+            if (creep.moveTo(stand, {range:0, reusePath:20}) === ERR_NO_PATH && onLane && !creep.fatigue) {
+                pro.parkOffControllerLane(creep, traffic, delivery, approach);
+            }
+        } else if (!headingForSupply && onLane && !creep.fatigue) {
+            pro.parkOffControllerLane(creep, traffic, delivery, approach);
+        } else if (!headingForSupply && !stand && !canWorkHere && !onLane && energy > 0) {
+            creep.moveTo(controller, {range:3, reusePath:20});
+        }
+        // upgradeController/repair (and movement) can set a swap pin. Only
+        // a productive fixed stand is allowed to retain it.
+        const stay = !!(!onLane && atStand && !headingForSupply && (energy > 0 || withdrew));
+        if (memory.dontPullMe !== stay) memory.dontPullMe = stay;
+    },
     /** Keep carriers pullable on protected lanes and park them when idle. */
     clearCarrierTraffic(creep) {
         const room = creep.room, station = room?.memory?.[pro.stationName];
@@ -376,14 +448,20 @@ let pro = {
         const traffic = pro.getTransitTiles(room);
         const delivery = station.deliveryPosition && pro.getDeliveryPosition(room);
         const approach = delivery && pro.getDeliveryApproach(room,delivery);
-        const tileKey = p => p.x + ":" + p.y;
-        const deliveryKey = delivery && tileKey(delivery), approachKey = approach && tileKey(approach);
-        const isLane = key => traffic?.has(key) || key === deliveryKey || key === approachKey;
-        if (!isLane(tileKey(creep.pos))) return false;
+        const pos = creep.pos;
+        if (!(traffic?.has(pos.x + ":" + pos.y)
+            || (delivery && pos.isEqualTo(delivery)) || (approach && pos.isEqualTo(approach)))) return false;
         if (creep.memory.dontPullMe) creep.memory.dontPullMe = false;
         if (creep.memory.tasks?.length !== 0 || creep.fatigue > 0
             || (creep.memory.role === "outerHarvestEnergyCarrier" && !creep.storeEmpty())) return false;
 
+        return pro.parkOffControllerLane(creep, traffic, delivery, approach);
+    },
+    parkOffControllerLane(creep, traffic, delivery, approach) {
+        const room = creep.room;
+        const tileKey = p => p.x + ":" + p.y;
+        const deliveryKey = delivery && tileKey(delivery), approachKey = approach && tileKey(approach);
+        const isLane = key => traffic?.has(key) || key === deliveryKey || key === approachKey;
         const reserved = getUpgradeReservations(room,room.controller,delivery,approach);
         const claimed = room._upgradeTrafficParking || (room._upgradeTrafficParking = new Set());
         const sources = room.source, mineral = room.mineral?.pos;

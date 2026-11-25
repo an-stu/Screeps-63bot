@@ -67,6 +67,7 @@ function makeUpgradeRuntime(transit, assigned = "W31N51", walkable, objects = {}
         extract(upgradeSource, "getUpgradeReservations(room, controller, delivery, approach) {"),
         extract(upgradeSource, "getUpgradePosition(creep, controller, supplyTargets = []) {"),
         extract(upgradeSource, "clearCarrierTraffic(creep) {"),
+        extract(upgradeSource, "parkOffControllerLane(creep, traffic, delivery, approach) {"),
     ];
     vm.runInNewContext("this.pro = {stationName:'stationUpgrade'," + methods.join(",\n") + "};", ctx);
     ctx.getUpgradeReservations=(...args)=>ctx.pro.getUpgradeReservations(...args);
