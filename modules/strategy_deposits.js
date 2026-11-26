@@ -33,6 +33,10 @@ let maxCoolDown = () => {
     let knob = Number(Memory.marketSettings && Memory.marketSettings.depositMaxCooldown);
     return knob > 0 ? knob : MAX_COOL_DOWM_DEFAULT;
 };
+function canHarvestDeposit(data) {
+    const limit = data.depositType === RESOURCE_MIST ? maxCoolDown() / 2 : maxCoolDown();
+    return Game.time < data.disappearTime && data.lastCooldown < limit;
+}
 /**
  * 采到多少刻度之后才值得给 harDeposits 上 boost（避免刚开工就烧化合物）。
  *
@@ -143,16 +147,11 @@ Creep.prototype.carryDeposit = function () {
         }
         flag.memory.harvesters = flag.memory.harvesters || [];
         let deposit = Game.getObjectById(task["id"]);
-        if (deposit) {
-            flag.memory.lastCooldown = deposit.lastCooldown;
-            if (flag.memory.harvesters.length == 0 && deposit && deposit.lastCooldown >= maxCoolDown()) {
-                flag.memory.waitTime = (flag.memory.waitTime || 0) + 1
-            }
-            // 有 harvester 在册（新任务重建/换班到位）时清零：waitTime 只增不清
-            // 会让收尾期的 carrier 一到场就被 >100 门槛赶回家，最后一批
-            // 已采矿物没人搬、随 harvester 老死丢失。
-            else if (flag.memory.harvesters.length) flag.memory.waitTime = 0
-        }
+        if (deposit) flag.memory.lastCooldown = deposit.lastCooldown;
+        // Give the last carrier a bounded pickup window once all harvesters
+        // leave, including at MIST's lower threshold or after deposit decay.
+        if (flag.memory.harvesters.length) flag.memory.waitTime = 0;
+        else if (!deposit || !canHarvestDeposit(flag.memory)) flag.memory.waitTime = (flag.memory.waitTime || 0) + 1;
         if (this.ticksToLive < (flag.memory.pathTime || 600) * 1.2 || this.storeFull() || flag.memory.waitTime > 100) {// 回家
             flag.memory.carriers = flag.memory.carriers || []
             // 原写法 `if (!contains(id)) without(id)` 恒为空操作：条件成立时该 id
@@ -212,16 +211,16 @@ let pro = {
     createOrUpdateDepositMission(targetRoomName, depositData) {//
         if (AVOID_ROOMS.indexOf(targetRoomName) !== -1) return;
         let spawnRoomName = StationObserver.getClosedMyRoomName(targetRoomName);
-        if (!spawnRoomName || depositData.lastCooldown > maxCoolDown()) return;
+        if (!spawnRoomName) return;
         let flagName = "deposit_" + spawnRoomName + "_" + targetRoomName + "_" + depositData.x + "_" + depositData.y;
+        const existing = Game.flags[flagName];
+        // An observer can retire an existing assignment without ever
+        // recreating an already closed flag (including equality at the cap).
+        if (!existing && !canHarvestDeposit(depositData)) return;
         if (!Memory.flags[flagName]) Memory.flags[flagName] = {}
         let flagMemory = Memory.flags[flagName];
-        depositData.flagName = flagName;
-        depositData.roomName = targetRoomName;
-        for (let k in depositData) {
-            flagMemory[k] = depositData[k];
-        }
-        if (!Game.flags[flagName]) {
+        Object.assign(flagMemory,depositData,{flagName,roomName:targetRoomName});
+        if (!existing) {
             (new RoomPosition(depositData.x, depositData.y, targetRoomName)).createFlag(flagName)
         }
     },
@@ -249,18 +248,26 @@ let pro = {
         if (Game._depositCleanFlag) return;
         Game._depositCleanFlag = true
         ManagerFlags.getFlagsByPrefix("deposit").forEach(flag => {
-            let roomName = flag.getRoomName();
-            if (!roomName || !Game.rooms[roomName] || !Game.rooms[roomName].my) {
-                flag.remove()
-            }
+            const home = Game.rooms[flag.getRoomName()];
+            if (!home?.my) return flag.remove();
+            if (canHarvestDeposit(flag.memory)) return;
+            // Spawning and en-route units may not be in the flag roster yet.
+            // Keep their flag until the real assignment is gone.
+            const assigned = (creep, taskName) => {
+                const task = creep?.headTask?.();
+                return task?.flagName === flag.name && task.taskName === taskName;
+            };
+            const active = (ids, role, taskName) => (ids || []).some(id => assigned(Game.getObjectById(id),taskName))
+                || (home.creeps?.(role,false) || []).some(creep => assigned(creep,taskName));
+            if (!active(flag.memory.harvesters,"harDeposits","harvestDeposit")
+                && !active(flag.memory.carriers,"carrierDeposits","carryDeposit")) flag.remove();
         })
     },
     exec(room) {
         pro.cleanFlag();
         // **bucket 节流**（用户 2026-11-05：不要让 CPU 影响房间正常运行）：
         // 存款采掘是奖励性产出，房间核心循环（升级/防御/孵化）才是刚需。
-        // bucket < 5000 时不再派新爬/维护旗子 —— 已在场的老爬自然老死退场，
-        // CPU 预算让给核心循环，bucket 回升后自动恢复。
+        // Low bucket only defers dispatch. Ended/idle flags were handled above.
         if (global.isSaveCpu !== false && (Game.cpu ? Game.cpu.bucket : 10000) < 5000) return;
         if (global.taskDispatchThrottle !== false && (Game.time + room.hashCode()) % 3 != 0) return;
         ManagerFlags.getFlagsByPrefixAndRoom("deposit", room.name).forEach(flag => {
@@ -276,10 +283,7 @@ let pro = {
             if (!flag.memory.walkableAroundCnt) {
                 flag.memory.walkableAroundCnt = Math.min(flag.pos.walkableAroundCnt(), 3)
             }
-            // MIST 价值低要"减半少挖"：原来第三个析取支与外层条件重复恒真，
-            // 减半意图从未生效 —— MIST 用一半的冷却窗口。
-            if (Game.time < flag.memory.disappearTime && flag.memory.lastCooldown < maxCoolDown()
-                && (flag.memory.depositType != RESOURCE_MIST || flag.memory.lastCooldown < maxCoolDown() / 2)) {// 如果是mist减半，少挖点，没啥用
+            if (canHarvestDeposit(flag.memory)) {
                 // ⚠️ 挨打后的「停 1200 tick」**只能挡住还没派人的任务**，不能停一个
                 // 已经在干的任务（用户 10-10 明确要求：任务要么不做，要么做完，
                 // 不许中途暂停 —— 停了就永远完不成）。
@@ -332,8 +336,6 @@ let pro = {
                     pro.trySpawnCarryDeposits(room, flag.memory, needBoost);
                     return;
                 }
-            } else if (flag.memory.harvesters.length == 0 && flag.memory.carriers.length == 0) {
-                flag.remove();
             } else if (flag.memory.harvesters.length != 0 && flag.memory.carriers.length == 0) {
                 pro.trySpawnCarryDeposits(room, flag.memory);// 如果还有挖矿继续派兵
             }

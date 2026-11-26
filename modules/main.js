@@ -40,6 +40,9 @@ let pro = {
         HelperError.catchError(() => ManagerCreeps.init());
         HelperError.catchError(() => ManagerRooms.init());
         HelperError.catchError(() => ManagerFlags.init());
+        if (global.StrategyDeposits && isCpuFeatureEnabled("deposits") && ManagerFlags.hasPrefix("deposit")) {
+            HelperError.catchError(() => StrategyDeposits.cleanFlag(), "depositFlagCleanup");
+        }
     },
     exec() {
         let objects = getTickObjects();
