@@ -1,3 +1,11 @@
+## v0.78.341 — Invader 塔优先支持抢占旧任务
+
+- 现场 E51S29（2 Invader、双塔 0）验证发现：carrier 若还有入侵前领取的
+  fillHive/extension 任务，不会空闲，v0.78.340 的优先派发要等它干完才生效。
+- 现在 Invader 在场时，每个已载能本地 carrier/worker 都会在任务栈顶插入塔
+  fillRes（无重复塔任务），立即转去补塔；原有任务保留在栈底，补塔后继续。
+- 回归：tower-invader-priority 增加“已载货爬任务栈抢占”源码钉；全量通过。
+
 ## v0.78.340 — Invader 在场时塔优先补能
 
 - 新增 `StationTower.invaderThreat(room)`：只识别 `username == "Invader"` 的活体。

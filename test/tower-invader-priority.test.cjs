@@ -43,7 +43,21 @@ assert.equal(ctx.fn({find: () => [{owner: {username: "Invader"}}]}), true);
         "低级房已载货 worker 在 Invader 下也必须先补塔");
 }
 
-// ③ 高级房：hive 缺口分支里，已载/空手 carrier 和已载 worker 都先服务塔
+// ③ 高级房：已有旧任务的载货爬必须被塔任务抢占（栈顶插入）
+{
+    const start = high.indexOf('let loadedHelpers = room.creeps("carrier", false)');
+    const add = high.indexOf("creep.addTask(fillTowerTasks.shift())", start);
+    assert.ok(start > 0 && add > start && add - start < 900,
+        "高级房必须抢占已有补能任务的载货 carrier/worker，把塔任务压到栈顶");
+}
+{
+    const start = low.indexOf('let loadedHelpers = room.creeps("carrier")');
+    const add = low.indexOf("creep.addTask(fillTowerTasks.shift())", start);
+    assert.ok(start > 0 && add > start && add - start < 900,
+        "低级房同样必须抢占已有任务的载货 carrier/worker");
+}
+
+// ④ hive 缺口分支里，已载/空手 carrier 和已载 worker 都先服务塔
 assert.ok(/if \(invaderThreat && fillTowerTasks\.length\) creep\.addTask\(fillTowerTasks\.shift\(\)\);[\s\S]{0,100}else creep\.addTask\(StationHive\.generatorFillHiveTask/.test(high),
     "高级房已载 carrier 在 Invader 下必须先补塔、再填 hive");
 assert.ok(/while \(invaderThreat && fillTowerTasks\.length && freeCarries\.length\)/.test(high),

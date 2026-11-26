@@ -349,6 +349,19 @@ let pro = {
             // Invader 在场时塔优先于 hive：空手车先接塔任务，再把取能任务压在栈顶。
             const invaderThreat = StationTower.invaderThreat ? StationTower.invaderThreat(room) : false;
             const fillTowerTasks = StationTower.generatorFillEnergyTasks(room);
+            if (invaderThreat && fillTowerTasks.length) {
+                let hasTowerFill = creep => (creep.memory.tasks || []).some(t => {
+                    if (!t || t.taskName != "fillRes") return false;
+                    let target = Game.getObjectById(t.id);
+                    return target && target.structureType == STRUCTURE_TOWER;
+                });
+                let loadedHelpers = room.creeps("carrier").concat(room.creeps("worker"))
+                    .filter(e => e && e.store[RESOURCE_ENERGY] > 0 && !hasTowerFill(e));
+                for (let creep of loadedHelpers) {
+                    if (!fillTowerTasks.length) break;
+                    creep.addTask(fillTowerTasks.shift());
+                }
+            }
             room.creeps("carrier").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
                 if (invaderThreat && fillTowerTasks.length) {
                     creep.addTask(fillTowerTasks.shift());

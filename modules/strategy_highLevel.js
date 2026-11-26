@@ -540,6 +540,23 @@ let pro = {
         room._fillTowerTasks = fillTowerTasks; // 同 pass 的 workerManagerAfterCarrier 复用，免得算两遍
         let invaderThreat = StationTower.invaderThreat ? StationTower.invaderThreat(room) : false;
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
+        // 抢占已有补能/施工任务：Invader 出现后，已载能本地 carrier/worker 的任务栈顶
+        // 立刻压入塔 fillRes（原任务留在栈底），不必等旧的一趟干完。
+        if (invaderThreat && fillTowerTasks.length) {
+            let hasTowerFill = creep => (creep.memory.tasks || []).some(t => {
+                if (!t || t.taskName != "fillRes") return false;
+                let target = Game.getObjectById(t.id);
+                return target && target.structureType == STRUCTURE_TOWER;
+            });
+            let loadedHelpers = room.creeps("carrier", false)
+                .concat(room.creeps("worker", false))
+                .filter(e => e && !e.storeEmpty() && e.store[RESOURCE_ENERGY] > 0
+                    && !e.storeContainsEnergyOtherResType() && !hasTowerFill(e));
+            for (let creep of loadedHelpers) {
+                if (!fillTowerTasks.length) break;
+                creep.addTask(fillTowerTasks.shift());
+            }
+        }
 
         if (StationHive.HiveNeedToFill(room)) {
             // Invader 在场时塔先于 hive：已载货 carrier 优先补塔，塔任务清完再填 hive。
