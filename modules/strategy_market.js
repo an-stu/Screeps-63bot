@@ -86,6 +86,18 @@ function marketSlowPass(room, ticks) {
     return (slot % period) === (((room.hashCode() % period) + period) % period);
 }
 
+function isTerminalMarketOrder(order) {
+    // Account-bound orders (e.g. CPU unlock) do not have a terminal room.
+    return typeof order.roomName === "string" && /^[WE]\d+[NS]\d+$/.test(order.roomName);
+}
+
+function selectCommodityMarketRoom(rooms) {
+    const usable = r => r.my && r.storage && r.terminal?.my && r.terminal.isActive()
+        && r.terminal.store.getFreeCapacity() >= 50000;
+    return rooms.find(r => r.name === "E41S23" && usable(r))
+        || rooms.find(r => r.factory?.my && usable(r)) || rooms.find(usable);
+}
+
 let getSeriesMap = function() {
     return {
         "blue": BLUE,
@@ -329,7 +341,8 @@ let pro = {
         // 毫无影响。
         // 每 500 tick 重算一次「自己压 bar」的毛利率（工厂侧据此过滤，低于 40% 不压）
         pro.scanCompressMargin();
-        _.values(Game.market.orders).filter(e => !e.remainingAmount).forEach(e => Game.market.cancelOrder(e.id));
+        _.values(Game.market.orders).filter(e => isTerminalMarketOrder(e) && !e.remainingAmount)
+            .forEach(e => Game.market.cancelOrder(e.id));
         // 先清一遍历史遗留的重复买单；本轮所有建单路径跑完之后还会再收敛一次
         // （见本函数末尾），确保一轮结束时必然收敛。
         pro.convergeBuyOrders();
@@ -380,14 +393,14 @@ let pro = {
     convergeBuyOrders() {
         let bestBuy = {};
         _.values(Game.market.orders).forEach(e => {
-            if (e.type != ORDER_BUY || !e.remainingAmount) return;
+            if (!isTerminalMarketOrder(e) || e.type != ORDER_BUY || !e.remainingAmount) return;
             let key = e.roomName + "|" + e.resourceType;
             let cur = bestBuy[key];
             if (!cur || e.remainingAmount > cur.remainingAmount) bestBuy[key] = e;
         });
         let keepBuyIds = new Set(_.values(bestBuy).map(e => e.id));
         _.values(Game.market.orders).forEach(e => {
-            if (e.type != ORDER_BUY || !e.remainingAmount || keepBuyIds.has(e.id)) return;
+            if (!isTerminalMarketOrder(e) || e.type != ORDER_BUY || !e.remainingAmount || keepBuyIds.has(e.id)) return;
             Logger.log("Market", `[cancel] duplicate buy ${e.roomName} ${e.resourceType} ${e.id}`);
             Game.market.cancelOrder(e.id);
         });
@@ -399,7 +412,8 @@ let pro = {
         if (Game._pauseCommodityBuysTick === Game.time) return;
         Game._pauseCommodityBuysTick = Game.time;
         _.values(Game.market.orders).forEach(order => {
-            if (order.type == ORDER_BUY && order.remainingAmount && order.resourceType != RESOURCE_ENERGY) {
+            if (isTerminalMarketOrder(order) && order.type == ORDER_BUY && order.remainingAmount
+                && order.resourceType != RESOURCE_ENERGY) {
                 Game.market.cancelOrder(order.id);
             }
         });
@@ -741,8 +755,10 @@ let pro = {
      * 使用 `Memory.marketSettings.scanMarginPct` 可覆盖利润率阈值。
      */
     scanUnderpricedCommodities() {
-        if (!scanUnderpricedDue()) return;
+        if (!scanUnderpricedDue() || pro.commodityBuysPaused()) return;
         if (Game.market.credits < 1000000) return;
+        const tradeRoom = selectCommodityMarketRoom(ManagerRooms.getNormalRoom());
+        if (!tradeRoom) return;
 
         // 利润率口径 = 利润 / 成本（与 StrategyMarketPrice.calculateAllCommoditiesProfit
         // 的 profitMargin 同源）。用户 11-12：门槛改为默认 1000%（利润 ≥ 成本 10 倍）。
@@ -854,14 +870,14 @@ let pro = {
                 Game.market.cancelOrder(our.id);
                 Logger.log("Market", `[scanUnderpriced] recreate ${comp} ${our.price.toFixed(2)} -> ${decision.price.toFixed(2)} (cap ${cap.toFixed(2)})`);
             }
-            Game.market.createOrder({
+            const result = Game.market.createOrder({
                 type: ORDER_BUY,
                 resourceType: comp,
                 price: decision.price,
                 totalAmount: 50000,
-                roomName: "E41S23",
+                roomName: tradeRoom.name,
             });
-            if (decision.action == "create") {
+            if (result === OK && decision.action == "create") {
                 Logger.log("Market", `[scanUnderpriced] ${comp} buy 50000 @ ${decision.price.toFixed(2)} (chain margin ${Math.round(marginByComp[comp] || 0)}%)`);
             }
         }

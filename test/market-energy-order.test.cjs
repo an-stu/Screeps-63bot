@@ -69,3 +69,52 @@ test("inactive terminals and empty external books without history do not create 
     open.run();
     assert.deepEqual(open.writes, [], "even a funded and active terminal cannot use its own ask as a quote");
 });
+
+function loadTerminalHelpers(ctx) {
+    const helpers = source.slice(source.indexOf("function isTerminalMarketOrder"), source.indexOf("let getSeriesMap"));
+    const start = source.indexOf("    convergeBuyOrders() {");
+    const end = source.indexOf("    commodityBuysPaused() {", start);
+    vm.runInContext(`${helpers}\nconst market = ({${source.slice(start, end)}});`, ctx);
+}
+
+test("market pause and deduplication both preserve account-bound orders", () => {
+    const roomOrder = (id, type, resourceType, remainingAmount) => ({id, type, resourceType, remainingAmount, roomName: "E41S29"});
+    const orders = {
+        low: roomOrder("low", "buy", "Z", 100),
+        high: roomOrder("high", "buy", "Z", 200),
+        energy: roomOrder("energy", "buy", "energy", 500),
+        sale: roomOrder("sale", "sell", "Z", 100),
+        unlock: {id: "unlock", type: "buy", resourceType: "cpuUnlock", remainingAmount: 20},
+        otherUnlock: {id: "otherUnlock", type: "buy", resourceType: "cpuUnlock", remainingAmount: 5},
+        pixel: {id: "pixel", type: "buy", resourceType: "pixel", remainingAmount: 3, roomName: "undefined"},
+    };
+    const canceled = [];
+    const ctx = vm.createContext({
+        Game: {time: 123, market: {orders, cancelOrder(id) { canceled.push(id); delete orders[id]; }}},
+        Logger: {log() {}}, _: {values: Object.values}, ORDER_BUY: "buy", RESOURCE_ENERGY: "energy",
+    });
+    loadTerminalHelpers(ctx);
+    vm.runInContext("market.convergeBuyOrders(); market.pauseCommodityBuys();", ctx);
+    assert.deepEqual(canceled, ["low", "high"]);
+    assert.deepEqual(Object.keys(orders), ["energy", "sale", "unlock", "otherUnlock", "pixel"]);
+});
+
+test("commodity scan selects a viable owned terminal on the current shard", () => {
+    function room(name, {active = true, free = 50000, my = true, factory = false} = {}) {
+        return {name, my, storage: {}, factory: factory ? {my: true} : undefined,
+            terminal: {my, isActive: () => active, store: {getFreeCapacity: () => free}}};
+    }
+    const ctx = vm.createContext({});
+    loadTerminalHelpers(ctx);
+    const local = room("E41S29");
+    const full = room("E51S29", {free: 49999});
+    const inactive = room("E41S23", {active: false});
+    const foreign = room("E40S30", {my: false});
+    const prefer = room("E41S23");
+    const factory = room("E56S29", {factory: true});
+    const pick = rooms => { ctx.rooms = rooms; return vm.runInContext("selectCommodityMarketRoom(rooms)?.name", ctx); };
+    assert.equal(pick([full, inactive, foreign]), undefined);
+    assert.equal(pick([full, inactive, foreign, local]), "E41S29");
+    assert.equal(pick([local, factory]), "E56S29");
+    assert.equal(pick([local, factory, prefer]), "E41S23");
+});
