@@ -1,3 +1,10 @@
+## v0.78.358 — 丢 spawn 的跨 shard 房重新援建，蓝图多槽位逐个试
+
+- shard2/W31N51（RCL5、storage 43,982、hive 1500/1500 满、2 tower、0 只爬、0 工地、**0 个 spawn**）已停摆约 137k tick：spawn 被打掉后没 spawn 生不出爬，没爬又建不了 spawn。跨 shard 援建配置在 spawn 建成、RCL≥3 时即 COMPLETE 删除，而恢复逻辑只认「RCL<3 且没 storage」，因此已完成的房再也拿不回援建队。
+- `recoverBootstrapConfigs` 改为：本房**没有 spawn** 时无条件从 `room.memory.crossShardBootstrap` 恢复援建配置（不再看等级/storage），由原出兵房派援建爬补回 spawn；有 spawn 的房仍按原判据（RCL<3 且无 storage）才恢复，避免白烧 CPU 与爬。
+- `StrategyClaim.ensureConstructionSites` 的 spawn 工地改为遍历蓝图里所有 spawn 槽位：[0] 被结构占住或被工地占了就试下一个。旧写法只看第一个槽位，创建失败即静默返回，房间永远建不回 spawn。
+- 巡检脚本新增判据「RCL≥3 却 0 个 spawn ⇒ 必须处理」（L1/L2 援建期不算），shard2 行同时打印 spawn 总数；含 4 条自检与负对照。
+
 ## v0.78.357 — NPC 安全提前占位与外矿搬运满载速度
 
 - 侦察确认同批 NPC 连续静止、回程虫洞正常且接近路线安全后，才对具体货位签发短时放行。搬运可提前过洞，在货运爬附近等候，绕开远程护卫 4 格、近战护卫 2 格及其它虫洞。

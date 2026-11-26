@@ -159,14 +159,23 @@ let pro = {
         pro.recoverBootstrapConfigs(builds);
     },
 
-    /** RCL<3 的已占领跨 shard 房若丢了建设配置（旧版 spawn 建成即 COMPLETE 误删），
-     *  从 room.memory.crossShardBootstrap 恢复，保证援建持续到 RCL3。 */
+    /** 已占领跨 shard 房若丢了建设配置（旧版 spawn 建成即 COMPLETE 误删），或**丢了
+     *  spawn**，从 room.memory.crossShardBootstrap 恢复，保证援建持续到 RCL3。
+     *
+     *  2026-11-27 shard2 W31N51（RCL5、storage 44k、hive 1500 满、0 只爬、无 spawn、
+     *  无 spawn 工地）：spawn 消失后房间没有任何自救路径 —— 没 spawn 生不出爬，
+     *  没爬又建不了 spawn。旧写法 `level>=3` / `有 storage` 两条「已完成」判据同时为真，
+     *  配置永不恢复，房间无限期停摆（实测停了 ~137k tick）。已完成的房也必须能在
+     *  spawn 消失时重新援建。 */
     recoverBootstrapConfigs(builds) {
         Object.keys(Game.rooms || {}).forEach(roomName => {
             let room = Game.rooms[roomName];
             if (!room || !room.my || !room.controller) return;
-            if ((room.controller.level || 0) >= 3) return;
-            if (room.storage && room.storage.my) return;
+            let spawnless = !room.find(FIND_MY_SPAWNS).length;
+            if (!spawnless) {
+                if ((room.controller.level || 0) >= 3) return;
+                if (room.storage && room.storage.my) return;
+            }
             if (builds[roomName]) return;
             let bootstrap = room.memory && room.memory.crossShardBootstrap;
             if (!bootstrap || !bootstrap.originShard || !bootstrap.spawnRoom) return;

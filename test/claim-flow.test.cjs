@@ -9,8 +9,16 @@ class MockCreep {}
 let positionState = {structures: [], sites: [], createResult: 0, createCalls: 0};
 class MockRoomPosition {
     constructor(x, y, roomName) { this.x = x; this.y = y; this.roomName = roomName; }
-    lookFor(type) { return type === "structures" ? positionState.structures : positionState.sites; }
-    createConstructionSite() { positionState.createCalls += 1; return positionState.createResult; }
+    lookFor(type) {
+        const key = type === "structures" ? "structures" : "sites";
+        if (positionState.byX && positionState.byX[this.x]) return positionState.byX[this.x][key] || [];
+        return positionState[key];
+    }
+    createConstructionSite() {
+        positionState.createCalls += 1;
+        positionState.createdAt = {x:this.x, y:this.y};
+        return positionState.createResult;
+    }
 }
 
 const plannerCalls = [];
@@ -20,7 +28,10 @@ const context = {
     Game: {time: 1, rooms: {}, getObjectById() {}},
     Memory: {},
     ManagerAutoPlanner: {tryCreateStructs(room, map, type) { plannerCalls.push(type); }},
-    Utils: {decodePosArray(value) { return value ? [{x: 10, y: 10}] : []; }},
+    Utils: {decodePosArray(value) {
+        if (!value) return [];
+        return positionState.positions || [{x: 10, y: 10}];
+    }},
     Logger: {info() {}, warning() {}},
     STRUCTURE_CONTROLLER: "controller",
     STRUCTURE_STORAGE: "storage",
@@ -77,6 +88,30 @@ assert.deepEqual(plannerCalls, [], "secondary sites must wait until an owned spa
 
 context.StrategyClaim.ensureConstructionSites(roomWith([{my: true}]));
 assert.deepEqual(plannerCalls, ["extension", "container"], "secondary sites must follow the completed owned spawn");
+
+// 蓝图多个 spawn 槽位：第一个被结构占住时必须试下一个，不能静默放弃
+// （2026-11-27 shard2 W31N51 丢 spawn 后重新援建遇到的坑）。
+positionState = {
+    structures: [], sites: [], createResult: 0, createCalls: 0,
+    positions: [{x: 10, y: 10}, {x: 11, y: 10}],
+    byX: {10: {structures: [{structureType: "spawn"}]}, 11: {structures: []}},
+};
+result = context.StrategyClaim.ensureConstructionSites(roomWith([]));
+assert.equal(result.spawnSite, true, "first planned tile blocked => must fall through to the next slot");
+assert.equal(positionState.createCalls, 1, "only one site attempt after the blocked slot");
+assert.deepEqual(positionState.createdAt, {x: 11, y: 10}, "site must be created on the free spawn slot");
+
+// 负对照：所有槽位都被占 ⇒ 不建站、留 diagnostics，不许假装成功。
+positionState = {
+    structures: [], sites: [], createResult: 0, createCalls: 0,
+    positions: [{x: 10, y: 10}, {x: 11, y: 10}],
+    byX: {10: {structures: [{structureType: "spawn"}]}, 11: {structures: [{structureType: "storage"}]}},
+};
+result = context.StrategyClaim.ensureConstructionSites(roomWith([]));
+assert.equal(result.spawnSite, false, "all spawn slots blocked => no site");
+assert.equal(positionState.createCalls, 0, "no site attempt on blocked tiles");
+delete positionState.positions;
+delete positionState.byX;
 
 // 清理不再靠爬（用户 2026-10-21）：已占领的房里直接 `structure.destroy()`。
 // 判据与执行都在 StrategyClaim.destroyForeignStructures 里，见 test/claim-cleanup.test.cjs。

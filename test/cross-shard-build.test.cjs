@@ -710,6 +710,47 @@ function runExec(sb, time) {
     assert.equal(sb.Memory.crossShardBuilds["E51S29"].spawnRoom, "E49S31");
 }
 
+// 13b. 已完成的跨 shard 房**丢了 spawn**（2026-11-27 shard2 W31N51：RCL5、storage 44k、
+//      hive 1500 满、0 只爬、无 spawn、无工地）必须重新援建：没 spawn 生不出爬，
+//      没爬又建不了 spawn，不恢复配置就是无限期停摆。
+{
+    const sb = makeWorld();
+    const room = makeRoom(sb, "W31N51", {level:5, spawns:[],
+        memory:{structMap:{spawn:"encoded"},
+            crossShardBootstrap:{originShard:"shard3", spawnRoom:"W31N55", builders:2,
+                path:{path:[{shard:"shard3", roomName:"W30N50", x:30, y:8}]}}}});
+    room.storage = {my:true, store:{energy:43982}};
+    runExec(sb, 1000);
+    assert.ok(sb.Memory.crossShardBuilds["W31N51"], "spawn 消失的已完成房必须恢复援建配置");
+    assert.equal(sb.Memory.crossShardBuilds["W31N51"].spawnRoom, "W31N55");
+    // 恢复发生在 builds 循环之后 ⇒ 下一轮才开始造工地/派爬。
+    runExec(sb, 1005);
+    assert.ok(world.ensureCalls >= 1, "恢复后必须补建 spawn 工地");
+    assert.ok(world.missions.length >= 1, "恢复后必须派跨 shard 援建爬");
+}
+
+// 13c. 负对照：同房只要 spawn 还在（RCL>=3 且有 storage）就不许反复重建配置。
+{
+    const sb = makeWorld();
+    const room = makeRoom(sb, "W31N51", {level:5, spawns:[{id:"spawn1"}],
+        memory:{structMap:{spawn:"encoded"},
+            crossShardBootstrap:{originShard:"shard3", spawnRoom:"W31N55", builders:2,
+                path:{path:[{shard:"shard3", roomName:"W30N50", x:30, y:8}]}}}});
+    room.storage = {my:true, store:{energy:43982}};
+    runExec(sb, 1000);
+    assert.ok(!sb.Memory.crossShardBuilds || !sb.Memory.crossShardBuilds["W31N51"],
+        "有 spawn 的 RCL5 房不得恢复援建配置（避免白烧 CPU/爬）");
+}
+
+// 13d. 负对照：没有 crossShardBootstrap 的 spawn 空房不许凭空造配置。
+{
+    const sb = makeWorld();
+    makeRoom(sb, "E51S29", {level:5, spawns:[], memory:{structMap:{spawn:"encoded"}}});
+    runExec(sb, 1000);
+    assert.ok(!sb.Memory.crossShardBuilds || !sb.Memory.crossShardBuilds["E51S29"],
+        "没有援建来源（originShard/spawnRoom）时不得造配置");
+}
+
 // 14. 源码层：lowLevel 援建闸 + claimRoom 持久化援建配置必须存在。
 {
     const low = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_lowLevel.js"), "utf8");

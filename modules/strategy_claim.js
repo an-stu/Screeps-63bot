@@ -123,19 +123,23 @@ let pro = {
         // cannot spend its lifetime on containers while the room is spawnless.
         let result = {spawnSite: false};
         if (!pro.mySpawns(room).length) {
+            // 蓝图可能留了多个 spawn 槽位（RCL8 允许 3 个）。第一个槽位被占/被工地占了
+            // 就试下一个 —— 只看 [0] 时，站点创建会静默失败，spawn 空房永远建不起来
+            // （2026-11-27 shard2 W31N51 丢 spawn 后要重新援建，就是这条路）。
             let spawnPositions = Utils.decodePosArray(room.memory.structMap[STRUCTURE_SPAWN] || "");
-            let spawnPosition = spawnPositions[0];
-            if (spawnPosition) {
+            for (let i = 0; i < spawnPositions.length && !result.spawnSite; i++) {
+                let spawnPosition = spawnPositions[i];
+                if (!spawnPosition) continue;
                 let position = new RoomPosition(spawnPosition.x, spawnPosition.y, room.name);
-                result.spawnSite = position.lookFor(LOOK_CONSTRUCTION_SITES)
+                let existingSite = position.lookFor(LOOK_CONSTRUCTION_SITES)
                     .some(site => site.my && site.structureType == STRUCTURE_SPAWN);
                 let blockingStructure = position.lookFor(LOOK_STRUCTURES)
                     .some(structure => structure.structureType != STRUCTURE_ROAD
                         && structure.structureType != STRUCTURE_RAMPART);
-                if (!result.spawnSite && !blockingStructure) {
-                    result.createResult = position.createConstructionSite(STRUCTURE_SPAWN);
-                    result.spawnSite = result.createResult == OK;
-                }
+                if (existingSite || blockingStructure) continue;
+                result.createResult = position.createConstructionSite(STRUCTURE_SPAWN);
+                result.spawnSite = result.createResult == OK;
+                result.spawnPosition = {x:spawnPosition.x, y:spawnPosition.y};
             }
         }
         if (!pro.mySpawns(room).length) return result;
