@@ -224,6 +224,7 @@ function makeCreep(ctx, {slot, shard, roomName, boosted = true, storeAmount = 0,
         popTask() { actions.push(["popTask"]); return this; },
         moveTo(target, opts) { actions.push(["moveTo", target, opts]); },
         move(direction) { actions.push(["move", direction]); },
+        suicide() { actions.push(["suicide"]); return ctx.OK; },
         withdraw(stash, res) {
             actions.push(["withdraw", stash.id, res]);
             store[res] = Math.min(capacity(), stash.store[res]);
@@ -331,6 +332,52 @@ test("scout reports only after death, in a clear room, with real assigned tombst
     assert.equal(assigned.__crossShardRequests[0].shard, "shard3");
     assert.deepEqual(assigned.__crossShardRequests[0].request.data.available, [cargoNames[0]],
         "only positive-resource tombstones assigned to this mission may be reported");
+});
+
+test("scout stays on shard2 until shard3 acknowledges the report, then suicides in place", () => {
+    const ctx = makeWorld();
+    ctx.Game.shard.name = "shard2";
+    ctx.__tombstones.push(makeTombstone(cargoNames[0]));
+    ctx.__portals.push({structureType: "portal", destination: {shard: "shard3"}, pos: makePos(30, 37, salvageRoomName)});
+    const scout = makeCreep(ctx, {slot: "scout", shard: "shard2", roomName: salvageRoomName, x: 24, y: 43});
+    ctx.Game.creeps[scout.creep.name] = scout.creep;
+    scout.run();
+    const report = ctx.__crossShardRequests[0].request;
+    const acknowledge = ctx.missionCallBack[report.callBack];
+    assert.equal(report.data.scout, scout.creep.name);
+    assert.equal(scout.task.readySent, ctx.Game.time);
+    assert.deepEqual(scout.actions, [], "queuing the request has not yet confirmed delivery");
+
+    ctx.Game.time += 141;
+    scout.creep.ticksToLive = 200;
+    acknowledge({data: {...report.data, id: "wrong-mission"}});
+    scout.run();
+    assert.equal(ctx.__crossShardRequests.length, 1);
+    assert.deepEqual(scout.actions, [], "do not requeue, return, or suicide while awaiting the matching acknowledgement");
+
+    ctx.Game.shard.name = "shard3";
+    assert.equal(ctx.missionFunc[report.func](report.data), true);
+    assert.deepEqual(Array.from(ctx.Memory.npcConvoySalvage.ready.available), [cargoNames[0]]);
+    acknowledge(report);
+    assert.equal(scout.task.readyAcknowledged, undefined, "only the sender shard can acknowledge its scout");
+    ctx.Game.shard.name = "shard2";
+    acknowledge(report);
+    scout.run();
+    assert.deepEqual(scout.actions, [["suicide"]]);
+});
+
+test("scout already returning on shard3 retires only for its matching accepted mission", () => {
+    const ctx = makeWorld();
+    const scout = makeCreep(ctx, {slot: "scout", shard: "shard3", roomName: salvageRoomName});
+    scout.task.returning = true;
+    ctx.Memory.npcConvoySalvage.ready = {tick: 100, seenAt: 100, available: [cargoNames[0]]};
+    scout.run();
+    assert.deepEqual(scout.actions, [["suicide"]]);
+
+    const hauler = makeCreep(ctx, {slot: cargoNames[0], shard: "shard3", roomName: salvageRoomName});
+    hauler.task.returning = true;
+    hauler.run();
+    assert.equal(hauler.actions.some(a => a[0] === "suicide"), false);
 });
 
 test("hauler waits for accepted scout signal, crosses only when boosted, then withdraws only its tombstone and returns", () => {

@@ -301,6 +301,14 @@ function salvageReady(data) {
     return true;
 }
 
+function salvageReadyAcknowledged(request) {
+    const data = request?.data;
+    if (Game.shard.name !== SALVAGE_TARGET || !data?.scout) return;
+    const task = Game.creeps[data.scout]?.lastTask();
+    if (task?.taskName === "npcConvoySalvage" && task.slot === "scout"
+        && task.id === data.id && task.readySent !== undefined) task.readyAcknowledged = true;
+}
+
 function validSalvage(cfg) {
     return !!(cfg && typeof cfg.id === "string" && /^[a-f\d]{24}$/.test(cfg.id)
         && Number.isSafeInteger(cfg.deathTick) && Number.isSafeInteger(cfg.launchUntil)
@@ -405,9 +413,12 @@ function salvageReturn(creep,task) {
 
 Creep.prototype.npcConvoySalvage = function () {
     const task = this.lastTask(), scout = task.slot === "scout", shard = Game.shard.name;
-    if (task.returning || this.ticksToLive <= SALVAGE_RETURN_TTL) return salvageReturn(this,task);
+    const cfg = shard === SALVAGE_ORIGIN ? Memory.npcConvoySalvage : undefined;
+    if (scout && ((cfg?.ready && cfg.id === task.id)
+        || (shard === SALVAGE_TARGET && task.readyAcknowledged))) return this.suicide();
+    const scoutAwaitingAck = scout && shard === SALVAGE_TARGET && task.readySent !== undefined;
+    if (task.returning || (this.ticksToLive <= SALVAGE_RETURN_TTL && !scoutAwaitingAck)) return salvageReturn(this,task);
     if (shard === SALVAGE_ORIGIN) {
-        const cfg = Memory.npcConvoySalvage;
         if (cfg?.id !== task.id || !isCpuFeatureEnabled("crossShard")) return salvageReturn(this,task);
         if (!scout && (!fullyBoosted(this,HAULER) || this.store.getCapacity() < 5000)) {
             // The boost task can pop immediately after issuing the intent.
@@ -432,14 +443,15 @@ Creep.prototype.npcConvoySalvage = function () {
     const hostiles = hostileCreeps(this.room);
     const safe = Game.time >= task.deathTick && !hostiles.length && !dangerousRoom(this.room);
     if (scout) {
-        if (safe && !task.readySent) {
+        if (safe && !scoutAwaitingAck) {
             const available = salvageLoot(this.room,task).map(t => t.creep.name);
             if (available.length && ManagerCrossShard.addCrossShardRequest(SALVAGE_ORIGIN,{
-                func:"npcConvoySalvageReady",data:{id:task.id,shard:SALVAGE_TARGET,tick:Game.time,available},
+                func:"npcConvoySalvageReady",callBack:"npcConvoySalvageReadyAcknowledged",
+                data:{id:task.id,shard:SALVAGE_TARGET,tick:Game.time,available,scout:this.name},
             },"npcConvoySalvage:"+task.id)) task.readySent = Game.time;
         }
-        if (task.readySent && Game.time - task.readySent > 140) return salvageReturn(this,task);
         if (hostiles.length && dodge(this,hostiles,true) !== 0) return;
+        if (task.readySent !== undefined) return;
         const wait = new RoomPosition(24,43,SALVAGE_ROOM);
         if (!this.pos.inRangeTo(wait,1)) moveLocal(this,wait,1);
         return;
@@ -452,4 +464,6 @@ Creep.prototype.npcConvoySalvage = function () {
 
 global.missionFunc = global.missionFunc || {};
 global.missionFunc.npcConvoySalvageReady = salvageReady;
+global.missionCallBack = global.missionCallBack || {};
+global.missionCallBack.npcConvoySalvageReadyAcknowledged = salvageReadyAcknowledged;
 global.StrategyNpcConvoy = {enabled,watches,recordObservation,exec,execSalvage};
