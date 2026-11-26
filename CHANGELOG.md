@@ -1,3 +1,14 @@
+## v0.78.344 — 房外的满载 worker 不再接 fillHive（空转的第二条链）
+
+- 现场延续 v0.78.343：本地自孵已生效（`shard2_78385477_1` 在 E58S26 内挖矿），
+  但 `shard2_78384441_1` 仍在 E52S29 (4,25) 满载 350 能量、0 任务站到 900+ tick。
+- 根因：低级房给「满载且空闲」的 worker 第一条就是 `fillHive`，而
+  `Creep.prototype.fillHive` 第二句是 `if (this.pos.roomName !== room.name) return this.popTask()`
+  ⇒ 房外的爬每 pass 领到、下一 tick 立刻弹掉，编制里永远「空闲」却没有任何
+  任务能把它带回家。v0.78.343 的编制房工地修复因此永远轮不到它。
+- 修法：房外的爬跳过 `fillHive`（本房 hive 归房内的爬管），改走施工 / 升级任务
+  —— 两条执行器都会 `moveTo` 目标，能把爬拉回编制房；房内行为完全不变。
+
 ## v0.78.343 — 空房先自孵；走位途中的 worker 不再拿到空工地任务
 
 - 现场（2026-11-26 shard2 E58S26，RCL2）：认领 COMPLETE 后房内 0 只爬、

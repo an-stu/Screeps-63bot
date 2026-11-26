@@ -124,6 +124,82 @@ function makeRoom(extra = {}) {
     assert.equal(base(), 1, "RCL4+ 由 extinction / workerManager 负责");
 }
 
+// ── 4) 行为：房外的满载 worker 不许接 fillHive（它下一 tick 会自己弹掉）──
+function runLowExec(workerPos, hiveNeedsFill = true) {
+    const tasks = [];
+    const site = { id: "siteE58", structureType: "container", pos: { x: 5, y: 5, roomName: "E58S26" } };
+    const room = {
+        name: "E58S26", my: true, level: 2, spawn: [{}], tower: [],
+        controller: { id: "ctrl", ticksToDowngrade: 20000 },
+        constructionSite: [site], memory: { stationSources: {} },
+        energyAvailable: 100, energyCapacityAvailable: 300,
+        hashCode: () => 0, isDownGrade: () => false,
+        find: () => [],
+        getEnergyCapacityAvailable: () => 300,
+        creeps: role => (role === "worker" ? [worker] : []),
+    };
+    const worker = {
+        pos: { roomName: workerPos },
+        store: { energy: 350 },
+        storeEmpty: () => false,
+        isFree: () => true,
+        addTask: task => tasks.push(...(Array.isArray(task) ? task : [task])),
+        mainRoom: () => room,
+    };
+    const sandbox = {
+        Creep: function Creep() {},
+        Game: { time: 0, map: { getRoomLinearDistance: () => 5 }, getObjectById: () => undefined },
+        Memory: {},
+        FIND_HOSTILE_CREEPS: "hostiles", FIND_MY_CREEPS: "myCreeps", FIND_FLAGS: "flags",
+        RESOURCE_ENERGY: "energy", STRUCTURE_ROAD: "road",
+        BODYPART_COST: { work: 100, carry: 50, move: 50 },
+        HelperError: { catchError: fn => fn() },
+        StrategyHighLevel: { spawnTickBudget: () => 0 },
+        StationHive: {
+            HiveNeedToFill: () => hiveNeedsFill,
+            generatorFillHiveTask: () => ({ taskName: "fillHive" }),
+            trySpawn: () => null,
+        },
+        StationSources: {
+            stationName: "stationSources", trySpawnHarKeeper() {},
+            generatorCarryEnergyTask: () => [], generatorReleaseAbleHarTask: () => ({ taskName: "harvestEnergy" }),
+        },
+        StationCarry: {
+            generatorPickTask: () => [], generatorCarryStorageEnergyTask: () => [],
+            roomMassStoreCnt: () => 0,
+        },
+        StationMineral: { generatorCarryMineralTask: () => [] },
+        StationWork: {
+            constructionNeedBuild: r => !!(r && r.constructionSite && r.constructionSite.length),
+            generatorBuildTask: () => ({ taskName: "buildConst" }),
+            getLowLevelWorkerBodyConfig: () => ["w"],
+            getMiddleLevelWorkerBodyConfig: () => ["w", "c", "m"],
+        },
+        StationUpgrade: { generatorUpgradeTask: () => ({ taskName: "upgrade" }) },
+        Utils: { getBodyEnergyNeed: () => 200 },
+        UtilsTask: { task: () => ({}) },
+        ManagerCreeps: {}, ManagerAutoPlanner: null, ManagerFlags: {},
+        _: { values: Object.values },
+        console: { log() {} },
+    };
+    sandbox.global = sandbox;
+    vm.runInNewContext(lowSource, sandbox);
+    sandbox.StrategyLowLevel.exec(room);
+    return tasks;
+}
+
+{
+    const away = runLowExec("E52S29");
+    assert.equal(away.some(t => t.taskName === "fillHive"), false,
+        "房外的爬不许接 fillHive（fillHive 见 pos.roomName 不等就 popTask，等于每 pass 空转）");
+    assert.ok(away.some(t => t.taskName === "buildConst"),
+        "房外的满载 worker 必须拿到能把它带回编制房的施工任务");
+
+    // 负对照：同一只爬在房内 ⇒ 仍是 fillHive 优先（原行为不变）
+    const inside = runLowExec("E58S26");
+    assert.equal(inside[0].taskName, "fillHive", "房内的爬仍先补 hive");
+}
+
 // ── 3) 行为：走位途中的 worker 拿到的是**编制房**的工地 ──
 {
     const tasks = [];

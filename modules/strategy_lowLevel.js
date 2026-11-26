@@ -257,12 +257,20 @@ let pro = {
             }
 
             room.creeps("worker").filter(e => !e.storeEmpty() && e.isFree()).forEach(creep => {
-                if (StationHive.HiveNeedToFill(room)) {
+                // **在房外的爬不许接 fillHive**（2026-11-26 E58S26）：`Creep.prototype.fillHive`
+                // 第二句就是 `if (this.pos.roomName !== room.name) return this.popTask()`
+                // —— 走位途中的爬每 pass 领到一次、下一 tick 立刻弹掉，编制里永远「空闲」
+                // 却又没有一条能把它带回家的任务（实测 shard2_78384441_1 在 E52S29 满载
+                // 350 能量站了 900+ tick）。施工/升级任务的执行器都会 `moveTo` 目标，
+                // 所以给它们跨房任务反而能把爬拉回编制房。
+                let outOfRoom = creep.pos && creep.pos.roomName !== room.name;
+                if (StationHive.HiveNeedToFill(room) && !outOfRoom) {
                     creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 } else if (StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
                     creep.addTask(StationWork.generatorBuildTask(creep))
                 }
                 else {
+                    // 升级任务的执行器会 `moveTo` 本房控制器 ⇒ 房外的爬也会被拉回来。
                     creep.addTask(StationUpgrade.generatorUpgradeTask(room));
                 }
             })
