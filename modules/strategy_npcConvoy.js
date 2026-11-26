@@ -283,6 +283,7 @@ const SALVAGE_HOME = "E41S32";
 const SALVAGE_ROUTE = [SALVAGE_HOME,"E40S32","E40S31",SALVAGE_ROOM];
 const SALVAGE_OUT = {shard:SALVAGE_ORIGIN,roomName:SALVAGE_ROOM,x:14,y:8};
 const SALVAGE_BACK = {shard:SALVAGE_TARGET,roomName:SALVAGE_ROOM,x:30,y:37};
+const SALVAGE_WAIT = [[11,11],[10,12],[12,11]];
 const SALVAGE_RETURN_TTL = 220;
 
 function salvageLoot(room, task) {
@@ -342,6 +343,29 @@ function salvageCross(creep, from, destination) {
     creep.execLastTask();
 }
 
+function salvageUnboost(creep,task) {
+    const room = creep.room;
+    const labs = (room.lab || []).filter(lab => lab.my && lab.isActive()
+        && !lab.cooldown && !lab._used);
+    if (!labs.length) return;
+    // Prefer the unboost container so the refunded boost goes straight into
+    // the container. Use another lab if the dedicated berth is unavailable.
+    const berth = global.StationLab?.getUnboostContainer?.(room);
+    const atBerth = berth && creep.pos.isEqualTo(berth);
+    const canUseBerth = berth && labs.some(lab => lab.pos.isNearTo(berth));
+    if (canUseBerth && !atBerth && !room._salvageBerthClaimed
+        && !berth.pos.lookFor(LOOK_CREEPS).length) {
+        room._salvageBerthClaimed = true;
+        return moveLocal(creep,berth,0);
+    }
+    const target = labs.find(lab => creep.pos.isNearTo(lab));
+    if (!target) return moveLocal(creep,creep.pos.findClosestByRange(labs) || labs[0],1);
+    if (target.unboostCreep(creep) === OK) {
+        target._used = true;
+        task.unboostAt = Game.time;
+    }
+}
+
 function salvageReturn(creep,task) {
     task.returning = true;
     if (Game.shard.name === SALVAGE_TARGET && creep.room.name === SALVAGE_ROOM) {
@@ -349,19 +373,32 @@ function salvageReturn(creep,task) {
     }
     if (Game.shard.name !== SALVAGE_ORIGIN) return;
     if (creep.room.name !== SALVAGE_HOME) return followRoute(creep,SALVAGE_ROUTE,-1);
-    const amount = creep.store[task.resource] || 0;
+    // Unload before changing carry capacity, including any refunded boost
+    // picked up on the way out. Only the actual loot counts as delivered.
+    const resource = creep.store[task.resource] > 0 ? task.resource
+        : Object.keys(creep.store).find(key => typeof creep.store[key] === "number" && creep.store[key] > 0);
+    const amount = creep.store[resource] || 0;
     if (amount) {
-        const target = [creep.room.storage,creep.room.terminal].find(o => o?.my && o.store.getFreeCapacity(task.resource) > 0);
+        const target = [creep.room.storage,creep.room.terminal].find(o => o?.my && o.store.getFreeCapacity(resource) > 0);
         if (!target) return;
-        const deliver = Math.min(amount,target.store.getFreeCapacity(task.resource));
-        const result = creep.transfer(target,task.resource,deliver);
+        const deliver = Math.min(amount,target.store.getFreeCapacity(resource));
+        const result = creep.transfer(target,resource,deliver);
         if (result === ERR_NOT_IN_RANGE) moveLocal(creep,target,1);
-        else if (result === OK) task.delivered = (task.delivered || 0) + deliver;
+        else if (result === OK && resource === task.resource) task.delivered = (task.delivered || 0) + deliver;
         return;
+    }
+    if (creep.body.some(part => part.boost)) return salvageUnboost(creep,task);
+    if (task.unboostAt && !task.checkedBoostDrop) {
+        // Containers catch the refund automatically. Pick up any overflow
+        // (or the refund from a fallback lab on an ordinary tile).
+        const drop = creep.pos.lookFor(LOOK_RESOURCES).find(r => r.resourceType === CARGO_BOOST && r.amount > 0);
+        task.checkedBoostDrop = true;
+        if (drop && creep.pickup(drop) === OK) return;
     }
     const cfg = Memory.npcConvoySalvage;
     if (cfg?.id === task.id && task.slot !== "scout") {
         (cfg.finished || (cfg.finished = {}))[task.slot] = task.delivered || 0;
+        if (task.unboostAt) (cfg.unboosted || (cfg.unboosted = {}))[task.slot] = Game.time;
     }
     creep.popTask().addTask(UtilsTask.taskData("recycleCreep"));
 }
@@ -384,8 +421,10 @@ Creep.prototype.npcConvoySalvage = function () {
         if (this.room.name !== SALVAGE_ROOM) return followRoute(this,SALVAGE_ROUTE,1);
         if (scout || cfg.ready?.available.includes(task.slot)) return salvageCross(this,SALVAGE_OUT,SALVAGE_TARGET);
         if (cfg.ready) return salvageReturn(this,task);
-        const wait = new RoomPosition(10,10,SALVAGE_ROOM);
-        if (!this.pos.inRangeTo(wait,2)) moveLocal(this,wait,2);
+        const slot = SALVAGE_WAIT[task.cargo.indexOf(task.slot)];
+        if (!slot) return salvageReturn(this,task);
+        const wait = new RoomPosition(slot[0],slot[1],SALVAGE_ROOM);
+        if (!this.pos.isEqualTo(wait)) moveLocal(this,wait,0);
         else if (!cfg.staged?.[task.slot]) (cfg.staged || (cfg.staged = {}))[task.slot] = Game.time;
         return;
     }

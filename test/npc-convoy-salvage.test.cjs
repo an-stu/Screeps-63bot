@@ -24,7 +24,9 @@ function makePos(x, y, roomName) {
             const p = other.pos || other;
             return Math.max(Math.abs(this.x - p.x), Math.abs(this.y - p.y)) <= range;
         },
-        isEqualTo(other) { return this.x === other.x && this.y === other.y; },
+        isNearTo(other) { return this.inRangeTo(other, 1); },
+        isEqualTo(other) { const p = other.pos || other; return this.x === p.x && this.y === p.y; },
+        lookFor() { return []; },
         getDirectionTo() { return 3; },
         findClosestByRange() { return {x: 49, y: 25, roomName: this.roomName}; },
     };
@@ -45,6 +47,14 @@ function makeTombstone(name, amount = 1000) {
     return {id: `tomb-${name}`, creep: {name}, store: {[resource]: amount}};
 }
 
+function makeLab(id, {my = true, active = true, cooldown = 0, pos} = {}, onUnboost = () => 0) {
+    return {
+        id, my, cooldown, pos,
+        isActive: () => active,
+        unboostCreep: onUnboost,
+    };
+}
+
 function makeWorld(options = {}) {
     const spawns = [];
     const spawnRecords = [];
@@ -59,6 +69,7 @@ function makeWorld(options = {}) {
         name: homeRoomName,
         controller: {my: true, level: 8},
         storage,
+        lab: [],
         energyAvailable: options.energy ?? 10000,
         currentEnergyAvailable: options.energy ?? 10000,
         spawnedMap: {},
@@ -113,7 +124,8 @@ function makeWorld(options = {}) {
         RESOURCE_ENERGY: "energy", FIND_TOMBSTONES: "tombstones",
         FIND_HOSTILE_CREEPS: "hostiles", FIND_HOSTILE_POWER_CREEPS: "hostilePower",
         FIND_HOSTILE_STRUCTURES: "hostileStructures", FIND_STRUCTURES: "structures",
-        LOOK_STRUCTURES: "structuresLook", STRUCTURE_TOWER: "tower",
+        LOOK_STRUCTURES: "structuresLook", LOOK_RESOURCES: "resourcesLook", LOOK_CREEPS: "creepsLook",
+        STRUCTURE_TOWER: "tower",
         STRUCTURE_PORTAL: "portal", BOOSTS: boosts,
         RoomPosition: function (x, y, roomName) { return makePos(x, y, roomName); },
         Utils: {
@@ -144,6 +156,7 @@ function makeWorld(options = {}) {
                 boostRegistrations.push(data);
                 return [{taskName: "boostCreepBodyPart", data}];
             },
+            getUnboostContainer(room) { return room.unboostBerth; },
         },
         StationHive: {
             trySpawn(room, targetRoom, body, role, tasks) {
@@ -192,13 +205,14 @@ function makeCreep(ctx, {slot, shard, roomName, boosted = true, storeAmount = 0,
             ...Array.from({length: 25}, () => ({type: "carry", hits: 100, boost: boosted ? "XKH2O" : undefined})),
             ...Array.from({length: 25}, () => ({type: "move", hits: 100})),
         ];
-    const capacity = scout ? 0 : body.filter(part => part.type === "carry" && part.hits > 0)
+    const capacity = () => scout ? 0 : body.filter(part => part.type === "carry" && part.hits > 0)
         .reduce((sum, part) => sum + 50 * (part.boost ? boosts[part.type][part.boost].capacity : 1), 0);
     const store = {
         [resource]: storeAmount,
         isEmpty: () => store[resource] === 0,
-        getCapacity: () => capacity,
-        getFreeCapacity: () => capacity - store[resource],
+        getCapacity: () => capacity(),
+        getFreeCapacity: () => capacity() - Object.keys(store)
+            .filter(key => typeof store[key] === "number").reduce((sum, key) => sum + store[key], 0),
     };
     const room = roomName === salvageRoomName ? ctx.__target : ctx.Game.rooms[homeRoomName];
     const creep = {
@@ -212,11 +226,23 @@ function makeCreep(ctx, {slot, shard, roomName, boosted = true, storeAmount = 0,
         move(direction) { actions.push(["move", direction]); },
         withdraw(stash, res) {
             actions.push(["withdraw", stash.id, res]);
-            store[res] = Math.min(capacity, stash.store[res]);
+            store[res] = Math.min(capacity(), stash.store[res]);
             return ctx.OK;
         },
-        transfer(target, res, amount) { actions.push(["transfer", target, res, amount]); return ctx.OK; },
+        transfer(target, res, amount) {
+            actions.push(["transfer", target, res, amount]);
+            store[res] = Math.max(0, (store[res] || 0) - (amount ?? store[res]));
+            return ctx.OK;
+        },
+        pickup(drop) {
+            actions.push(["pickup", drop.resourceType, drop.amount]);
+            store[drop.resourceType] = (store[drop.resourceType] || 0) + drop.amount;
+            drop.amount = 0;
+            return ctx.OK;
+        },
     };
+    creep.drops = [];
+    creep.pos.lookFor = kind => kind === ctx.LOOK_RESOURCES ? creep.drops : [];
     ctx.Game.shard.name = shard;
     return {creep, task, actions, run: () => ctx.Creep.prototype.npcConvoySalvage.call(creep)};
 }
@@ -344,5 +370,88 @@ test("hauler waits for accepted scout signal, crosses only when boosted, then wi
         "hauler may withdraw only the tombstone assigned to its slot");
     fieldHauler.run();
     const returning = fieldHauler.actions.find(a => a[0] === "addTask" && a[1].expectedDestShard === "shard3");
-    assert.ok(returning, "loaded hauler must use the return portal to shard3");
+    assert.ok(returning, `loaded hauler must use the return portal to shard3: ${JSON.stringify({actions:fieldHauler.actions, cached:targetRoom._npcConvoyPortals?.map(p=>({id:p.id,x:p.pos.x,y:p.pos.y,to:p.destination?.shard}))})}`);
+});
+
+test("returning hauler unloads loot, waits for an owned active ready lab, unboosts, then recycles", () => {
+    const ctx = makeWorld();
+    const home = ctx.Game.rooms[homeRoomName];
+    const berth = {id: "unboost-berth", pos: makePos(20, 20, homeRoomName)};
+    home.unboostBerth = berth;
+    const unboostCalls = [];
+    const noOpUnboost = () => { throw new Error("ineligible lab must not be selected"); };
+    const cooling = makeLab("cooling", {pos: makePos(19, 20, homeRoomName), cooldown: 1}, noOpUnboost);
+    const inactive = makeLab("inactive", {pos: makePos(20, 19, homeRoomName), active: false}, noOpUnboost);
+    const foreign = makeLab("foreign", {pos: makePos(21, 20, homeRoomName), my: false}, noOpUnboost);
+    const ready = makeLab("ready", {pos: makePos(21, 21, homeRoomName)}, creep => {
+        unboostCalls.push(creep.name);
+        for (const part of creep.body) delete part.boost;
+        return ctx.OK;
+    });
+    home.lab = [foreign, inactive, cooling, ready];
+
+    const hauler = makeCreep(ctx, {slot: cargoNames[0], shard: "shard3", roomName: homeRoomName, storeAmount: 500});
+    hauler.task.returning = true;
+    hauler.run();
+    assert.equal(hauler.creep.store[resource], 0, "cargo unload happens before unboosting");
+    assert.equal(hauler.task.delivered, 500);
+    assert.equal(unboostCalls.length, 0);
+
+    hauler.creep.pos = makePos(10, 10, homeRoomName);
+    hauler.run();
+    const berthMove = hauler.actions.find(a => a[0] === "moveTo");
+    assert.equal(berthMove[1], berth, "the dedicated StationLab berth is preferred");
+    assert.equal(unboostCalls.length, 0, "a boosted hauler must not recycle while traveling to the berth");
+
+    hauler.creep.pos = berth.pos;
+    ready.cooldown = 1;
+    hauler.run();
+    assert.equal(unboostCalls.length, 0, "cooldown blocks unboost without triggering recycle");
+    assert.ok(hauler.creep.body.some(part => part.boost), "boost remains while every eligible lab is unavailable");
+    assert.equal(hauler.actions.some(a => a[0] === "addTask" && a[1].taskName === "recycleCreep"), false);
+
+    ready.cooldown = 0;
+    hauler.run();
+    assert.deepEqual(unboostCalls, [hauler.creep.name], "the owned active ready lab performs unboost");
+    assert.equal(cooling._used, undefined, "the previously cooling lab remains unused");
+    assert.equal(ready._used, true);
+    assert.equal(hauler.task.unboostAt, ctx.Game.time);
+    assert.equal(hauler.actions.some(a => a[0] === "addTask" && a[1].taskName === "recycleCreep"), false,
+        "do not recycle in the same snapshot that still observed boosted body parts");
+
+    hauler.run(); // next body snapshot is unboosted
+    assert.equal(hauler.creep.body.some(part => part.boost), false);
+    assert.equal(ctx.Memory.npcConvoySalvage.finished[cargoNames[0]], 500);
+    assert.equal(ctx.Memory.npcConvoySalvage.unboosted[cargoNames[0]], ctx.Game.time);
+    assert.ok(hauler.actions.some(a => a[0] === "addTask" && a[1].taskName === "recycleCreep"));
+});
+
+test("fallback unboost overflow XKH2O is delivered but not counted as recovered loot", () => {
+    const ctx = makeWorld();
+    const home = ctx.Game.rooms[homeRoomName];
+    const hauler = makeCreep(ctx, {slot: cargoNames[1], shard: "shard3", roomName: homeRoomName});
+    hauler.task.returning = true;
+    hauler.task.delivered = 400;
+    const overflow = {resourceType: "XKH2O", amount: 750};
+    hauler.creep.drops.push(overflow);
+    const fallback = makeLab("fallback", {pos: makePos(11, 10, homeRoomName)}, creep => {
+        for (const part of creep.body) delete part.boost;
+        return ctx.OK;
+    });
+    home.lab = [fallback]; // no dedicated StationLab berth: use the nearby fallback lab
+
+    hauler.run();
+    assert.equal(hauler.task.unboostAt, ctx.Game.time);
+    assert.equal(hauler.creep.body.some(part => part.boost), false);
+    assert.equal(hauler.actions.some(a => a[0] === "addTask" && a[1].taskName === "recycleCreep"), false);
+
+    hauler.run(); // pick up the XKH2O overflow from the fallback lab
+    assert.ok(hauler.actions.some(a => a[0] === "pickup" && a[1] === "XKH2O"));
+    hauler.run(); // export the boost resource without increasing loot accounting
+    const boostTransfer = hauler.actions.find(a => a[0] === "transfer" && a[2] === "XKH2O");
+    assert.ok(boostTransfer, "overflow boost mineral is returned to storage");
+    assert.equal(hauler.task.delivered, 400, "XKH2O must not count as the assigned loot resource");
+    hauler.run();
+    assert.equal(ctx.Memory.npcConvoySalvage.finished[cargoNames[1]], 400);
+    assert.ok(hauler.actions.some(a => a[0] === "addTask" && a[1].taskName === "recycleCreep"));
 });
