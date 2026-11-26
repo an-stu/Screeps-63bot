@@ -1,3 +1,12 @@
+## v0.78.340 — Invader 在场时塔优先补能
+
+- 新增 `StationTower.invaderThreat(room)`：只识别 `username == "Invader"` 的活体。
+- 低级与高级房的任务派发改为：Invader 在场时，空手 carrier 先接塔 fillRes
+  再取能，已载货 carrier/worker 先补塔再补 hive；塔任务清完后恢复原顺序。
+- 平时（无敌）仍保持 hive > 塔 > 升级容器，不改变正常经济优先级。
+- 回归：新增 tower-invader-priority，覆盖 Invader/Source Keeper/玩家负例与
+  空手、载货 carrier/worker 的顺序；worker-full-employment 保持原出口链断言。
+
 ## v0.78.339 — 本房已有小 carrier 时优先补满配 carrier，worker 让位
 
 - 配合 v0.78.338 的外矿闸门：本地已有 carrier 但都未达到满配体型时，暂停

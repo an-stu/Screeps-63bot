@@ -346,7 +346,17 @@ let pro = {
             // 内矿的能量搬运 和掉落资源
             let pickTasks = StationCarry.generatorPickTask(room, true)
             let storageTasks = StationCarry.generatorCarryStorageEnergyTask(room);
+            // Invader 在场时塔优先于 hive：空手车先接塔任务，再把取能任务压在栈顶。
+            const invaderThreat = StationTower.invaderThreat ? StationTower.invaderThreat(room) : false;
+            const fillTowerTasks = StationTower.generatorFillEnergyTasks(room);
             room.creeps("carrier").filter(e => e.storeEmpty() && e.isFree()).forEach(creep => {
+                if (invaderThreat && fillTowerTasks.length) {
+                    creep.addTask(fillTowerTasks.shift());
+                    if (carryTasks.length) creep.addTask(carryTasks.pop());
+                    else if (storageTasks.length) creep.addTask(storageTasks.shift());
+                    else creep.addTask(UtilsTask.task(creep, "carryEnergyAuto"));
+                    return;
+                }
                 if (StationHive.HiveNeedToFill(room)) {
                     // hive 是第一优先级：空手 carrier 先取容器（keeper 新挖的
                     // 新鲜能量，认领表已防重复），容器没货再取 storage 兜底
@@ -391,11 +401,14 @@ let pro = {
                 }
             })
 
-            // Hive > 塔 > 升级容器。先给塔派单，避免每轮提前预留升级搬运把塔饿住。
+            // 平时 Hive > 塔 > 升级容器；Invader 在场时塔 > Hive > 升级容器。
             // 临近降级仍由 assignDowngradeProtection 保留直接升级的 worker。
-            const fillTowerTasks = StationTower.generatorFillEnergyTasks(room);
             let upgradeConsidered = false;
             room.creeps("carrier").filter(e => !e.storeEmpty() && e.isFree()).forEach(creep => {
+                if (invaderThreat && fillTowerTasks.length) {
+                    creep.addTask(fillTowerTasks.shift());
+                    return;
+                }
                 if (StationHive.HiveNeedToFill(room)) {
                     creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                     return;
@@ -419,7 +432,9 @@ let pro = {
             });
 
             workers.filter(e => !e.storeEmpty() && e.isFree()).forEach(creep => {
-                if (StationHive.HiveNeedToFill(room)) {
+                if (invaderThreat && fillTowerTasks.length) {
+                    creep.addTask(fillTowerTasks.shift());
+                } else if (StationHive.HiveNeedToFill(room)) {
                     creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 } else if (StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
                     creep.addTask(StationWork.generatorBuildTask(creep));

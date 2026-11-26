@@ -269,7 +269,8 @@ function mkRoom({ workers, carriers = [], storageEnergy = 98671, fillTowerTasks,
 {   // ── ⑨ 源码 pin：出口链顺序、栈配对、迟滞、豁免、carrier 缓存 ──────────
     const code = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
     const iFetch = code.indexOf("pro.workerHasConsumer(room, creep)");
-    const iTower = code.indexOf("creep.addTask(towerFillTasks.shift())");
+    // 正常房的出口链从「取能」之后开始；Invader 分支在取能前会另有一条塔优先出口。
+    const iTower = code.indexOf("creep.addTask(towerFillTasks.shift())", iFetch);
     const iShuttle = code.indexOf("creep.addTask(idleShuttleTasks.pop())");
     const iRecycle = code.indexOf("creep.addTask([UtilsTask.taskData(\"recycleCreep\")])");
     assert.ok(iFetch > 0 && iTower > iFetch && iShuttle > iTower && iRecycle > iShuttle,

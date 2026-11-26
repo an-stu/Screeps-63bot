@@ -329,6 +329,8 @@ let pro = {
         // 1200~75% 区间归 worker，靠 room.used 每 tick 去重不撞车。
         let towerFillTasks = room._fillTowerTasks !== undefined ? room._fillTowerTasks
             : (global.StationTower ? StationTower.generatorFillEnergyTasks(room) : []);
+        let invaderThreat = global.StationTower && StationTower.invaderThreat
+            ? StationTower.invaderThreat(room) : false;
         let idleShuttleTasks = StationSources.generatorCarryEnergyTask(room, 1200);
         room.creeps("worker").filter(e => e.memory.tasks.length <= 1).forEach(creep => { // 优先 unboost 回收t2
             if (creep.ticksToLive < 80 && creep.memory.needUnboost === undefined)
@@ -338,6 +340,9 @@ let pro = {
             if (creep.storeEmpty()) {
                 if (creep.ticksToLive < 80 && creep.memory.needUnboost === undefined) {
                     pro.unboostWorker(room, creep)
+                } else if (invaderThreat && towerFillTasks.length) {
+                    creep.addTask(towerFillTasks.shift());
+                    pro.attachPickupForEmptyFill(creep, StorageCarryEnergyTasks);
                 } else if (StorageCarryEnergyTasks.length > 0 && pro.workerHasConsumer(room, creep)) {
                     // 没有下家就别去 storage 取：取了只能站着（见 workerHasConsumer）
                     // 修墙配对（0.78.220，用户「怎么又在挂机」）：墙缺口存在时把
@@ -380,8 +385,10 @@ let pro = {
                     if (pro.shouldRecycleIdleWorker(room, creep)) creep.addTask([UtilsTask.taskData("recycleCreep")]);
                 }
             } else {
-                // hive 需要能量时 worker 自己优先填 spawn/extension（不依赖 carrier）
-                if (StationHive.HiveNeedToFill(room)) {
+                // Invader 在场时，已载货 worker 也先补塔；平时才 hive > 工地 > 修墙 > 升级。
+                if (invaderThreat && towerFillTasks.length) {
+                    creep.addTask(towerFillTasks.shift());
+                } else if (StationHive.HiveNeedToFill(room)) {
                     creep.addTask(StationHive.generatorFillHiveTask(room, creep));
                 } else if (StationWork.constructionNeedBuild(creep.mainRoom()) && !room.isDownGrade()) {
                     creep.addTask(StationWork.generatorBuildTask(creep))
@@ -531,13 +538,21 @@ let pro = {
         let freeCarries = room.creeps("carrier").filter(e => e.isFree() && e.storeEmpty());
         let fillTowerTasks = StationTower.generatorFillEnergyTasks(room)
         room._fillTowerTasks = fillTowerTasks; // 同 pass 的 workerManagerAfterCarrier 复用，免得算两遍
+        let invaderThreat = StationTower.invaderThreat ? StationTower.invaderThreat(room) : false;
         let StorageCarryEnergyTasks = StationCarry.generatorCarryStorageEnergyTask(room);
 
         if (StationHive.HiveNeedToFill(room)) {
-            // 已带能量的 carrier 直接填 hive
+            // Invader 在场时塔先于 hive：已载货 carrier 优先补塔，塔任务清完再填 hive。
             room.creeps("carrier").filter(e => e.isFree() && !e.storeEmpty() && !e.storeContainsEnergyOtherResType()).forEach(creep => {
-                creep.addTask(StationHive.generatorFillHiveTask(room, creep));
+                if (invaderThreat && fillTowerTasks.length) creep.addTask(fillTowerTasks.shift());
+                else creep.addTask(StationHive.generatorFillHiveTask(room, creep));
             });
+            // 空手 carrier 在 Invader 威胁下也先服务塔（取能任务压在塔 fillRes 之后）。
+            while (invaderThreat && fillTowerTasks.length && freeCarries.length) {
+                let creep = freeCarries.pop();
+                creep.addTask(fillTowerTasks.shift());
+                pro.attachPickupForEmptyFill(creep, StorageCarryEnergyTasks);
+            }
             // 空手 carrier：只派够填 hive 缺口的数量；但至少留一只给塔
             let hiveFree = room.energyCapacityAvailable - room.getEnergyAvailable();
             // 只有至少 2 只空闲 carrier 时才预留 1 只给塔；只剩 1 只时

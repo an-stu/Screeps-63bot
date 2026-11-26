@@ -191,6 +191,13 @@ let pro={
         }
         pro.lastUpdateMap[room.name] -= 1
     },
+    /** 房间当前是否有 Invader 活体（用户 2026-11-26：有敌时塔优先补能）。 */
+    invaderThreat(room) {
+        if (!room) return false;
+        let hostiles = room.getHostileCreeps
+            ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
+        return (hostiles || []).some(c => c && c.owner && c.owner.username == "Invader");
+    },
     generatorFillEnergyTasks(roomName){
         let room = Game.rooms[roomName.name||roomName]
         return room.tower.filter(e=>e.store[RESOURCE_ENERGY]+(room.used&&room.used[e.id]||0)<=600).map(e=>
