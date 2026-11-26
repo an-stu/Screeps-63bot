@@ -56,7 +56,7 @@ function runLowEnergyRoom({workers = [], hiveNeedsFill = false, sites, downgrade
         memory: {stationSources: {}},
         hashCode: () => 0,
         getEnergyCapacityAvailable: () => 300,
-        find: () => [],
+        find: type => (type === "myCreeps" ? workers : []),
         creeps(role) {
             if (role === "worker") return workers;
             if (role === "carrier") return [];
@@ -71,7 +71,9 @@ function runLowEnergyRoom({workers = [], hiveNeedsFill = false, sites, downgrade
         Game: {time: 0, getObjectById: () => undefined},
         Memory: {crossShardBuilds: {}},
         FIND_HOSTILE_CREEPS: "hostiles",
+        FIND_MY_CREEPS: "myCreeps",
         FIND_FLAGS: "flags",
+        HelperError: {catchError: fn => fn()},
         STRUCTURE_ROAD: "road",
         RESOURCE_ENERGY: "energy",
         StationHive: {

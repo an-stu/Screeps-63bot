@@ -1,3 +1,21 @@
+## v0.78.343 — 空房先自孵；走位途中的 worker 不再拿到空工地任务
+
+- 现场（2026-11-26 shard2 E58S26，RCL2）：认领 COMPLETE 后房内 0 只爬、
+  hive 300/300、spawn 空闲、11 个工地、控制器 5,649 tick 一路往下掉；唯一的
+  「编制」是 4 只从 E52S29 / E54S28 走过来的援建 worker（4~9 个房间）。
+- 根因 1：`room.creeps(role)` 按 `memory.roomName` 编队 ⇒ 还在路上的爬已被算成
+  在职，`workerManager` 的 `worker+carrier == 0` 自救与低级房的应急 worker 同时
+  认为「已经有 4 只」，本房 spawn 顶着满能量空转。新增
+  `StrategyLowLevel.trySpawnLocalBootstrap`：房内 0 只己方爬 + spawn 空闲 +
+  本 tick 预算 ≥200 时自孵一只；援建爬已在相邻 1 房内则继续等；RCL4+ 与
+  `Memory.crossShardBuilds` 援建房不碰（用户政策）。
+- 根因 2：`StationWork.generatorBuildTask` 在 `creep.room` 里找工地，而调用方判的是
+  `creep.mainRoom()` ⇒ 走位途中的 worker 拿到 `[]`（`addTask([])` 是空操作），
+  实测 `shard2_78384441_1` 满载 350 能量在 E52S29 (4,25) 站了 800+ tick。
+  改为「编制房有工地就用编制房的，否则退回当前房」；RCL4+ 原位房仍是最近优先。
+- 工具侧：`check-status.py` 的降级倒计时闸线改成 `min(20,000, 该 RCL 满值 × 0.75)`。
+  E51S26（RCL2、倒计时 10,000 = 满值）此前恒被判「必须处理」。
+
 ## v0.78.342 — 外矿带 WORK 搬运爬满载道路满速
 
 - 现场（2026-11-26 shard2 外矿）：带 WORK 的搬运爬是

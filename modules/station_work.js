@@ -56,14 +56,27 @@ let pro={
     },
     stationName:"stationWork",
     generatorBuildTask(creep){
-        if (!creep.room || creep.room.level >= 4) {
-            let target=creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES)
+        // **目标房 = 编制房（memory.roomName），不是当前所在房**（2026-11-26 E58S26）。
+        // 调用方（`strategy_lowLevel`）判的是 `creep.mainRoom()` 有没有工地，旧实现却
+        // 在 `creep.room` 里找工地：走位途中的 worker（去新房的援建爬）本房没有工地
+        // ⇒ 返回 `[]` ⇒ `addTask([])` 是空操作 ⇒ 它顶着满载能量原地站到死
+        // （实测 shard2_78384441_1 在 E52S29 (4,25) 站了 800+ tick、0 任务、350 能量）。
+        // 编制房没工地 / 没视野时退回当前房，保持原行为。
+        let home = creep.mainRoom ? creep.mainRoom() : null;
+        let room = (home && home.constructionSite && home.constructionSite.length) ? home : creep.room;
+        if (!room) return [];
+        if (room.level >= 4) {
+            // 原位房维持「最近」；跨房走位时距离无意义（getRangeTo 跨房恒 Infinity），
+            // 退回清单第一项让它先走过来。
+            let target = creep.pos.roomName == room.name
+                ? creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES) : undefined
+            if (!target) target = room.find(FIND_CONSTRUCTION_SITES)[0]
             if(!target)return []
             return UtilsTask.task(target,"buildConst","registerStationBuild")
         }
         // 低 RCL：容器/spawn 是收入与产能基础设施，必须排在道路/其它工地前面。
         // 10 个工地/房的预算常被道路占满，源容器排在后面永远轮不到（E51S29 实测）。
-        let sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+        let sites = room.find(FIND_CONSTRUCTION_SITES);
         if (!sites.length) return [];
         let priority = s => (s.structureType == STRUCTURE_CONTAINER || s.structureType == STRUCTURE_SPAWN) ? 0
             : s.structureType == STRUCTURE_TOWER ? 1

@@ -115,6 +115,43 @@ let pro = {
             && room.constructionSite.every(site => site.structureType === STRUCTURE_ROAD)
             && !StationHive.HiveNeedToFill(room));
     },
+    /**
+     * 房内一只爬都没有、但**本房 spawn 有能量**时自孵一只（2026-11-26 E58S26）。
+     *
+     * 新房（认领流程 COMPLETE 之后）的第一个工人是出兵房派来的，援建爬要走过
+     * 4~9 个房间、路上几百 tick。而 `room.creeps(role)` 是按 `memory.roomName`
+     * 编队的 ⇒ 还在路上的爬已经被算成「在职」，于是：
+     *   · `workerManager` 的 `worker + carrier == 0` 自救分支不触发；
+     *   · 低级房分支的 `hasWorker` 同理（`strategy_lowLevel` 的应急 worker）；
+     *   · 采集任务派给路上的爬（它们得先走到），本房 0 收入、控制器一路衰减。
+     * 同一时间本房 spawn 顶着 300/300 的能量空转 —— spawn 的能量**只有本房能用**
+     * （能量搬不动，只能靠爬），这段产能是纯浪费。
+     *
+     * 触发条件全部取「本房真的没人」的极端值：
+     *   · 房内 0 只己方爬；编制里在路上的不算「有人」，但只要有一只已经在相邻
+     *     1 房内就继续等它（避免双份孵化）；
+     *   · spawn 没在孵、本 tick 预算 ≥ 200（最小 [WORK,CARRY,MOVE]）；
+     *   · 只救 RCL<4 的小房（大房由 `trySpawnExtinctionRescue` / `workerManager` 管）；
+     *   · 援建房（`Memory.crossShardBuilds`）跳过 —— 用户政策：援建房不本产爬。
+     */
+    trySpawnLocalBootstrap(room) {
+        if (!room || !room.my || !room.spawn || !room.spawn.length) return;
+        if ((room.level || 0) >= 4) return;
+        if (Memory.crossShardBuilds && Memory.crossShardBuilds[room.name]) return;
+        if (room.find(FIND_MY_CREEPS).length) return;
+        if (room.spawn.some(spawn => spawn.spawning)) return;
+        let budget = global.StrategyHighLevel
+            ? StrategyHighLevel.spawnTickBudget(room) : room.energyAvailable;
+        if (budget < 200) return;
+        // 援建爬已经在隔壁：再等它一程，不要双份。
+        let nearby = room.creeps("worker", false).concat(room.creeps("carrier", false))
+            .some(creep => Game.map.getRoomLinearDistance(creep.pos.roomName, room.name) <= 1);
+        if (nearby) return;
+        // 同 tick 前面的 keeper/救援尝试可能置真了这个粘滞标记。
+        room.spawnFailure = false;
+        StationHive.trySpawn(room, room.name,
+            StationWork.getMiddleLevelWorkerBodyConfig(room, budget), "worker", []);
+    },
     assignDowngradeProtection(room, workers, urgent = pro.needsDowngradeProtection(room)) {
         if (!urgent) return;
         // 优先升级只保留一只有能量的 worker；优先空闲者，必要时中断施工。
@@ -148,6 +185,10 @@ let pro = {
         if (room.spawn.length && room.find(FIND_HOSTILE_CREEPS).filter(e => e.body.filter(p => p.type != MOVE).length).length) {// 如果有敌人的爬且不是侦察兵
             if (room.creeps("lowLevelDefense").length < 3 && room.tower.length == 0) pro.trySpawnLowLevelDefense(room)
         }
+        // 全空房 + 本房 spawn 有能量 ⇒ 先自孵一只（援建爬还在路上时别让 hive 空转）。
+        // 放在防守之后、所有经济分支之前：孵化顺序上它不抢任何在岗岗位的能量 ——
+        // 触发条件就是「本房一只爬都没有」。
+        HelperError.catchError(() => pro.trySpawnLocalBootstrap(room), "localBootstrap:" + room.name);
         // if ((room.getEnergyCapacityAvailable(room) < 800 || (room.storage && !room.storage.my))) {
         if ((room.getEnergyCapacityAvailable(room) < 800 )) {
             // Creating structures from an existing blueprint is core room

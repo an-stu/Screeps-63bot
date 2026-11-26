@@ -33,10 +33,13 @@ function makeRoom({workers = [], carriers = [creep()], roomEnergy = 200, downgra
             return ({worker: workers, carrier: carriers, harvestEnergyKeeper: [objects.miner]})[role] || [];
         },
         getEnergyAvailable: () => roomEnergy, getEnergyCapacityAvailable: () => 800,
-        find: () => [], isDownGrade: () => false, hashCode: () => 0,
+        find: type => (type === "myCreeps" ? [...workers, ...carriers, objects.miner] : []),
+        isDownGrade: () => false, hashCode: () => 0,
     };
     const ctx = {
         Creep: function () {}, CARRY: "carry", RESOURCE_ENERGY: "energy", FIND_HOSTILE_CREEPS: 1,
+        FIND_MY_CREEPS: "myCreeps",
+        HelperError: {catchError: fn => fn()},
         Game: {time: 30, getObjectById: id => objects[id]}, Memory: {},
         StationSources: {stationName: "stationSources", trySpawnHarKeeper() {},
             generatorCarryEnergyTask() { carryScans++; return []; },
