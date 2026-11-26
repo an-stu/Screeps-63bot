@@ -190,7 +190,12 @@ let pro = {
                         // log(StationWork.getLowLevelWorkerBodyConfig(spawnRoom,false))
                         if (creep) creep.addTask(StationSources.generatorReleaseAbleHarTask(data))
                         else if (room.creeps("worker").length < 20 && !room.find(FIND_FLAGS).filter(e => e.getPrefix() == "claimCrossShard").length) {
-                            let spawnRoom = StationHive.getClosestSpawnRoom(room, 7, 5, 15)
+                            // **出兵房必须先养活自己**（2026-11-26）：`requireSelfSustaining`
+                            // 会跳过 worker/carrier 双零的房。实测 E51S29（RCL6）：自己
+                            // 一只爬都不剩、hive 只剩 244，仍被选作出兵房，把最后 244
+                            // 能量孵成一只外派 worker 走去 E58S26 ⇒ 再也生不出自己的
+                            // keeper（hive 14/1850），而 storage 里的 9,456 没人能搬。
+                            let spawnRoom = StationHive.getClosestSpawnRoom(room, 7, 5, 15, { requireSelfSustaining: true })
                             if (!spawnRoom) {
                                 return;
                             }

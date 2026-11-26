@@ -54,8 +54,10 @@ assert.match(sourcesSrc, /!\(global\.StationHive && StationHive\.HiveNeedToFill\
     "hive 缺能时满载 worker 不得把能量倒进容器，应直接回填 hive");
 
 // 2b2) 本地代孵按出兵房 RCL 限制：<5 一律不派
-assert.match(lowSrc, /getClosestSpawnRoom\(room, 7, 5, 15\)/,
-    "本地代孵只会选中 RCL>=5 的出兵房");
+//      并且出兵房必须自给自足（2026-11-26：0 爬的房把最后 244 能量孵成外派 worker，
+//      E51S29 因此 hive 14/1850 永久停摆）
+assert.match(lowSrc, /getClosestSpawnRoom\(room, 7, 5, 15, \{ requireSelfSustaining: true \}\)/,
+    "本地代孵只会选中 RCL>=5 且自己能养活的出兵房");
 assert.match(lowSrc, /spawnRoom\.name != room\.name && \(spawnRoom\.level \|\| 0\) < 5\) return;/,
     "出兵房 RCL<5 禁止派本地援建");
 

@@ -1,3 +1,19 @@
+## v0.78.336 — 全灭房不再永久躺死：出兵房要自给自足 + 隔壁救援
+
+- 现场（shard2 E51S29，2026-11-26 08:5x）：RCL6、单 spawn、容量 1,850，`worker / carrier /
+  keeper` 全 0，`spawnFailure` 粘滞，hive 14/1850，storage 9,456 没人搬；同一 tick 它的
+  spawn 刚把最后的 244 能量孵成一只**外派** worker（`memory.roomName=E58S26`）走去隔壁。
+- 三条自救出口同时关死：① `workerManager` 的空 hive 闸（244 < 925）② `workerHasEnergyToSpend`
+  （storage 9,456 < 10,000 地板）③ `trySpawnCarrier` 的极端自救要先造满配 carrier（300）。
+- 修法：① 出兵房必须自给自足 —— `getClosestSpawnRoom` 新增 `requireSelfSustaining`，本地代孵
+  传入后跳过 worker/carrier 双零的房；② 全灭房（三类全 0）绕过上面两条"省能量"闸门 ——
+  它们的理由是"别抢 keeper/升级爬的能量"，全灭房里没人能来抢；③ 新增
+  `trySpawnExtinctionRescue`：本房连 200 都付不起、storage/terminal ≥ 2,000 时，向自给自足
+  的隔壁房要一只最小搬运爬（150，带 `carryRes` 指向本房 storage）过来填 hive，等 keeper 接管；
+  ④ `trySpawn` 拒绝空体型（`spawnCreep([])` 只会 ERR_INVALID_ARGS 并把 `spawnFailure` 置真）。
+- 回归：`test/extinct-room-recovery.test.cjs` 覆盖全灭判定、四种负对照（hive≥200 / 已有救兵 /
+  无存量 / 无健康出兵房）、出兵房过滤（去掉过滤后测试因行为失败）与空体型不进 spawnCreep。
+
 ## v0.78.335 — 新房仅剩道路工地时，预留一只工人升 RCL2
 
 - shard2 E51S26 的首个 Spawn 建成约 3,800 tick 后仍为 RCL1、升级进度 0；三个容器已经建成，Spawn 满能，自动补充的道路工地持续压过升级派单。

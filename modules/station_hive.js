@@ -131,8 +131,17 @@ let pro = {
      * @param minRoomDistinct
      * @return {room,routeDistance}
      */
-    getClosestSpawnRoom(roomName, level = 7, minLevel = 4, minRoomDistinct = 10) {
+    getClosestSpawnRoom(roomName, level = 7, minLevel = 4, minRoomDistinct = 10, opts) {
         roomName = roomName.name || roomName
+        // `requireSelfSustaining`：出兵房得先养得活自己（worker + carrier 至少一只）。
+        //
+        // 2026-11-26 E51S29 实测：RCL6、自己 0 只爬、hive 244/1850、storage 9,456。
+        // 它仍被低等级房选作援建出兵房（L6 离得最近），把最后的 244 能量孵成一只
+        // 外派 worker 走去 E58S26 ⇒ hive 14/1850、spawnFailure 粘滞、再也生不出
+        // keeper，storage 里的能量又没人搬 ⇒ 整房彻底停摆。
+        // 只给调用方显式开启：军事/侦察等路径可能确实需要一个「没经济」的房出兵。
+        const canDonate = e => !opts || !opts.requireSelfSustaining
+            || (e.creeps("worker", false).length + e.creeps("carrier", false).length) > 0;
         if (Game.rooms[roomName] && Game.rooms[roomName].spawn.length > 0 && Game.rooms[roomName].level >= level) {// 三级一下叫隔壁的帮忙生
             return Game.rooms[roomName];
         }
@@ -154,13 +163,14 @@ let pro = {
         while (!room && level >= minLevel) {
             // e.spawn 是极致建筑缓存的类型 getter（命中缓存）；
             // e.find(FIND_MY_SPAWNS) 是原生全量扫描，15 房每档 level 扫一遍
-            room = _.values(Game.rooms).filter(e => e.my && e.spawn.length && e.level >= level)
+            room = _.values(Game.rooms).filter(e => e.my && e.spawn.length && e.level >= level && canDonate(e))
                 .map(e => [e, getDistinct(roomName, e.name)]).filter(e => e[1].length < minRoomDistinct)
                 .sort((a, b) => a[1].length - b[1].length).map(e => e[0]).head();
             level -= 1;
         }
         if (room) return room
-        else if (Game.rooms[roomName] && Game.rooms[roomName].spawn.length > 0) return Game.rooms[roomName]
+        else if (Game.rooms[roomName] && Game.rooms[roomName].spawn.length > 0
+            && canDonate(Game.rooms[roomName])) return Game.rooms[roomName]
         else return undefined
     },
     spawnAble(room) {
@@ -175,6 +185,10 @@ let pro = {
         }
         if (!room.spawnedMap) room.spawnedMap = {};
         if (room.spawnFailure) return null;
+        // 空体型 = 付不起任何一组（`getMiddleLevelWorkerBodyConfig` 在余额 < 200 时
+        // 返回 []）。`spawnCreep([])` 只会回 ERR_INVALID_ARGS，还会把 `spawnFailure`
+        // 置真挡掉本 tick 后面所有正常孵化。按「这一轮不生」处理，不写粘滞标记。
+        if (!body || !body.length) return null;
         // log(room.name,role)
         if (room.currentEnergyAvailable == undefined) room.currentEnergyAvailable = room.getEnergyAvailable();//缓存当前的能量
         Game._name_hash = (Game._name_hash || 0) + 1;//防止同一帧冲突名字

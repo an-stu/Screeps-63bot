@@ -106,6 +106,24 @@ let pro = {
             : (room.energyCapacityAvailable || 0);
         return Math.max(0, Math.min(cap, cached));
     },
+    /**
+     * 本房经济是否**全灭**：worker / carrier / keeper 三类都是 0。
+     *
+     * 这类房所有「省能量」闸门的前提都不成立 —— 它们存在的理由是「别让后台岗位
+     * 抢走 keeper / 升级爬的能量」，而全灭房里根本没有 keeper / 升级爬可抢。
+     * 纯函数，便于离线单测。
+     */
+    isEconomyExtinct(counts) {
+        if (!counts) return true;
+        return (counts.worker || 0) + (counts.carrier || 0) + (counts.keeper || 0) === 0;
+    },
+    roomEconomyCounts(room) {
+        return {
+            worker: room.creeps("worker", false).length,
+            carrier: room.creeps("carrier", false).length,
+            keeper: room.creeps("harvestEnergyKeeper", false).length,
+        };
+    },
     workerManager(room) {
         // 空 hive 保护：hive 缺口大且可用能量很低时不再生 worker，
         // 把 spawn 能量留给 keeper 和 bootstrap carrier（E53S21 教训）。
@@ -114,10 +132,19 @@ let pro = {
         // 对 cap ≤ 2,500 的 RCL5/6 房它恒真（hive 满格也只有 1,800 / 2,300），
         // 等于「hive 一缺能就永远不生 worker」，RCL6 房连自己的工地都盖不动
         // （与 2026-11-01 upgrader 那个坑同一形态，见 MEMORY 第 16 条）。
-        if (StationHive.HiveNeedToFill(room)
-            && room.energyAvailable < Math.min(2500, room.energyCapacityAvailable * 0.5)) return;
-        // 本房根本没能量可花 → 不生 worker（见 WORKER_ENERGY_FLOOR 的说明）
-        if (!pro.workerHasEnergyToSpend(room)) return;
+        //
+        // ⚠️ 但**全灭房必须让路**（2026-11-26）：下面两条闸门都是「别抢别人的能量」，
+        // 本房 worker/carrier/keeper 全为 0 时没有任何人能来抢，唯一生路就是生一只
+        // 最便宜的 worker 去挖矿。E51S29 实测（RCL6）：0 爬、hive 244、storage 9,456
+        // —— hive 闸 244 < 925、`workerHasEnergyToSpend` 因 storage 9,456 < 10,000
+        // 地板也是 false，两条一起把唯一的出口锁死。
+        let extinct = pro.isEconomyExtinct(pro.roomEconomyCounts(room));
+        if (!extinct) {
+            if (StationHive.HiveNeedToFill(room)
+                && room.energyAvailable < Math.min(2500, room.energyCapacityAvailable * 0.5)) return;
+            // 本房根本没能量可花 → 不生 worker（见 WORKER_ENERGY_FLOOR 的说明）
+            if (!pro.workerHasEnergyToSpend(room)) return;
+        }
         // **修墙爬不强化**（用户 11-03：修墙不需要满 boost，CPU 足够时用非 boost 爬，
         // 参考 Overmind —— 常规工地/修墙是后台工作，boost 化合物留给战斗与 upgrade
         // 高价值场景）。只有 isSaveCpu（少爬多活降 CPU）时才走强化路径。
@@ -131,6 +158,9 @@ let pro = {
             let boostLevel = noBoost ? -1 : (global.StationLab ? StationLab.boostAbleLevel(room, "build", partCnt, 1) : -1);
             let isBoost = !noBoost && room.creeps("carrier").length && boostLevel >= 0;
             if (LOCAL_SHARD_NAME == "6g3y-station") isBoost = false
+            // 全灭房：先解除本 tick 的粘滞标记（同 pass 里 keeper 大概率刚因付不起
+            // 置真），否则这只唯一的救命 worker 会被静默吞掉。
+            if (extinct) room.spawnFailure = false;
             let task = []
             if (isBoost) task = StationLab.generatorBoostLevelTask(room, "build", partCnt, boostLevel)
             StationHive.trySpawn(room, room.name, body, "worker", task)
@@ -935,6 +965,40 @@ let pro = {
         if (Game.shard?.name === "shard3") return Game.cpu.bucket < 5000 ? 14 : 7;
         return 5;
     },
+    /**
+     * 全灭房的外部救援：本房一只爬都没有、hive 又付不起最小体型（< 200）时，
+     * 唯一出路是让**隔壁还活着的房**孵一只小搬运爬过来，把本房 storage 的能量
+     * 填进 spawn/extension，等 hive 够了再由本房自己的 keeper 接管。
+     *
+     * 2026-11-26 E51S29 实测（RCL6）：worker/carrier/keeper 全 0、hive 14/1850、
+     * storage 9,456。`workerManager` 的两条省能量闸门都要 ≥200 或 ≥10,000 存量才放行，
+     * `trySpawnCarrier` 的极端自救又要 carrier 满配体型（300）付得起 —— 三条路同时
+     * 关死，而 storage 里明明有能量却没有任何爬能搬 ⇒ 这种房会**永久**躺着。
+     *
+     * 触发条件都取「已经无路可走」的极端值，正常房间一次都不会进：
+     *   · hive < 200（连 [WORK,CARRY,MOVE] 都付不起，本房自己不可能孵出来）；
+     *   · worker/carrier/keeper 全 0（有爬在路上也不算全灭，不重复派）；
+     *   · storage/terminal 合计 ≥ 2,000（没存量可搬，派过去也是空跑）；
+     *   · 出兵房必须自给自足（`requireSelfSustaining`）且不等于本房。
+     */
+    trySpawnExtinctionRescue(room) {
+        if (!room || !room.my || !room.spawn || !room.spawn.length) return;
+        if (room.energyAvailable >= 200) return;
+        if (!pro.isEconomyExtinct(pro.roomEconomyCounts(room))) return;
+        let stored = (room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0)
+            + (room.terminal ? (room.terminal.store[RESOURCE_ENERGY] || 0) : 0);
+        if (stored < 2000) return;
+        let donor = StationHive.getClosestSpawnRoom(room.name, 7, 4, 15, { requireSelfSustaining: true });
+        if (!donor || donor.name == room.name) return;
+        // 只派最小搬运：够把 storage 的能量一车车送进 hive，不占出兵房太多能量。
+        let body = [CARRY, CARRY, MOVE];
+        if (Utils.getBodyEnergyNeed(body) > donor.energyAvailable) return;
+        let tasks = room.storage
+            ? [UtilsTask.task(room.storage, "carryRes", undefined, { resType: RESOURCE_ENERGY })]
+            : [];
+        donor.spawnFailure = false;
+        StationHive.trySpawn(donor, room.name, body, "carrier", tasks);
+    },
     exec(room) {
         if (!MIN_CPU) pro.processPowerSpawn(room)// 每tick都要处理
         // **link 发送每 tick 执行**（0.78.190）：原来跟经济 pass 共用 %7 门槛，
@@ -971,6 +1035,10 @@ let pro = {
         // 能量生产者最优先：先补 keeper（缺矿点/死光时），否则 carrier/worker
         // 会先把空 hive 的 spawn 能量吃光，keeper 永远 spawn 失败（E53S21）。
         StationSources.trySpawnHarKeeper(room);
+        // 全灭房自救（见 trySpawnExtinctionRescue）：本房连最小体型都付不起时，
+        // 向隔壁健康房要一只搬运爬过来把 storage 的能量填进 hive。放在 keeper 之后，
+        // 因为 keeper 一旦付得起就该由本房自己解决。
+        HelperError.catchError(() => pro.trySpawnExtinctionRescue(room), "extinctRescue:" + room.name);
         // 保留者 = 外矿产量的总开关（Overmind 式顺序：先保留、后开采）。
         // 未保留的控制器让源容量减半（1500 vs 3000）；reserver 便宜且低频，
         // 但原来埋在旗循环深处抢不到单 spawn —— 提到 worker/carrier 之前，
