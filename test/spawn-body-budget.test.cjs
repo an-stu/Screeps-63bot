@@ -175,6 +175,17 @@ function mkRoom({ level = 6, cap = 2300, avail = 1500, storageEnergy = 49066, si
         "还有 worker 时 carrier 也必须满配，临时预算不得缩体型");
 }
 
+// ── ①b 已有小 carrier：worker 必须先等满配 carrier 补出来 ───────────────────
+{
+    const spawned = [];
+    const ctx = loadModules(makeCtx(spawned), ["station_carry.js", "station_work.js", "strategy_highLevel.js"]);
+    ctx.StrategyHighLevel.workerManager(mkRoom({
+        sites: 2, avail: 2300, cap: 2300, carriers: 1, workers: 0,
+    }));
+    assert.equal(spawned.filter(s => s.role == "worker").length, 0,
+        "本地只有小 carrier 时不得先孵 worker：先把满配 carrier 补出来");
+}
+
 // ── ② RCL6 / hive 1,500 / 有工地 ⇒ worker 必须派得出来且付得起 ─────────────
 {
     const spawned = [];

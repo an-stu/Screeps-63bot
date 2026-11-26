@@ -148,7 +148,19 @@ let pro = {
         // **修墙爬不强化**（用户 11-03：修墙不需要满 boost，CPU 足够时用非 boost 爬，
         // 参考 Overmind —— 常规工地/修墙是后台工作，boost 化合物留给战斗与 upgrade
         // 高价值场景）。只有 isSaveCpu（少爬多活降 CPU）时才走强化路径。
+        // 本地 carrier 已存在但还没有满配体型时，先补满配 carrier，再考虑 worker。
+        // 完全没有 carrier 的早期房仍允许 worker bootstrap，避免双零死锁。
+        let localCarrierCnt = room.creeps("carrier", false).length;
+        let bodyCost = body => (body || []).reduce((sum, part) => {
+            let type = (part && part.type) || part;
+            return sum + (typeof BODYPART_COST != "undefined" ? BODYPART_COST[type] || 0 : 50);
+        }, 0);
+        let normalCarrierCost = bodyCost(StationCarry.getCarrierBodyConfig(room));
+        let hasNormalCarrier = room.creeps("carrier", false).some(c =>
+            bodyCost(c.body) >= normalCarrierCost && normalCarrierCost > 0);
+        let holdWorkerForCarrier = localCarrierCnt > 0 && !hasNormalCarrier;
         let spawnWorker = (noBoost) => {
+            if (holdWorkerForCarrier) return;
             // 体型按「本 tick 付得起」定（见 spawnTickBudget）：按满容量算的体型在
             // hive 未满时会被 trySpawn 静默吞掉，还会把 spawnFailure 置真挡住后面的
             // carrier / 外矿补员。
@@ -166,6 +178,7 @@ let pro = {
             StationHive.trySpawn(room, room.name, body, "worker", task)
         }
         let spawnHighLevelWorker = () => {
+            if (holdWorkerForCarrier) return;
             if (!global.StationLab) return spawnWorker();
             let body = StationWork.getHighLevelWorkerBodyConfig(room);
             if (Utils.getBodyEnergyNeed(body) > pro.spawnTickBudget(room)) return;

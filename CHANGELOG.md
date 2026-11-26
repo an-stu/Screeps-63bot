@@ -1,3 +1,11 @@
+## v0.78.339 — 本房已有小 carrier 时优先补满配 carrier，worker 让位
+
+- 配合 v0.78.338 的外矿闸门：本地已有 carrier 但都未达到满配体型时，暂停
+  worker 孵化，让同一 pass 后面的 carrier 分支先拿到 spawn，避免“小 carrier
+  永远补不满 → 外矿永久暂停”的死锁。
+- 完全没有 carrier 的早期房仍允许 worker 启动链；carrier 补齐后 worker 恢复。
+- 回归：spawn-body-budget 新增「小 carrier 存在时 worker 不得抢先孵化」用例。
+
 ## v0.78.338 — 外矿派发让位于本房核心 keeper/carrier
 
 - 用户 2026-11-26：外矿优先级低，本房必须先有至少 1 只正常体型的 home keeper
