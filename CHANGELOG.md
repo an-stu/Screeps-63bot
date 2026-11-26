@@ -1,3 +1,14 @@
+## v0.78.342 — 外矿带 WORK 搬运爬满载道路满速
+
+- 现场（2026-11-26 shard2 外矿）：带 WORK 的搬运爬是
+  `2 WORK + 2T CARRY + T MOVE`，满载后道路每格疲劳 = `2T + 2`（WORK 也算
+  重量），而 MOVE 只能抵消 `2T` ⇒ 每格固定残留 2 点，永远 2 tick 走一格。
+- 体型改为把最后一组 `[CARRY,CARRY,MOVE]` 换成 `[CARRY,MOVE,MOVE]`：
+  `2T-1 CARRY + T+1 MOVE + 2 WORK`，满载疲劳 `2T+1` ≤ MOVE 抵消 `2T+2`；
+  造价与部件数不变，满编 31 CARRY + 17 MOVE + 2 WORK = 50 部件 / 1550 容量。
+- `outerCarrierTripCapacity` 自动跟随实际体型：RCL6 出兵房 550、RCL8 1550；
+  配额测试与 edge-link 体型测试同步更新，并新增“满载含 WORK 重量”的满速断言。
+
 ## v0.78.341 — Invader 塔优先支持抢占旧任务
 
 - 现场 E51S29（2 Invader、双塔 0）验证发现：carrier 若还有入侵前领取的

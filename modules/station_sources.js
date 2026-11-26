@@ -1994,18 +1994,29 @@ let pro = {
         return body;
     },
     /**
-     * 修路爬（前缀 2 个 WORK + 同样的 2:1 组）。
+     * 修路爬（前缀 2 个 WORK + 搬运组）。
      *
      * **部件数必须 ≤ 50**：上一版写的是 `floor(maxPart / 2)` 组 → 2 + 25×3 = 77
      * 部件，spawnCreep 直接 ERR_INVALID_ARGS，修路爬一只也生不出来（路坏了没人修）。
-     * 现在最多 16 组 = 2 + 48 = 50 部件（32 CARRY + 16 MOVE + 2 WORK，容量 1600）。
+     * 现在最多 16 组 = 2 + 48 = 50 部件（31 CARRY + 17 MOVE + 2 WORK，容量 1550）。
+     *
+     * **满载道路满速必须把 WORK 也称进去**：道路每格疲劳 = WORK + 已装 CARRY，
+     * MOVE 每部件只抵 2 点。原体型 T 组全是 `[CARRY,CARRY,MOVE]`（2T CARRY +
+     * T MOVE + 2 WORK），满载疲劳 = 2T+2 > 2T ⇒ 每格多剩 2 点、固定 2 tick 走
+     * 一格（用户 2026-11-26 实车发现）。现在把最后一组的第二个 CARRY 换成 MOVE：
+     * `[CARRY,MOVE,MOVE]`，即 2T-1 CARRY + T+1 MOVE + 2 WORK，载荷重量 2T+1，
+     * 2×(T+1) = 2T+2 ≥ 2T+1，刚好多 1 点余量；成本与部件数完全不变，只少 50
+     * 容量（31×50 = 1550）。
      */
     getOuterHarCarrierBuildBodyConfig(energy, maxPart) {
         let triples = Math.min(Math.floor((maxPart - 2) / 3), 16);
         while (triples > 1 && triples * (BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE])
             + BODYPART_COST[WORK] * 2 > energy) triples--;
         let body = [WORK, WORK];
-        for (let i = 0; i < triples; i++) body.push(CARRY, CARRY, MOVE);
+        for (let i = 0; i < triples; i++) {
+            if (i == triples - 1) body.push(CARRY, MOVE, MOVE);
+            else body.push(CARRY, CARRY, MOVE);
+        }
         return body;
     },
     /**
@@ -4116,7 +4127,7 @@ let pro = {
      * `OUTER_CARRIER_TRIP`(1700) 描述的是**满编 50 部件**（34 CARRY）的运力，
      * 而补员实际用的体型由 `bodyBudget = min(floor(hiveCap*0.5), max(spawnAvail,550))`
      * 决定：RCL6 出兵房（hiveCap 2,300）只给 1,150 ⇒ `getOuterHarCarrierBodyConfig(1150)`
-     * 出 14 CARRY / 7 MOVE = **700**，修路版（2 WORK）更小 = **600**。两者差 2.4~2.8 倍。
+     * 出 14 CARRY / 7 MOVE = **700**，修路版（2 WORK）更小 = **550**。两者差 2.4~2.8 倍。
      *
      * 拿 1700 折算配额，等于把「这批货要几只车」少算近 3 倍 —— 而配额正是
      * `outerMineStarvesSpawnRoom` 的自锁豁免（主房穷时唯一还允许补员的路径），

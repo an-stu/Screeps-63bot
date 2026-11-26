@@ -169,12 +169,21 @@ function makeStore(contents, capacity) {
     }
 
     const builder = S.getOuterHarCarrierBuildBodyConfig(12900, 50);
-    const bcnt = part => builder.filter(p => p === part).length;
+    const bcnt = body => part => body.filter(p => p === part).length;
     assert.equal(builder.length, 50, "修路爬也必须是 50 部件（旧版 77 部件根本生不出来）");
-    assert.equal(bcnt(CONSTANTS.WORK), 2, "修路爬前缀 2 个 WORK");
-    assert.equal(bcnt(CONSTANTS.CARRY) + bcnt(CONSTANTS.MOVE) + 2, 50);
-    assert.ok(bcnt(CONSTANTS.MOVE) * 2 >= bcnt(CONSTANTS.CARRY),
-        "2:1 的 MOVE 数必须撑得住满货道路速度（恢复 = 2×MOVE ≥ 载重 CARRY 数）");
+    assert.equal(bcnt(builder)(CONSTANTS.WORK), 2, "修路爬前缀 2 个 WORK");
+    assert.equal(bcnt(builder)(CONSTANTS.CARRY), 31, "满载满速版 31 CARRY = 1550 容量");
+    assert.equal(bcnt(builder)(CONSTANTS.MOVE), 17, "17 MOVE 才能抵消 31 CARRY + 2 WORK 的道路疲劳");
+    assert.equal(bcnt(builder)(CONSTANTS.CARRY) + bcnt(builder)(CONSTANTS.MOVE) + 2, 50);
+    assert.ok(bcnt(builder)(CONSTANTS.MOVE) * 2 >= bcnt(builder)(CONSTANTS.CARRY) + bcnt(builder)(CONSTANTS.WORK),
+        "满载道路满速必须把 WORK 自重一起算：2×MOVE ≥ CARRY + WORK（每格疲劳 = 非 MOVE 部件数）");
+    for (const budget of [250, 600, 1150, 2300, 12900]) {
+        const body = S.getOuterHarCarrierBuildBodyConfig(budget, 50);
+        const cnt = bcnt(body);
+        assert.ok(cnt(CONSTANTS.MOVE) * 2 >= cnt(CONSTANTS.CARRY) + cnt(CONSTANTS.WORK),
+            "预算 " + budget + " 的修路爬也必须满载道路满速，实得 "
+            + JSON.stringify({ work: cnt(CONSTANTS.WORK), carry: cnt(CONSTANTS.CARRY), move: cnt(CONSTANTS.MOVE) }));
+    }
 
     // 低等级房（能量上限低）按能量收缩，不能算出付不起的体型
     const small = S.getOuterHarCarrierBodyConfig(600, 50);

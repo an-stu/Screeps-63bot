@@ -6,7 +6,7 @@
  *   此时唯一还能补员的路径是「按存货配额豁免」，而配额写死按满编一趟 1,700 折：
  *     容器 2000/2000 + 容器格溢出 ⇒ floor(2000/1700) = **1 只/矿点**
  *   可这个 RCL6 房被 `min(floor(hiveCap*0.5), ...)` 夹到预算 1,150，实孵的是
- *   `{2 WORK, 12 CARRY, 7 MOVE}` = **600 运力**（修路版），另一版也只有 700。
+ *   `{2 WORK, 11 CARRY, 7 MOVE}` = **550 运力**（修路版），另一版也只有 700。
  *   ⇒ 1 只 600 的车对 13.3/tick 产出、114 tick 往返，吞吐只有 5.3/tick，
  *     容器永远满、keeper 手里 50 能量塞不下、源只出 10/tick（应 26.7）。
  *     `__outerWhy=starves+mineQ1>=1@27,29` 就是这个自锁。
@@ -86,22 +86,22 @@ function makeStore(contents, capacity) {
     };
 }
 
-// ── ① RCL6 出兵房：预算 = floor(2300*0.5) = 1150，实孵 600 运力（修路版）────
+// ── ① RCL6 出兵房：预算 = floor(2300*0.5) = 1150，实孵 550 运力（修路版）────
 {
     const ctx = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx);
     const S = ctx.StationSources;
 
     const rcl6 = { name: "W26N58", my: true, level: 6, energyCapacityAvailable: 2300 };
-    assert.equal(S.outerCarrierTripCapacity(rcl6), 600,
-        "RCL6 出兵房实孵 {2WORK,12CARRY,7MOVE} = 600 运力（不是满编 1700）");
+    assert.equal(S.outerCarrierTripCapacity(rcl6), 550,
+        "RCL6 出兵房实孵 {2WORK,11CARRY,7MOVE} = 550 运力（不是满编 1700）");
 
     // 体型侧的同源校验：预算 1150 下真实孵出的 CARRY 数 × 50 必须等于上面的容量
     const budget = Math.floor(2300 * 0.5);
     const plain = S.getOuterHarCarrierBodyConfig(budget, 50);
     const build = S.getOuterHarCarrierBuildBodyConfig(budget, 50);
     const carriage = b => b.filter(p => p === CONSTANTS.CARRY).length;
-    assert.equal(Math.min(carriage(plain), carriage(build)) * 50, 600,
+    assert.equal(Math.min(carriage(plain), carriage(build)) * 50, 550,
         "配额口径必须与 getOuterHarCarrier*BodyConfig 的实际体型同源（MEMORY 第 7 条）");
 
     // ── ② 负对照：同一个满容器，按 1700 折只配 1 只（旧行为），按真实运力要 3 只 ──
@@ -109,13 +109,13 @@ function makeStore(contents, capacity) {
     const oldQuota = Math.floor(waiting / 1700); // = 1（旧写法）
     const newQuota = Math.floor(waiting / S.outerCarrierTripCapacity(rcl6)); // = 3
     assert.equal(oldQuota, 1, "旧写法下 2000 存货只配 1 只车（就是现场那个自锁）");
-    assert.equal(newQuota, 3, "按 600 运力算，2000 存货该配 3 只");
+    assert.equal(newQuota, 3, "按 550 运力算，2000 存货该配 3 只");
     assert.ok(newQuota > oldQuota, "真实运力更小 ⇒ 配额必须更大（改回去这里就失败）");
 
     // ── ③ RCL8 大房不受影响：体型本来就接近满编，配额基本不变 ──
     const rcl8 = { name: "W33N55", my: true, level: 8, energyCapacityAvailable: 12900 };
-    assert.equal(S.outerCarrierTripCapacity(rcl8), 1600,
-        "RCL8 房预算 6450 ⇒ 修路版 32 CARRY = 1600（接近满编，不是 1700 也不是 600）");
+    assert.equal(S.outerCarrierTripCapacity(rcl8), 1550,
+        "RCL8 房预算 6450 ⇒ 修路版 31 CARRY = 1550（接近满编，不是 1700 也不是 550）");
     assert.equal(Math.floor(6000 / S.outerCarrierTripCapacity(rcl8)), 3,
         "6000 存货在 RCL8 房仍是 3 只（与改前一致，不动大房行为）");
 
