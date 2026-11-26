@@ -935,6 +935,7 @@ function defenceGateFixture(defenders) {
     ctx2.StationHive.trySpawn = (room, name, body, role) => { spawned.push(role); return "c"; };
     const spawnRoom = {
         name: "W33N55", my: true, spawnFailure: false, level: 8,
+        energyAvailable: 12900, currentEnergyAvailable: 12900,
         creeps: () => new Array(8).fill({}),       // 已经 8 只：旧上限下必然被早返回挡住
         memory: {}, getEnergyCapacityAvailable: () => 12900,
     };

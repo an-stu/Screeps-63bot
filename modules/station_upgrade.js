@@ -10,6 +10,8 @@ let MAX_GCL = 150;
  */
 let UPGRADER_REPLACE_PRESPAWN = 50;
 let CONTROLLER_SIGN_VERSION = 2;
+/** 低库存时只有控制器进入该降级余量内才允许继续孵 upgrader。 */
+const UPGRADER_LOW_STOCK_DOWNGRADE_TICKS = 5000;
 /**
  * 控制器签名「签不住」时的冷却窗口（tick）。
  *
@@ -759,6 +761,17 @@ let pro = {
         // 容器被拆/退化时，只要升级 link 还在，upgradeKeeper 仍能取能量升级；
         // 只有 container 和 link 都没了才放弃本 tick，等 stationUpgrade.update 重建。
         if (!Game.getObjectById(sm["container"]) && !Game.getObjectById(sm["link"])) return;
+
+        // 能量库存闸（用户 2026-11-26）：storage 低于本 RCL 的安全库存时不再孵
+        // 新 upgrader，避免把 hive/施工/防守的救命能量抽去升级。只有控制器真的
+        // 快降级（<5000 tick）才破例；在位 upgrader 仍照常工作，不受此闸影响。
+        if (room.storage) {
+            let stockFloor = Math.max(0, (room.level - 3.5) * 10000);
+            let stock = room.storage.store[RESOURCE_ENERGY] || 0;
+            let downgradeUrgent = room.controller.ticksToDowngrade !== undefined
+                && room.controller.ticksToDowngrade < UPGRADER_LOW_STOCK_DOWNGRADE_TICKS;
+            if (stock < stockFloor && !downgradeUrgent) return;
+        }
 
         // let creeps = sm["creeps"].map(e=>Game.getObjectById(e)).filter(e=>e&&e.ticksToLive) // 清理两个爬重叠
         // creeps.forEach(a=>{

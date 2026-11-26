@@ -4553,8 +4553,13 @@ let pro = {
                 // 结果外矿双容器 4,000 满 + 地面 3,161 堆着没人搬。
                 // 夹到 50% 后 900 就能孵：keeper 孵完 hive 从 0 按 20/tick 回填，
                 // 45 tick 就够，窗口密度高一个量级。体型小→多跑几趟，比「根本不出车」强。
-                let bodyBudget = Math.min(Math.floor(hiveCap * 0.5),
-                    Math.max(spawnAvail, 550));
+                // 正常外矿搬运按出兵房容量等满配；临时低能量不再缩成 6C3M 小爬。
+                // 只有 worker+carrier 双缺的极端阶段才保留 550 档救急体型。
+                let depleted = !spawnRoom.creeps("worker", false).length
+                    && !spawnRoom.creeps("carrier", false).length;
+                let bodyBudget = depleted
+                    ? Math.min(Math.floor(hiveCap * 0.5), Math.max(spawnAvail, 550))
+                    : hiveCap;
                 // ⚠️ 这里原先是 `CarryPartCnt > 0 && !isNearToAny`：只要**有一只搬运贴在容器边上**
                 // 就不再补员。而 `CarryPartCnt` 本身已经把现有车队的 CARRY 减掉了，剩下的正缺口
                 // 才是要补的量 —— 用「有没有车贴着容器」再挡一次，等于把「车在装卸」误判成
@@ -4567,6 +4572,13 @@ let pro = {
                     let carrierBody = carrierBuildCreep ?
                         pro.getOuterHarCarrierBodyConfig(bodyBudget, maxPart)
                         : pro.getOuterHarCarrierBuildBodyConfig(bodyBudget, maxPart) // 如果没修路的造一个
+                    // 非救急阶段付不起满配就等 hive 回充，绝不再产 450 能量的 9 部件小爬。
+                    let carrierCost = 0;
+                    for (let part of carrierBody)
+                        carrierCost += (typeof BODYPART_COST != "undefined" ? BODYPART_COST[part] || 0 : 50);
+                    if (carrierCost > spawnAvail) {
+                        why("wait:fullCarrier" + carrierCost + ">" + spawnAvail);
+                    } else {
                     let tasks = pro.generatorOuterHarCarryTask(data)
                     // `StationHive.trySpawn` 开头就是 `if (room.spawnFailure) return null`，
                     // 而这个标记的含义只是「本 tick 有过一次孵化尝试失败」——本房 keeper 付不起、
@@ -4584,6 +4596,7 @@ let pro = {
                     // 体型而实际只剩 100 能量，白丢一个 pass。
                     spawnRoom.spawnFailure = false;
                     StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestEnergyCarrier", tasks)
+                    }
                 }
                 // 路没修完时再补专职修路的 carrier。
                 //

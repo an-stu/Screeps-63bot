@@ -1,3 +1,14 @@
+## v0.78.337 — 低库存暂停 upgrader；外矿 carrier 非救急不再缩体型
+
+- 用户 2026-11-26：能量库存太低时不要孵 upgrader，除非控制器快降级。
+  `spawnUpgrader` 新增 storage 安全库存线 `(RCL-3.5)×10000`（RCL6=25k），
+  低于该线且降级余量 ≥5000 tick 时不孵化；在位 upgrader 照常工作。
+- 现场 E51S29 发现正在孵 9 部件外矿应急 carrier（6C3M/450 能量）：外矿 carrier
+  仍按 `max(当前能量,550)` 缩体型。现改为正常阶段按出兵房容量等满配，付不起就等；
+  只有 worker+carrier 同时为零才保留 550 档救急体型。
+- 回归：upgrader-affordable-body 新增低库存禁止/临近降级破例用例；
+  core-profile、edge-link 等测试更新到新预算口径。
+
 ## v0.78.336 — 全灭房不再永久躺死：出兵房要自给自足 + 隔壁救援
 
 - 现场（shard2 E51S29，2026-11-26 08:5x）：RCL6、单 spawn、容量 1,850，`worker / carrier /

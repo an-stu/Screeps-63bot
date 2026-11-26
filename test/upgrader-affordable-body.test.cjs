@@ -95,7 +95,7 @@ function load() {
     return { StationUpgrade: ctx.global.StationUpgrade, attempts };
 }
 
-function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, upgraders = 0 }) {
+function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, upgraders = 0, downgrade = 119965 }) {
     const creepList = Array.from({ length: upgraders }, (_, i) => ({
         id: "c" + i, memory: { role: "upgrader" }, ticksToLive: 900,
     }));
@@ -110,7 +110,7 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
         terminal: { id: "term", my: true, store: { energy: 50000 } },
         extension: Array.from({ length: 20 }, (_, i) => ({ id: "e" + i })),
         controller: {
-            id: "ctl", progress: 348023, progressTotal: 3645000, ticksToDowngrade: 119965,
+            id: "ctl", progress: 348023, progressTotal: 3645000, ticksToDowngrade: downgrade,
         },
         memory: { stationUpgrade: { creeps: [], container: "cont", link: "lnk" } },
         getEnergyCapacityAvailable() { return cap; },
@@ -123,10 +123,10 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
 {
     // ── ① 低 hive（1,000 / cap 2,300）+ storage 还不富裕：必须派，且体型付得起 ──
     //
-    // storage 20,000 < (level-3.5)*1e4 = 25,000 ⇒ 只有「0 只 upgrader」这条分支能放行，
-    // 于是这条用例正好卡在修好的那道门槛上：旧门槛 min(cap,4000)=2,300 = 要求满格。
+    // storage 30,000 已高于本 RCL 的 25,000 安全库存；此时「0 只 upgrader」分支
+    // 只受 hive 40% 门槛约束，验证低 hive 仍能孵且体型付得起。
     const { StationUpgrade, attempts } = load();
-    StationUpgrade.spawnUpgrader(mkRoom({ avail: 1000, storageEnergy: 20000 }));
+    StationUpgrade.spawnUpgrader(mkRoom({ avail: 1000, storageEnergy: 30000 }));
 
     assert.equal(attempts.length, 1,
         "0 只 upgrader + hive 1,000（cap 2,300 的 43%）必须尝试孵化："
@@ -165,6 +165,23 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
     StationUpgrade.spawnUpgrader(mkRoom({ avail: 2300, upgraders: 1 }));
     assert.equal(attempts.length, 0,
         "已经有 upgrader、storage 31,587 未达 (level-3.5)*1e4 的加编门槛，不应再派");
+}
+
+{
+    // ── ④b 库存低于安全线（RCL6=25k）且降级还远：不得孵 upgrader ───────────────
+    const { StationUpgrade, attempts } = load();
+    StationUpgrade.spawnUpgrader(mkRoom({ avail: 1000, storageEnergy: 378, downgrade: 119965 }));
+    assert.equal(attempts.length, 0,
+        "storage 378 < 25k 时不得为 upgrader 消耗 hive/施工救命能量");
+}
+
+{
+    // ── ④c 同样的低库存，但控制器快降级：必须破例孵化 ─────────────────────────
+    const { StationUpgrade, attempts } = load();
+    StationUpgrade.spawnUpgrader(mkRoom({ avail: 1000, storageEnergy: 378, downgrade: 4000 }));
+    assert.equal(attempts.length, 1,
+        "库存再低，控制器进入 5000 tick 降级余量后仍必须补 upgrader");
+    assert.ok(attempts[0].okSpawn, "破例孵化也必须付得起当前 hive");
 }
 
 {

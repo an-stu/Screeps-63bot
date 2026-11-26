@@ -130,14 +130,11 @@ assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     assert.ok(hlText.includes("economySlot(room, interval)"),
         "the ordinal-based slot helper must exist with a hashCode fallback for special/offline rooms");
 }
-// 2026-10-27：预算在「按可用能量」之上再夹一层「hive 容量的 75%」——RCL5 出兵房
-// 只有 1800 容量，满配 1800 的爬一孵就把整只 hive 抽干（掉到 109），本房与外矿补员
-// 互相饿死。两条都要在：按可用能量收缩 + 不超过 hive 的 50%（0.78.164 从 75% 收紧：
-// 1,350 的爬要求「hive 满 + spawn 空闲」同时成立，RCL5 换 keeper 期这个窗口两天
-// 只出现几次；50% 后 900 就能孵，体型小多跑几趟比「根本不出车」强）。
-assert.ok(stationSources.includes("let bodyBudget = Math.min(Math.floor(hiveCap * 0.5),")
-    && stationSources.includes("Math.max(spawnAvail, 550)"),
-    "outer carrier bodies must be sized from the energy actually available AND capped at 50% of the hive: a 2500-energy 50-part body queued against a hive holding 2000-5000 energy simply fails to spawn, and on a 1800-capacity RCL5 spawn room even a full-size body drains the hive so far that both the room and the outer mine starve");
+// 用户 2026-11-26：正常外矿 carrier 必须按出兵房容量等满配，临时低能量不得
+// 退化成 450 能量的 9 部件小爬；只有 worker+carrier 双缺才保留 550 档救急预算。
+assert.ok(/let bodyBudget = depleted[\s\S]{0,180}: hiveCap;/.test(stationSources)
+    && stationSources.includes("wait:fullCarrier"),
+    "outer carrier bodies must use the full hive capacity unless worker+carrier are both absent; otherwise wait for a full body instead of spawning a small carrier");
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
     "the road builder turn-around must use taskOutView when getOuterMineTarget falls back to a RoomPosition: UtilsTask.task requires .pos and a RoomPosition has none, so the no-vision case threw every tick");
 assert.ok(/if \(!target \|\| this\.pos\.isNearTo\(target\)/.test(stationSources),
