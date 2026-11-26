@@ -988,7 +988,8 @@ let pro = {
         let stored = (room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0)
             + (room.terminal ? (room.terminal.store[RESOURCE_ENERGY] || 0) : 0);
         if (stored < 2000) return;
-        let donor = StationHive.getClosestSpawnRoom(room.name, 7, 4, 15, { requireSelfSustaining: true });
+        let donor = StationHive.getClosestSpawnRoom(room.name, 7, 4, 15,
+            { requireSelfSustaining: true, excludeSelf: true });
         if (!donor || donor.name == room.name) return;
         // 只派最小搬运：够把 storage 的能量一车车送进 hive，不占出兵房太多能量。
         let body = [CARRY, CARRY, MOVE];

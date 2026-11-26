@@ -133,16 +133,25 @@ let pro = {
      */
     getClosestSpawnRoom(roomName, level = 7, minLevel = 4, minRoomDistinct = 10, opts) {
         roomName = roomName.name || roomName
-        // `requireSelfSustaining`：出兵房得先养得活自己（worker + carrier 至少一只）。
+        // `requireSelfSustaining`：**外派**的出兵房得先养得活自己（worker + carrier 至少一只）。
         //
         // 2026-11-26 E51S29 实测：RCL6、自己 0 只爬、hive 244/1850、storage 9,456。
         // 它仍被低等级房选作援建出兵房（L6 离得最近），把最后的 244 能量孵成一只
         // 外派 worker 走去 E58S26 ⇒ hive 14/1850、spawnFailure 粘滞、再也生不出
         // keeper，storage 里的能量又没人搬 ⇒ 整房彻底停摆。
-        // 只给调用方显式开启：军事/侦察等路径可能确实需要一个「没经济」的房出兵。
-        const canDonate = e => !opts || !opts.requireSelfSustaining
-            || (e.creeps("worker", false).length + e.creeps("carrier", false).length) > 0;
-        if (Game.rooms[roomName] && Game.rooms[roomName].spawn.length > 0 && Game.rooms[roomName].level >= level) {// 三级一下叫隔壁的帮忙生
+        //
+        // **只约束「别的房」**：`e.name == roomName`（本房给自己出兵）永远是合法的，
+        // 低等级房 0 爬时的唯一出路就是用自己的 spawn 孵——挡掉它等于自锁。
+        // `excludeSelf` 给「救援」用：救援必须来自别处，本房什么都生不出来。
+        // 两个开关都默认关闭，其余调用方的行为与改动前完全一致。
+        const selfName = roomName;
+        const canDonate = e => {
+            if (!opts || !opts.requireSelfSustaining) return true;
+            if (e.name === selfName) return !opts.excludeSelf;
+            return (e.creeps("worker", false).length + e.creeps("carrier", false).length) > 0;
+        };
+        if (Game.rooms[roomName] && Game.rooms[roomName].spawn.length > 0
+            && Game.rooms[roomName].level >= level && canDonate(Game.rooms[roomName])) {// 三级一下叫隔壁的帮忙生
             return Game.rooms[roomName];
         }
         let avoidRooms = BetterMove.getAvoidRoomsMap();

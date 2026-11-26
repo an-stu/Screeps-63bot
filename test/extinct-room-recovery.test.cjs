@@ -102,6 +102,7 @@ function fakeRoom({ name = "E51S29", level = 6, energy = 14, cap = 1850, storage
     assert.equal(tasks[0].taskName, "carryRes");
     assert.equal(tasks[0].id, "st1", "任务必须指向受灾房自己的 storage");
     assert.equal(calls.getClosest.at(-1).requireSelfSustaining, true, "出兵房必须要求自给自足");
+    assert.equal(calls.getClosest.at(-1).excludeSelf, true, "救援必须来自别处（本房什么都生不出来）");
 }
 
 // 负对照 ①：hive 付得起最小体型（≥200）⇒ 本房自己孵，不该外派求援
@@ -183,6 +184,15 @@ if (!Array.prototype.head) {
         "不带 requireSelfSustaining 时行为不变（离得最近的就选）");
     assert.equal(hive.getClosestSpawnRoom("E58S26", 5, 4, 15, { requireSelfSustaining: true }).name, "E56S29",
         "带 requireSelfSustaining 时必须跳过 worker/carrier 双零的死房");
+
+    // 自锁负对照：本房给自己出兵永远合法（低等级房 0 爬时唯一出路就是用自己 spawn 孵）
+    const selfRoom = fakeRoom({ name: "E58S26", level: 5, worker: 0, carrier: 0 });
+    Object.assign(hiveCtx.Game.rooms, { E58S26: selfRoom });
+    assert.equal(hive.getClosestSpawnRoom("E58S26", 5, 4, 15, { requireSelfSustaining: true }).name, "E58S26",
+        "0 爬的房给自己孵不能被过滤掉（否则低等级房永远起不来）");
+    assert.equal(hive.getClosestSpawnRoom("E58S26", 5, 4, 15,
+        { requireSelfSustaining: true, excludeSelf: true }).name, "E56S29",
+        "excludeSelf 只给救援用：必须换别的房");
 }
 
 // ── ③ 空体型不许进 spawnCreep ────────────────────────────────────────────────
