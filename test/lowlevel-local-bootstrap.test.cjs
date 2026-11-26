@@ -276,4 +276,129 @@ function runLowExec(workerPos, hiveNeedsFill = true) {
         "RCL4+ 原位房仍是「最近优先」（不改原有优先级）");
 }
 
+// ── 5) 行为：RCL<3 房「spawn 空闲 + hive 付得起本地体型」⇒ 自己生，别排援建队 ──
+// 现场（2026-11-26 shard2 E58S26）：2 个源、只 1 只 worker、hive 满 550、spawn 空闲
+// 1,280 tick。level 2 < 7 ⇒ `getClosestSpawnRoom` 只返回捐赠房（E51S29 RCL6），
+// 援建体型 2,000 对上捐赠房容量 2,100，`deferSpawn` 又排在他自己的经济孵化之后 ⇒
+// 结构性抢不到 spawn，而本房 550 能量一直闲着。
+function runLowExecSpawn(opts = {}) {
+    const spawned = [];
+    const deferred = [];
+    const loadedWorker = () => ({
+        pos: { roomName: "E58S26", x: 5, y: 5 },
+        store: { energy: 400 },
+        storeEmpty: () => false,
+        isFree: () => true,
+        headTask: () => null,
+        lastTask: () => ({ taskName: "buildConst", roomName: "E58S26" }),
+        addTask: () => {},
+        mainRoom: () => room,
+    });
+    const workers = opts.workers === undefined ? [loadedWorker()] : opts.workers;
+    const source = { id: "s1", roomName: "E58S26", spawnTime: 0, creeps: [] };
+    const room = {
+        name: "E58S26", my: true, level: 2,
+        spawn: opts.spawn || [{ spawning: null }],
+        tower: [],
+        controller: { id: "ctrl", ticksToDowngrade: opts.ttd === undefined ? 9000 : opts.ttd },
+        constructionSite: [{ id: "siteE58", structureType: "road", pos: { x: 5, y: 5, roomName: "E58S26" } }],
+        memory: { stationSources: { s1: source } },
+        energyAvailable: opts.energyAvailable === undefined ? 550 : opts.energyAvailable,
+        energyCapacityAvailable: 550,
+        hashCode: () => 0,
+        isDownGrade: () => false,
+        find: () => [],
+        getEnergyAvailable: () => room.energyAvailable,
+        getEnergyCapacityAvailable: () => 550,
+        creeps: role => (role === "worker" ? workers : []),
+    };
+    // 房级缓存：`room[sourceId]`（模块里 posLen 走这条路，不是 Game.getObjectById）。
+    room.s1 = { pos: { nearPos: () => [{ walkable: () => true }, { walkable: () => true }] } };
+    const sandbox = {
+        Creep: function Creep() {},
+        Game: { time: 0, map: { getRoomLinearDistance: () => 5 }, getObjectById: () => ({ energy: 1000 }) },
+        Memory: {},
+        FIND_HOSTILE_CREEPS: "hostiles", FIND_MY_CREEPS: "myCreeps", FIND_FLAGS: "flags",
+        RESOURCE_ENERGY: "energy", STRUCTURE_ROAD: "road", STRUCTURE_CONTAINER: "container",
+        BODYPART_COST: { work: 100, carry: 50, move: 50 },
+        taskDispatchThrottle: false,
+        HelperError: { catchError: fn => fn() },
+        StrategyHighLevel: { spawnTickBudget: () => 0 },
+        StationHive: {
+            HiveNeedToFill: () => false,
+            generatorFillHiveTask: () => ({ taskName: "fillHive" }),
+            trySpawn: (rm, target, body, role) => spawned.push({ room: rm.name, target, body, role }),
+            getClosestSpawnRoom: opts.donor === undefined
+                ? () => ({ name: "E51S29", level: 6 }) : () => opts.donor,
+            deferSpawn: (kind, run) => deferred.push({ kind, run }),
+        },
+        StationSources: {
+            stationName: "stationSources", trySpawnHarKeeper() {},
+            generatorCarryEnergyTask: () => [], generatorReleaseAbleHarTask: () => ({ taskName: "harvestEnergy" }),
+        },
+        StationCarry: {
+            generatorPickTask: () => [], generatorCarryStorageEnergyTask: () => [],
+            roomMassStoreCnt: () => 0,
+        },
+        StationMineral: { generatorCarryMineralTask: () => [] },
+        StationWork: {
+            constructionNeedBuild: r => !!(r && r.constructionSite && r.constructionSite.length),
+            generatorBuildTask: () => ({ taskName: "buildConst" }),
+            getLowLevelWorkerBodyConfig: () => ["w", "c", "m"],
+            getMiddleLevelWorkerBodyConfig: () => ["w", "c", "m"],
+        },
+        StationUpgrade: { generatorUpgradeTask: () => ({ taskName: "upgrade" }) },
+        Utils: { getBodyEnergyNeed: () => 500 },
+        UtilsTask: { task: () => ({}) },
+        ManagerCreeps: {}, ManagerAutoPlanner: null, ManagerFlags: {},
+        _: { values: Object.values, map: (a, f) => a.map(f), filter: (a, f) => a.filter(f) },
+        console: { log() {} },
+    };
+    sandbox.global = sandbox;
+    // lodash 在线上把 head() 挂在 Array 原型上。`room.creeps(...)` 返回的是**本文件
+    // 这个 realm** 的数组，所以必须补在本 realm 的原型上（vm 上下文的原型管不到它）。
+    if (!Array.prototype.head) Array.prototype.head = function () { return this[0]; };
+    vm.runInNewContext(lowSource, sandbox);
+    sandbox.StrategyLowLevel.exec(room);
+    return { spawned, deferred };
+}
+
+{
+    // 正例：1 只满载 worker + hive 550 + spawn 空闲 ⇒ 本房自孵
+    const { spawned, deferred } = runLowExecSpawn();
+    assert.equal(spawned.length, 1, "本房 spawn 空闲且付得起时必须自己孵（不许只排援建队）");
+    assert.equal(spawned[0].room, "E58S26", "能量只能本房用 ⇒ 必须孵在本房");
+    assert.equal(spawned[0].role, "worker");
+    assert.equal(deferred.length, 0, "自己孵得出来时不要再向捐赠房请求援建");
+
+    // 负对照 1：编制已有 2 只 worker ⇒ 不本孵，回到援建请求（原行为）
+    const two = runLowExecSpawn({ workers: [loaded2(), loaded2()] });
+    assert.equal(two.spawned.length, 0, "编制满 2 只时不许再本孵（550 容量的小房会堆满）");
+    assert.equal(two.deferred.length, 1, "编制满时仍走原来的援建请求");
+    assert.equal(two.deferred[0].kind, "aid");
+
+    // 负对照 2：spawn 正在孵 ⇒ 不本孵，仍排援建
+    const busy = runLowExecSpawn({ spawn: [{ spawning: { name: "x" } }] });
+    assert.equal(busy.spawned.length, 0, "spawn 忙时不许下单");
+    assert.equal(busy.deferred.length, 1, "spawn 忙时援建请求照旧");
+
+    // 负对照 3：hive 只有 300 < 本地体型 500 ⇒ 不本孵
+    const poor = runLowExecSpawn({ energyAvailable: 300 });
+    assert.equal(poor.spawned.length, 0, "付不起本地体型时必须等，不许缩体型下单");
+    assert.equal(poor.deferred.length, 1, "付不起时仍走援建请求");
+}
+
+function loaded2() {
+    return {
+        pos: { roomName: "E58S26", x: 6, y: 6 },
+        store: { energy: 400 },
+        storeEmpty: () => false,
+        isFree: () => true,
+        headTask: () => null,
+        lastTask: () => ({ taskName: "buildConst", roomName: "E58S26" }),
+        addTask: () => {},
+        mainRoom: () => null,
+    };
+}
+
 console.log("lowlevel-local-bootstrap OK");

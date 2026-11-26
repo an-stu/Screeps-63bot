@@ -237,6 +237,26 @@ let pro = {
                             // 一只爬都不剩、hive 只剩 244，仍被选作出兵房，把最后 244
                             // 能量孵成一只外派 worker 走去 E58S26 ⇒ 再也生不出自己的
                             // keeper（hive 14/1850），而 storage 里的 9,456 没人能搬。
+                            // **本房 spawn 空闲且付得起本地体型 ⇒ 自己生**（2026-11-26
+                            // E58S26 实测）。RCL2 房 2 个源只 1 只 worker、hive 满 550、
+                            // spawn 全程空闲 1,280 tick：因为 level 2 < 7，`getClosestSpawnRoom`
+                            // 永远返回捐赠房（E51S29 RCL6），而援建体型 2,000 对上捐赠房容量
+                            // 2,100 —— `deferSpawn` 排在捐赠房自己的经济孵化之后，它每 tick
+                            // 孵一只自己的爬就把余额打到 2,000 以下 ⇒ 结构性抢不到 spawn。
+                            // 本地 500 的体型当场生得出来，而且本房 spawn 的能量搬不出去。
+                            // 编制 <2 才走这条：避免 550 容量的小房堆满 worker。
+                            const selfBody = StationWork.getLowLevelWorkerBodyConfig(room);
+                            const selfBudget = room.currentEnergyAvailable === undefined
+                                ? room.getEnergyAvailable() : room.currentEnergyAvailable;
+                            const selfIdle = room.spawn.some(spawn => !spawn.spawning);
+                            if (selfIdle && room.creeps("worker", false).length < 2
+                                && selfBody && selfBody.length
+                                && selfBudget >= Utils.getBodyEnergyNeed(selfBody)) {
+                                // 同 tick 前面的 keeper/自孵尝试可能置真了这个粘滞标记。
+                                room.spawnFailure = false;
+                                StationHive.trySpawn(room, room.name, selfBody, "worker", []);
+                                return;
+                            }
                             let spawnRoom = StationHive.getClosestSpawnRoom(room, 7, 5, 15, { requireSelfSustaining: true })
                             if (!spawnRoom) {
                                 return;
