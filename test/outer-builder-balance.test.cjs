@@ -27,6 +27,8 @@ const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm
 const srcSrc = read("station_sources.js");
 const outBody = srcSrc.match(/\n {4}trySpawnOuterHarCarrier\(roomName, spawnRoom\) \{[\s\S]*?\n {4}\},/);
 assert.ok(outBody, "trySpawnOuterHarCarrier 必须存在");
+const budgetBody = srcSrc.match(/\n {4}outerCarrierSpawnBudget\(spawnRoom, spawnAvail\) \{[\s\S]*?\n {4}\},/);
+assert.ok(budgetBody, "outerCarrierSpawnBudget 必须存在");
 
 // ── 源码层：新判据与在途计数必须真的在代码里 ──────────────────────────────
 {
@@ -102,7 +104,7 @@ function makeHarness(opts) {
     Array.prototype.head = function () { return this.length ? this[0] : undefined; };
     vm.runInNewContext(
         "Array.prototype.head = function(){ return this.length ? this[0] : undefined; };"
-        + "var pro = {" + (opts.mutate ? opts.mutate(outBody[0]) : outBody[0]) + "\n};",
+        + "var pro = {" + budgetBody[0] + (opts.mutate ? opts.mutate(outBody[0]) : outBody[0]) + "\n};",
         harness, { filename: "trySpawnOuterHarCarrier.js" });
     Object.assign(harness.pro, {
         stationName: "stationSources",
@@ -114,7 +116,7 @@ function makeHarness(opts) {
         outerCarrierFleetCap: () => 15,
         outerMineStarvesSpawnRoom: () => false,
         outerMineWaitingByMine: () => 0,
-        outerCarrierTripCapacity: () => 1700,
+        outerCarrierTripCapacity: () => 1650,
         getOuterHarCarrierBodyConfig: () => PLAIN,
         getOuterHarCarrierBuildBodyConfig: () => BUILD,
         generatorOuterHarCarryTask: () => [{}],

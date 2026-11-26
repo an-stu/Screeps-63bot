@@ -131,11 +131,13 @@ assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     assert.ok(hlText.includes("economySlot(room, interval)"),
         "the ordinal-based slot helper must exist with a hashCode fallback for special/offline rooms");
 }
-// 用户 2026-11-26：正常外矿 carrier 必须按出兵房容量等满配，临时低能量不得
-// 退化成 450 能量的 9 部件小爬；只有 worker+carrier 双缺才保留 550 档救急预算。
-assert.ok(/let bodyBudget = depleted[\s\S]{0,180}: hiveCap;/.test(stationSources)
+// Normal outer carriers use full hive capacity; only worker+carrier extinction gets
+// the bounded half-hive recovery budget. Spawn and quota must share that helper.
+assert.ok(stationSources.includes("outerCarrierSpawnBudget(spawnRoom, spawnAvail)")
+    && stationSources.includes("if (!depleted) return hiveCap;")
+    && stationSources.includes("let bodyBudget = pro.outerCarrierSpawnBudget(spawnRoom, spawnAvail);")
     && stationSources.includes("wait:fullCarrier"),
-    "outer carrier bodies must use the full hive capacity unless worker+carrier are both absent; otherwise wait for a full body instead of spawning a small carrier");
+    "outer carrier spawning and quota capacity must share full-hive normal / bounded depleted budgets, waiting until a full body is affordable");
 assert.ok(stationSources.includes("taskOutView(data && data.container, nextTarget.roomName"),
     "the road builder turn-around must use taskOutView when getOuterMineTarget falls back to a RoomPosition: UtilsTask.task requires .pos and a RoomPosition has none, so the no-vision case threw every tick");
 assert.ok(/if \(!target \|\| this\.pos\.isNearTo\(target\)/.test(stationSources),

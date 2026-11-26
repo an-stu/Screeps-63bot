@@ -61,6 +61,7 @@ function makeWorld(options = {}) {
     const boostChecks = [];
     const boostRegistrations = [];
     const crossShardRequests = [];
+    const paths = [];
     const storage = {
         my: true,
         store: {energy: 1000000, getFreeCapacity: () => 1000000},
@@ -90,6 +91,7 @@ function makeWorld(options = {}) {
         find(kind, options = {}) {
             if (kind === "tombstones") return this.tombstones;
             if (kind === "hostiles") return this.hostiles;
+            if (kind === "creeps") return this.hostiles;
             if (kind === "hostilePower") return [];
             if (kind === "hostileStructures") return [];
             if (kind === "structures") return this.structures.filter(options.filter || (() => true));
@@ -112,6 +114,7 @@ function makeWorld(options = {}) {
                 findExit: () => 3,
                 findRoute: () => route.slice(1).map(room => ({room})),
                 getRoomLinearDistance: () => 1,
+                getRoomTerrain: () => ({get: () => 0}),
             },
         },
         global: null,
@@ -123,10 +126,36 @@ function makeWorld(options = {}) {
         CARRY_CAPACITY: 50, LAB_BOOST_MINERAL: 30, LAB_BOOST_ENERGY: 20,
         RESOURCE_ENERGY: "energy", FIND_TOMBSTONES: "tombstones",
         FIND_HOSTILE_CREEPS: "hostiles", FIND_HOSTILE_POWER_CREEPS: "hostilePower",
-        FIND_HOSTILE_STRUCTURES: "hostileStructures", FIND_STRUCTURES: "structures",
+        FIND_HOSTILE_STRUCTURES: "hostileStructures", FIND_STRUCTURES: "structures", FIND_CREEPS: "creeps",
         LOOK_STRUCTURES: "structuresLook", LOOK_RESOURCES: "resourcesLook", LOOK_CREEPS: "creepsLook",
         STRUCTURE_TOWER: "tower",
-        STRUCTURE_PORTAL: "portal", BOOSTS: boosts,
+        STRUCTURE_PORTAL: "portal", STRUCTURE_RAMPART: "rampart", BOOSTS: boosts,
+        OBSTACLE_OBJECT_TYPES: ["terminal", "wall"], TERRAIN_MASK_WALL: 1,
+        PathFinder: {
+            CostMatrix: class {
+                constructor() { this.data = new Uint8Array(2500); }
+                set(x,y,n) { this.data[x*50+y] = n; }
+                get(x,y) { return this.data[x*50+y]; }
+            },
+            search(start, goals, opts) {
+                const matrix = opts.roomCallback(start.roomName);
+                const valid = p => opts.flee ? goals.every(o => !p.inRangeTo(o.pos,o.range))
+                    : goals.some(o => p.inRangeTo(o.pos,o.range));
+                const queue = [[start,[]]], seen = new Set([start.x*50+start.y]);
+                for (let i=0;i<queue.length;i++) {
+                    const [p,path] = queue[i];
+                    if (valid(p)) { paths.push(path); return {path,incomplete:false}; }
+                    for (let dx=-1;dx<=1;dx++) for (let dy=-1;dy<=1;dy++) {
+                        const x=p.x+dx, y=p.y+dy, key=x*50+y;
+                        if (x<=0 || y<=0 || x>=49 || y>=49 || seen.has(key) || matrix.get(x,y)>=255) continue;
+                        seen.add(key);
+                        const next = makePos(x,y,start.roomName);
+                        queue.push([next,[...path,next]]);
+                    }
+                }
+                return {path:[],incomplete:true};
+            },
+        },
         RoomPosition: function (x, y, roomName) { return makePos(x, y, roomName); },
         Utils: {
             getBodyEnergyNeed(body) {
@@ -185,6 +214,7 @@ function makeWorld(options = {}) {
         __portals: portals,
         __tombstones: tombstones,
         __hostiles: hostiles,
+        __paths: paths,
         __spawns: spawns,
     };
     ctx.global = ctx;
@@ -316,7 +346,7 @@ test("salvageReady accepts only matching mission, shard, death tick, and assigne
     });
 });
 
-test("scout reports only after death, in a clear room, with real assigned tombstones", () => {
+test("scout reports only after death, without an armed intruder, with real assigned tombstones", () => {
     const noTombstone = makeWorld();
     noTombstone.Game.shard.name = "shard2";
     const scout0 = makeCreep(noTombstone, {slot: "scout", shard: "shard2", roomName: salvageRoomName, x: 24, y: 43});
@@ -335,9 +365,9 @@ test("scout reports only after death, in a clear room, with real assigned tombst
     const hostile = makeWorld();
     hostile.Game.shard.name = "shard2";
     hostile.__tombstones.push(makeTombstone(cargoNames[0]));
-    hostile.__hostiles.push({getActiveBodyparts: () => 0, pos: makePos(1, 1, salvageRoomName)});
+    hostile.__hostiles.push({getActiveBodyparts: type => type === hostile.ATTACK ? 1 : 0, pos: makePos(1, 1, salvageRoomName)});
     makeCreep(hostile, {slot: "scout", shard: "shard2", roomName: salvageRoomName, x: 24, y: 43}).run();
-    assert.equal(hostile.__crossShardRequests.length, 0, "any visible hostile blocks the signal");
+    assert.equal(hostile.__crossShardRequests.length, 0, "a visible armed intruder blocks the signal");
 
     const assigned = makeWorld();
     assigned.Game.shard.name = "shard2";
@@ -348,6 +378,102 @@ test("scout reports only after death, in a clear room, with real assigned tombst
     assert.equal(assigned.__crossShardRequests[0].shard, "shard3");
     assert.deepEqual(assigned.__crossShardRequests[0].request.data.available, [cargoNames[0]],
         "only positive-resource tombstones assigned to this mission may be reported");
+});
+
+function npc(name, x, y, offense, store = {}) {
+    return {name, owner:{username:"Screeps"}, pos:makePos(x,y,salvageRoomName), store,
+        getActiveBodyparts:type => type === offense ? 1 : 0};
+}
+
+test("a scout only authorizes early staging after stationary samples and a safe portal-to-cargo path", () => {
+    const ctx = makeWorld();
+    ctx.Game.shard.name = "shard2";
+    ctx.Game.time = 80;
+    const reverse = {structureType:"portal",destination:{shard:"shard3"},pos:makePos(30,37,salvageRoomName),ticksToDecay:50};
+    ctx.__portals.push(reverse);
+    const cargo = npc(cargoNames[0],43,30,null,{[resource]:5000});
+    const ranged = npc(`creep${missionId}_3`,40,25,"ranged_attack");
+    const melee = npc(`creep${missionId}_4`,48,29,"attack");
+    const outsider = {name:"unarmed-looter",owner:{username:"other"},pos:makePos(41,30,salvageRoomName),getActiveBodyparts:()=>0};
+    ctx.__hostiles.push(cargo,ranged,melee,outsider);
+    const scout = makeCreep(ctx,{slot:"scout",shard:"shard2",roomName:salvageRoomName,x:25,y:43});
+    scout.run();
+    ctx.Game.time = 84;
+    ranged.pos = makePos(39,25,salvageRoomName);
+    scout.run();
+    assert.equal(ctx.__crossShardRequests.length,0,"moving escorts invalidate the stability sample");
+    ctx.Game.time = 88;
+    scout.run();
+    assert.equal(ctx.__crossShardRequests.length,0,"a return portal decaying before the return window cannot authorize entry");
+    reverse.ticksToDecay = 1000;
+    ctx.Game.time = 89;
+    scout.run();
+    assert.equal(ctx.__crossShardRequests[0].request.func,"npcConvoySalvageStage");
+    assert.deepEqual(Array.from(ctx.__crossShardRequests[0].request.data.slots),[cargoNames[0]]);
+    assert.ok(ctx.__paths.length > 0);
+    for (const p of ctx.__paths.flat()) {
+        assert.equal(p.inRangeTo(ranged,4),false,"entire path keeps ranged buffer");
+        assert.equal(p.inRangeTo(melee,2),false,"entire path keeps melee buffer");
+        assert.equal(p.isEqualTo(outsider),false);
+    }
+    assert.ok(scout.actions.some(a=>a[0]==="move"));
+    assert.equal(scout.actions.some(a=>a[0]==="withdraw"),false);
+});
+
+test("early portal permission expires and is scoped to the approved cargo slot", () => {
+    const ctx = makeWorld();
+    ctx.__portals.push({structureType:"portal",destination:{shard:"shard2"},pos:makePos(14,8,salvageRoomName)});
+    const data = {id:missionId,shard:"shard2",tick:80,observedAt:Date.now(),slots:[cargoNames[0]]};
+    assert.equal(ctx.missionFunc.npcConvoySalvageStage({...data,observedAt:data.observedAt-91000}),false);
+    assert.equal(ctx.missionFunc.npcConvoySalvageStage({...data,tick:100}),false);
+    assert.equal(ctx.missionFunc.npcConvoySalvageStage({...data,slots:["foreign-slot"]}),false);
+    assert.equal(ctx.missionFunc.npcConvoySalvageStage(data),true);
+
+    const accepted = makeCreep(ctx,{slot:cargoNames[0],shard:"shard3",roomName:salvageRoomName});
+    const wait = makeCreep(ctx,{slot:cargoNames[1],shard:"shard3",roomName:salvageRoomName});
+    accepted.run(); wait.run();
+    assert.ok(accepted.actions.some(a=>a[0]==="addTask"&&a[1].peaceful));
+    assert.equal(wait.actions.some(a=>a[0]==="addTask"),false);
+    ctx.Memory.npcConvoySalvage.stageHint.observedAt -= 91000;
+    const late = makeCreep(ctx,{slot:cargoNames[0],shard:"shard3",roomName:salvageRoomName});
+    late.run();
+    assert.equal(late.actions.some(a=>a[0]==="addTask"),false,"stale approval does not authorize the crossing");
+});
+
+test("a staged hauler waits adjacent without attacking and collects only after expiry despite an unarmed rival", () => {
+    const ctx = makeWorld();
+    ctx.Game.shard.name = "shard2";
+    ctx.Game.time = 95;
+    ctx.__hostiles.push(npc(cargoNames[0],43,30,null,{[resource]:5000}),
+        npc(`creep${missionId}_3`,39,25,"ranged_attack"));
+    const h = makeCreep(ctx,{slot:cargoNames[0],shard:"shard2",roomName:salvageRoomName,x:42,y:30});
+    ctx.__tombstones.push(makeTombstone(cargoNames[0],2500));
+    h.run();
+    assert.deepEqual(h.actions,[],"no pickup, attack or detour while waiting by live cargo");
+    ctx.Game.time = 100;
+    h.run();
+    assert.deepEqual(h.actions,[],"reaching the nominal tick does not bypass live escorts");
+    ctx.Game.time = 101;
+    ctx.__hostiles.splice(0,2,{name:"other-carrier",owner:{username:"other"},pos:makePos(40,30,salvageRoomName),getActiveBodyparts:()=>0});
+    h.run();
+    assert.deepEqual(h.actions,[["withdraw",`tomb-${cargoNames[0]}`,resource]]);
+    assert.equal(h.creep.store[resource],2500);
+});
+
+test("a foreign attacker sends a staged hauler back along a safe path", () => {
+    const ctx = makeWorld();
+    ctx.Game.shard.name = "shard2";
+    ctx.Game.time = 93;
+    ctx.__portals.push({structureType:"portal",destination:{shard:"shard3"},pos:makePos(30,37,salvageRoomName)});
+    const foreign = {name:"fighter",owner:{username:"other"},pos:makePos(35,32,salvageRoomName),
+        getActiveBodyparts:type=>type===ctx.RANGED_ATTACK?1:0};
+    ctx.__hostiles.push(npc(cargoNames[0],43,30,null,{[resource]:5000}),foreign);
+    const h = makeCreep(ctx,{slot:cargoNames[0],shard:"shard2",roomName:salvageRoomName,x:42,y:30});
+    h.run();
+    assert.equal(h.task.returning,true);
+    assert.ok(h.actions.some(a=>a[0]==="move"));
+    assert.equal(h.actions.some(a=>a[0]==="withdraw"||a[0]==="addTask"),false,"never leave the route to fight or step directly into danger");
+    assert.ok(ctx.__paths.at(-1).every(p=>!p.inRangeTo(foreign,4)));
 });
 
 test("scout stays on shard2 until shard3 acknowledges the report, then suicides in place", () => {

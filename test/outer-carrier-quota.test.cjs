@@ -1,18 +1,7 @@
 /**
- * 外矿补员配额的分母必须是**本房实际孵得出的体型**运力。
- *
- * 现场（2026-11-01 W26N59，出兵房 W26N58）：
- *   storage 0 / terminal 26,898 ⇒ `outerMineStarvesSpawnRoom(=carrier)` 判真，
- *   此时唯一还能补员的路径是「按存货配额豁免」，而配额写死按满编一趟 1,700 折：
- *     容器 2000/2000 + 容器格溢出 ⇒ floor(2000/1700) = **1 只/矿点**
- *   可这个 RCL6 房被 `min(floor(hiveCap*0.5), ...)` 夹到预算 1,150，实孵的是
- *   `{2 WORK, 11 CARRY, 7 MOVE}` = **550 运力**（修路版），另一版也只有 700。
- *   ⇒ 1 只 600 的车对 13.3/tick 产出、114 tick 往返，吞吐只有 5.3/tick，
- *     容器永远满、keeper 手里 50 能量塞不下、源只出 10/tick（应 26.7）。
- *     `__outerWhy=starves+mineQ1>=1@27,29` 就是这个自锁。
- *
- * 修法：配额分母改用 `outerCarrierTripCapacity(spawnRoom)` —— 按真实体型算，
- * 并以满编 1,700 封顶。**负对照**：把分母改回常量 1,700，本文件的第 ② 组必须失败。
+ * Outer-carrier quota capacity must share the spawn body budget: full hive capacity
+ * normally, and the bounded half-hive fallback only when workers and home carriers
+ * are both absent. Work-carrier bodies include WORK weight in their road-speed ratio.
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -86,43 +75,83 @@ function makeStore(contents, capacity) {
     };
 }
 
-// ── ① RCL6 出兵房：预算 = floor(2300*0.5) = 1150，实孵 550 运力（修路版）────
+// ── ① Normal rooms use full hive capacity; only a depleted room gets the bounded fallback ──
 {
     const ctx = makeContext();
     vm.runInNewContext(read("station_sources.js"), ctx);
     const S = ctx.StationSources;
 
-    const rcl6 = { name: "W26N58", my: true, level: 6, energyCapacityAvailable: 2300 };
-    assert.equal(S.outerCarrierTripCapacity(rcl6), 550,
-        "RCL6 出兵房实孵 {2WORK,11CARRY,7MOVE} = 550 运力（不是满编 1700）");
+    const rcl6 = {
+        name: "W26N58", my: true, level: 6, energyCapacityAvailable: 2300,
+        getEnergyCapacityAvailable() { return this.energyCapacityAvailable; },
+        creeps(role) { return role === "worker" ? [{}] : []; },
+    };
+    assert.equal(S.outerCarrierTripCapacity(rcl6), 1350,
+        "RCL6 non-depleted room uses full hive budget; work-hauler capacity is 1350");
 
-    // 体型侧的同源校验：预算 1150 下真实孵出的 CARRY 数 × 50 必须等于上面的容量
-    const budget = Math.floor(2300 * 0.5);
-    const plain = S.getOuterHarCarrierBodyConfig(budget, 50);
-    const build = S.getOuterHarCarrierBuildBodyConfig(budget, 50);
+    // Actual normal-spawn body at the full 2,300 hive cap.
+    const plain = S.getOuterHarCarrierBodyConfig(2300, 50);
+    const build = S.getOuterHarCarrierBuildBodyConfig(2300, 50);
     const carriage = b => b.filter(p => p === CONSTANTS.CARRY).length;
-    assert.equal(Math.min(carriage(plain), carriage(build)) * 50, 550,
-        "配额口径必须与 getOuterHarCarrier*BodyConfig 的实际体型同源（MEMORY 第 7 条）");
+    const roadBuildCounts = {
+        carry: carriage(build), move: build.filter(p => p === CONSTANTS.MOVE).length,
+        work: build.filter(p => p === CONSTANTS.WORK).length,
+        cost: build.reduce((sum, p) => sum + CONSTANTS.BODYPART_COST[p], 0),
+    };
+    assert.deepEqual(roadBuildCounts, { carry: 27, move: 15, work: 2, cost: 2300 },
+        "2300 budget produces the affordable, full-speed 27C15M2W work hauler");
+    assert.equal(Math.min(carriage(plain), carriage(build)) * 50, 1350,
+        "quota capacity must match the actual full-hive plain/work body pair");
 
-    // ── ② 负对照：同一个满容器，按 1700 折只配 1 只（旧行为），按真实运力要 3 只 ──
-    const waiting = 2000;                       // 容器 2000/2000 满
-    const oldQuota = Math.floor(waiting / 1700); // = 1（旧写法）
-    const newQuota = Math.floor(waiting / S.outerCarrierTripCapacity(rcl6)); // = 3
-    assert.equal(oldQuota, 1, "旧写法下 2000 存货只配 1 只车（就是现场那个自锁）");
-    assert.equal(newQuota, 3, "按 550 运力算，2000 存货该配 3 只");
-    assert.ok(newQuota > oldQuota, "真实运力更小 ⇒ 配额必须更大（改回去这里就失败）");
+    const depleted = {
+        name: "W26N58-depleted", my: true, level: 6, energyCapacityAvailable: 2300,
+        energyAvailable: 1150,
+        getEnergyCapacityAvailable() { return this.energyCapacityAvailable; },
+        getEnergyAvailable() { return this.energyAvailable; },
+        creeps() { return []; },
+    };
+    assert.equal(S.outerCarrierTripCapacity(depleted), 600,
+        "1150 current energy under the depleted fallback produces a 600-capacity work hauler");
+    const fallbackBuild = S.getOuterHarCarrierBuildBodyConfig(S.outerCarrierSpawnBudget(depleted), 50);
+    assert.deepEqual({
+        carry: carriage(fallbackBuild),
+        move: fallbackBuild.filter(p => p === CONSTANTS.MOVE).length,
+        work: fallbackBuild.filter(p => p === CONSTANTS.WORK).length,
+        cost: fallbackBuild.reduce((sum, p) => sum + CONSTANTS.BODYPART_COST[p], 0),
+    }, { carry: 12, move: 7, work: 2, cost: 1150 }, "1150 fallback body is exactly 12C7M2W");
+    const carrierOnly = { ...depleted, name: "carrier-only", creeps(role) { return role === "carrier" ? [{}] : []; } };
+    assert.equal(S.outerCarrierSpawnBudget(carrierOnly), 2300,
+        "one home carrier prevents the emergency half-hive fallback");
+
+    // ── ② 负对照：同一个满容器，正常体型只配 1 只，救急体型按实际运力要 3 只 ──
+    const waiting = 2000;
+    const normalQuota = Math.floor(waiting / S.outerCarrierTripCapacity(rcl6));
+    const depletedQuota = Math.floor(waiting / S.outerCarrierTripCapacity(depleted));
+    assert.equal(normalQuota, 1, "normal RCL6 quota uses its 1350-capacity work hauler");
+    assert.equal(depletedQuota, 3, "depleted recovery quota uses the actual 600-capacity body");
+    assert.ok(depletedQuota > normalQuota, "bounded emergency body capacity must be reflected by the quota");
 
     // ── ③ RCL8 大房不受影响：体型本来就接近满编，配额基本不变 ──
-    const rcl8 = { name: "W33N55", my: true, level: 8, energyCapacityAvailable: 12900 };
+    const rcl8 = {
+        name: "W33N55", my: true, level: 8, energyCapacityAvailable: 12900,
+        getEnergyCapacityAvailable() { return this.energyCapacityAvailable; },
+        creeps(role) { return role === "worker" ? [{}] : []; },
+    };
     assert.equal(S.outerCarrierTripCapacity(rcl8), 1550,
-        "RCL8 房预算 6450 ⇒ 修路版 31 CARRY = 1550（接近满编，不是 1700 也不是 550）");
+        "RCL8 normal room produces 31 CARRY = 1550 capacity with 2 WORK");
     assert.equal(Math.floor(6000 / S.outerCarrierTripCapacity(rcl8)), 3,
         "6000 存货在 RCL8 房仍是 3 只（与改前一致，不动大房行为）");
 
     // ── ④ 拿不到容量（VM 桩 / 极早期）→ 退回满编口径，行为不变 ──
     const unknown = { name: "X", my: true };
-    assert.equal(S.outerCarrierTripCapacity(unknown), 1700,
-        "容量未知时退回满编 1700（不改变既有离线测试与极早期行为）");
+    assert.equal(S.outerCarrierTripCapacity(unknown), 1650,
+        "capacity unknown falls back to the nominal ordinary body capacity");
+    const ordinaryMax = S.getOuterHarCarrierBodyConfig(12900, 50);
+    assert.equal(ordinaryMax.filter(p => p === CONSTANTS.CARRY).length, 33,
+        "ordinary full body carries 33 parts");
+    assert.equal(ordinaryMax.filter(p => p === CONSTANTS.MOVE).length, 17,
+        "ordinary full body has enough MOVE for full-speed roads");
+    assert.equal(ordinaryMax.filter(p => p === CONSTANTS.CARRY).length * 50, 1650);
 }
 
 // ── ⑤ 补员闸确实用上了新分母（源码级：两个调用点都要改）───────────────

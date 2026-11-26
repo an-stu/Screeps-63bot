@@ -240,22 +240,21 @@ const OUTER_CARRY_DROP_PICK = 500;
  */
 const OUTER_TERMINAL_RESERVE = 50000;
 /**
- * 一只满编外矿搬运爬的 spawn 成本：34 CARRY × 50 + 16 MOVE × 50 = 2500。
+ * 一只满编外矿搬运爬的 spawn 成本：33 CARRY × 50 + 17 MOVE × 50 = 2500。
  *
  * 用途见 outerCarrierBacklogQuota —— 外矿堆着的货「够喂饱几只搬运爬」是按这个
- * 数折算的：一只一趟能运 1700，所以存货超过 2500 就意味着出这一只立刻回本。
+ * 数折算的：一只一趟能运 1650，所以存货超过 2500 就意味着出这一只立刻回本。
  * 体型见 getOuterHarCarrierBodyConfig，两者必须一起改。
  */
 const OUTER_CARRIER_COST = 2500;
 /**
- * 一只外矿搬运爬**一趟大约能运多少能量**：满编 50 部件 = 1,700（与下面注释里的
- * 「一趟运 1700」同源），RCL5 出兵房的 900~1,000 体型也在同一量级。
+ * 一只普通外矿搬运爬**一趟大约能运多少能量**：满编 50 部件 = 1,650（33 CARRY）。
  *
  * 配额（outerCarrierBacklogQuota）要按它折算「这批存货需要几只车」——
  * 用 `OUTER_CARRIER_COST`（造车价 2,500）当分母是单位错配：那是**成本**，
  * 不是**运力**，会把「4,000 货」算成 1 只（实际要 4 只），车队被封死在 1。
  */
-const OUTER_CARRIER_TRIP = 1700;
+const OUTER_CARRIER_TRIP = 1650;
 
 /**
  * 外矿车换代缓冲（Overmind Overlord.ts 的 `prespawn` 项）。
@@ -2004,48 +2003,51 @@ let pro = {
         return ManagerCreeps.calcBodyPart({ [MOVE]: num, [CLAIM]: num });
     },
     /**
-     * 外矿搬运爬体型：**2:1 的 CARRY:MOVE**，`[CARRY,CARRY,MOVE]` 循环排列
-     * （用户 10-03 指示），满编 34 CARRY + 16 MOVE = 50 部件 / **1700 容量**。
-     *
-     * 为什么是 2:1：路上每格的疲劳 ≈ 部件数 / 2，而 MOVE 提供的额度是 2×MOVE
-     * —— 2 CARRY : 1 MOVE 正好在铺好的路上跑满 1 格/tick，同部件数下比 1:1 多装
-     * 36% 的货（1700 vs 1250）。循环排列让伤害（从 body 前端往后扣）每扣一组都
-     * 保持 2:1，被伏击掉一半部件后在路上依然满速，不会越打越慢。
-     * 尾部两个 CARRY 把部件数补到 50。
-     *
-     * 能量不足时按能量收缩组数（每组 150 能量），否则低等级房会 spawnFailure。
+     * 普通外矿搬运爬体型：道路满载全速的 `[CARRY,CARRY,MOVE]` 组，最后有空间和
+     * 预算时再加 `[CARRY,MOVE]`。满编为 33 CARRY + 17 MOVE = 50 部件 / 1,650 容量。
+     * 每组按 2:1 排列，最后的 1:1 补件保证满载时仍有足够 MOVE；能量不足则只取
+     * 最大可负担的组数，付不起一组就不生成无效体型。
      */
     getOuterHarCarrierBodyConfig(energy, maxPart) {
-        let triples = Math.min(Math.floor(maxPart / 3), 16);
-        while (triples > 1 && triples * (BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE]) > energy) triples--;
+        let partLimit = Math.min(50, Math.max(0, Math.floor(maxPart || 0)));
+        let budget = Math.max(0, energy || 0);
+        let triples = Math.min(Math.floor(partLimit / 3), 16);
+        while (triples > 0 && triples * (BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE]) > budget) triples--;
+        if (triples == 0) return [];
         let body = [];
         for (let i = 0; i < triples; i++) body.push(CARRY, CARRY, MOVE);
-        if (triples == 16) body.push(CARRY, CARRY);   // 50 部件 / 34 CARRY = 1700
+        let extraCost = BODYPART_COST[CARRY] + BODYPART_COST[MOVE];
+        if (body.length + 2 <= partLimit && triples * (BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE]) + extraCost <= budget) {
+            body.push(CARRY, MOVE);
+        }
         return body;
     },
     /**
      * 修路爬（前缀 2 个 WORK + 搬运组）。
      *
-     * **部件数必须 ≤ 50**：上一版写的是 `floor(maxPart / 2)` 组 → 2 + 25×3 = 77
-     * 部件，spawnCreep 直接 ERR_INVALID_ARGS，修路爬一只也生不出来（路坏了没人修）。
-     * 现在最多 16 组 = 2 + 48 = 50 部件（31 CARRY + 17 MOVE + 2 WORK，容量 1550）。
-     *
-     * **满载道路满速必须把 WORK 也称进去**：道路每格疲劳 = WORK + 已装 CARRY，
-     * MOVE 每部件只抵 2 点。原体型 T 组全是 `[CARRY,CARRY,MOVE]`（2T CARRY +
-     * T MOVE + 2 WORK），满载疲劳 = 2T+2 > 2T ⇒ 每格多剩 2 点、固定 2 tick 走
-     * 一格（用户 2026-11-26 实车发现）。现在把最后一组的第二个 CARRY 换成 MOVE：
-     * `[CARRY,MOVE,MOVE]`，即 2T-1 CARRY + T+1 MOVE + 2 WORK，载荷重量 2T+1，
-     * 2×(T+1) = 2T+2 ≥ 2T+1，刚好多 1 点余量；成本与部件数完全不变，只少 50
-     * 容量（31×50 = 1550）。
+     * 修路版固定 2 WORK，其余优先 `[CARRY,CARRY,MOVE]` 组。满载道路全速必须满足
+     * `2×MOVE ≥ CARRY+WORK`。若在最大可负担组数上多一个 MOVE 同时仍在预算和部件
+     * 上限内，把最后一组升级为 `[CARRY,CARRY,MOVE,MOVE]`；放不下时退回旧的
+     * `[CARRY,MOVE,MOVE]` 尾组。50 部件满编因此是 31 CARRY + 17 MOVE + 2 WORK
+     * （1,550 容量）；32 CARRY + 17 MOVE + 2 WORK 会超过 50 部件。
      */
     getOuterHarCarrierBuildBodyConfig(energy, maxPart) {
-        let triples = Math.min(Math.floor((maxPart - 2) / 3), 16);
-        while (triples > 1 && triples * (BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE])
-            + BODYPART_COST[WORK] * 2 > energy) triples--;
+        let partLimit = Math.min(50, Math.max(0, Math.floor(maxPart || 0)));
+        let budget = Math.max(0, energy || 0);
+        let workCost = BODYPART_COST[WORK] * 2;
+        let groupCost = BODYPART_COST[CARRY] * 2 + BODYPART_COST[MOVE];
+        let triples = Math.max(0, Math.min(Math.floor((partLimit - 2) / 3), 16));
+        while (triples > 0 && triples * groupCost + workCost > budget) triples--;
+        if (triples == 0) return [];
         let body = [WORK, WORK];
         for (let i = 0; i < triples; i++) {
             if (i == triples - 1) body.push(CARRY, MOVE, MOVE);
             else body.push(CARRY, CARRY, MOVE);
+        }
+        let extraMoveCost = BODYPART_COST[MOVE];
+        if (body.length + 1 <= partLimit && triples * groupCost + workCost + extraMoveCost <= budget) {
+            // The extra MOVE replaces the fallback tail with a 2C2M final group.
+            body.splice(body.length - 3, 3, CARRY, CARRY, MOVE, MOVE);
         }
         return body;
     },
@@ -4136,34 +4138,38 @@ let pro = {
         return total;
     },
     /**
-     * 本出兵房**实际孵得出**的外矿搬运爬，一趟能运多少能量。
-     *
-     * `OUTER_CARRIER_TRIP`(1700) 描述的是**满编 50 部件**（34 CARRY）的运力，
-     * 而补员实际用的体型由 `bodyBudget = min(floor(hiveCap*0.5), max(spawnAvail,550))`
-     * 决定：RCL6 出兵房（hiveCap 2,300）只给 1,150 ⇒ `getOuterHarCarrierBodyConfig(1150)`
-     * 出 14 CARRY / 7 MOVE = **700**，修路版（2 WORK）更小 = **550**。两者差 2.4~2.8 倍。
-     *
-     * 拿 1700 折算配额，等于把「这批货要几只车」少算近 3 倍 —— 而配额正是
-     * `outerMineStarvesSpawnRoom` 的自锁豁免（主房穷时唯一还允许补员的路径），
-     * 算小了它就形同虚设：容器 2000/2000 永远满、keeper 手里 50 能量塞不下
-     * ⇒ 采集停摆。2026-11-01 实测 W26N59（出兵房 W26N58，storage 0 / terminal 26.9k）：
-     *   `__outerWhy=starves+mineQ1>=1@27,29`，两矿点容器都 2000/2000、
-     *   地面 ~1.6k 不再下降、keeper 停在 e50、源只出 10/tick（应 26.7）。
-     * 与 MEMORY 第 7 条「同一决策的两层阈值必须收敛成一个常量且两侧同源」同型：
-     * **体型和配额必须一起改**，否则配额恒小于真实需求。
-     *
-     * 口径取**两者较小的那个**（修路版 CARRY 更少），保守估计、不会超编；
-     * 上限仍是 `OUTER_CARRIER_TRIP`（满编一趟），防止畸形体型算出超额。
+     * Shared body budget used by spawning and its backlog-quota denominator.
+     * Normal rooms use full hive capacity. Only when both worker and home-carrier
+     * populations are empty do we use the bounded half-hive emergency budget,
+     * matching the actual spawn policy.
+     */
+    outerCarrierSpawnBudget(spawnRoom, spawnAvail) {
+        let hiveCap = typeof spawnRoom.getEnergyCapacityAvailable == "function"
+            ? spawnRoom.getEnergyCapacityAvailable()
+            : (typeof spawnRoom.energyCapacityAvailable == "number" ? spawnRoom.energyCapacityAvailable : 0);
+        if (!hiveCap) return 0;
+        let depleted = typeof spawnRoom.creeps == "function"
+            && !spawnRoom.creeps("worker", false).length
+            && !spawnRoom.creeps("carrier", false).length;
+        if (!depleted) return hiveCap;
+        if (spawnAvail === undefined) {
+            let high = global.StrategyHighLevel;
+            spawnAvail = high && typeof high.spawnTickBudget == "function"
+                ? high.spawnTickBudget(spawnRoom)
+                : (spawnRoom.getEnergyAvailable
+                    ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0));
+        }
+        return Math.min(Math.floor(hiveCap * 0.5), Math.max(spawnAvail, 550));
+    },
+    /**
+     * Nominal per-trip capacity for the body this room can currently spawn.
+     * The ordinary maximum is 1,650 (33 CARRY); roads/work bodies carry less.
      */
     outerCarrierTripCapacity(spawnRoom) {
         if (spawnRoom._outerCarrierTripCap !== undefined) return spawnRoom._outerCarrierTripCap;
-        let hiveCap = 0;
-        if (typeof spawnRoom.getEnergyCapacityAvailable == "function") hiveCap = spawnRoom.getEnergyCapacityAvailable();
-        else if (typeof spawnRoom.energyCapacityAvailable == "number") hiveCap = spawnRoom.energyCapacityAvailable;
-        // 拿不到容量（VM 桩、极早期房）→ 退回满编口径，行为与改前完全一致。
-        if (!hiveCap) { spawnRoom._outerCarrierTripCap = OUTER_CARRIER_TRIP; return OUTER_CARRIER_TRIP; }
-        // 与 trySpawnOuterHarCarrier 的 bodyBudget 上限同源（hive 的 50%）。
-        let budget = Math.floor(hiveCap * 0.5);
+        let budget = pro.outerCarrierSpawnBudget(spawnRoom);
+        // Capacity unknown (VM stub / very early room): retain the nominal full-body fallback.
+        if (!budget) { spawnRoom._outerCarrierTripCap = OUTER_CARRIER_TRIP; return OUTER_CARRIER_TRIP; }
         let maxPart = 50;
         let plain = pro.getOuterHarCarrierBodyConfig(budget, maxPart);
         let build = pro.getOuterHarCarrierBuildBodyConfig(budget, maxPart);
@@ -4188,7 +4194,7 @@ let pro = {
      *   2000/2000 全满 + 地面堆 5714、W35N55 三个容器全满且一只爬都没有，
      *   两侧约 1.8 万能量滞留、外矿整条链停摆。
      *
-     * 返回值 = 存货能喂饱几只（每只成本 OUTER_CARRIER_COST、一趟运 1700），
+     * 返回值 = 存货能喂饱几只（每只成本 OUTER_CARRIER_COST、一趟最多运 1650），
      * 天然收敛：货清完就归零，**不会把闸门永久架空**。所以只在闸门判真时拿它
      * 当豁免，不用它取代闸门。
      *
@@ -4209,9 +4215,7 @@ let pro = {
         // 配额却把车队封在 1（实测 2026-10-27 W26N59：spawn 空闲、能量满 1800/1800、
         // 容器 2000/2000 + 地面 6,800，就是不孵第二只）。
         // 换算成「一趟运力」后：无货仍为 0（不会把闸门永久架空），4,000 货 ⇒ 4 只。
-        // 分母必须用**本房实际孵得出的体型**的运力，不能用满编常数 1700：
-        // 出兵房的体型被 hive 的 50% 夹住（RCL6 ⇒ 600~700），拿 1700 算会把
-        // 「这批货要几只车」少算近 3 倍（见 outerCarrierTripCapacity 的实测数字）。
+        // 分母必须用本房按共享预算实际孵得出的体型运力，不能直接用满编常数。
         let quota = Math.floor(pro.outerMineEnergyWaiting(spawnRoom, roomFilter) / pro.outerCarrierTripCapacity(spawnRoom));
         cache[cacheKey] = quota;
         return quota;
@@ -4341,7 +4345,7 @@ let pro = {
         // **但闸门不能自锁**：它的输入（主房能量）恰好是外矿搬运爬的产出，
         // 车一没就是环 —— 车没了 → 货回不来 → 主房穷 → 闸门恒真 → 永远不出车。
         // 实测两次（2026-10-04 / 2026-10-07 / 10-08，见 outerCarrierBacklogQuota 注释）。
-        // 豁免按**本矿房存货**折算出该有几只（每只成本 2500、一趟运 1700），
+        // 豁免按**本矿房存货**折算出该有几只（每只成本 2500、一趟最多运 1650），
         // 存货清完自动失效，所以不会把闸门永久架空；本矿房的车队已经到配额就不再多出。
         //
         // 计数与配额**都必须落到矿点**（`t.id`），不能停在房间：
@@ -4417,12 +4421,11 @@ let pro = {
             // 0 只车」被 `onThisMine(2) >= quota(2)` 判成「够了」，那 4.2k 一路衰减
             // （2026-11-01 实测 W26N59，`__outerWhy=starves+quota2>=2`；分矿点需求
             //  公式本来算得对，只是根本走不到那里）。
-            // 改到矿点粒度后总和上限几乎不变（Σ floor(w_i/1700) ≤ floor(Σw/1700)+矿点数-1），
+            // 改到矿点粒度后总和上限几乎不变（Σ floor(w_i/1650) ≤ floor(Σw/1650)+矿点数-1），
             // 只是把「谁该分到车」判对 —— 与 MEMORY 第 1 条同一条规则。
             if (stockRecovery || (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true))) {
                 // 配额的分母必须是**本房实际孵得出的体型**的运力（见
-                // outerCarrierTripCapacity）：用满编常数 1700 会把小车房
-                // （hive 的 50% 夹出 600~700 运力）的豁免配额算小近 3 倍，
+                // outerCarrierTripCapacity）：直接用满编常数会把小车房的豁免配额算小，
                 // 于是「主房穷」时那道豁免形同虚设 —— 容器永远满、keeper 塞不下。
                 let mineQuota = Math.floor(pro.outerMineWaitingByMine(spawnRoom, targetName, data) / pro.outerCarrierTripCapacity(spawnRoom));
                 let mineCarriers = roomCarriers.filter(c => {
@@ -4572,25 +4575,9 @@ let pro = {
                     ? high.spawnTickBudget(spawnRoom)
                     : (spawnRoom.getEnergyAvailable
                         ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0));
-                // **体型预算再夹一层「hive 容量的 75%」。** 满配 50 部件要 2,500：RCL8 房
-                // （12,900）无所谓，但出兵房 RCL5 只有 1,800 —— 满配爬一孵就是 56+ tick，
-                // 把整只 hive 抽干，本房 spawn/extension 补员与外矿补员互相饿死
-                // （实测 W26N58：孵一只 1,800 的爬期间 hive 掉到 109，期间所有补员全部失败）。
-                // 夹到 75% 之后同样是「大爬少只」，但留出余量给本房。
-                let hiveCap = spawnRoom.getEnergyCapacityAvailable();
-                // **体型再降到 hive 的 50%**（2026-10-29 实测）：1,350 的爬要求
-                // 「hive 满 1,800 + spawn 空闲」同时成立，而 RCL5 房每 1,500 tick 要换
-                // 4 只 keeper（每只 1,250）—— 这个窗口两天只出现几次，
-                // 结果外矿双容器 4,000 满 + 地面 3,161 堆着没人搬。
-                // 夹到 50% 后 900 就能孵：keeper 孵完 hive 从 0 按 20/tick 回填，
-                // 45 tick 就够，窗口密度高一个量级。体型小→多跑几趟，比「根本不出车」强。
-                // 正常外矿搬运按出兵房容量等满配；临时低能量不再缩成 6C3M 小爬。
-                // 只有 worker+carrier 双缺的极端阶段才保留 550 档救急体型。
-                let depleted = !spawnRoom.creeps("worker", false).length
-                    && !spawnRoom.creeps("carrier", false).length;
-                let bodyBudget = depleted
-                    ? Math.min(Math.floor(hiveCap * 0.5), Math.max(spawnAvail, 550))
-                    : hiveCap;
+                // Normal outer carriers wait for full hive capacity; only the
+                // worker+carrier-depleted recovery state uses the bounded fallback.
+                let bodyBudget = pro.outerCarrierSpawnBudget(spawnRoom, spawnAvail);
                 // ⚠️ 这里原先是 `CarryPartCnt > 0 && !isNearToAny`：只要**有一只搬运贴在容器边上**
                 // 就不再补员。而 `CarryPartCnt` 本身已经把现有车队的 CARRY 减掉了，剩下的正缺口
                 // 才是要补的量 —— 用「有没有车贴着容器」再挡一次，等于把「车在装卸」误判成

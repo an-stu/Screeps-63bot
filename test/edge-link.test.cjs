@@ -159,37 +159,77 @@ function makeStore(contents, capacity) {
     const carrier = S.getOuterHarCarrierBodyConfig(12900, 50);
     const cnt = part => carrier.filter(p => p === part).length;
     assert.equal(carrier.length, 50, "满编搬运爬必须是 50 部件");
-    assert.equal(cnt(CONSTANTS.CARRY), 34, "34 CARRY -> 1700 容量（用户 10-03 定稿）");
-    assert.equal(cnt(CONSTANTS.MOVE), 16, "16 MOVE 配 34 CARRY = 2:1（道路满速比）");
-    // [CARRY,CARRY,MOVE] 循环：伤害从 body 前端扣，每扣一组都保持 2:1
-    for (let i = 0; i + 2 < 48; i += 3) {
+    assert.equal(cnt(CONSTANTS.CARRY), 33, "33 CARRY -> 1650 容量");
+    assert.equal(cnt(CONSTANTS.MOVE), 17, "17 MOVE 配 33 CARRY = 满载道路全速");
+    // [CARRY,CARRY,MOVE] 主循环，最后 [CARRY,MOVE] 补到道路全速的 50 部件。
+    for (let i = 0; i < 48; i += 3) {
         // 用 join 比较：VM realm 的数组和宿主 realm 的数组字面量 deepStrictEqual 不相等
         assert.equal(carrier.slice(i, i + 3).join(","), "carry,carry,move",
             "搬运爬必须是 [CARRY,CARRY,MOVE] 循环（第 " + i + " 组）");
     }
+    assert.equal(carrier.slice(48).join(","), "carry,move", "最后 1C1M 补件保证满载道路全速");
 
     const builder = S.getOuterHarCarrierBuildBodyConfig(12900, 50);
     const bcnt = body => part => body.filter(p => p === part).length;
-    assert.equal(builder.length, 50, "修路爬也必须是 50 部件（旧版 77 部件根本生不出来）");
+    assert.equal(builder.length, 50, "满编修路爬也必须不超过 50 部件");
     assert.equal(bcnt(builder)(CONSTANTS.WORK), 2, "修路爬前缀 2 个 WORK");
     assert.equal(bcnt(builder)(CONSTANTS.CARRY), 31, "满载满速版 31 CARRY = 1550 容量");
     assert.equal(bcnt(builder)(CONSTANTS.MOVE), 17, "17 MOVE 才能抵消 31 CARRY + 2 WORK 的道路疲劳");
     assert.equal(bcnt(builder)(CONSTANTS.CARRY) + bcnt(builder)(CONSTANTS.MOVE) + 2, 50);
     assert.ok(bcnt(builder)(CONSTANTS.MOVE) * 2 >= bcnt(builder)(CONSTANTS.CARRY) + bcnt(builder)(CONSTANTS.WORK),
         "满载道路满速必须把 WORK 自重一起算：2×MOVE ≥ CARRY + WORK（每格疲劳 = 非 MOVE 部件数）");
-    for (const budget of [250, 600, 1150, 2300, 12900]) {
+    const oversizedPlain = S.getOuterHarCarrierBodyConfig(12900, 51);
+    const oversizedBuilder = S.getOuterHarCarrierBuildBodyConfig(12900, 51);
+    assert.ok(oversizedPlain.length <= 50 && oversizedBuilder.length <= 50,
+        "传入 maxPart > 50 也必须钳在引擎上限内");
+    assert.equal(oversizedBuilder.length, 50, "超大上限不可让修路体型溢出到第 51 部件");
+    const bodyCost = body => body.reduce((s, p) => s + CONSTANTS.BODYPART_COST[p], 0);
+    assert.equal(S.getOuterHarCarrierBuildBodyConfig(250, 50).length, 0,
+        "预算低于一个 2 WORK + 最小搬运组时必须不造车");
+    for (const budget of [350, 600, 1150, 2300, 2500, 12900]) {
         const body = S.getOuterHarCarrierBuildBodyConfig(budget, 50);
         const cnt = bcnt(body);
+        assert.ok(body.length > 0 && body.length <= 50, "预算 " + budget + " 必须返回有效的 ≤50 部件体型");
+        assert.ok(bodyCost(body) <= budget, "修路爬必须在预算内：" + budget + " >= " + bodyCost(body));
         assert.ok(cnt(CONSTANTS.MOVE) * 2 >= cnt(CONSTANTS.CARRY) + cnt(CONSTANTS.WORK),
             "预算 " + budget + " 的修路爬也必须满载道路满速，实得 "
             + JSON.stringify({ work: cnt(CONSTANTS.WORK), carry: cnt(CONSTANTS.CARRY), move: cnt(CONSTANTS.MOVE) }));
     }
+    for (const [budget, expected] of [
+        [2300, { carry: 27, move: 15, work: 2, cost: 2300 }],
+        [2500, { carry: 30, move: 16, work: 2, cost: 2500 }],
+        [12900, { carry: 31, move: 17, work: 2, cost: 2600 }],
+    ]) {
+        const body = S.getOuterHarCarrierBuildBodyConfig(budget, 50);
+        assert.deepEqual({
+            carry: bcnt(body)(CONSTANTS.CARRY), move: bcnt(body)(CONSTANTS.MOVE),
+            work: bcnt(body)(CONSTANTS.WORK), cost: bodyCost(body),
+        }, expected, "修路爬精确体型 / 成本，budget=" + budget);
+    }
+    const emergencyBuilder = S.getOuterHarCarrierBuildBodyConfig(1150, 50);
+    assert.deepEqual({
+        carry: bcnt(emergencyBuilder)(CONSTANTS.CARRY), move: bcnt(emergencyBuilder)(CONSTANTS.MOVE),
+        work: bcnt(emergencyBuilder)(CONSTANTS.WORK), cost: bodyCost(emergencyBuilder),
+    }, { carry: 12, move: 7, work: 2, cost: 1150 }, "1150 预算应造 12C7M2W / 600 容量");
+    const roadCap2300 = S.getOuterHarCarrierBuildBodyConfig(2300, 50);
+    assert.equal(bcnt(roadCap2300)(CONSTANTS.CARRY) * 50, 1350, "2300 预算正常修路爬容量为 1350");
 
     // 低等级房（能量上限低）按能量收缩，不能算出付不起的体型
     const small = S.getOuterHarCarrierBodyConfig(600, 50);
-    const bodyCost = body => body.reduce((s, p) => s + CONSTANTS.BODYPART_COST[p], 0);
     assert.ok(bodyCost(small) <= 600, "low-energy room must shrink the body");
     assert.ok(small.length >= 6, "至少保留最小可用体型");
+    for (const budget of [0, 100, 150, 250, 600, 1150, 2300, 2500, 12900]) {
+        const body = S.getOuterHarCarrierBodyConfig(budget, 50);
+        const cnt = bcnt(body);
+        if (!body.length) continue;
+        assert.ok(body.length <= 50 && bodyCost(body) <= budget,
+            "普通搬运爬必须不超过 50 部件且可支付：" + budget);
+        assert.ok(cnt(CONSTANTS.MOVE) * 2 >= cnt(CONSTANTS.CARRY),
+            "预算 " + budget + " 下满载普通搬运爬仍须道路全速");
+    }
+    assert.equal(S.getOuterHarCarrierBodyConfig(100, 50).length, 0, "付不起一个 2C1M 组就不生成体型");
+    assert.deepEqual({ carry: cnt(CONSTANTS.CARRY), move: cnt(CONSTANTS.MOVE), cost: bodyCost(carrier) },
+        { carry: 33, move: 17, cost: 2500 }, "满编普通搬运爬 33C17M / 1650 容量 / 成本 2500");
 }
 
 // ───────────────────────── 2) 回程只交 Storage，兼容旧 Link 任务 ─────────────────────────
@@ -1171,10 +1211,10 @@ function defenceGateFixture(defenders) {
     const live = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
                              containerEnergies: [2000, 2000, 2000], fleet: [] });
     assert.equal(live.S.outerMineEnergyWaiting(live.spawnRoom), 6000, "外矿存货 = 三个容器之和");
-    // 2026-10-27：配额的分母从「造车价 2500」改成「一趟运力 1700」—— 前者是**成本**、
+    // 2026-10-27：配额的分母从「造车价 2500」改成「一趟运力 1650」—— 前者是**成本**、
     // 不是运力，会把 4000 存货算成 1 只车（实际要 2~4 只才清得完）。
     assert.equal(live.S.outerCarrierBacklogQuota(live.spawnRoom), 3,
-        "6000 存货 / 一趟 1700 = 该有 3 只");
+        "6000 存货 / 一趟 1650 = 该有 3 只");
     assert.equal(live.S.outerMineStarvesSpawnRoom(live.spawnRoom, true), true,
         "按主房口径仍然算穷（storage + terminal 超额 只有 22592 < 3 万）");
     // 这就是补员闸的最终判据：闸门判真 && 车队 >= 配额 才挡
@@ -1193,7 +1233,7 @@ function defenceGateFixture(defenders) {
         "没货就老老实实被闸门挡住");
 
     // 负对照 ②：车队已经到配额 → 不再多出，豁免不会把闸门永久架空
-    // （配额按「一趟运力 1700」算，6000 存货 ⇒ 3 只）
+    // （配额按「一趟运力 1650」算，6000 存货 ⇒ 3 只）
     const stocked = gateScene({ storageEnergy: 4242, terminalEnergy: 48350,
                                 containerEnergies: [2000, 2000, 2000], fleet: [{}, {}, {}] });
     assert.equal(stocked.S.outerMineStarvesSpawnRoom(stocked.spawnRoom, true)
@@ -1271,7 +1311,7 @@ function defenceGateFixture(defenders) {
     assert.equal(S.outerMineEnergyWaiting(spawnRoom, "W35N55"), 6000, "按房取 W35N55 的存货");
     assert.equal(S.outerMineEnergyWaiting(spawnRoom), 9070, "不传房名 = 全部外矿房之和");
     assert.equal(S.outerCarrierBacklogQuota(spawnRoom, "W34N55"), 1, "W34N55 只喂得起 1 只");
-    // 2026-10-27：分母从「造车价 2500」改成「一趟运力 1700」—— 6000/1700 = 3 只
+    // 2026-10-27：分母从「造车价 2500」改成「一趟运力 1650」—— 6000/1650 = 3 只
     assert.equal(S.outerCarrierBacklogQuota(spawnRoom, "W35N55"), 3, "W35N55 喂得起 3 只");
 
     // 关键：全局车数（这里模拟 5 只）已经超过全局配额，但 W35N55 只有 1 只
@@ -1344,13 +1384,12 @@ function defenceGateFixture(defenders) {
 
     // ③ 按矿点算配额：有货的 1 只，没货的 0 只
     //    分母走实现本体（`outerCarrierTripCapacity`）：这个 spawnRoom 桩没有容量
-    //    ⇒ 退回满编 1700，与历史数值一致；真实房间里 RCL6 房会算出 600（见
-    //    test/outer-carrier-quota.test.cjs）。
-    assert.equal(S.outerCarrierTripCapacity(spawnRoom), 1700, "容量未知时退回满编口径");
+    //    ⇒ 退回普通满编口径 1650。
+    assert.equal(S.outerCarrierTripCapacity(spawnRoom), 1650, "容量未知时退回普通满编口径");
     const trip = S.outerCarrierTripCapacity(spawnRoom);
     const quotaStarved = Math.floor(waitingStarved / trip);
     const quotaFull = Math.floor(S.outerMineWaitingByMine(spawnRoom, "W26N59", memFull) / trip);
-    assert.equal(quotaStarved, 1, "3200/1700 → 该有 1 只");
+    assert.equal(quotaStarved, 1, "3200/1650 → 该有 1 只");
     assert.equal(quotaFull, 0, "没货 → 0 只");
 
     // ④ 复现现场：2 只车**都**跑 (29,4)，(27,29) 一只没有
@@ -1363,13 +1402,13 @@ function defenceGateFixture(defenders) {
         return t && t.roomName == "W26N59" && t.id == id;
     }).length;
     // 旧口径（房间级）：2 只 >= 配额 → 直接把 (27,29) 挡死
-    const roomQuota = Math.floor(S.outerMineEnergyWaiting(spawnRoom, "W26N59") / 1700);
+    const roomQuota = Math.floor(S.outerMineEnergyWaiting(spawnRoom, "W26N59") / 1650);
     assert.ok(carriers.length >= roomQuota, "旧口径把满容器矿点判成够了（这就是要修的 bug）");
     // 新口径（矿点级）：满的那个放行，空的照旧挡住
     assert.ok(countMine(STARVED_ID) < quotaStarved, "容器满的那个矿点必须放行补员");
     assert.ok(countMine(FULL_ID) >= quotaFull, "没货的那个矿点不许再出车");
 
-    // ⑤ 总量上限几乎不变（Σ floor(w_i/1700) ≤ floor(Σw/1700) + 矿点数-1）
+    // ⑤ 总量上限几乎不变（Σ floor(w_i/1650) ≤ floor(Σw/1650) + 矿点数-1）
     assert.ok(quotaStarved + quotaFull <= roomQuota + 1, "按矿点拆开不会让总编制失控");
 }
 

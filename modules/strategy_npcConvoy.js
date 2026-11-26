@@ -285,6 +285,145 @@ const SALVAGE_OUT = {shard:SALVAGE_ORIGIN,roomName:SALVAGE_ROOM,x:14,y:8};
 const SALVAGE_BACK = {shard:SALVAGE_TARGET,roomName:SALVAGE_ROOM,x:30,y:37};
 const SALVAGE_WAIT = [[11,11],[10,12],[12,11]];
 const SALVAGE_RETURN_TTL = 220;
+const SALVAGE_STAGE_MAX_AGE_MS = 90000;
+const SALVAGE_STAGE_REFRESH = 12;
+const SALVAGE_STABLE_TICKS = 4;
+
+function salvageDamageBuffer(creep) {
+    if (creep.getActiveBodyparts(RANGED_ATTACK) > 0) return 4;
+    return creep.getActiveBodyparts(ATTACK) > 0 ? 2 : 0;
+}
+
+function salvageField(room, task) {
+    const cache = room._salvageField;
+    if (cache?.tick === Game.time && cache.id === task.id) return cache;
+    const hostiles = hostileCreeps(room);
+    const convoy = hostiles.filter(c => convoyGroup(c) === task.id);
+    const threats = hostiles.map(c => ({pos:c.pos, range:salvageDamageBuffer(c), expected:convoy.includes(c)}))
+        .filter(t => t.range);
+    // Unarmed looters may compete for loot but cannot directly attack. Their
+    // tiles are still blocked. Never pre-stage through armed foreign players.
+    const blocked = !!(room.controller?.owner || room.find(FIND_HOSTILE_POWER_CREEPS).length
+        || room.find(FIND_HOSTILE_STRUCTURES,{filter:s => s.structureType === STRUCTURE_TOWER}).length
+        || threats.some(t => !t.expected));
+    const cargo = convoy.filter(c => task.cargo.includes(c.name) && c.store?.[task.resource] > 0);
+    return room._salvageField = {tick:Game.time,id:task.id,blocked,convoy,threats,cargo};
+}
+
+function salvageThreatened(field, pos) {
+    return field.threats.some(t => range(t.pos,pos) <= t.range);
+}
+
+function salvageSafeMatrix(room, field) {
+    if (field.matrix) return field.matrix;
+    const matrix = avoidPortals(room,new PathFinder.CostMatrix());
+    for (const s of room.find(FIND_STRUCTURES)) {
+        if (OBSTACLE_OBJECT_TYPES.includes(s.structureType)
+            || (s.structureType === STRUCTURE_RAMPART && !s.my && !s.isPublic)) matrix.set(s.pos.x,s.pos.y,255);
+    }
+    for (const c of room.find(FIND_CREEPS)) matrix.set(c.pos.x,c.pos.y,255);
+    for (const t of field.threats) {
+        for (let x=Math.max(t.pos.x-t.range,0);x<=Math.min(t.pos.x+t.range,49);x++)
+            for (let y=Math.max(t.pos.y-t.range,0);y<=Math.min(t.pos.y+t.range,49);y++) matrix.set(x,y,255);
+    }
+    return field.matrix = matrix;
+}
+
+function salvageSearch(room, field, start, goals) {
+    if (!goals.length) return;
+    const matrix = salvageSafeMatrix(room,field);
+    const result = PathFinder.search(start,goals,{maxRooms:1,maxOps:700,plainCost:2,swampCost:5,
+        roomCallback:name => name === room.name ? matrix : false});
+    if (!result.incomplete && result.path.every(p => matrix.get(p.x,p.y) < 255)) return result.path;
+}
+
+function salvageNearCargo(room, field, start, cargo, scout=false) {
+    if (salvageThreatened(field,start)) return;
+    let matrix, terrain;
+    const minRange = scout ? 2 : 1;
+    const onPortal = portalPositions(room).some(p => range(p.pos,start) === 0);
+    // Prefer an adjacent square, then expand only if no safe path exists.
+    for (let distance=minRange;distance<=5;distance++) {
+        if (!onPortal && range(start,cargo.pos) >= minRange && range(start,cargo.pos) <= distance) return [];
+        matrix ??= salvageSafeMatrix(room,field);
+        terrain ??= Game.map.getRoomTerrain(room.name);
+        const goals = [];
+        for (let x=Math.max(1,cargo.pos.x-distance);x<=Math.min(48,cargo.pos.x+distance);x++) {
+            for (let y=Math.max(1,cargo.pos.y-distance);y<=Math.min(48,cargo.pos.y+distance);y++) {
+                if (range({x,y},cargo.pos)<minRange || matrix.get(x,y)>=255 || terrain.get(x,y)===TERRAIN_MASK_WALL) continue;
+                goals.push({pos:new RoomPosition(x,y,room.name),range:0});
+            }
+        }
+        const path = salvageSearch(room,field,start,goals);
+        if (path) return path;
+    }
+}
+
+function salvageMoveStep(creep, path) {
+    if (path?.length) creep.move(creep.pos.getDirectionTo(path[0]));
+}
+
+function salvagePark(creep, task, field, cargo, scout=false) {
+    const zone = `${cargo.name}:${cargo.pos.x}:${cargo.pos.y}:` + field.threats.map(t => `${t.pos.x}/${t.pos.y}/${t.range}`).join(";");
+    const park = task.stagePark;
+    if (park?.zone === zone && range(creep.pos,park) === 0) return true;
+    const path = salvageNearCargo(creep.room,field,creep.pos,cargo,scout);
+    if (!path) return false;
+    const destination = path.at(-1) || creep.pos;
+    task.stagePark = {zone,x:destination.x,y:destination.y};
+    salvageMoveStep(creep,path);
+    return true;
+}
+
+function salvageAvoidDanger(creep, field) {
+    if (!salvageThreatened(field,creep.pos)) return false;
+    const matrix = salvageSafeMatrix(creep.room,field);
+    const result = PathFinder.search(creep.pos,field.threats.map(t => ({pos:t.pos,range:t.range + 1})),
+        {flee:true,maxRooms:1,maxOps:450,roomCallback:() => matrix});
+    const step = result.path[0];
+    if (step && matrix.get(step.x,step.y) < 255) salvageMoveStep(creep,[step]);
+    return true;
+}
+
+function salvageStageCurrent(data) {
+    const age = Date.now() - data?.observedAt;
+    return age >= 0 && age <= SALVAGE_STAGE_MAX_AGE_MS;
+}
+
+function salvageStageReceived(data) {
+    const cfg = Memory.npcConvoySalvage;
+    if (Game.shard.name !== SALVAGE_ORIGIN || !cfg || cfg.id !== data?.id || data.shard !== SALVAGE_TARGET
+        || !Number.isSafeInteger(data.tick) || data.tick >= cfg.deathTick || !salvageStageCurrent(data)
+        || !Array.isArray(data.slots) || !data.slots.length || data.slots.some(s => !cfg.cargo.includes(s))) return false;
+    if (!cfg.stageHint || data.tick > cfg.stageHint.tick)
+        cfg.stageHint = {tick:data.tick,observedAt:data.observedAt,slots:data.slots};
+    return true;
+}
+
+function salvageScoutStage(creep, task, field) {
+    const sample = field.convoy.map(c => `${c.name}:${c.pos.x}:${c.pos.y}:${salvageDamageBuffer(c)}`).sort().join(";");
+    if (task.stageSample !== sample) {
+        task.stageSample = sample;
+        task.stageSince = Game.time;
+        return;
+    }
+    if (Game.time - task.stageSince < SALVAGE_STABLE_TICKS) return;
+    const cargo = field.cargo[0];
+    if (!cargo) return;
+    if (Game.time < task.deathTick && Game.time - (task.stagePublished ?? -Infinity) >= SALVAGE_STAGE_REFRESH) {
+        const back = portalPositions(creep.room).find(p => p.pos.x === SALVAGE_BACK.x
+            && p.pos.y === SALVAGE_BACK.y && p.destination?.shard === SALVAGE_ORIGIN);
+        if (!back || (Number.isFinite(back.ticksToDecay)
+            && back.ticksToDecay <= task.deathTick - Game.time + SALVAGE_RETURN_TTL)) return;
+        const landing = back.pos;
+        const slots = field.cargo.filter(c => salvageNearCargo(creep.room,field,landing,c)).map(c => c.name);
+        task.stagePublished = Game.time;
+        if (slots.length) ManagerCrossShard.addCrossShardRequest(SALVAGE_ORIGIN,{
+            func:"npcConvoySalvageStage",data:{id:task.id,shard:SALVAGE_TARGET,tick:Game.time,observedAt:Date.now(),slots},
+        },`npcConvoySalvageStage:${task.id}:${Game.time}`);
+    }
+    salvagePark(creep,task,field,cargo,true);
+}
 
 function salvageLoot(room, task) {
     return room.find(FIND_TOMBSTONES).filter(t => task.cargo.includes(t.creep?.name)
@@ -378,6 +517,15 @@ function salvageUnboost(creep,task) {
 function salvageReturn(creep,task) {
     task.returning = true;
     if (Game.shard.name === SALVAGE_TARGET && creep.room.name === SALVAGE_ROOM) {
+        const field = salvageField(creep.room,task);
+        if (field.threats.length) {
+            if (salvageAvoidDanger(creep,field)) return;
+            const portal = new RoomPosition(SALVAGE_BACK.x,SALVAGE_BACK.y,SALVAGE_ROOM);
+            if (salvageThreatened(field,portal)) return;
+            if (range(creep.pos,portal) > 1) {
+                return salvageMoveStep(creep,salvageSearch(creep.room,field,creep.pos,[{pos:portal,range:1}]));
+            }
+        }
         return salvageCross(creep,SALVAGE_BACK,SALVAGE_ORIGIN);
     }
     if (Game.shard.name !== SALVAGE_ORIGIN) return;
@@ -433,6 +581,9 @@ Creep.prototype.npcConvoySalvage = function () {
         if (this.room.name !== SALVAGE_ROOM) return followRoute(this,SALVAGE_ROUTE,1);
         if (scout || cfg.ready?.available.includes(task.slot)) return salvageCross(this,SALVAGE_OUT,SALVAGE_TARGET);
         if (cfg.ready) return salvageReturn(this,task);
+        if (salvageStageCurrent(cfg.stageHint) && cfg.stageHint.slots.includes(task.slot)) {
+            return salvageCross(this,SALVAGE_OUT,SALVAGE_TARGET);
+        }
         const slot = SALVAGE_WAIT[task.cargo.indexOf(task.slot)];
         if (!slot) return salvageReturn(this,task);
         const wait = new RoomPosition(slot[0],slot[1],SALVAGE_ROOM);
@@ -441,8 +592,10 @@ Creep.prototype.npcConvoySalvage = function () {
         return;
     }
     if (shard !== SALVAGE_TARGET || this.room.name !== SALVAGE_ROOM) return;
-    const hostiles = hostileCreeps(this.room);
-    const safe = Game.time >= task.deathTick && !hostiles.length && !dangerousRoom(this.room);
+    const field = salvageField(this.room,task);
+    if (field.blocked) return salvageReturn(this,task);
+    if (salvageAvoidDanger(this,field)) return;
+    const safe = Game.time >= task.deathTick && !field.convoy.length;
     if (scout) {
         if (safe && !scoutAwaitingAck) {
             const available = salvageLoot(this.room,task).map(t => t.creep.name);
@@ -451,13 +604,23 @@ Creep.prototype.npcConvoySalvage = function () {
                 data:{id:task.id,shard:SALVAGE_TARGET,tick:Game.time,available,scout:this.name},
             },"npcConvoySalvage:"+task.id)) task.readySent = Game.time;
         }
-        if (hostiles.length && dodge(this,hostiles,true) !== 0) return;
         if (task.readySent !== undefined) return;
+        if (field.cargo.length) return salvageScoutStage(this,task,field);
         const wait = new RoomPosition(24,43,SALVAGE_ROOM);
         if (!this.pos.inRangeTo(wait,1)) moveLocal(this,wait,1);
         return;
     }
-    if (!safe || (this.store[task.resource] || 0) > 0) return salvageReturn(this,task);
+    if ((this.store[task.resource] || 0) > 0) return salvageReturn(this,task);
+    if (!safe) {
+        const cargo = field.cargo.find(c => c.name === task.slot);
+        if (!cargo) {
+            if (Game.time >= task.deathTick - 1 && Game.time <= task.deathTick + 2) return;
+            return salvageReturn(this,task);
+        }
+        if (Game.time > task.deathTick + 2) return salvageReturn(this,task);
+        if (!salvagePark(this,task,field,cargo)) return salvageReturn(this,task);
+        return;
+    }
     const stash = salvageLoot(this.room,task).find(t => t.creep.name === task.slot);
     if (!stash) return salvageReturn(this,task);
     if (this.withdraw(stash,task.resource) === ERR_NOT_IN_RANGE) moveLocal(this,stash,1);
@@ -465,6 +628,7 @@ Creep.prototype.npcConvoySalvage = function () {
 
 global.missionFunc = global.missionFunc || {};
 global.missionFunc.npcConvoySalvageReady = salvageReady;
+global.missionFunc.npcConvoySalvageStage = salvageStageReceived;
 global.missionCallBack = global.missionCallBack || {};
 global.missionCallBack.npcConvoySalvageReadyAcknowledged = salvageReadyAcknowledged;
 global.StrategyNpcConvoy = {enabled,watches,recordObservation,exec,execSalvage};

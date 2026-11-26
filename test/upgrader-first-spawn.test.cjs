@@ -74,6 +74,8 @@ assert.ok(/spawnFailure\s*=\s*false/.test(nowCode), "但必须解掉 spawnFailur
 // 外矿 carrier 那条同样紧挨着 upgrader，判据同源。
 const outBody = srcSrc.match(/\n {4}trySpawnOuterHarCarrier\(roomName, spawnRoom\) \{[\s\S]*?\n {4}\},/);
 assert.ok(outBody, "trySpawnOuterHarCarrier 必须存在");
+const carrierBudgetBody = srcSrc.match(/\n {4}outerCarrierSpawnBudget\(spawnRoom, spawnAvail\) \{[\s\S]*?\n {4}\},/);
+assert.ok(carrierBudgetBody, "outerCarrierSpawnBudget 必须存在");
 const outCode = strip(outBody[0]);
 assert.ok(!/currentEnergyAvailable\s*=\s*undefined/.test(outCode),
     "外矿 carrier 补员也不能清 currentEnergyAvailable");
@@ -106,7 +108,7 @@ harness.__spawned = [];
 Array.prototype.head = function () { return this.length ? this[0] : undefined; };
 vm.runInNewContext(
     "Array.prototype.head = function(){ return this.length ? this[0] : undefined; };"
-    + "var pro = {" + outBody[0] + "\n};", harness, { filename: "trySpawnOuterHarCarrier.js" });
+    + "var pro = {" + carrierBudgetBody[0] + outBody[0] + "\n};", harness, { filename: "trySpawnOuterHarCarrier.js" });
 
 const makeSpawnRoom = upgraderCnt => ({
     name: "W26N58",
@@ -139,7 +141,7 @@ Object.assign(harness.pro, {
     outerCarrierFleetCap: () => 6,
     outerMineStarvesSpawnRoom: () => false,
     outerMineWaitingByMine: () => 0,
-    outerCarrierTripCapacity: () => 1700,
+    outerCarrierTripCapacity: () => 1650,
     getOuterHarCarrierBodyConfig: () => new Array(20).fill("carry"),
     getOuterHarCarrierBuildBodyConfig: () => new Array(20).fill("carry"),
     generatorOuterHarCarryTask: () => [{}],

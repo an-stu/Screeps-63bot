@@ -23,21 +23,19 @@ assert.ok(!/if \(spawnRoom\.spawnFailure\) return;/.test(code),
 assert.ok(/!spawnRoom\.spawn\.some\(e => !e\.spawning && e\.isActive\(\)\)/.test(code),
     "应该直接检查「有没有空闲且可用的 spawn」（允许带诊断埋点包装）");
 
-// ── ② 体型预算必须夹住，别让一只外矿搬运抽干整只 hive ──────────────────────
-//
-// 满配 50 部件 = 2,500 能量：RCL8 房（12,900）无所谓，但出兵房 RCL5 只有 1,800，
-// 满配爬一孵 56+ tick，把 hive 抽到 109，本房补员和外矿补员互相饿死。
-assert.ok(/let hiveCap = spawnRoom\.getEnergyCapacityAvailable\(\);/.test(code),
-    "体型预算要基于主房 hive 容量算上限");
-// 0.78.164 把夹从 75% 收紧到 50%（2026-10-29 实测：1,350 的爬要求「hive 满 1,800 +
-// spawn 空闲」同时成立，RCL5 每 1,500 tick 要换 4 只 1,250 的 keeper，这个窗口
-// 两天只出现几次 ⇒ 外矿双容器 4,000 满 + 地面 3,161 堆着没人搬；50% 后 900 就能孵）。
+// ── ② Normal rooms use full capacity; only the depleted recovery state is bounded ──
+assert.ok(/outerCarrierSpawnBudget\(spawnRoom, spawnAvail\)/.test(code),
+    "spawn and quota capacity must share one body-budget helper");
+assert.ok(/getEnergyCapacityAvailable\(\)[\s\S]{0,120}energyCapacityAvailable/.test(code),
+    "shared body budget must support the room's full hive capacity");
+assert.ok(/!spawnRoom\.creeps\("worker", false\)\.length[\s\S]{0,100}!spawnRoom\.creeps\("carrier", false\)\.length/.test(code),
+    "half-hive fallback is allowed only when both workers and home carriers are absent");
 assert.ok(/Math\.min\(Math\.floor\(hiveCap \* 0\.5\),/.test(code),
-    "体型预算必须夹在 hive 容量的 50% 以内（0.78.164 从 75% 收紧）");
+    "depleted fallback must remain bounded by half the hive capacity");
 
 // ── ③ 保留「按当前可用能量收缩」的原意 ────────────────────────────────────
 assert.ok(/Math\.max\(spawnAvail, 550\)/.test(code),
-    "仍要按当前可用能量收缩体型（hive 正在连续出兵时不能按满容量去试）");
+    "depleted fallback still uses current spawn energy with the existing 550 floor");
 
 // ── ④ 行为对照：预算变小后体型确实变小（真实函数，不需要桩）─────────────
 const vm = require("node:vm");
@@ -88,12 +86,9 @@ assert.ok(!/capPath\.length \* \(roadDone \? 1\.2 : 3\)/.test(code),
 //
 // OUTER_CARRIER_COST(2500) 是**造一只车**的价格，被当成了「一只车能清多少货」：
 // 容器 4,000 ⇒ floor(4000/2500) = 1 只，而实际要 4 只（每趟约 1,000）。
-assert.ok(/OUTER_CARRIER_TRIP = 1700/.test(code),
-    "必须有「一趟运力」常量（满编一趟 1,700）");
-// 0.78.177：分母从满编常量 1700 升级为 `outerCarrierTripCapacity(spawnRoom)`
-// ——出兵房体型被 hive 50% 夹住（RCL6 ⇒ 600~700），拿 1700 算会把
-// 「这批货要几只车」少算近 3 倍。意图不变：分母 = 一趟运力，不是造价。
-assert.ok(/outerCarrierTripCapacity = 1700|let quota = Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/ pro\.outerCarrierTripCapacity\(spawnRoom\)\);/.test(code),
+assert.ok(/OUTER_CARRIER_TRIP = 1650/.test(code),
+    "ordinary full body trip capacity must be 1,650 (33 CARRY)");
+assert.ok(/let quota = Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/ pro\.outerCarrierTripCapacity\(spawnRoom\)\);/.test(code),
     "配额 = 存货 / 一趟运力（按实际体型算运力；无货仍为 0，不会把闸门永久架空）");
 assert.ok(!/Math\.floor\(pro\.outerMineEnergyWaiting\(spawnRoom, roomFilter\) \/ OUTER_CARRIER_COST\)/.test(code),
     "不能再用造的价钱当分母");
