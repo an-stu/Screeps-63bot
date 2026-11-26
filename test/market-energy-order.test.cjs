@@ -90,13 +90,22 @@ test("market pause and deduplication both preserve account-bound orders", () => 
     };
     const canceled = [];
     const ctx = vm.createContext({
-        Game: {time: 123, market: {orders, cancelOrder(id) { canceled.push(id); delete orders[id]; }}},
+        Game: {time: 123, shard: {name:"shard3"}, market: {orders, cancelOrder(id) { canceled.push(id); delete orders[id]; }}},
         Logger: {log() {}}, _: {values: Object.values}, ORDER_BUY: "buy", RESOURCE_ENERGY: "energy",
     });
     loadTerminalHelpers(ctx);
     vm.runInContext("market.convergeBuyOrders(); market.pauseCommodityBuys();", ctx);
     assert.deepEqual(canceled, ["low", "high"]);
     assert.deepEqual(Object.keys(orders), ["energy", "sale", "unlock", "otherUnlock", "pixel"]);
+});
+
+test("secondary shard commodity pause leaves normal manual orders alone", () => {
+    const own = {id:"manual", type:"buy", resourceType:"Z", roomName:"E41S29", remainingAmount:1000};
+    const ctx = vm.createContext({Game:{time:123, shard:{name:"shard2"}, market:{orders:{manual:own}}}, ORDER_BUY:"buy", RESOURCE_ENERGY:"energy"});
+    loadTerminalHelpers(ctx);
+    vm.runInContext("market.pauseCommodityBuys();", ctx);
+    assert.equal(ctx.Game._pauseCommodityBuysTick, 123, "the optional commodity strategy is still paused");
+    assert.equal(ctx.Game.market.orders.manual, own);
 });
 
 test("commodity scan selects a viable owned terminal on the current shard", () => {

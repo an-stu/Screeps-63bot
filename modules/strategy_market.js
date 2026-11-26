@@ -91,6 +91,35 @@ function isTerminalMarketOrder(order) {
     return typeof order.roomName === "string" && /^[WE]\d+[NS]\d+$/.test(order.roomName);
 }
 
+const BASIC_MARKET_MINERALS = ["U", "L", "K", "Z", "X", "O", "H"];
+const LOCAL_MINERAL_BUY_TARGET = 6000;
+const LOCAL_MINERAL_BUY_ENERGY = 80000;
+const LOCAL_MINERAL_TX_RESERVE = 2000;
+const LOCAL_MINERAL_TX_LIMIT = 1000;
+
+function activeMarketTerminal(room) {
+    return room.my && room.terminal?.my && room.terminal.isActive();
+}
+
+function mineralSellReserve() {
+    return Number(Memory.marketSettings?.mineralKeep) || 20000;
+}
+
+function hasOwnMineralOrder(room, resType) {
+    return Object.values(Game.market.orders).some(o => o.roomName === room.name
+        && o.resourceType === resType && o.remainingAmount > 0);
+}
+
+function recentMineralPrice(resType) {
+    let volume = 0, value = 0;
+    for (const day of (StrategyMarketPrice.getHistory(resType) || []).slice(-7)) {
+        if (!(day.volume > 0 && day.avgPrice > 0)) continue;
+        volume += day.volume;
+        value += day.volume * day.avgPrice;
+    }
+    return volume ? value / volume : StrategyMarketPrice.getResTypeHistory(resType);
+}
+
 function selectCommodityMarketRoom(rooms) {
     const usable = r => r.my && r.storage && r.terminal?.my && r.terminal.isActive()
         && r.terminal.store.getFreeCapacity() >= 50000;
@@ -370,9 +399,8 @@ let pro = {
             //     }
             // }
         }
-        let MINERALS = ["U", "L", "K", "Z", "X", "O", "H"];
         let batch = Math.floor(Game.time / 100) % 4;
-        for (let i = 0; i < 2; i++) pro.autoBuyMineral(MINERALS[(batch * 2 + i) % MINERALS.length]);
+        for (let i = 0; i < 2; i++) pro.autoBuyMineral(BASIC_MARKET_MINERALS[(batch * 2 + i) % BASIC_MARKET_MINERALS.length]);
         // 利润套利：买入利润率超阈值商品的展开基础原料，供工厂合成后售卖
         if (batch % 2 == 0) pro.autoBuyHighProfitComponents();
         // 所有建单路径跑完后再收敛一次。放在开头是不够的：autoBuyLowRclEnergy
@@ -406,11 +434,13 @@ let pro = {
         });
     },
     /**
-     * 低能量模式：撤销所有非 energy 买单，避免继续采购 lab/工厂商品链。
+     * 低能量模式：暂停 lab/工厂采购。非 shard3 不撤手动房间买单，
+     * 也不把本地可交易房间的基础矿采购一起停掉。
      */
     pauseCommodityBuys() {
         if (Game._pauseCommodityBuysTick === Game.time) return;
         Game._pauseCommodityBuysTick = Game.time;
+        if (Game.shard.name !== "shard3") return;
         _.values(Game.market.orders).forEach(order => {
             if (isTerminalMarketOrder(order) && order.type == ORDER_BUY && order.remainingAmount
                 && order.resourceType != RESOURCE_ENERGY) {
@@ -1015,7 +1045,54 @@ let pro = {
             }
         });
     },
+    tryLocalMineralDeal(room, resType, side, requested) {
+        const terminal = room.terminal;
+        if (!activeMarketTerminal(room) || terminal.cooldown || terminal._localMineralDeal
+            || hasOwnMineralOrder(room, resType)) return false;
+        const buy = side === ORDER_BUY;
+        const txEnergy = Math.max(0, (terminal.store[RESOURCE_ENERGY] || 0) - LOCAL_MINERAL_TX_RESERVE);
+        const limit = Math.min(requested, LOCAL_MINERAL_TX_LIMIT,
+            buy ? terminal.store.getFreeCapacity(resType) : terminal.store[resType] || 0);
+        if (limit < 100) return false;
+        const ref = recentMineralPrice(resType);
+        const energyPrice = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
+        if (!(ref > 0) || !(energyPrice > 0)) return false;
+        const market = Game.market;
+        const usedOrders = market._dealedOrder || (market._dealedOrder = {});
+        const creditBudget = market._localMineralCredits ?? market.credits;
+        let best;
+        for (const order of pro.getAllOrdersCacheList(resType, buy ? ORDER_SELL : ORDER_BUY)) {
+            if (!(order.price > 0) || !order.roomName || market.orders[order.id] || usedOrders[order.id]) continue;
+            let amount = Math.floor(Math.min(limit, order.amount, buy ? creditBudget / order.price : limit));
+            if (!(amount >= 100)) continue;
+            let cost = market.calcTransactionCost(amount, room.name, order.roomName);
+            if (cost > txEnergy) {
+                amount = Math.floor(amount * txEnergy / cost);
+                if (amount < 100) continue;
+                cost = market.calcTransactionCost(amount, room.name, order.roomName);
+            }
+            if (cost > txEnergy) continue;
+            const price = order.price + (buy ? 1 : -1) * cost * energyPrice / amount;
+            if (buy ? price > ref * 1.25 : price < ref * 0.90) continue;
+            if (!best || (buy ? price < best.price : price > best.price)
+                || (price === best.price && amount > best.amount)) best = {order, amount, price};
+        }
+        if (!best || market.deal(best.order.id, best.amount, room.name) !== OK) return false;
+        terminal._localMineralDeal = true;
+        usedOrders[best.order.id] = true;
+        if (buy) market._localMineralCredits = creditBudget - best.amount * best.order.price;
+        Logger.info("Market", `${room.name} ${buy ? "buy" : "sell"} ${best.amount} ${resType} @ ${best.price.toFixed(3)} (incl. energy)`);
+        return true;
+    },
+    autoBuyLocalMineral(resType) {
+        for (const room of ManagerRooms.getNormalRoom()) {
+            if (!activeMarketTerminal(room) || StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY) < LOCAL_MINERAL_BUY_ENERGY) continue;
+            const missing = LOCAL_MINERAL_BUY_TARGET - StationCarry.roomMassStoreCnt(room, resType);
+            if (missing >= 100) pro.tryLocalMineralDeal(room, resType, ORDER_BUY, missing);
+        }
+    },
     autoBuyMineral(resType) {
+        if (Game.shard.name !== "shard3") return pro.autoBuyLocalMineral(resType);
         // Game.* 每 tick 重置，缓存必须放在 global 并按 tick 校验
         if (!global._resCnt) global._resCnt = { tick: -1 };
         if (global._resCnt.tick != Game.time || global._resCnt[resType] == null) {
@@ -1264,21 +1341,44 @@ let pro = {
     // 返回当前价格，供其他函数使用
     return maxPrice;
 },
+    autoSellLocalMineral(room) {
+        if (!activeMarketTerminal(room)) return false;
+        const keep = mineralSellReserve();
+        for (const resType of BASIC_MARKET_MINERALS) {
+            const store = room.storage.store[resType] || 0;
+            const stocked = room.terminal.store[resType] || 0;
+            const surplus = store + stocked - keep;
+            if (surplus < 100 || hasOwnMineralOrder(room, resType)) continue;
+            if (pro.tryLocalMineralDeal(room, resType, ORDER_SELL, surplus)) return true;
+            if (stocked >= LOCAL_MINERAL_TX_LIMIT || !store) continue;
+            const amount = Math.min(surplus, store, LOCAL_MINERAL_TX_LIMIT - stocked, room.terminal.store.getFreeCapacity(resType));
+            if (amount < 100) continue;
+            const carrier = room.creeps("carrier").find(e => e.isFree() && e.storeEmpty() && e.ticksToLive > 90);
+            if (!carrier) continue;
+            carrier.addTask([
+                UtilsTask.task(room.terminal, "fillRes", undefined, {resType, resCount:amount}),
+                UtilsTask.task(room.storage, "carryRes", undefined, {resType, resCount:amount}),
+            ]);
+            return false;
+        }
+        return false;
+    },
     autoSellMineral(room) {
         if (!room.storage || !room.terminal || !room.terminal.my) return;
         // 矿物挂单/补货也是 CPU 大头（7 种矿物 × 市场订单查询）。
         // 按房间错开每 100 tick 检查一次：矿物产量低、卖单成交慢，
         // 每 80 tick 更新一次价格与数量足够（见 marketSlowPass 的说明）
         if (!marketSlowPass(room)) return;
+        if (Game.shard.name !== "shard3") return pro.autoSellLocalMineral(room);
         // 基础矿物：采集侧已无存量上限（0.78.217 station_minetral 改「矿价>能量价一半
         // 就采，有矿就采」），多余的矿物在这里直接挂卖单。
-        let sellable = ["U", "L", "K", "Z", "X", "O", "H"];
+        let sellable = BASIC_MARKET_MINERALS;
         // 每房间保留量（用户 2026-11-07：「多余的 mineral 直接挂卖单售卖 >20k」）：
         // 单房存量 >2 万的部分直接出 surplus 挂单。历史：30000（太容易边采边卖）
         // → 150000（当时采集侧有 20k 上限）→ 20000（采集侧已不限量，卖单线接管泄压）。
         // 全局闸（下方 _resCnt ≥ 每房 6000+1 万）仍保留：全局存量不足买入线时不卖，
         // 防止与 autoBuyMineral 自买自卖。可用 Memory.marketSettings.mineralKeep 调整。
-        let keep = Number((Memory.marketSettings && Memory.marketSettings.mineralKeep) || 20000);
+        let keep = mineralSellReserve();
         for (let resType of sellable) {
             let storeCnt = room.storage.store[resType] || 0;
             let termCnt = room.terminal.store[resType] || 0;
@@ -1397,7 +1497,7 @@ let pro = {
         if (!pro.shouldRunMarketRoom()) return;
         // let time = Game.cpu.getUsed();
 
-        if (!room.my || !room.terminal || !room.terminal.my) return;
+        if (!activeMarketTerminal(room)) return;
         if (Game.time - 300 > allRoomRes.updateTime) {
             allRoomRes.res = pro.getMyAllRoomRes();
             allRoomRes.updateTime = Game.time;
@@ -1532,7 +1632,7 @@ let pro = {
         // 每 280 tick 一次，并按 hash 分散到 7 个相位。
         if (marketSlowPass(room, 280)) SELL_RES_TYPES.forEach(e => {pro.autoSell(e, room)})
         // 基础矿物：能采就采，超出保留量自动挂卖单（矿物采集已不再因存量暂停）
-        pro.autoSellMineral(room);
+        if (pro.autoSellMineral(room)) return;
         pro.autoSellDeposit(room);
 
         // 买入低频化：遍历 RES_BUY_AMOUNT_ROOM 每个资源都要查市场卖单，
@@ -1543,6 +1643,7 @@ let pro = {
         // 买东西
         if (Game.market.credits > 100000)
             for (let resType in RES_BUY_AMOUNT_ROOM) {
+                if (Game.shard.name !== "shard3" && BASIC_MARKET_MINERALS.includes(resType)) continue;
                 if (StationCarry.roomMassStoreCnt(room, resType) < RES_BUY_AMOUNT_ROOM[resType] && (allRoomRes.res[resType] || 0) < RES_BUY_MIN_HOLD_ROOM[resType]) {
                     let sellList = pro.getAllOrdersCacheList(resType, ORDER_SELL)
                     let minPrice = 1e30;
