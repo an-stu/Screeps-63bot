@@ -137,6 +137,19 @@ global.missionCallBack = { //被crossShard引用 ，相当于交叉依赖了
 }
 
 let pro={
+    isBuilderAid(mission) {
+        return mission?.func === "spawnCrossShardBuilder"
+            || (mission?.func === "spawnCreepCressShard" && mission.data?.role === "worker");
+    },
+    runMission(missions, id, mission) {
+        if (missions[id] !== mission || !missionFunc[mission.func]?.(mission.data)) return;
+        if (mission.callBack) {
+            const callback = missionCallBack[mission.callBack];
+            if (callback) callback(mission.data);
+            else Logger.log("Missions", "no callBack name : " + mission.callBack);
+        }
+        delete missions[id];
+    },
     getTaskId (){
         Game._mission_cnt = ( Game._mission_cnt || 0 ) + 1;
         return Game.time +"_"+ Game._mission_cnt;
@@ -156,14 +169,8 @@ let pro={
             HelperError.catchError(()=>{
                 e.ttl = e.ttl===undefined ? TTL:e.ttl-1;
                 if(!e.ttl)delete missions[id];
-                else if(missionFunc[e.func]&&missionFunc[e.func](e.data)){
-                    if(e.callBack){
-                        if(missionCallBack[e.callBack])
-                            missionCallBack[e.callBack](e.data)
-                        else Logger.log("Missions", "no callBack name : "+e.callBack)
-                    }
-                    delete missions[id];
-                }
+                else if(pro.isBuilderAid(e)) StationHive.deferSpawn("aid", () => pro.runMission(missions, id, e));
+                else pro.runMission(missions, id, e);
             },"mission in : "+id)
         })
     },

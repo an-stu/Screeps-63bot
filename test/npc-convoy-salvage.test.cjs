@@ -276,6 +276,22 @@ test("execSalvage spawns one scout and three independently boosted haulers", () 
         "25 XKH2O-boosted CARRY parts × 50 base capacity × 4 boost = 5,000");
 });
 
+test("two convoy cargo slots only dispatch one scout and two full haulers", () => {
+    const ctx = makeWorld();
+    ctx.Memory.npcConvoySalvage = makeConfig({cargo: cargoNames.slice(0, 2)});
+    ctx.StrategyNpcConvoy.execSalvage();
+    assert.deepEqual(ctx.__spawnRecords.map(s => s.tasks[0].slot), ["scout", ...cargoNames.slice(0, 2)]);
+    assert.deepEqual(ctx.__boostChecks, [{XKH2O: 750}, {XKH2O: 750}]);
+    assert.equal(Object.keys(ctx.Memory.npcConvoySalvage.units).length, 3);
+
+    for (const cargo of [[], [cargoNames[0], cargoNames[0]], [...cargoNames, `creep${missionId}_3`]]) {
+        const invalid = makeWorld();
+        invalid.Memory.npcConvoySalvage = makeConfig({cargo});
+        invalid.StrategyNpcConvoy.execSalvage();
+        assert.equal(invalid.__spawnRecords.length, 0, "reject invalid or oversized staging groups");
+    }
+});
+
 test("salvageReady accepts only matching mission, shard, death tick, and assigned cargo", () => {
     const cases = [
         [{id: "wrong"}, "mission mismatch"],

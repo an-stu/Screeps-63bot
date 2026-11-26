@@ -1039,8 +1039,10 @@ let pro = {
         let tasks = room.storage
             ? [UtilsTask.task(room.storage, "carryRes", undefined, { resType: RESOURCE_ENERGY })]
             : [];
-        donor.spawnFailure = false;
-        StationHive.trySpawn(donor, room.name, body, "carrier", tasks);
+        StationHive.deferSpawn("rescue", () => {
+            if (pro.spawnTickBudget(room) >= 200 || !pro.isEconomyExtinct(pro.roomEconomyCounts(room))) return;
+            StationHive.trySpawn(donor, room.name, body, "carrier", tasks);
+        });
     },
     exec(room) {
         if (!MIN_CPU) pro.processPowerSpawn(room)// 每tick都要处理
@@ -1103,7 +1105,6 @@ let pro = {
         if (global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest") && !room.flags("stopRemote").length) {
             HelperError.catchError(() => StrategyOuterHarvest.exec(room), room.name);
         }
-        StationMineral.trySpawnHarKeeper(room);
         // 「hive 见底就别为 upgrader 抽能量」（90fca62）—— 但**门槛必须按本房容量折算**。
         //
         // 写死的 2,500 是 RCL8 的量级（12,900 的 ~19%）；对 cap ≤ 2,500 的 RCL5/6 房
@@ -1114,6 +1115,9 @@ let pro = {
         // 与历轮行为一致，小房则拿到真实存在的窗口。
         let hiveStarvingEnergy = Math.min(2500, room.energyCapacityAvailable * 0.2);
         if (!(StationHive.HiveNeedToFill(room) && room.energyAvailable < hiveStarvingEnergy)) StationUpgrade.spawnUpgrader(room);
+        if (room.memory[StationMineral.stationName]?.container && room.mineral?.mineralAmount > 0) {
+            StationHive.deferSpawn("mineral", () => StationMineral.trySpawnHarKeeper(room));
+        }
 
 
         //最后回收全部资源！

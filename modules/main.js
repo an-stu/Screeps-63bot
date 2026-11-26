@@ -114,6 +114,7 @@ let pro = {
         if (global.StrategyFactoryPowerCreep) HelperError.catchError(() => StrategyFactoryPowerCreep.exec());
         if (global.StrategyCleanBuild && isCpuFeatureEnabled("cleanBuild") && ManagerFlags.hasPrefix("cleanBuild")) HelperError.catchError(() => StrategyCleanBuild.exec());
         if (global.StrategyBlockRoom && isCpuFeatureEnabled("blockRoom") && ManagerFlags.hasPrefix("blockRoom")) HelperError.catchError(() => StrategyBlockRoom.exec());
+        global.StationHive?.runDeferredSpawns?.();
         if (cpuProfile) {
             cpuProfile.flagStrategies = Game.cpu.getUsed() - phaseStart;
             phaseStart = Game.cpu.getUsed();

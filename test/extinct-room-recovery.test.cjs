@@ -31,7 +31,7 @@ const costOf = body => body.reduce((a, p) => a + (BODY_COST[p] || 0), 0);
 
 // ── ① 纯函数：全灭判定 ───────────────────────────────────────────────────────
 function loadHighLevel(opts = {}) {
-    const calls = { trySpawn: [] };
+    const calls = { trySpawn: [], deferred: [] };
     const StationHive = {
         HiveNeedToFill: () => true,
         getClosestSpawnRoom: (...args) => {
@@ -42,6 +42,7 @@ function loadHighLevel(opts = {}) {
             calls.trySpawn.push(args);
             return "creepName";
         },
+        deferSpawn: (kind, run) => calls.deferred.push([kind, run]),
     };
     const ctx = {
         console: { log() {} },
@@ -92,6 +93,10 @@ function fakeRoom({ name = "E51S29", level = 6, energy = 14, cap = 1850, storage
     const room = fakeRoom();
     assert.equal(P.isEconomyExtinct({ worker: 0, carrier: 0, keeper: 0 }), true, "三类全 0 必须判定为全灭");
     P.trySpawnExtinctionRescue(room);
+    assert.equal(calls.trySpawn.length, 0, "先让出兵房自己的补员运行");
+    assert.equal(calls.deferred.length, 1);
+    assert.equal(calls.deferred[0][0], "rescue");
+    calls.deferred[0][1]();
     assert.equal(calls.trySpawn.length, 1, "全灭 + hive<200 + storage 有存量 ⇒ 必须向隔壁求一只救命爬");
     const [spawnRoom, target, body, role, tasks] = calls.trySpawn[0];
     assert.equal(spawnRoom.name, "E56S29", "必须用隔壁出兵房（不能自我出兵）");

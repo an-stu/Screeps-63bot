@@ -312,8 +312,9 @@ function salvageReadyAcknowledged(request) {
 function validSalvage(cfg) {
     return !!(cfg && typeof cfg.id === "string" && /^[a-f\d]{24}$/.test(cfg.id)
         && Number.isSafeInteger(cfg.deathTick) && Number.isSafeInteger(cfg.launchUntil)
-        && typeof cfg.resource === "string" && Array.isArray(cfg.cargo) && cfg.cargo.length === 3
-        && new Set(cfg.cargo).size === 3
+        && typeof cfg.resource === "string" && Array.isArray(cfg.cargo)
+        && cfg.cargo.length > 0 && cfg.cargo.length <= SALVAGE_WAIT.length
+        && new Set(cfg.cargo).size === cfg.cargo.length
         && cfg.cargo.every(n => typeof n === "string" && n.startsWith("creep"+cfg.id+"_")));
 }
 

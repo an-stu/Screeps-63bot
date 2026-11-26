@@ -245,13 +245,17 @@ let pro={
         else pro.addDataList.push([id,task])
         return id;
     },
-    applyRequest(id,req){
+    applyRequest(id,req,late=false){
         // log(LOCAL_SHARD_NAME,id,req.data.func,req.data.data)
         if(pro.localShardData[id]){
             if (Game.time - (pro.localShardData[id].createTime || 0) >= 100) {
                 pro.localShardData[id].createTime = Game.time;
                 pro.dirty = true;
             }
+            return;
+        }
+        if (!late && global.ManagerMissions?.isBuilderAid?.(req.data)) {
+            StationHive.deferSpawn("aid", () => pro.applyRequest(id, req, true));
             return;
         }
         let handler = global.missionFunc && global.missionFunc[req.data && req.data.func];

@@ -187,6 +187,20 @@ let pro = {
         if (!room.spawnedMap) room.spawnedMap = {};
         return room.spawn.filter(e => !e.spawning && !room.spawnedMap[e.id]).head();
     },
+    // Optional cross-room jobs must not get a donor's spawn before its own
+    // economy pass, even when the target room or a remote request ran first.
+    deferSpawn(kind, run) {
+        const queue = Game._backgroundSpawnQueue || (Game._backgroundSpawnQueue = {rescue: [], aid: [], mineral: []});
+        queue[kind].push(run);
+    },
+    runDeferredSpawns() {
+        const queue = Game._backgroundSpawnQueue;
+        if (!queue) return;
+        delete Game._backgroundSpawnQueue;
+        for (const kind of ["rescue", "aid", "mineral"]) {
+            for (const run of queue[kind]) HelperError.catchError(run, "spawn:" + kind);
+        }
+    },
     trySpawn(room, targetRoomName, body, role, tasks, ops) {
         if (!room || !room.my) {
             Logger.log("Hive", "room not yours cannot spawn in " + targetRoomName);

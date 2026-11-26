@@ -245,7 +245,15 @@ let pro = {
                             // 本地援建（小房出兵只能产小体型，援建统一走跨 shard）。
                             if (spawnRoom.name != room.name && (spawnRoom.level || 0) < 5) return;
                             if (spawnRoom.name != room.name && room.creeps("worker", false).length >= 4) return;// 如果不是自己的房间最多生4个
-                            StationHive.trySpawn(spawnRoom, room.name, StationWork.getLowLevelWorkerBodyConfig(spawnRoom), "worker", [])
+                            if (spawnRoom.name === room.name) {
+                                StationHive.trySpawn(spawnRoom, room.name, StationWork.getLowLevelWorkerBodyConfig(spawnRoom), "worker", []);
+                            } else if (!room._workerAidQueued) {
+                                room._workerAidQueued = true;
+                                StationHive.deferSpawn("aid", () => {
+                                    if (room.creeps("worker", false).length >= 4) return;
+                                    StationHive.trySpawn(spawnRoom, room.name, StationWork.getLowLevelWorkerBodyConfig(spawnRoom), "worker", []);
+                                });
+                            }
                         }
                     }
                 });
