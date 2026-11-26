@@ -753,6 +753,13 @@ let pro = {
             return e.ticksToLive > e.body.length * 3 + UPGRADER_REPLACE_PRESPAWN;
         }).length;
     },
+    isSpawnBlockedByEnergyStock(room) {
+        if (!room.storage) return false;
+        const floor = Math.max(0, (room.level - 3.5) * 10000);
+        const stock = room.storage.store[RESOURCE_ENERGY] || 0;
+        const downgrade = room.controller?.ticksToDowngrade;
+        return stock < floor && !(downgrade !== undefined && downgrade < UPGRADER_LOW_STOCK_DOWNGRADE_TICKS);
+    },
     spawnUpgrader(room) {
         let sm = room.memory[pro.stationName];
         // 先救「在位的爬」再做孵化决策：这道闸门只该管「要不要再派一只」。
@@ -765,13 +772,7 @@ let pro = {
         // 能量库存闸（用户 2026-11-26）：storage 低于本 RCL 的安全库存时不再孵
         // 新 upgrader，避免把 hive/施工/防守的救命能量抽去升级。只有控制器真的
         // 快降级（<5000 tick）才破例；在位 upgrader 仍照常工作，不受此闸影响。
-        if (room.storage) {
-            let stockFloor = Math.max(0, (room.level - 3.5) * 10000);
-            let stock = room.storage.store[RESOURCE_ENERGY] || 0;
-            let downgradeUrgent = room.controller.ticksToDowngrade !== undefined
-                && room.controller.ticksToDowngrade < UPGRADER_LOW_STOCK_DOWNGRADE_TICKS;
-            if (stock < stockFloor && !downgradeUrgent) return;
-        }
+        if (pro.isSpawnBlockedByEnergyStock(room)) return;
 
         // let creeps = sm["creeps"].map(e=>Game.getObjectById(e)).filter(e=>e&&e.ticksToLive) // 清理两个爬重叠
         // creeps.forEach(a=>{

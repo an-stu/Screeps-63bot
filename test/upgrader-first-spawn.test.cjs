@@ -170,4 +170,32 @@ harness.pro.trySpawnOuterHarCarrier("W26N59", roomWithUpgrader);
 assert.ok(harness.__spawned.includes("outerHarvestEnergyCarrier"),
     "有 upgrader 在岗时外矿补员必须恢复正常（负对照）");
 
+// ③ 缺能时 upgrader 本身不能孵：只放行一只确有整车货的恢复搬运，
+// 不允许额外的道路专车或邻矿在同 tick 重复占 spawn。
+let backlog = 0;
+harness.global.StationUpgrade = { isSpawnBlockedByEnergyStock: () => true };
+harness.pro.outerMineWaitingByMine = () => backlog;
+harness.pro.outerRoadComplete = () => false;
+harness.pro.outerRoadSiteCount = () => 3;
+const recovering = makeSpawnRoom(0);
+harness.__spawned = [];
+harness.pro.trySpawnOuterHarCarrier("W26N59", recovering);
+assert.deepEqual(harness.__spawned, [], "no backlog means no recovery vehicle");
+backlog = 2000;
+harness.global.StrategyHighLevel.spawnTickBudget = () => 999;
+harness.pro.trySpawnOuterHarCarrier("W26N59", recovering);
+assert.deepEqual(harness.__spawned, [], "recovery waits for the normal full body to be affordable");
+harness.global.StrategyHighLevel.spawnTickBudget = () => 2300;
+harness.pro.trySpawnOuterHarCarrier("W26N59", recovering);
+harness.pro.trySpawnOuterHarCarrier("W26N59", recovering);
+assert.deepEqual(harness.__spawned, ["outerHarvestEnergyCarrier"], "one full-size haul; no extra road or duplicate spawn");
+assert.match(harness.Memory.rooms.W26N59.__outerWhy, /^needUpgrader|^stockRecovery/);
+
+const alreadyHauling = makeSpawnRoom(0);
+const existingRoster = alreadyHauling.creeps;
+alreadyHauling.creeps = role => role === "outerHarvestEnergyCarrier" ? [{}] : existingRoster(role);
+harness.__spawned = [];
+harness.pro.trySpawnOuterHarCarrier("W26N59", alreadyHauling);
+assert.deepEqual(harness.__spawned, [], "the stock exception does not add more carriers to a room already hauling");
+
 console.log("upgrader-first spawn: OK");

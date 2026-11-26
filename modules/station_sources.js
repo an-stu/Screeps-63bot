@@ -4382,8 +4382,13 @@ let pro = {
         // 在役的外矿搬运不受影响（岗位闸门只控数量），keeper / 本房 carrier
         // 两条主房能量循环也都不经过这里。
         let high = global.StrategyHighLevel;
-        if (targetName != spawnRoom.name && high && typeof high.upgraderStarved == "function"
-            && high.upgraderStarved(spawnRoom)) {
+        const needsUpgrader = targetName != spawnRoom.name && high && typeof high.upgraderStarved == "function"
+            && high.upgraderStarved(spawnRoom);
+        // A deliberate stock hold and an upgrade spawn reservation must not
+        // block each other: allow one vehicle to bring back a proven backlog
+        // while the upgrader is ineligible. The normal body and quota still apply.
+        const stockRecovery = needsUpgrader && global.StationUpgrade?.isSpawnBlockedByEnergyStock?.(spawnRoom);
+        if (needsUpgrader && (!stockRecovery || roomCarriers.length || spawnRoom._outerStockRecoverySpawned)) {
             why("needUpgrader" + roomCarriers.length);
             return null;
         }
@@ -4393,6 +4398,7 @@ let pro = {
         // 让路线长时间缺失（W34N55 实测三个矿点的 roadPathStr 同时为空）。
         // （路线维护已经挪到上面的早返回之前，这里只保留补员。）
         _.values(sm).forEach(data => {
+            if (stockRecovery && spawnRoom._outerStockRecoverySpawned) return;
             let pathTime = data["pathTime"];
             // 补员才需要空闲 Spawn：单 Spawn 房若先尝试本地补员，spawnFailure
             // 不能阻止已有外矿 carrier 修正其过期路径。
@@ -4413,7 +4419,7 @@ let pro = {
             //  公式本来算得对，只是根本走不到那里）。
             // 改到矿点粒度后总和上限几乎不变（Σ floor(w_i/1700) ≤ floor(Σw/1700)+矿点数-1），
             // 只是把「谁该分到车」判对 —— 与 MEMORY 第 1 条同一条规则。
-            if (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true)) {
+            if (stockRecovery || (targetName != spawnRoom.name && pro.outerMineStarvesSpawnRoom(spawnRoom, true))) {
                 // 配额的分母必须是**本房实际孵得出的体型**的运力（见
                 // outerCarrierTripCapacity）：用满编常数 1700 会把小车房
                 // （hive 的 50% 夹出 600~700 运力）的豁免配额算小近 3 倍，
@@ -4620,7 +4626,11 @@ let pro = {
                     // 都按满格旧值算体型去要 spawn，实测 upgrader 因此算出 2,100 的
                     // 体型而实际只剩 100 能量，白丢一个 pass。
                     spawnRoom.spawnFailure = false;
-                    StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestEnergyCarrier", tasks)
+                    const spawned = StationHive.trySpawn(spawnRoom, spawnRoom.name, carrierBody, "outerHarvestEnergyCarrier", tasks);
+                    if (stockRecovery && spawned) {
+                        spawnRoom._outerStockRecoverySpawned = true;
+                        why("stockRecovery:" + spawned);
+                    }
                     }
                 }
                 // 路没修完时再补专职修路的 carrier。
@@ -4631,7 +4641,7 @@ let pro = {
                 // 加大 CARRY 或 WORK 都提不了多少（见 getOuterHarCarrierBuildBodyConfig）。
                 // W34N55 实测只有 1 只 carrier 带 WORK:2，好几天过去路还停在 34 条。
                 // 路修完后 outerRoadComplete 为真，这里自然就不再补了。
-                if (!pro.outerRoadComplete(data)) {
+                if (!stockRecovery && !pro.outerRoadComplete(data)) {
                     // **修路编制动态平衡**（2026-11-12，W26N59 实测）：专职修路爬只按
                     // 「路线上真有修路工地」派。路面衰减由在岗 WORK 车的沿途维修负责
                     // （本格 <90% / 前瞻 <25%，见 harvestEnergyOuterCarryRoadBuilder），

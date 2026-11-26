@@ -121,6 +121,17 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
 }
 
 {
+    const { StationUpgrade, attempts } = load();
+    for (const [storageEnergy, downgrade, blocked] of [[0, 115000, true], [24999, 5000, true], [25000, 115000, false], [0, 4999, false]]) {
+        attempts.length = 0;
+        const room = mkRoom({storageEnergy, downgrade});
+        assert.equal(StationUpgrade.isSpawnBlockedByEnergyStock(room), blocked);
+        StationUpgrade.spawnUpgrader(room);
+        assert.equal(attempts.length === 0, blocked, "shared hold state must match the actual spawn decision");
+    }
+}
+
+{
     // ── ① 低 hive（1,000 / cap 2,300）+ storage 还不富裕：必须派，且体型付得起 ──
     //
     // storage 30,000 已高于本 RCL 的 25,000 安全库存；此时「0 只 upgrader」分支
