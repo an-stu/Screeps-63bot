@@ -64,12 +64,13 @@ Creep.prototype.testEnd = function(){
  * shard；旧双向路径的回程虫洞作为终点兼容处理。
  */
 Creep.prototype.moveCrossShardByPath = function(){
-    this.autoHeal()
-    let hostile = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS)
-    this.rangedAttack(hostile)
-    this.attack(hostile)
-
     let task = this.lastTask()
+    if (!task.peaceful) {
+        this.autoHeal()
+        let hostile = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS)
+        this.rangedAttack(hostile)
+        this.attack(hostile)
+    }
     let path = task.path
     if (!Array.isArray(path) || !path.length) return this.popTask().execLastTask();
     task.index = Number.isFinite(task.index) ? Math.max(0, Math.floor(task.index)) : 0;
@@ -168,6 +169,7 @@ Creep.prototype.moveCrossShardByPath = function(){
         let portal = pos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_PORTAL).head()
         if(portal){
             let destShard = portal.destination&&portal.destination.shard
+            if (task.expectedDestShard && destShard !== task.expectedDestShard) return;
             let prev = path[task.index-1]
             let reverseLanding = task.index == path.length - 1 && prev
                 && prev.shard != shard && destShard == prev.shard
@@ -186,6 +188,8 @@ Creep.prototype.moveCrossShardByPath = function(){
                 task.index = departureIndex + 1
                 this.submitCrossShardCreepMemory(destShard,this.memory)
             }
+        } else if (task.expectedDestShard) {
+            return; // Explicitly bound operations may not walk onto a missing portal.
         } else if (task.index == path.length - 1 && path.length > 1
             && !task.crossShardTransitionConfirmed) {
             // Pre-marker two-way routes sometimes appended the landing-side

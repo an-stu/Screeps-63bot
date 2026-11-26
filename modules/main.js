@@ -89,6 +89,9 @@ let pro = {
         if (global.StrategyNpcConvoy && StrategyNpcConvoy.enabled()) {
             HelperError.catchError(() => StrategyNpcConvoy.exec());
         }
+        if (global.StrategyNpcConvoy && Memory.npcConvoySalvage) {
+            HelperError.catchError(() => StrategyNpcConvoy.execSalvage(), "npcConvoySalvage");
+        }
         // Blueprint rendering is an explicit, user-created Flag action. Keep
         // it outside the 25-tick auto-planner cadence so it remains visible,
         // while adding no cost at all when the Flag is absent.

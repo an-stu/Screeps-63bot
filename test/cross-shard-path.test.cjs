@@ -108,6 +108,25 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     assert.equal(creep.memory.tasks.length, 1, "claim 任务应保留");
 }
 
+// A peaceful haul must not cross a retargeted portal or issue combat intents.
+{
+    const portal = {x:14,y:8,roomName:"E40S30",destinationShard:"shard1"};
+    const world = makeWorld({shard:"shard3",portal});
+    const move = {taskName:"moveCrossShardByPath",peaceful:true,expectedDestShard:"shard2",
+        path:[{shard:"shard3",roomName:"E40S30",x:14,y:8}]};
+    const c = makeCreep(world.Creep,"shard3",14,9,"E40S30",[move],portal);
+    c.attack = c.rangedAttack = c.autoHeal = () => assert.fail("peaceful haul must not issue combat intents");
+    c.moveCrossShardByPath();
+    assert.equal(c.submitted,undefined);
+    assert.equal(c.goto,undefined);
+    portal.destinationShard = "shard2";
+    c.moveCrossShardByPath();
+    assert.deepEqual(c.submitted,["shard2"]);
+    world.sandbox.Game.shard.name = "shard2";
+    c.moveCrossShardByPath();
+    assert.equal(c.popped,1);
+}
+
 // 2) Failed first crossing: retain the transition and keep approaching the
 //    source portal without repeatedly enqueueing the creep memory.
 {

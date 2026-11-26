@@ -274,4 +274,143 @@ Creep.prototype.npcConvoyIntercept = function () {
     if (!moved && !this.pos.inRangeTo(cargo,3)) moveLocal(this,cargo,3);
 };
 
-global.StrategyNpcConvoy = {enabled,watches,recordObservation,exec};
+// Independent, opt-in salvage. This never starts the E50S30 intercept or
+// attacks the convoy: the scout confirms actual expiry and identifiable loot.
+const SALVAGE_ORIGIN = "shard3";
+const SALVAGE_TARGET = "shard2";
+const SALVAGE_ROOM = "E40S30";
+const SALVAGE_HOME = "E41S32";
+const SALVAGE_ROUTE = [SALVAGE_HOME,"E40S32","E40S31",SALVAGE_ROOM];
+const SALVAGE_OUT = {shard:SALVAGE_ORIGIN,roomName:SALVAGE_ROOM,x:14,y:8};
+const SALVAGE_BACK = {shard:SALVAGE_TARGET,roomName:SALVAGE_ROOM,x:30,y:37};
+const SALVAGE_RETURN_TTL = 220;
+
+function salvageLoot(room, task) {
+    return room.find(FIND_TOMBSTONES).filter(t => task.cargo.includes(t.creep?.name)
+        && t.store?.[task.resource] > 0);
+}
+
+function salvageReady(data) {
+    const cfg = Memory.npcConvoySalvage;
+    if (Game.shard.name !== SALVAGE_ORIGIN || !cfg || cfg.id !== data?.id
+        || data.shard !== SALVAGE_TARGET || !(data.tick >= cfg.deathTick)
+        || !Array.isArray(data.available) || !data.available.length
+        || data.available.some(name => !cfg.cargo.includes(name))) return false;
+    if (!cfg.ready) cfg.ready = {tick:data.tick, seenAt:Game.time, available:data.available};
+    return true;
+}
+
+function validSalvage(cfg) {
+    return !!(cfg && typeof cfg.id === "string" && /^[a-f\d]{24}$/.test(cfg.id)
+        && Number.isSafeInteger(cfg.deathTick) && Number.isSafeInteger(cfg.launchUntil)
+        && typeof cfg.resource === "string" && Array.isArray(cfg.cargo) && cfg.cargo.length === 3
+        && new Set(cfg.cargo).size === 3
+        && cfg.cargo.every(n => typeof n === "string" && n.startsWith("creep"+cfg.id+"_")));
+}
+
+function execSalvage() {
+    const cfg = Memory.npcConvoySalvage;
+    if (Game.shard.name !== SALVAGE_ORIGIN || !validSalvage(cfg) || Game.time > cfg.launchUntil
+        || !isCpuFeatureEnabled("crossShard") || MIN_CPU) return;
+    const room = Game.rooms[SALVAGE_HOME];
+    if (!rcl8(room) || !room.storage) return;
+    const units = cfg.units || (cfg.units = {});
+    for (const slot of ["scout",...cfg.cargo]) {
+        if (units[slot] || !room.spawn.some(s => !s.spawning && !room.spawnedMap?.[s.id] && s.isActive())) continue;
+        const scout = slot === "scout";
+        const body = scout ? [MOVE] : materialize(HAULER);
+        if ((room.currentEnergyAvailable ?? room.energyAvailable) < Utils.getBodyEnergyNeed(body)) continue;
+        const boost = scout ? undefined : minerals(HAULER);
+        if (boost && (!global.StationLab || !StationLab.boostAble(room,boost))) continue;
+        const task = UtilsTask.taskData("npcConvoySalvage",undefined,{
+            id:cfg.id, slot, cargo:cfg.cargo, resource:cfg.resource, deathTick:cfg.deathTick,
+        });
+        const boostTasks = boost ? StationLab.generatorBoostResTask(boost,room) : [];
+        room.spawnFailure = false;
+        const name = StationHive.trySpawn(room,room.name,body,"npcSalvage",[task,...boostTasks]);
+        if (name) units[slot] = name;
+    }
+}
+
+function salvageCross(creep, from, destination) {
+    const portal = portalPositions(creep.room).find(p => p.pos.x === from.x && p.pos.y === from.y
+        && p.destination?.shard === destination);
+    if (!portal) return;
+    creep.addTask(UtilsTask.taskData("moveCrossShardByPath",undefined,{
+        path:[from], expectedDestShard:destination, peaceful:true,
+    }));
+    creep.execLastTask();
+}
+
+function salvageReturn(creep,task) {
+    task.returning = true;
+    if (Game.shard.name === SALVAGE_TARGET && creep.room.name === SALVAGE_ROOM) {
+        return salvageCross(creep,SALVAGE_BACK,SALVAGE_ORIGIN);
+    }
+    if (Game.shard.name !== SALVAGE_ORIGIN) return;
+    if (creep.room.name !== SALVAGE_HOME) return followRoute(creep,SALVAGE_ROUTE,-1);
+    const amount = creep.store[task.resource] || 0;
+    if (amount) {
+        const target = [creep.room.storage,creep.room.terminal].find(o => o?.my && o.store.getFreeCapacity(task.resource) > 0);
+        if (!target) return;
+        const deliver = Math.min(amount,target.store.getFreeCapacity(task.resource));
+        const result = creep.transfer(target,task.resource,deliver);
+        if (result === ERR_NOT_IN_RANGE) moveLocal(creep,target,1);
+        else if (result === OK) task.delivered = (task.delivered || 0) + deliver;
+        return;
+    }
+    const cfg = Memory.npcConvoySalvage;
+    if (cfg?.id === task.id && task.slot !== "scout") {
+        (cfg.finished || (cfg.finished = {}))[task.slot] = task.delivered || 0;
+    }
+    creep.popTask().addTask(UtilsTask.taskData("recycleCreep"));
+}
+
+Creep.prototype.npcConvoySalvage = function () {
+    const task = this.lastTask(), scout = task.slot === "scout", shard = Game.shard.name;
+    if (task.returning || this.ticksToLive <= SALVAGE_RETURN_TTL) return salvageReturn(this,task);
+    if (shard === SALVAGE_ORIGIN) {
+        const cfg = Memory.npcConvoySalvage;
+        if (cfg?.id !== task.id || !isCpuFeatureEnabled("crossShard")) return salvageReturn(this,task);
+        if (!scout && (!fullyBoosted(this,HAULER) || this.store.getCapacity() < 5000)) {
+            // The boost task can pop immediately after issuing the intent.
+            // Recheck the next snapshot before rejecting the hauler at home.
+            if (this.room.name === SALVAGE_HOME) {
+                task.boostCheckStarted ??= Game.time;
+                if (Game.time <= task.boostCheckStarted + 2) return;
+            }
+            return salvageReturn(this,task);
+        }
+        if (this.room.name !== SALVAGE_ROOM) return followRoute(this,SALVAGE_ROUTE,1);
+        if (scout || cfg.ready?.available.includes(task.slot)) return salvageCross(this,SALVAGE_OUT,SALVAGE_TARGET);
+        if (cfg.ready) return salvageReturn(this,task);
+        const wait = new RoomPosition(10,10,SALVAGE_ROOM);
+        if (!this.pos.inRangeTo(wait,2)) moveLocal(this,wait,2);
+        else if (!cfg.staged?.[task.slot]) (cfg.staged || (cfg.staged = {}))[task.slot] = Game.time;
+        return;
+    }
+    if (shard !== SALVAGE_TARGET || this.room.name !== SALVAGE_ROOM) return;
+    const hostiles = hostileCreeps(this.room);
+    const safe = Game.time >= task.deathTick && !hostiles.length && !dangerousRoom(this.room);
+    if (scout) {
+        if (safe && !task.readySent) {
+            const available = salvageLoot(this.room,task).map(t => t.creep.name);
+            if (available.length && ManagerCrossShard.addCrossShardRequest(SALVAGE_ORIGIN,{
+                func:"npcConvoySalvageReady",data:{id:task.id,shard:SALVAGE_TARGET,tick:Game.time,available},
+            },"npcConvoySalvage:"+task.id)) task.readySent = Game.time;
+        }
+        if (task.readySent && Game.time - task.readySent > 140) return salvageReturn(this,task);
+        if (hostiles.length && dodge(this,hostiles,true) !== 0) return;
+        const wait = new RoomPosition(24,43,SALVAGE_ROOM);
+        if (!this.pos.inRangeTo(wait,1)) moveLocal(this,wait,1);
+        return;
+    }
+    if (!safe || (this.store[task.resource] || 0) > 0) return salvageReturn(this,task);
+    const stash = salvageLoot(this.room,task).find(t => t.creep.name === task.slot);
+    if (!stash) return salvageReturn(this,task);
+    if (this.withdraw(stash,task.resource) === ERR_NOT_IN_RANGE) moveLocal(this,stash,1);
+};
+
+global.missionFunc = global.missionFunc || {};
+global.missionFunc.npcConvoySalvageReady = salvageReady;
+global.StrategyNpcConvoy = {enabled,watches,recordObservation,exec,execSalvage};

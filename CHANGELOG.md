@@ -1,3 +1,8 @@
+## v0.78.347 — E40S30 跨分片 NPC 过期回收
+
+- 与 E50S30 战斗拦截分开：仅在显式填入 `Memory.npcConvoySalvage` 的指定 NPC 批次时启用。shard3/E41S32 派一只侦察和三只 5,000 容量的强化搬运，不攻击 NPC。
+- 侦察在 shard2 验证过期 tick、现场无敌对及真实匹配墓碑后才放行。搬运队先在 shard3/E40S30 虫洞外等待，按原 NPC 名分配墓碑，取货后从回程虫洞送回 E41S32。虫洞目的地和实际强化容量有校验。
+
 ## v0.78.346 — 仅 shard3 应用 CPU 降频，其他分片按任务就绪推进
 
 - 收紧 `isSaveCpu`、低桶 `MIN_CPU` 和 `taskDispatchThrottle` 的分片边界。shard3 保留低桶保护和派发节流；其他分片即使 Memory 留着旧的 `true`，经济、补员和拾取仍正常推进，换 Pixel 后的低 bucket 不再暂停产线。

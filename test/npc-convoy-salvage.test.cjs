@@ -1,0 +1,348 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const vm = require("node:vm");
+
+const source = fs.readFileSync(path.join(__dirname, "../modules/strategy_npcConvoy.js"), "utf8");
+const missionId = "0123456789abcdef01234567";
+const cargoNames = [0, 1, 2].map(i => `creep${missionId}_${i}`);
+const resource = "XGH2O";
+const salvageRoomName = "E40S30";
+const homeRoomName = "E41S32";
+const route = [homeRoomName, "E40S32", "E40S31", salvageRoomName];
+
+const boosts = {
+    carry: {XKH2O: {capacity: 4}},
+    move: {}, tough: {}, ranged_attack: {}, heal: {}, attack: {},
+};
+
+function makePos(x, y, roomName) {
+    return {
+        x, y, roomName,
+        inRangeTo(other, range) {
+            const p = other.pos || other;
+            return Math.max(Math.abs(this.x - p.x), Math.abs(this.y - p.y)) <= range;
+        },
+        isEqualTo(other) { return this.x === other.x && this.y === other.y; },
+        getDirectionTo() { return 3; },
+        findClosestByRange() { return {x: 49, y: 25, roomName: this.roomName}; },
+    };
+}
+
+function makeConfig(overrides = {}) {
+    return {
+        id: missionId,
+        deathTick: 100,
+        launchUntil: 1000,
+        resource,
+        cargo: cargoNames.slice(),
+        ...overrides,
+    };
+}
+
+function makeTombstone(name, amount = 1000) {
+    return {id: `tomb-${name}`, creep: {name}, store: {[resource]: amount}};
+}
+
+function makeWorld(options = {}) {
+    const spawns = [];
+    const spawnRecords = [];
+    const boostChecks = [];
+    const boostRegistrations = [];
+    const crossShardRequests = [];
+    const storage = {
+        my: true,
+        store: {energy: 1000000, getFreeCapacity: () => 1000000},
+    };
+    const home = {
+        name: homeRoomName,
+        controller: {my: true, level: 8},
+        storage,
+        energyAvailable: options.energy ?? 10000,
+        currentEnergyAvailable: options.energy ?? 10000,
+        spawnedMap: {},
+        spawnFailure: false,
+        spawn: Array.from({length: options.spawnCount ?? 4}, (_, i) => ({
+            id: `spawn${i}`, spawning: false, isActive: () => true,
+        })),
+    };
+
+    const portals = [];
+    const tombstones = [];
+    const hostiles = [];
+    const target = {
+        name: salvageRoomName,
+        hostiles,
+        tombstones,
+        structures: portals,
+        find(kind, options = {}) {
+            if (kind === "tombstones") return this.tombstones;
+            if (kind === "hostiles") return this.hostiles;
+            if (kind === "hostilePower") return [];
+            if (kind === "hostileStructures") return [];
+            if (kind === "structures") return this.structures.filter(options.filter || (() => true));
+            return [];
+        },
+        getHostileCreeps() { return this.hostiles; },
+    };
+
+    const ctx = {
+        Creep: function () {},
+        Memory: {npcConvoySalvage: makeConfig()},
+        Game: {
+            time: 100,
+            shard: {name: "shard3"},
+            cpu: {bucket: 10000},
+            rooms: {[home.name]: home, [target.name]: target},
+            creeps: {},
+            getObjectById: () => null,
+            map: {
+                findExit: () => 3,
+                findRoute: () => route.slice(1).map(room => ({room})),
+                getRoomLinearDistance: () => 1,
+            },
+        },
+        global: null,
+        MIN_CPU: false,
+        CARRY: "carry", MOVE: "move", TOUGH: "tough", ATTACK: "attack",
+        RANGED_ATTACK: "ranged_attack", HEAL: "heal", SYSTEM_USERNAME: "Screeps",
+        OK: 0, ERR_NOT_IN_RANGE: -9, ERR_TIRED: -11, ERR_FULL: -8,
+        ATTACK_POWER: 30, RANGED_ATTACK_POWER: 10, HEAL_POWER: 12,
+        CARRY_CAPACITY: 50, LAB_BOOST_MINERAL: 30, LAB_BOOST_ENERGY: 20,
+        RESOURCE_ENERGY: "energy", FIND_TOMBSTONES: "tombstones",
+        FIND_HOSTILE_CREEPS: "hostiles", FIND_HOSTILE_POWER_CREEPS: "hostilePower",
+        FIND_HOSTILE_STRUCTURES: "hostileStructures", FIND_STRUCTURES: "structures",
+        LOOK_STRUCTURES: "structuresLook", STRUCTURE_TOWER: "tower",
+        STRUCTURE_PORTAL: "portal", BOOSTS: boosts,
+        RoomPosition: function (x, y, roomName) { return makePos(x, y, roomName); },
+        Utils: {
+            getBodyEnergyNeed(body) {
+                const costs = {carry: 50, move: 50};
+                return body.reduce((sum, part) => sum + (costs[part] || 0), 0);
+            },
+        },
+        UtilsTask: {
+            taskData(taskName, _register, data) { return {taskName, ...(data || {})}; },
+        },
+        isCpuFeatureEnabled: name => name === "crossShard",
+        ManagerCrossShard: {
+            addCrossShardRequest(shard, request, key) {
+                crossShardRequests.push({shard, request, key});
+                return options.acceptSignal !== false;
+            },
+        },
+        StationLab: {
+            boostAble(_room, requested) {
+                boostChecks.push({...requested});
+                const reserved = (_room._boost_need || []).reduce((sum, need) => sum + (need.XKH2O || 0), 0);
+                return (options.xkh2o ?? 2250) - reserved >= (requested.XKH2O || 0);
+            },
+            generatorBoostResTask(requested, room) {
+                const data = {...requested};
+                (room._boost_need || (room._boost_need = [])).unshift(data);
+                boostRegistrations.push(data);
+                return [{taskName: "boostCreepBodyPart", data}];
+            },
+        },
+        StationHive: {
+            trySpawn(room, targetRoom, body, role, tasks) {
+                if (room.spawnFailure) return null;
+                const spawn = room.spawn.find(s => !s.spawning && !room.spawnedMap[s.id] && s.isActive());
+                const cost = ctx.Utils.getBodyEnergyNeed(body);
+                if (!spawn || room.currentEnergyAvailable < cost) {
+                    room.spawnFailure = true;
+                    return null;
+                }
+                room.spawnedMap[spawn.id] = true;
+                room.currentEnergyAvailable -= cost;
+                const name = `salvage${spawnRecords.length}`;
+                const record = {room, targetRoom, body: body.slice(), role, tasks, name, spawn: spawn.id};
+                spawnRecords.push(record);
+                spawns.push(name);
+                ctx.Game.creeps[name] = {};
+                return name;
+            },
+        },
+        __spawnRecords: spawnRecords,
+        __boostChecks: boostChecks,
+        __boostRegistrations: boostRegistrations,
+        __crossShardRequests: crossShardRequests,
+        __target: target,
+        __portals: portals,
+        __tombstones: tombstones,
+        __hostiles: hostiles,
+        __spawns: spawns,
+    };
+    ctx.global = ctx;
+    vm.runInNewContext(source, ctx, {filename: "strategy_npcConvoy.js"});
+    return ctx;
+}
+
+function makeCreep(ctx, {slot, shard, roomName, boosted = true, storeAmount = 0, x = 10, y = 10}) {
+    const task = {
+        taskName: "npcConvoySalvage", id: missionId, slot, cargo: cargoNames,
+        resource, deathTick: 100, returning: false,
+    };
+    const actions = [];
+    const scout = slot === "scout";
+    const body = scout
+        ? [{type: "move", hits: 100}]
+        : [
+            ...Array.from({length: 25}, () => ({type: "carry", hits: 100, boost: boosted ? "XKH2O" : undefined})),
+            ...Array.from({length: 25}, () => ({type: "move", hits: 100})),
+        ];
+    const capacity = scout ? 0 : body.filter(part => part.type === "carry" && part.hits > 0)
+        .reduce((sum, part) => sum + 50 * (part.boost ? boosts[part.type][part.boost].capacity : 1), 0);
+    const store = {
+        [resource]: storeAmount,
+        isEmpty: () => store[resource] === 0,
+        getCapacity: () => capacity,
+        getFreeCapacity: () => capacity - store[resource],
+    };
+    const room = roomName === salvageRoomName ? ctx.__target : ctx.Game.rooms[homeRoomName];
+    const creep = {
+        name: `salvage-${slot}`, body, room, store, ticksToLive: 1000,
+        hits: 5000, hitsMax: 5000, pos: makePos(x, y, roomName),
+        lastTask: () => task,
+        addTask(next) { actions.push(["addTask", next]); return this; },
+        execLastTask() { actions.push(["execLastTask"]); return this; },
+        popTask() { actions.push(["popTask"]); return this; },
+        moveTo(target, opts) { actions.push(["moveTo", target, opts]); },
+        move(direction) { actions.push(["move", direction]); },
+        withdraw(stash, res) {
+            actions.push(["withdraw", stash.id, res]);
+            store[res] = Math.min(capacity, stash.store[res]);
+            return ctx.OK;
+        },
+        transfer(target, res, amount) { actions.push(["transfer", target, res, amount]); return ctx.OK; },
+    };
+    ctx.Game.shard.name = shard;
+    return {creep, task, actions, run: () => ctx.Creep.prototype.npcConvoySalvage.call(creep)};
+}
+
+test("execSalvage spawns one scout and three independently boosted haulers", () => {
+    const ctx = makeWorld();
+    ctx.StrategyNpcConvoy.execSalvage();
+
+    assert.equal(ctx.__spawnRecords.length, 4);
+    assert.deepEqual(ctx.__spawnRecords.map(s => s.tasks[0].slot), ["scout", ...cargoNames]);
+    assert.equal(ctx.__spawnRecords[0].body.length, 1);
+    assert.deepEqual(Array.from(ctx.__spawnRecords[0].body), ["move"]);
+    for (const record of ctx.__spawnRecords.slice(1)) {
+        assert.equal(record.role, "npcSalvage");
+        assert.equal(record.body.length, 50);
+        assert.equal(record.body.filter(part => part === "carry").length, 25);
+        assert.equal(record.body.filter(part => part === "move").length, 25);
+        assert.equal(record.tasks[0].taskName, "npcConvoySalvage");
+        assert.equal(record.tasks.at(-1).taskName, "boostCreepBodyPart", "boost must execute from the top of the stack");
+    }
+    assert.deepEqual(ctx.__boostChecks, [{XKH2O: 750}, {XKH2O: 750}, {XKH2O: 750}]);
+    assert.deepEqual(ctx.__boostRegistrations, [{XKH2O: 750}, {XKH2O: 750}, {XKH2O: 750}],
+        "register exactly one 750 XKH2O request for each hauler");
+    assert.equal(ctx.Game.rooms[homeRoomName]._boost_need.length, 3);
+    assert.equal(ctx.Game.rooms[homeRoomName].currentEnergyAvailable, 2450,
+        "scout plus three 2,500-energy haulers must be debited from the shared tick budget");
+
+    const hauler = makeCreep(ctx, {slot: cargoNames[0], shard: "shard3", roomName: salvageRoomName});
+    assert.equal(hauler.creep.store.getCapacity(), 5000,
+        "25 XKH2O-boosted CARRY parts × 50 base capacity × 4 boost = 5,000");
+});
+
+test("salvageReady accepts only matching mission, shard, death tick, and assigned cargo", () => {
+    const cases = [
+        [{id: "wrong"}, "mission mismatch"],
+        [{shard: "shard3"}, "wrong reporting shard"],
+        [{tick: 99}, "before NPC death tick"],
+        [{available: []}, "no tombstones"],
+        [{available: ["creep-unassigned"]}, "unassigned tombstone"],
+    ];
+    for (const [patch, label] of cases) {
+        const ctx = makeWorld();
+        const data = {id: missionId, shard: "shard2", tick: 100, available: [cargoNames[0]], ...patch};
+        assert.equal(ctx.missionFunc.npcConvoySalvageReady(data), false, label);
+        assert.equal(ctx.Memory.npcConvoySalvage.ready, undefined, `${label} must not unlock haulers`);
+    }
+
+    const ctx = makeWorld();
+    assert.equal(ctx.missionFunc.npcConvoySalvageReady({
+        id: missionId, shard: "shard2", tick: 101, available: [cargoNames[0], cargoNames[2]],
+    }), true);
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.Memory.npcConvoySalvage.ready)), {
+        tick: 101, seenAt: 100, available: [cargoNames[0], cargoNames[2]],
+    });
+});
+
+test("scout reports only after death, in a clear room, with real assigned tombstones", () => {
+    const noTombstone = makeWorld();
+    noTombstone.Game.shard.name = "shard2";
+    const scout0 = makeCreep(noTombstone, {slot: "scout", shard: "shard2", roomName: salvageRoomName, x: 24, y: 43});
+    scout0.run();
+    assert.equal(noTombstone.__crossShardRequests.length, 0, "no identifiable tombstone means no signal");
+
+    const early = makeWorld();
+    early.Game.shard.name = "shard2";
+    early.__tombstones.push(makeTombstone(cargoNames[0]));
+    early.Memory.npcConvoySalvage.deathTick = 101;
+    const earlyScout = makeCreep(early, {slot: "scout", shard: "shard2", roomName: salvageRoomName, x: 24, y: 43});
+    earlyScout.task.deathTick = 101;
+    earlyScout.run();
+    assert.equal(early.__crossShardRequests.length, 0, "scout must wait until the configured death tick");
+
+    const hostile = makeWorld();
+    hostile.Game.shard.name = "shard2";
+    hostile.__tombstones.push(makeTombstone(cargoNames[0]));
+    hostile.__hostiles.push({getActiveBodyparts: () => 0, pos: makePos(1, 1, salvageRoomName)});
+    makeCreep(hostile, {slot: "scout", shard: "shard2", roomName: salvageRoomName, x: 24, y: 43}).run();
+    assert.equal(hostile.__crossShardRequests.length, 0, "any visible hostile blocks the signal");
+
+    const assigned = makeWorld();
+    assigned.Game.shard.name = "shard2";
+    assigned.__tombstones.push(makeTombstone(cargoNames[0]), makeTombstone("creep-unassigned"), makeTombstone(cargoNames[1], 0));
+    const scout = makeCreep(assigned, {slot: "scout", shard: "shard2", roomName: salvageRoomName, x: 24, y: 43});
+    scout.run();
+    assert.equal(assigned.__crossShardRequests.length, 1);
+    assert.equal(assigned.__crossShardRequests[0].shard, "shard3");
+    assert.deepEqual(assigned.__crossShardRequests[0].request.data.available, [cargoNames[0]],
+        "only positive-resource tombstones assigned to this mission may be reported");
+});
+
+test("hauler waits for accepted scout signal, crosses only when boosted, then withdraws only its tombstone and returns", () => {
+    const ctx = makeWorld();
+    ctx.__portals.push(
+        {structureType: "portal", destination: {shard: "shard2"}, pos: makePos(14, 8, salvageRoomName)},
+        {structureType: "portal", destination: {shard: "shard3"}, pos: makePos(30, 37, salvageRoomName)},
+    );
+
+    const hauler = makeCreep(ctx, {slot: cargoNames[1], shard: "shard3", roomName: salvageRoomName, x: 10, y: 10});
+    hauler.run();
+    assert.equal(hauler.task.returning, false);
+    assert.equal(hauler.actions.some(a => a[0] === "addTask" && a[1].expectedDestShard === "shard2"), false,
+        "hauler must stage without an accepted scout signal");
+
+    assert.equal(ctx.missionFunc.npcConvoySalvageReady({
+        id: missionId, shard: "shard2", tick: 101, available: [cargoNames[1]],
+    }), true);
+    hauler.run();
+    const outbound = hauler.actions.find(a => a[0] === "addTask" && a[1].expectedDestShard === "shard2");
+    assert.ok(outbound, "accepted signal for this slot unlocks the outbound portal task");
+
+    const unboosted = makeCreep(ctx, {slot: cargoNames[0], shard: "shard3", roomName: salvageRoomName, boosted: false});
+    ctx.Memory.npcConvoySalvage.ready = {tick: 101, seenAt: 100, available: [cargoNames[0]]};
+    unboosted.run();
+    ctx.Game.time += 3;
+    unboosted.run();
+    assert.equal(unboosted.task.returning, true, "an unboosted hauler is routed home even if listed as available");
+    assert.equal(unboosted.actions.some(a => a[0] === "addTask" && a[1].expectedDestShard === "shard2"), false);
+
+    ctx.Game.shard.name = "shard2";
+    const targetRoom = ctx.__target;
+    targetRoom.tombstones.push(makeTombstone(cargoNames[0]), makeTombstone(cargoNames[1]), makeTombstone(cargoNames[2]));
+    const fieldHauler = makeCreep(ctx, {slot: cargoNames[1], shard: "shard2", roomName: salvageRoomName, x: 24, y: 43});
+    fieldHauler.run();
+    assert.deepEqual(fieldHauler.actions.find(a => a[0] === "withdraw"), ["withdraw", `tomb-${cargoNames[1]}`, resource],
+        "hauler may withdraw only the tombstone assigned to its slot");
+    fieldHauler.run();
+    const returning = fieldHauler.actions.find(a => a[0] === "addTask" && a[1].expectedDestShard === "shard3");
+    assert.ok(returning, "loaded hauler must use the return portal to shard3");
+});
