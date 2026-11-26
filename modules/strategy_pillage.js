@@ -110,7 +110,7 @@ let pro = {
           
     },
     exec (room) {
-        if((Game.time+room.hashCode())%30!=0)return;
+        if(global.taskDispatchThrottle !== false && (Game.time+room.hashCode())%30!=0)return;
         if(!room.storage)return;
         // 全局扫描 pillage 旗子（旗子物理插在目标掠夺房间，可能非己方房间）
         let flags = ManagerFlags.getFlagsByPrefix("pillage");

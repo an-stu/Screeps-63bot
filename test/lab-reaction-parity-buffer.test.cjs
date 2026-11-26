@@ -1,24 +1,10 @@
 /**
- * 实验室反应的「2 tick 缓冲」把奇数周期反应打成半速（2026-11-15 修，0.78.252）。
+ * Reaction cadence with actual per-lab cooldowns. shard3 retains its 2-tick
+ * state scan; other shards inspect lab readiness every tick.
  *
- * 现场：`StationLab.exec` 为了让 12 次 `getObjectById` 少跑一半，在反应分支入口
- * 挡了一条 `(Game.time + room.hashCode()) % 2 != 0 → return`。而真正的触发判据在
- * 下游是 `(Game.time + hashCode) % REACTION_TIME[res] == 0`：
- *   · RT 为偶数 ⇒ 任何倍数都是偶数 ⇒ 触发点永远落在放行的那一半，行为不变；
- *   · RT 为奇数 ⇒ 每 2*RT 里恰好有一半的触发点落在被跳过的奇偶上
- *     ⇒ 反应按 2*RT 跑，**吞吐打对折**。
- * 线上 `REACTION_TIME` 有 12 个是奇数（G/ZK/UL/LHO2/ZHO2/UHO2/KHO2/UH2O/KH2O=5、
- * LH/GH2O=15、XLH2O=65），正好覆盖 T3 化合物的主链条。
- *
- * 修法：反应周期为奇数时不套缓冲（每 tick 都评估状态机）。
- *
- * 这里验行为，不断言源码：
- *   ① 奇数周期（G，RT=5）：60 tick 内 runReaction 必须被调 **12** 次（旧代码 6 次）
- *   ② 偶数周期（GH，RT=10）：仍是 6 次 —— 触发窗口的数量本来就是这个数，不许变
- *   ③ 偶数周期 + centerLab 有死 id（状态机会置 clear）：奇数奇偶的那一 tick
- *      必须**被缓冲挡住**（stat 保持 reacting）⇒ 证明缓冲本身没被拆掉
- *   ④ 奇数周期 + 同样的死 id：奇数奇偶那一 tick 必须**已经跑过**（stat=clear）
- *      ⇒ 这条是 ① 的定点对照，旧代码在这里会红
+ * The fake labs set cooldown to REACTION_TIME after a successful reaction and
+ * age it once per tick. This verifies the readiness model, odd/even shard3
+ * cadence, shard2 low-bucket progress, and independent cooldown phases.
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -104,13 +90,26 @@ function setup(res, opt = {}) {
     const ctx = load();
     const [a, b] = ctx.LAB_REACTIONS[res];
     const counter = { n: 0 };
-    const runLab = {
-        id: "L2",
-        runReaction: () => { counter.n++; return ctx.OK; },
-    };
+    const runLabs = (opt.outputCooldowns || [0]).map((cooldown, i) => {
+        const lab = {
+            id: `L${i + 2}`,
+            cooldown,
+            attemptedTicks: [],
+            successTicks: [],
+            runReaction: () => {
+                lab.attemptedTicks.push(ctx.Game.time);
+                if (lab.cooldown > 0) return ctx.ERR_TIRED;
+                counter.n++;
+                lab.successTicks.push(ctx.Game.time);
+                lab.cooldown = ctx.REACTION_TIME[res];
+                return ctx.OK;
+            },
+        };
+        return lab;
+    });
     const L0 = centerLab("L0", a, 3000);
     const L1 = centerLab("L1", b, 3000);
-    ctx.__objs = { L0, L1, L2: runLab };
+    ctx.__objs = { L0, L1, ...Object.fromEntries(runLabs.map(lab => [lab.id, lab])) };
     if (opt.deadCenter) delete ctx.__objs.L1;
 
     const room = {
@@ -123,40 +122,47 @@ function setup(res, opt = {}) {
                 stat: "reacting",
                 reacting: res,
                 centerLabs: ["L0", "L1"],
-                otherLabs: ["L2"],
+                otherLabs: runLabs.map(lab => lab.id),
                 boostLabMap: {},
             },
         },
     };
-    return { ctx, room, counter, stat: () => room.memory.stationLab.stat };
+    return { ctx, room, counter, runLabs, stat: () => room.memory.stationLab.stat };
 }
 
-/** 跑 [1..60] 这 60 个 tick，返回调了 runReaction 的次数 */
+/** Run one script tick, then age the fake lab cooldowns as the engine does. */
+function runTick(setupResult, tick) {
+    const { ctx, room, runLabs } = setupResult;
+    ctx.Game.time = tick;
+    ctx.StationLab.exec(room);
+    for (const lab of runLabs) if (lab.cooldown > 0) lab.cooldown--;
+}
+
+/** 跑 [1..60] 这 60 个 tick，返回成功反应数 */
 function runTicks(setupResult) {
-    const { ctx, room, counter } = setupResult;
     for (let t = 1; t <= 60; t++) {
-        ctx.Game.time = t;
-        ctx.StationLab.exec(room);
+        runTick(setupResult, t);
     }
-    return counter.n;
+    return setupResult.counter.n;
 }
 
-// ① 奇数周期 RT=5：60 tick 里 (t+1)%5==0 有 12 次 ⇒ 必须每次都真的跑
+// ① Odd RT=5 on shard3: 2-tick state scans plus actual cooldown yield 10 runs / 60.
 {
     const s = setup("G");
     assert.equal(s.ctx.REACTION_TIME.G, 5, "前置：G 的反应周期必须是奇数（本用例的前提）");
     const got = runTicks(s);
-    assert.equal(got, 12,
-        "RT=5 的奇数周期反应在 60 tick 内应触发 12 次；拿到 " + got +
-        " 次说明 2 tick 奇偶缓冲仍在吃掉一半的触发点（旧行为 = 6）");
+    assert.equal(got, 10, "shard3 RT=5 with actual cooldown yields 10 reactions per 60 ticks");
+    assert.deepEqual(s.runLabs[0].successTicks, [1, 7, 13, 19, 25, 31, 37, 43, 49, 55],
+        "shard3 scans every other tick and runs a lab when its cooldown is ready");
 }
 
-// ② 偶数周期 RT=10：触发窗口本来就是 6 个，修法不许改变它
+// ② Even RT=10: actual cooldown yields 6 reactions / 60 on shard3.
 {
     const s = setup("GH");
     assert.equal(s.ctx.REACTION_TIME.GH % 2, 0, "前置：GH 的反应周期是偶数");
     const got = runTicks(s);
-    assert.equal(got, 6, "RT 为偶数时触发窗口 6 个，保持不变（修法只影响奇数周期）");
+    assert.equal(got, 6, "shard3 RT=10 with actual cooldown yields 6 reactions per 60 ticks");
+    assert.deepEqual(s.runLabs[0].successTicks, [1, 11, 21, 31, 41, 51]);
 }
 
 // ③ 负对照：偶数周期下缓冲必须还在
@@ -172,30 +178,63 @@ function runTicks(setupResult) {
     assert.equal(s.stat(), "clear", "放行的那一 tick 必须能进状态机并清掉死 id 的反应态");
 }
 
-// ④ 定点对照：奇数周期下，被跳过的那一 tick 的下一个放行 tick 必须补上
-//    RT=5、hashCode=1：t=4 时 (t+1)=5 是触发点但奇偶被跳过；t=5 时 (t+1)=6，
-//    余数 1 —— 只有「余数 <= 1」的容差才会在这里补跑。旧代码（余数 == 0）会漏掉。
+// ④ The odd-cycle state scan reaches the next eligible tick after a skipped scan.
+//    Reaction execution itself now follows each output lab's cooldown, not a global phase.
 {
     const s = setup("G", { deadCenter: true });
-    s.ctx.Game.time = 4;                 // 触发点 (4+1)%5==0，但 (4+1)%2!=0 ⇒ 缓冲跳过
+    s.ctx.Game.time = 4;                 // (4+1)%2!=0 ⇒ buffered state scan skips
     s.ctx.StationLab.exec(s.room);
     assert.equal(s.stat(), "reacting", "被缓冲跳过的这一 tick 状态机不该动（缓冲仍在）");
-    s.ctx.Game.time = 5;                 // 下一个放行 tick，(5+1)%5==1 ⇒ 容差窗口
+    s.ctx.Game.time = 5;                 // next even phase: inspect the state
     s.ctx.StationLab.exec(s.room);
-    assert.equal(s.stat(), "clear",
-        "RT=5 时触发点落在被跳过的奇偶上，下一个放行 tick 的余数是 1，必须靠容差补跑；" +
-        "否则这个反应永远按 2*RT 跑");
+    assert.equal(s.stat(), "clear", "the next odd-cycle state scan must clear a missing center lab");
 }
 
-console.log("lab reaction parity buffer checks passed");
+// Off shard3, low bucket must not halt active reactions. RT=5 is limited only
+// by the lab's real five-tick cooldown, so 60 ticks still allow 12 reactions.
 {
     const s = setup("G");
     s.ctx.Game.shard.name = "shard2";
-    s.ctx.Game.cpu.bucket = 6000;
-    assert.equal(runTicks(s),12,"fast shards run once per true odd-cycle window, without duplicate tolerance attempts");
-    const d = setup("GH",{deadCenter:true});
+    s.ctx.Game.cpu.bucket = 1;
+    assert.equal(runTicks(s), 12, "shard2 low bucket must not pause reactions with actual cooldown");
+    assert.deepEqual(s.runLabs[0].successTicks, [1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, 56]);
+}
+
+// Each output lab follows its own cooldown phase, rather than one room-level
+// reaction timestamp. The second lab starts two ticks behind the first.
+{
+    const s = setup("G", {outputCooldowns: [0, 2]});
+    s.ctx.Game.shard.name = "shard2";
+    runTick(s, 1);
+    runTick(s, 2);
+    runTick(s, 3);
+    assert.deepEqual(s.runLabs.map(lab => lab.successTicks), [[1], [3]],
+        "a shifted lab cooldown must shift that lab's own ready tick");
+    assert.deepEqual(s.runLabs.map(lab => lab.attemptedTicks), [[1], [3]],
+        "runReaction must not be called while the output lab cooldown is positive");
+}
+
+// shard3 still protects reaction CPU below 8,000, then resumes at the boundary.
+{
+    const s = setup("G");
+    s.ctx.Game.cpu.bucket = 7999;
+    s.ctx.Game.time = 1; // hash=1 => eligible state scan
+    s.ctx.StationLab.exec(s.room);
+    assert.equal(s.counter.n, 0, "shard3 must keep the low-bucket reaction guard");
+    s.ctx.Game.cpu.bucket = 8000;
+    s.ctx.Game.time = 3; // next eligible scan; lab cooldown is still ready
+    s.ctx.StationLab.exec(s.room);
+    assert.equal(s.counter.n, 1, "shard3 may resume reactions at bucket 8,000");
+}
+
+// shard2 performs the invalid-center state check immediately; only shard3
+// retains its buffered state scan.
+{
+    const d = setup("GH", {deadCenter: true});
     d.ctx.Game.shard.name = "shard2";
     d.ctx.Game.time = 2;
     d.ctx.StationLab.exec(d.room);
-    assert.equal(d.stat(),"clear","only shard3 delays the state check to the next even tick");
+    assert.equal(d.stat(), "clear", "shard2 must not defer the invalid-center check");
 }
+
+console.log("lab reaction cooldown and shard cadence checks passed");

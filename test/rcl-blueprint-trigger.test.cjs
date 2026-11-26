@@ -26,6 +26,7 @@ const sandbox = {
     ManagerPlanner: {computeManor() { sandbox.heavyPlannerCalls++; }},
     testPlanner: {},
 };
+sandbox.global = sandbox;
 const triggerMethod = extractMethod(plannerSource, "tryBuildOnRclChange(room) {").replace(/\bpro\./g, "testPlanner.");
 vm.runInNewContext(`this.testPlanner = {${triggerMethod}};`, sandbox);
 const ManagerAutoPlanner = sandbox.testPlanner;
@@ -140,6 +141,25 @@ ManagerAutoPlanner.tryCurrentBlueprintTier = () => {
     assert.equal(tierCalls, 0, "a low CPU bucket must defer tier construction");
     sandbox.Game.cpu.bucket = 9000;
     assert.equal(sandbox.heavyPlannerCalls, 0, "an RCL transition must reuse the saved blueprint, not recompute it");
+
+    // Outside save-CPU mode, low bucket alone must not suppress this cheap
+    // saved-blueprint tier pass. Keep the persisted retry tick authoritative.
+    sandbox.isSaveCpu = false;
+    sandbox.Game.cpu.bucket = 100;
+    sandbox.Game.time = 401;
+    const unrestricted = makeRoom({memory: {
+        structMap: {extension: "blueprint"},
+        blueprintTierBuild: {rcl: 6, nextTick: 401},
+    }});
+    tierCalls = 0;
+    tierResult = {state: "complete", placed: 1};
+    ManagerAutoPlanner.tryBuildOnRclChange(unrestricted);
+    assert.equal(tierCalls, 1, "isSaveCpu=false must bypass the save-CPU bucket floor");
+    assert.equal(unrestricted.memory.blueprintTierBuild.state, "complete");
+    assert.equal("nextTick" in unrestricted.memory.blueprintTierBuild, false,
+        "the bypass must not preserve a completed retry deadline");
+    delete sandbox.isSaveCpu;
+    sandbox.Game.cpu.bucket = 9000;
 }
 
 // ManagerRooms reaches the trigger only for owned, unblocked, ordinary rooms.

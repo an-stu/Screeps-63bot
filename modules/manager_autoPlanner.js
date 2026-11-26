@@ -384,7 +384,8 @@ let pro={
         })
     },
     tryAutoBuildLowLevel0 (room){
-        if((Game.time+room.hashCode()) % 150 == 0  && Game.cpu.bucket>50 && room.memory.structMap){
+        if(room.memory.structMap && (global.isSaveCpu === false || Game.cpu.bucket > 50)
+            && (global.taskDispatchThrottle === false || (Game.time+room.hashCode()) % 150 == 0)){
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_SPAWN);
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
             // room.memory.structMap[STRUCTURE_SPAWN].take(1).forEach(e=>{pro.tryCreateCons(new RoomPosition(e[0],e[1],room.name),STRUCTURE_SPAWN)})
@@ -440,7 +441,8 @@ let pro={
         if (room.controller) tryBlueprintContainerNear(room.controller.pos);
     },
     tryAutoBuildLowLevel800 (room){
-        if((Game.time+room.hashCode()) % 150 == 0 && Game.cpu.bucket>50 && room.memory.structMap){
+        if(room.memory.structMap && (global.isSaveCpu === false || Game.cpu.bucket > 50)
+            && (global.taskDispatchThrottle === false || (Game.time+room.hashCode()) % 150 == 0)){
             // Source/controller containers precede other sites. Only RCL6+
             // rooms may also queue the other blueprint slots (e.g. mineral).
             pro.ensureSourceContainers(room);
@@ -459,7 +461,8 @@ let pro={
         // points without turning on the shard-wide planner. 17 is coprime
         // with the economy pass (7/14 ticks).
         if (!room.my || room.memory.autoBuildLabs !== true || room.level < 6
-            || MIN_CPU || Game.cpu.bucket <= 500 || (Game.time + room.hashCode()) % 17) return;
+            || MIN_CPU || (global.isSaveCpu !== false && Game.cpu.bucket <= 500)
+            || (global.taskDispatchThrottle !== false && (Game.time + room.hashCode()) % 17)) return;
         const structMap = room.memory.structMap;
         if (structMap?.[STRUCTURE_LAB]) pro.tryCreateStructs(room, structMap, STRUCTURE_LAB);
     },
@@ -473,7 +476,8 @@ let pro={
             room.memory.blueprintTierBuild = {rcl:tier, nextTick:Game.time+(last ? 0 : (room.hashCode() & 3))};
         }
         const check = room.memory.blueprintTierBuild;
-        if (MIN_CPU || Game.cpu.bucket <= 500 || check.nextTick == null || Game.time < check.nextTick) return;
+        if (MIN_CPU || (global.isSaveCpu !== false && Game.cpu.bucket <= 500)
+            || check.nextTick == null || Game.time < check.nextTick) return;
         // If an individual damaged blueprint throws, do not repeat it every tick.
         check.nextTick = Game.time+61;
         const result = pro.tryCurrentBlueprintTier(room);
@@ -559,20 +563,23 @@ let pro={
         let extensionLimit = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.level];
         let extensionQueued = room.constructionSite.filter(e => e.structureType == STRUCTURE_EXTENSION).length;
         let extensionMissing = room.extension.length + extensionQueued < extensionLimit;
-        if(Game.cpu.bucket>500&&room.memory.structMap && (extensionMissing || (Game.time+room.hashCode()) % 150 == 0)){
+        const hasReserve = global.isSaveCpu === false || Game.cpu.bucket > 500;
+        if(hasReserve && room.memory.structMap && (extensionMissing
+            || (global.taskDispatchThrottle !== false && (Game.time+room.hashCode()) % 150 == 0))){
             pro.tryCreateStructs(room,room.memory.structMap,STRUCTURE_EXTENSION);
         }
         // Old off-plan roads must not hide missing bypasses. Spread exact
         // position checks across economy passes instead of decoding every pass.
-        if (Game.cpu.bucket > 500 && room.memory.structMap?.[STRUCTURE_ROAD]
+        if (hasReserve && room.memory.structMap?.[STRUCTURE_ROAD]
             && Game.time >= (room.memory.nextBlueprintRoadCheck || 0)) {
             room.memory.nextBlueprintRoadCheck = Game.time + 25 + (room.hashCode() & 7);
             pro.tryCreateRoads(room, room.memory.structMap);
         }
-        if((Game.time+room.hashCode()) % 600 == 0 && Game.cpu.bucket>500&&room.memory.structMap){ // 4级后600tick更新一次
+        if(hasReserve && room.memory.structMap
+            && (global.taskDispatchThrottle === false || (Game.time+room.hashCode()) % 600 == 0)){
             // 开始建 road 和 container
             _.keys(CONTROLLER_STRUCTURES).forEach(struct=>{
-                if(struct == STRUCTURE_RAMPART || struct == STRUCTURE_WALL || struct == STRUCTURE_EXTENSION)return;
+                if(struct == STRUCTURE_RAMPART || struct == STRUCTURE_WALL || struct == STRUCTURE_EXTENSION || struct == STRUCTURE_ROAD)return;
                 pro.tryCreateStructs(room,room.memory.structMap,struct);
                 // room.memory.structMap[struct].take(CONTROLLER_STRUCTURES[struct][room.level]).forEach(e=>{
                 //     let pos = new RoomPosition(e[0],e[1],room.name);
@@ -765,10 +772,10 @@ let pro={
         return roomArray;
     },
     computeAnyRoom (){
-        let blocked = pro.getBlocked();
         let p = Game.flags.autoBlueprint;
         if(!p)return;
-        if(Game.cpu.bucket<300)return;
+        if(global.isSaveCpu !== false && Game.cpu.bucket<300)return;
+        let blocked = pro.getBlocked();
         let pa = Game.flags.pa;
         let pb = Game.flags.pb;
         let pc = Game.flags.pc;
@@ -791,7 +798,7 @@ let pro={
         }
     },
     computeRoom (roomObject){
-        if(Game.cpu.bucket<300)return {ok:false, reason:"insufficient_cpu"};
+        if(global.isSaveCpu !== false && Game.cpu.bucket<300)return {ok:false, reason:"insufficient_cpu"};
         const room = roomObject?.room, name = roomObject?.pos?.roomName || room?.name;
         if (!room?.controller?.pos || !room.mineral?.pos || !room.source?.length || !name) {
             return {ok:false, reason:"missing_room_data"};

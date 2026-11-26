@@ -29,11 +29,9 @@ let pro = {
         // MIN_CPU 滞回：进入 <2000、退出 ≥2400。原来无滞回时 bucket 在 2000
         // 线上逐 tick 翻转（实测 1997↔2005），角色过滤/经济间隔随 tick 抖动。
         // global 跨 tick 持久（重载才清零），天然可做粘滞位。
-        MIN_CPU = !!Memory.mincpu || (MIN_CPU ? Game.cpu.bucket < 2400 : Game.cpu.bucket < 2000);
+        MIN_CPU = isSaveCpu && (!!Memory.mincpu || (MIN_CPU ? Game.cpu.bucket < 2400 : Game.cpu.bucket < 2000));
         // 每 tick 重读开关，修改 Memory.taskDispatchThrottle 后下一 tick 生效。
-        taskDispatchThrottle = typeof Memory.taskDispatchThrottle === "boolean"
-            ? Memory.taskDispatchThrottle
-            : Game.shard.name === "shard3";
+        taskDispatchThrottle = isSaveCpu && Memory.taskDispatchThrottle !== false;
         if (MIN_CPU && Game.time % 100 == 0) Logger.log("Core", "warning : min cpu on")
         let objects = getTickObjects();
         objects.rooms.forEach(room => room.used = {});
@@ -151,13 +149,14 @@ let pro = {
             HelperError.catchError(() => StrategyMarket.autoBuy());
         // Migrate existing roads independently of the optional full planner.
         // At most one room per slot, only with spare CPU; never replan buildings.
-        const workTileInterval = Game.shard.name === "shard3" && Game.cpu.bucket <= 6000 ? 13 : 5;
-        if (!MIN_CPU && global.ManagerAutoPlanner && Game.time % workTileInterval === 4
-            && Game.cpu.bucket > 3000 && Game.cpu.getUsed() < Game.cpu.limit)
+        const workTileInterval = Game.cpu.bucket <= 6000 ? 13 : 5;
+        if (!MIN_CPU && global.ManagerAutoPlanner && (!taskDispatchThrottle || Game.time % workTileInterval === 4)
+            && (!isSaveCpu || Game.cpu.bucket > 3000) && Game.cpu.getUsed() < Game.cpu.limit)
             HelperError.catchError(() => ManagerAutoPlanner.updateWorkTileRoads(objects.rooms), "workTileRoads");
         if (!MIN_CPU && global.ManagerAutoPlanner && isCpuFeatureEnabled("autoPlanner")
-            && Game.cpu.bucket >= 6000
-            && HelperCpuUsed.shouldRun(Game.shard.name === "shard3" ? 25 : 10, OPTIONAL_CPU_OFFSETS.autoPlanner))
+            && (Game.flags.autoBlueprint || Game.flags.saveBlueprint)
+            && (!isSaveCpu || Game.cpu.bucket >= 6000)
+            && (!taskDispatchThrottle || HelperCpuUsed.shouldRun(25, OPTIONAL_CPU_OFFSETS.autoPlanner)))
             HelperError.catchError(() => {
                 let plannerStart = Game.cpu.getUsed();
                 ManagerAutoPlanner.exec();
@@ -181,10 +180,10 @@ let pro = {
         // 每只正在唱的爬每 tick 推进一页（10 字），长句自然分成好几句。
         // 看它有没有真的在跑：控制台读 `__chatAll`（调用次数）/`__chatSays`（说出句数）。
         if (!MIN_CPU && global.TalkAll && isCpuFeatureEnabled("chat")
-            && Game.cpu.bucket >= 5000)
+            && (!isSaveCpu || Game.cpu.bucket >= 5000))
             HelperError.catchError(() => TalkAll());
         if (!MIN_CPU && global.HelperVisual && isCpuFeatureEnabled("visual")
-            && HelperCpuUsed.shouldRun(10, OPTIONAL_CPU_OFFSETS.visual))
+            && (!taskDispatchThrottle || HelperCpuUsed.shouldRun(10, OPTIONAL_CPU_OFFSETS.visual)))
             HelperError.catchError(() => HelperVisual.exec());
         if (cpuProfile) cpuProfile.optional = Game.cpu.getUsed() - phaseStart;
     },
@@ -234,17 +233,6 @@ let getTickObjects = function () {
         };
     }
     return Game._coreObjects;
-}
-
-// RCL8 controllers have a large downgrade buffer. When the bucket is falling,
-// stagger only their upgrader intents; economy, defense and Power Creeps keep
-// running at full frequency. Controllers near downgrade always run normally.
-let getUpgraderInterval = function () {
-    if (Game.cpu.bucket < 5000) return 5;
-    if (Game.cpu.bucket < 9000) return 4;
-    if (Game.cpu.bucket < 9800) return 3;
-    if (Game.cpu.bucket < 9950) return 2;
-    return 1;
 }
 
 /**
@@ -323,9 +311,10 @@ let updateCodeHealth = function () {
         cpu: Game.cpu.getUsed(),
         averageCpu: HelperCpuUsed.average(HelperCpuUsed.cpu, 20),
         bucket: Game.cpu.bucket,
+        cpuMode: {save: isSaveCpu, dispatchThrottle: taskDispatchThrottle, minCpu: MIN_CPU},
         creeps: objects.creeps.length,
         powerCreeps: objects.powerCreeps.filter(e => e.ticksToLive).length,
-        upgraderInterval: Game._upgraderInterval || getUpgraderInterval(),
+        upgraderInterval: 1,
         fullSourceContainers: fullConts,
         totalSourceContainers: totalConts,
         missingTaskHandlers: missingTaskHandlers,

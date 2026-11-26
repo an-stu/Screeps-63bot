@@ -337,7 +337,7 @@ let pro = {
         })
     },
     exec () {
-        if(Game.time%3!=0)return;
+        if(global.taskDispatchThrottle !== false && Game.time%3!=0)return;
         ManagerFlags.getFlagsByPrefix("teamL2").forEach(flag=>{
             pro.execSpawn(flag,2)
         });

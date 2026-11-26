@@ -415,7 +415,7 @@ let pro = {
         // }
     },
     exec () {
-        if(Game.time%3!=0)return;
+        if(global.taskDispatchThrottle !== false && Game.time%3!=0)return;
         ManagerFlags.getFlagsByPrefix("raL1").forEach(flag=>{
             if(flag.name.indexOf("crossShard")>0)
                 pro.execSpawnCrossShard(flag,pro.raBody1,pro.raBoost1())

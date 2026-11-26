@@ -488,7 +488,7 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
             }
         }
 
-        if (this.ticksToLive % 7 < 2) {
+        if (container && (global.taskDispatchThrottle === false || this.ticksToLive % 7 < 2)) {
             //捡起掉落的能量
             let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
             if (dropEnergy && container) {
@@ -822,7 +822,7 @@ Creep.prototype.harvestEnergyKeeper = function () {
             }
         }
 
-        if (this.ticksToLive % 6 <= 1) {
+        if (container && (global.taskDispatchThrottle === false || this.ticksToLive % 6 <= 1)) {
             //捡起掉落的能量
             let dropEnergy = this.pos.lookFor(LOOK_ENERGY).head();
             if (dropEnergy && container) {
@@ -4851,7 +4851,7 @@ let pro = {
      * CPU 飙升的主因之一）。隔 tick 寻路对实际推进速度**零影响**。
      */
     defenseStep(creep, target, range) {
-        if (Game.time % 2 != 0) return;
+        if (creep.fatigue > 0 || (global.taskDispatchThrottle !== false && Game.time % 2 != 0)) return;
         creep.moveTo(target, { range: range });
     },
     /**

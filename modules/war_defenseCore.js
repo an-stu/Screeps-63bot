@@ -108,7 +108,7 @@ let pro={
             // TypeError，被 catchError 吞掉后**其余防御旗子本 tick 全部不再处理**，
             // 而这个旗子也永远清不掉（hasAnyPrefix 恒为 true，每 tick 白发 CPU）。
             if(!room) return flag.remove();
-            if((Game.time+room.hashCode())%3!=0)return;// 和tick同步，没创建的时候不计算，省点cpu
+            if(global.taskDispatchThrottle !== false && (Game.time+room.hashCode())%3!=0)return;
 
             if(!flag.memory.lastSpawnTime)flag.memory.lastSpawnTime=Game.time-290;
 

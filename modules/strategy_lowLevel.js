@@ -33,6 +33,7 @@ let pro = {
         StationHive.trySpawn(room, room.name, body, "lowLevelDefense", [UtilsTask.taskData("lowLevelDefense")])
     },
     pickTasks(room, freeCarries, onlyEnergy = false) {
+        if (!freeCarries.length && !isTaskDispatchThrottled()) return;
         // 捡起任务 9tick更新一次，比较耗时 缓存起来
         let pickTasks = pro.pickTasksMap[room.name] || []
         if (!isTaskDispatchThrottled() || (Game.time + room.hashCode()) % 9 == 0) {

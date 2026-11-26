@@ -23,15 +23,17 @@ const priorityMethod = extractMethod(src, "ensureSourceContainers (room,");
 const genericMethod = extractMethod(src, "tryCreateCons(pos,struct){");
 const typeMethod = extractMethod(src, "tryCreateStructs(room,structMap,struct,structCnt=2500){");
 const lowLevelMethod = extractMethod(src, "tryAutoBuildLowLevel800 (room){");
+const lowLevel0Method = extractMethod(src, "tryAutoBuildLowLevel0 (room){");
 const highLevelMethod = extractMethod(src, "tryAutoBuildHighLevel (room){");
 const sandbox = {
     STRUCTURE_CONTAINER: "container",
+    STRUCTURE_SPAWN: "spawn",
     STRUCTURE_ROAD: "road",
     STRUCTURE_RAMPART: "rampart",
     STRUCTURE_EXTENSION: "extension",
     STRUCTURE_TOWER: "tower",
     STRUCTURE_WALL: "constructedWall",
-    CONTROLLER_STRUCTURES: Object.fromEntries(["container", "extension", "road", "tower"]
+    CONTROLLER_STRUCTURES: Object.fromEntries(["container", "extension", "road", "tower", "spawn"]
         .map(type => [type, Array(9).fill(5)])),
     LOOK_STRUCTURES: "structures",
     LOOK_CONSTRUCTION_SITES: "sites",
@@ -43,8 +45,9 @@ const sandbox = {
     RoomPosition: function (x, y, name) { return sandbox.Game.rooms[name].getPositionAt(x, y); },
     console: {log() {}},
 };
+sandbox.global = sandbox;
 vm.runInNewContext("Array.prototype.head=function(){return this[0]}; Array.prototype.take=function(n){return this.slice(0,n)}; function copyArray(a){return Array.from(a)}; var Utils={decodePosArray:()=>copyArray(planned)}; var pro = { "
-    + [priorityMethod, genericMethod, typeMethod, lowLevelMethod, highLevelMethod, "pruneOutOfTierExtensionSites(){}"].join(",") + " };", sandbox);
+    + [priorityMethod, genericMethod, typeMethod, lowLevel0Method, lowLevelMethod, highLevelMethod, "pruneOutOfTierExtensionSites(){}"].join(",") + " };", sandbox);
 
 function makeRoom(opts = {}) {
     const created = [];
@@ -254,6 +257,31 @@ assert.ok(lowLevelMethod.indexOf("pro.ensureSourceContainers(room)") < lowLevelM
     const room = makeRoom({level: 5, planned, containers: allPriority, sites: [existing]});
     sandbox.pro.tryAutoBuildHighLevel(room);
     assert.deepEqual(room.constructionSite, [existing]);
+}
+
+// On a normal shard, explicit false bypasses both the saved-CPU bucket floor
+// and the 150-tick slots without changing priority-site selection.
+{
+    sandbox.isSaveCpu = false;
+    sandbox.taskDispatchThrottle = false;
+    sandbox.Game.cpu.bucket = 10;
+    sandbox.Game.time = 601; // not a 150-tick slot
+    const room = makeRoom();
+    sandbox.pro.tryAutoBuildLowLevel800(room);
+    assert.deepEqual(room.created[0], {x: 9, y: 9, type: "container"},
+        "out-of-phase low-level pass must still queue its source-priority container");
+
+    // The RCL0 path has its own 150-tick gate and must honor the same switch.
+    const lowRoom = makeRoom({level: 1});
+    lowRoom.memory.structMap = {spawn: "encoded", extension: "encoded"};
+    sandbox.planned = [{x: 10, y: 10}, {x: 11, y: 10}];
+    sandbox.pro.tryAutoBuildLowLevel0(lowRoom);
+    assert.ok(lowRoom.created.length > 0,
+        "out-of-phase low-RCL0 build pass must run when both CPU switches are explicitly false");
+    delete sandbox.isSaveCpu;
+    delete sandbox.taskDispatchThrottle;
+    sandbox.Game.cpu.bucket = 10000;
+    sandbox.planned = [];
 }
 
 console.log("source and controller blueprint containers are prioritized safely");

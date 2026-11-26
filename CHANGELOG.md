@@ -1,3 +1,9 @@
+## v0.78.346 — 仅 shard3 应用 CPU 降频，其他分片按任务就绪推进
+
+- 收紧 `isSaveCpu`、低桶 `MIN_CPU` 和 `taskDispatchThrottle` 的分片边界。shard3 保留低桶保护和派发节流；其他分片即使 Memory 留着旧的 `true`，经济、补员和拾取仍正常推进，换 Pixel 后的低 bucket 不再暂停产线。
+- 将领取任务、塔的敌情侦测、PC、占领/跨分片、蓝图派单及存款/PB 的纯 CPU 间隔限定在 shard3；Lab 在非 shard3 按实验室自己的冷却开工，Factory 不再因非 shard3 的低桶停批。
+- 保留实际冷却、运输配额、市场批次、去重、建造失败退避、和平塔维修和遥测周期。只在有需求时扫描可拾取货物，保留路径缓存与蓝图同 tick 防重复。
+
 ## v0.78.345 — 本房和外矿 energy keeper 按新体型提前接班
 
 - 普通体型为 6 WORK / 3 MOVE / 1 CARRY（800 能量），低级房容量不够或全空房救急时按实际预算减配；仅 shard3 的 `isSaveCpu` 保留原有大体型。非 shard3 不再因 bucket 低而让 keeper 隔 tick 挖矿；shard3 降频也必须有足够的 WORK 保持产量。

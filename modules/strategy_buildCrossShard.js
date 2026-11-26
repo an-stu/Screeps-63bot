@@ -149,7 +149,7 @@ let pro = {
 
     exec() {
         pro.migrateLegacyConfig();
-        if (Game.time % BUILD_INTERVAL != 0) return;
+        if (global.taskDispatchThrottle !== false && Game.time % BUILD_INTERVAL != 0) return;
         let builds = ensureBuildMap();
         Object.keys(builds).forEach(roomName => {
             let cfg = builds[roomName];

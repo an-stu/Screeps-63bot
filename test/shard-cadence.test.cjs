@@ -36,11 +36,11 @@ const room = {hashCode: () => 0, memory: {stationLab: {boostLabMap:{}}}};
 for (const shard of ["shard0","shard1","shard2","shard3"]) {
     sandbox.Game.shard.name = shard;
     sandbox.Game.cpu.bucket = 6000;
-    assert.equal(sandbox.pro.economyInterval(), shard === "shard3" ? 7 : 5);
+    assert.equal(sandbox.pro.economyInterval(), shard === "shard3" ? 7 : 1);
     sandbox.Game.cpu.bucket = 4999;
-    assert.equal(sandbox.pro.economyInterval(), shard === "shard3" ? 14 : 5);
+    assert.equal(sandbox.pro.economyInterval(), shard === "shard3" ? 14 : 1);
     sandbox.MIN_CPU = true;
-    assert.equal(sandbox.pro.economyInterval(), 10);
+    assert.equal(sandbox.pro.economyInterval(), shard === "shard3" ? 10 : 1);
     sandbox.MIN_CPU = false;
 
     sandbox.calls = 0;
@@ -56,9 +56,23 @@ for (const shard of ["shard0","shard1","shard2","shard3"]) {
     sandbox.Game.time = 870;
     assert.equal(sandbox.pro.shouldRunMarketRoom(), true,"shard3 retains its full eligibility window");
 }
-assert.match(lab, /const buffered = Game\.shard\?\.name === "shard3";\s*if \(buffered && \(Game\.time \+ room\.hashCode\(\)\) % 2/);
-assert.match(lab, /Game\.cpu\.bucket < \(Game\.shard\?\.name === "shard3" \? 8000 : 5000\)/);
-assert.match(read("main.js"), /Game\.cpu\.bucket >= 6000\s*&& HelperCpuUsed\.shouldRun\(Game\.shard\.name === "shard3" \? 25 : 10/);
+assert.match(lab, /const buffered = Game\.shard\?\.name === "shard3";\s*const staggered = buffered && global\.taskDispatchThrottle !== false;/);
+assert.match(lab, /Game\.shard\?\.name === "shard3" && Game\.cpu\.bucket < 8000/);
+assert.match(read("main.js"), /\(!isSaveCpu \|\| Game\.cpu\.bucket >= 6000\)\s*&& \(!taskDispatchThrottle \|\| HelperCpuUsed\.shouldRun\(25/);
 assert.match(read("manager_rooms.js"), /ROOM_REFRESH_INTERVAL = Game\.shard\?\.name === "shard3" \? 61 : 31/);
+
+const pc = {Game:{time:1},calls:0, HelperError:{catchError:fn=>fn()},
+    ManagerFlags:{getFlagsByPrefix:()=>[{}]}};
+pc.global = pc;
+vm.runInNewContext(`this.pro = {execRoom() { calls++; }, ${method(read("strategy_factoryPowerCreep.js"), "exec() {")}};`,pc);
+pc.taskDispatchThrottle = false;
+pc.pro.exec();
+assert.equal(pc.calls,1,"PC ready tasks dispatch outside shard3 on a non-phase tick");
+pc.taskDispatchThrottle = true;
+pc.pro.exec();
+assert.equal(pc.calls,1,"shard3 keeps the CPU-saving dispatch phase when enabled");
+pc.Game.time = 3;
+pc.pro.exec();
+assert.equal(pc.calls,2);
 
 console.log("shard-specific optional cadence: OK");

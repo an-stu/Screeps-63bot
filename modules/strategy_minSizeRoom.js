@@ -205,7 +205,9 @@ let pro = {
         if(hostileCnt){
             flag.memory.hostileFindTime = Game.time // 如果发现敌人就暂时不生小兵，躲几波
         }
-        if (room.creeps("minRoomWorker",false).length < 3 && ((Game.time+room.hashCode())%7==0) && Game.time>(flag.memory.hostileFindTime||0)+1500) {
+        if (room.creeps("minRoomWorker",false).length < 3
+            && (global.taskDispatchThrottle === false || (Game.time+room.hashCode())%7==0)
+            && Game.time>(flag.memory.hostileFindTime||0)+1500) {
             // if(!Game.time%3==0)return;
             // let spawnRoom = Game.rooms.E7N18//?Game.rooms.E7N18:StationHive.getClosestSpawnRoom(room,6,6)
             let spawnRoom = StationHive.getClosestSpawnRoom(room,6,6)//Game.rooms.W8N7//?Game.rooms.W8N7:StationHive.getClosestSpawnRoom(room,6,6)

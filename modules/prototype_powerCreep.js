@@ -441,15 +441,18 @@ PowerCreep.prototype.OpExt = function () {
 PowerCreep.prototype.needOpLab = function () {
     let pcPower = this.powers[PWR_OPERATE_LAB]
     if (pcPower && pcPower.level < 4) return false;
-    if (pcPower && pcPower.cooldown < OP_SOURCE_WAIT_TIME && Game.time % 5 == 1) {
+    if (pcPower && pcPower.cooldown < OP_SOURCE_WAIT_TIME
+        && (global.taskDispatchThrottle === false || Game.time % 5 == 1)) {
         let room = this.mainRoom();
-        let obj = room.memory[StationLab.stationName];
+        let obj = room?.memory?.[StationLab.stationName];
+        if (!obj?.otherLabs) return false;
         // half of the labs need to be Operated
         let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
         // let labs = otherLabs.splice(0, Math.ceil(otherLabs.length / 2))
         let labs = otherLabs
         for (let lab of labs) {
-            if (Game.cpu.bucket>2000 &&(!lab.effects || !lab.effects.length || lab.effects.head().ticksRemaining < 50)) {
+            if (lab && (global.isSaveCpu === false || Game.cpu.bucket>2000)
+                && (!lab.effects || !lab.effects.length || lab.effects.head().ticksRemaining < 50)) {
                 return lab;
             }
         }

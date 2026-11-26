@@ -116,8 +116,9 @@ assert.ok(fs.readFileSync(path.join(root, "modules/station_hive.js"), "utf8")
     "fillHive must not hand a carry task to a zero-capacity creep: storeFull() is trivially true there, so the two handlers bounce execLastTask() until the stack overflows");
 {
     const ss = stationSources;
-    assert.ok(ss.includes("defenseStep(creep, target, range)") && ss.includes("if (Game.time % 2 != 0) return;"),
-        "defender approach movement must re-path only every other tick: a 50-part / ~17-MOVE body needs 2 ticks per tile anyway, and BetterMove's cache key includes the moving target's coordinates, so per-tick moveTo is a full path search every tick (measured outerHarvestDefenser 10.7 CPU/tick while engaged)");
+    assert.ok(ss.includes("defenseStep(creep, target, range)")
+        && ss.includes("if (creep.fatigue > 0 || (global.taskDispatchThrottle !== false && Game.time % 2 != 0)) return;"),
+        "defenders skip impossible movement while fatigued; only shard3 additionally skips the alternate dispatch tick");
     assert.ok(ss.includes("defenseAllies(room)") && ss.includes("_defAllyCache"),
         "the defender handler must share one FIND_MY_CREEPS scan per room per tick instead of re-scanning per creep");
     assert.ok(ss.includes("defenseHostiles(room)") && ss.includes("getHostileCreeps"),

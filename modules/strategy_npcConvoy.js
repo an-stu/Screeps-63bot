@@ -152,7 +152,7 @@ function exec() {
         if (Game.time - op.start < 5 || Game.creeps[op.fighter] || Game.creeps[op.hauler]) return;
         delete state.op;
     }
-    if (MIN_CPU || Game.cpu.bucket < MIN_BUCKET) return;
+    if (MIN_CPU || (global.isSaveCpu !== false && Game.cpu.bucket < MIN_BUCKET)) return;
     if (visibleBy?.tick === Game.time) {
         const home = Game.rooms[visibleBy.room], room = Game.rooms[TARGET_ROOM];
         const attempt = state?.until > Game.time ? state.attempted : undefined;

@@ -21,7 +21,7 @@ Creep.prototype.moveto=function () {
 
 let pro = {
     exec () {
-        if(Game.time%3!=0)return;
+        if(global.taskDispatchThrottle !== false && Game.time%3!=0)return;
         if(!ManagerFlags.hasPrefix("moveto"))return;
         ManagerFlags.getFlagsByPrefix("moveto").forEach(flag=> {
             let spawnRoom;

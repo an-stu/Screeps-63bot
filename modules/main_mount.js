@@ -1,12 +1,10 @@
 
-global.isSaveCpu = true
+global.isSaveCpu = Game.shard.name === "shard3"
 // 任务派发节流开关（按 shard 持久化在各自的 Memory）：
 //   true  = 沿用 %3 / economyInterval / 9-tick 拾取缓存，省 CPU；
 //   false = 经济 pass 与拾取刷新每 tick 跑，消除接任务前的 multi-tick 空窗。
-// 默认只在 shard3 开启；其他 shard 优先保证产线吞吐。
-global.taskDispatchThrottle = typeof Memory.taskDispatchThrottle === "boolean"
-    ? Memory.taskDispatchThrottle
-    : Game.shard.name === "shard3"
+// 仅 shard3 可开启；其他 shard 忽略旧 Memory 中的 true。
+global.taskDispatchThrottle = isSaveCpu && Memory.taskDispatchThrottle !== false
 global.MIN_CPU = false
 global.WHO_AM_I = "an_w"
 // Optional work is off by default only when it has no survival value. Override
@@ -41,7 +39,7 @@ global.isCpuFeatureEnabled = name => {
 // the online cross-shard feature gate is temporarily disabled.
 global.LOCAL_SHARD_NAME = Game.shard.name
 global.RUNTIME_PROFILE = {
-    version: "0.78.345",
+    version: "0.78.346",
     uploadedModules: 75,
     restoredSnapshotModules: 69,
     intentionallyExcluded: []

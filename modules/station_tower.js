@@ -50,15 +50,15 @@ let pro={
             .map(e => e.id)
     },
     exec (room){
-        // 战术扫描 tick 上复用同一份 hostiles；其它 tick 仅让安全模式
-        // 检查按 3 tick 节流自己扫描，塔本体逻辑不碰敌人数据。
-        let scanTick = !pro.lastUpdateMap[room.name]||pro.lastUpdateMap[room.name] <= 0;
+        // Keep peaceful repair pacing (tower energy), separate from combat detection.
+        const maintenanceTick = !pro.lastUpdateMap[room.name] || pro.lastUpdateMap[room.name] <= 0;
+        const scanTick = global.taskDispatchThrottle === false || maintenanceTick;
         let hostiles = scanTick ? room.getHostileCreeps() : undefined;
-        if ((Game.time + room.hashCode()) % SAFE_MODE_CHECK_INTERVAL == 0) {
+        if (global.taskDispatchThrottle === false || (Game.time + room.hashCode()) % SAFE_MODE_CHECK_INTERVAL == 0) {
             StationDefense.checkSafeMode(room, hostiles);
         }
         if (scanTick) {
-            pro.lastUpdateMap[room.name]=TOWER_SCAN_INTERVAL
+            if (maintenanceTick) pro.lastUpdateMap[room.name]=TOWER_SCAN_INTERVAL
             if (global.WarDefenseCore && isCpuFeatureEnabled("combat")) WarDefenseCore.checkNeedDefense(room, hostiles);
             let randomAttack = undefined;
             if(hostiles.length){
@@ -173,6 +173,7 @@ let pro={
                     return;
                 }
 
+                if (!maintenanceTick) return;
                 if (!pro.needRepairsRoomMap[room.name]) pro.needRepairsRoomMap[room.name] =[]
                 let id = this.towerRepairMap[tower.id] = this.towerRepairMap[tower.id] || pro.needRepairsRoomMap[room.name].shift();
                 let target = Game.getObjectById(id)

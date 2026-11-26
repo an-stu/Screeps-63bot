@@ -601,7 +601,7 @@ let pro = {
         if (!powerBankFlags.length) return;
         let activeQueues = {};
         powerBankFlags.forEach(flag => activeQueues[flag.name] = pro.dispatchPBSpawnQueue(room, flag));
-        if ((Game.time + room.hashCode()) % 3 != 0) return;
+        if (global.taskDispatchThrottle !== false && (Game.time + room.hashCode()) % 3 != 0) return;
         powerBankFlags.forEach(flag => {
             let queueActive = activeQueues[flag.name];
             let memory = flag.memory;

@@ -701,7 +701,7 @@ let pro = {
 
         // 捡起任务 9tick更新一次，比较耗时 缓存起来
         let pickTasks = pro.pickTasksMap[room.name] || []
-        if ((Game.time + room.hashCode()) % 9 == 0) {
+        if (global.taskDispatchThrottle === false ? freeCarries.length : (Game.time + room.hashCode()) % 9 == 0) {
             let onlyEnergy = false
             if (room.storage.store.getFreeCapacity() < 5000 && !room.terminal) {
                 onlyEnergy = true
@@ -884,14 +884,14 @@ let pro = {
         // 正常补员不再生产 750 应急小 carrrier：hive 临时低能量时等满配。
         // hive 缺口 + 能量已够满配 carrier：不等 avgBusy 门槛（空 hive 时
         // avgBusy 常年在 0.85 以下，单 carrier 永远等不到第二只）。
-        if (carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 25 == 0
+        if (carrierCnt < carrierTarget && (global.taskDispatchThrottle === false || (Game.time + room.hashCode()) % 25 == 0)
             && StationHive.HiveNeedToFill(room) && room.energyAvailable >= carrierBodyMinEnergy) {
             spawnCarrierNow(StationCarry.getCarrierBodyConfig(room));
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
             return;
         }
-        if (starved && carrierCnt < carrierTarget && (Game.time + room.hashCode()) % 100 == 0) {
+        if (starved && carrierCnt < carrierTarget && (global.taskDispatchThrottle === false || (Game.time + room.hashCode()) % 100 == 0)) {
             spawnCarrierNow(StationCarry.getCarrierBodyConfig(room))
             if (room.memory.carryBusy.length > 130) room.memory.carryBusy = room.memory.carryBusy.slice(-100)
             room.memory.carryBusy.push(0)
@@ -1002,13 +1002,10 @@ let pro = {
         return idx >= 0 ? idx % interval : room.hashCode() % interval;
     },
     economyInterval() {
-        if (MIN_CPU) return 10; // Emergency bucket protection on every shard.
-        // 任务派发不节流时（非 shard3 默认，或 Memory.taskDispatchThrottle=false）
-        // 房间经济 pass 每 tick 都跑：空闲爬完成旧任务后不会再等 3/5/7 tick。
-        let throttled = typeof taskDispatchThrottle == "undefined" ? true : !!taskDispatchThrottle;
-        if (!throttled) return 1;
-        if (Game.shard?.name === "shard3") return Game.cpu.bucket < 5000 ? 14 : 7;
-        return 5;
+        if (Game.shard?.name !== "shard3") return 1;
+        if (MIN_CPU) return 10;
+        if (typeof taskDispatchThrottle !== "undefined" && !taskDispatchThrottle) return 1;
+        return Game.cpu.bucket < 5000 ? 14 : 7;
     },
     /**
      * 全灭房的外部救援：本房一只爬都没有、hive 又付不起最小体型（< 200）时，

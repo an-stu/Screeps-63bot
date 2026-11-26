@@ -588,9 +588,7 @@ let pro={
             return undefined;
         }
         if(obj["reacting"]) return obj["reacting"];
-        // shard3 leaves more headroom for many active labs. Elsewhere only
-        // a low reserve delays a new batch; an active batch is never stopped here.
-        if (Game.cpu.bucket < (Game.shard?.name === "shard3" ? 8000 : 5000)) return obj["reacting"];
+        if (Game.shard?.name === "shard3" && Game.cpu.bucket < 8000) return obj["reacting"];
         // 如果上次检查过了就不检查了
         if(Game.time-(obj.lastCheckNeedReactionTick||0)<=30)return obj["reacting"];
         obj.lastCheckNeedReactionTick = Game.time;
@@ -722,7 +720,8 @@ let pro={
             // 缓冲 2 tick：合成（REACTION_TIME 分钟级）状态变化慢，2 tick
             // 延迟无影响，却能省一半的 map + getObjectById。
             const buffered = Game.shard?.name === "shard3";
-            if (buffered && (Game.time + room.hashCode()) % 2 != 0) return;
+            const staggered = buffered && global.taskDispatchThrottle !== false;
+            if (staggered && (Game.time + room.hashCode()) % 2 != 0) return;
             let otherLabs = obj.otherLabs.map(id => Game.getObjectById(id))
             let centerLabs = obj.centerLabs.map(id => Game.getObjectById(id))
             // Layout cache can expire between checks, so react defensively to a
@@ -759,27 +758,19 @@ let pro={
                 // HelperVisual.showText(Game.getObjectById(obj["centerLabs"][0]),(centerLabs[0].store.getLabReactionCnt()+room.storage.store[a]<3000))
                 // HelperVisual.showText(Game.getObjectById(obj["centerLabs"][1]),(centerLabs[1].store.getLabReactionCnt()+room.storage.store[b]<3000))
             }
-            // 触发点容差（0.78.252）：上面的 2 tick 缓冲只放行一半奇偶的 tick，
-            // 而触发判据是 `(Game.time+hashCode) % REACTION_TIME[res] == 0`。
-            // **RT 为奇数时两者会互相打脸**：每 2*RT 里必有一半的触发点正好落在
-            // 被跳过的奇偶上 ⇒ 反应按 2*RT 跑，吞吐打对折。实测 REACTION_TIME
-            // 有 12 个是奇数（G/ZK/UL/LHO2/ZHO2/UHO2/KHO2/UH2O/KH2O=5、
-            // LH/GH2O=15、XLH2O=65），正好覆盖 T3 化合物的主链条。
-            // 修法：把窗口从「余数 == 0」放宽到「余数 <= 1」——被跳过的那一 tick
-            // 的下一个放行 tick 余数恰好是 1，一 tick 的延迟在分钟级反应里可忽略。
-            // 偶数 RT 下余数 1 是奇数，永远不可能落在放行的偶数 tick 上 ⇒ 行为不变。
-            // 不放开缓冲本身：bucket 正贴着闸门，多花 CPU 不划算。
             let reactRt = REACTION_TIME[obj["reacting"]] || 0;
-            let reactHit = reactRt ? (Game.time + room.hashCode()) % reactRt : 99;
             if (obj["stat"] == 'reacting' && (!obj["reacting"]||
                 (centerLabs[0].store.getLabReactionResType()||LAB_REACTIONS[obj["reacting"]][0])!=LAB_REACTIONS[obj["reacting"]][0]||
                 (centerLabs[1].store.getLabReactionResType()||LAB_REACTIONS[obj["reacting"]][1])!=LAB_REACTIONS[obj["reacting"]][1])){
                 obj["stat"] = 'clear'
-            }else if(obj["stat"] == 'reacting' && reactHit <= (buffered && reactRt % 2 ? 1 : 0)){
-                // Keep the reagents and resume after the shard's bucket recovers.
-                if(Game.cpu.bucket < (buffered ? 8000 : 5000)) return;
-                let boosting = new Set(_.values(boostLabMap).flat())
+            }else if(obj["stat"] == 'reacting' && reactRt > 0){
+                // Actual cooldown avoids a second phase lock on shard3's
+                // buffered scan, notably for odd reaction durations.
+                if(buffered && Game.cpu.bucket < 8000) return;
+                let boosting;
                 for(let lab of otherLabs){
+                    if(lab.cooldown > 0)continue;
+                    boosting ||= new Set(_.values(boostLabMap).flat());
                     if(boosting.has(lab.id))continue;
                     let code = lab.runReaction(centerLabs[0],centerLabs[1])
                     if(code==ERR_TIRED){

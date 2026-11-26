@@ -354,7 +354,7 @@ let pro={
                 sm.powered = false
                 if(room.factory.store.getAllResTypeCount()==0){
                     // CPU 保护开关：bucket < 8000 时不启动新生产任务
-                    if (Game.cpu.bucket < 8000) {
+                    if (global.isSaveCpu !== false && Game.cpu.bucket < 8000) {
                         sm.lastCooldown = Game.time + FACTORY_SLEEP_TIME;
                         return;
                     }
@@ -390,7 +390,7 @@ let pro={
             }else if(sm.stat == STAT_PRODUCE) {// 反应阶段
                 // CPU 保护开关：bucket < 8000 时暂停生产（已搬入的原料保留，
                 // bucket 恢复后继续）
-                if (Game.cpu.bucket < 8000) {
+                if (global.isSaveCpu !== false && Game.cpu.bucket < 8000) {
                     sm.lastCooldown = Game.time + 20;
                     return;
                 }

@@ -284,7 +284,7 @@ let pro={
         // 开销，而跨 shard 任务以数百上千 tick 计时，入站扫描错峰到每 5 tick
         // 一次没有可感知影响。出站请求不走这条路：addCrossShardRequest 写入
         // addDataList，仍由每 tick 的 afterWork 冲洗保存。
-        if (Game.time % CROSS_SHARD_SCAN_INTERVAL) return;
+        if (global.taskDispatchThrottle !== false && Game.time % CROSS_SHARD_SCAN_INTERVAL) return;
         pro.dirty = false;
         let parse = value=>{try{return JSON.parse(value||"{}")||{}}catch(e){return {}}};
         // 获取所有 shard 的 InterShardMemory

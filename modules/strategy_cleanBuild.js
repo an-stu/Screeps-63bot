@@ -115,7 +115,7 @@ Creep.prototype.upgradeWithEnergy=function (){
 
 let pro = {
     exec () {
-        if(Game.time%10!=0)return;
+        if(global.taskDispatchThrottle !== false && Game.time%10!=0)return;
         if(!ManagerFlags.hasPrefix("cleanBuild"))return;
         ManagerFlags.getFlagsByPrefix("cleanBuild").forEach(flag=>{
             if(flag.room && flag.room.my && flag.room.find(FIND_HOSTILE_STRUCTURES).length == 0){//全部清理完毕

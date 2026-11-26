@@ -119,7 +119,7 @@ let pro = {
         return ManagerCreeps.calcBodyPart({ [MOVE]: 34, [CLAIM]: 16 });
     },
     exec() {
-        if (Game.time % 3 != 0) return;
+        if (global.taskDispatchThrottle !== false && Game.time % 3 != 0) return;
         if(!ManagerFlags.hasPrefix("claimCrossShard"))return;
         ManagerFlags.getFlagsByPrefix("claimCrossShard").forEach(flag => {
             if (Game.rooms[flag.pos.roomName] && Game.rooms[flag.pos.roomName].my && Game.rooms[flag.pos.roomName].storage && Game.rooms[flag.pos.roomName].storage.my) {//&&Game.rooms[flag.pos.roomName].spawn.length>0

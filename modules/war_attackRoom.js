@@ -237,7 +237,7 @@ let pro = {
     },
     execSpawn(flag) {
         pro.checkRoomState(flag)
-        if (Game.time % 3 != 0) return;
+        if (global.taskDispatchThrottle !== false && Game.time % 3 != 0) return;
         if (flag.memory.safeModeTime > Game.time) return;
         // if (flag.memory.hasTower||flag.memory.hasSpawn)
         //     pro.execSpawnWorkB4(flag);

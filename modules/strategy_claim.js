@@ -26,7 +26,7 @@ let isClaimCleanupTarget = function (room, structure) {
 };
 
 let pro = {
-    ensureClaimBlueprint(room, minBucket = Game.shard?.name === "shard3" ? 9500 : 6000) {
+    ensureClaimBlueprint(room, minBucket = global.isSaveCpu !== false && Game.shard?.name === "shard3" ? 9500 : 6000) {
         if (!room?.controller?.pos || !room.memory) return {state:"WAITING_FOR_VISION"};
         const memory = room.memory;
         const hasSpawnSlot = () => !!memory.structMap?.[STRUCTURE_SPAWN]?.length;
@@ -50,7 +50,7 @@ let pro = {
         if (!global.ManagerAutoPlanner || typeof ManagerAutoPlanner.computeRoom !== "function")
             return {state:"WAITING_FOR_PLANNER", reason:"planner_unavailable"};
         const bucket = Game.cpu?.bucket || 0;
-        if (bucket < minBucket) return {state:"WAITING_FOR_PLANNER_CPU", bucket};
+        if (global.isSaveCpu !== false && bucket < minBucket) return {state:"WAITING_FOR_PLANNER_CPU", bucket};
         let result, error;
         try {
             result = ManagerAutoPlanner.computeRoom({room, pos:room.controller.pos});
@@ -152,7 +152,7 @@ let pro = {
             let watch = Memory.observerWatch && Memory.observerWatch[flag.pos.roomName];
             let priorityVisionTick = targetRoom && watch
                 && watch.p == Game.time;
-            if (Game.time % 3 != 0 && !priorityVisionTick) return;
+            if (global.taskDispatchThrottle !== false && Game.time % 3 != 0 && !priorityVisionTick) return;
             if (!targetRoom && global.StationObserver && isCpuFeatureEnabled("observer")) {
                 flag.memory.observerRoom = StationObserver.requestRoom(flag.pos.roomName, flag.memory.observerRoom)
                     || flag.memory.observerRoom;
