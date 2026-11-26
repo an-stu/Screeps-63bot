@@ -660,23 +660,27 @@ let pro = {
         //  2) RCL8 但存量能量见底（<50k）的停摆房
         //  3) 任何还挂着 energy buy 单的房间——必须纳入管理，才能把
         //     恢复后或升级后的旧单撤销/缩小，防止遗留巨单继续吃信用点。
-        let energyOrderRooms = new Set(_.values(Game.market.orders)
+        const ownOrders = Game.market.orders;
+        const ownIds = new Set(Object.keys(ownOrders));
+        let energyOrderRooms = new Set(_.values(ownOrders)
             .filter(o => o.remainingAmount > 0 && o.resourceType == RESOURCE_ENERGY && o.type == ORDER_BUY)
             .map(o => o.roomName));
-        let rooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.terminal
+        let rooms = ManagerRooms.getNormalRoom().filter(e => e.my && e.terminal?.my && e.terminal.isActive()
             && ((e.level < 8 && e.controller && e.controller.progress < e.controller.progressTotal)
                 || StationCarry.roomMassStoreCnt(e, RESOURCE_ENERGY) < 50000
                 || energyOrderRooms.has(e.name)));
         if (!rooms.length) return;
-        let buyOrders = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_BUY);
-        let maxBuy = buyOrders.length ? buyOrders.maxBy(e => e.price).price : 0;
+        // getAllOrders includes our own orders. Bidding 5% above any of those
+        // would ratchet up the price at every cache refresh without competition.
+        const isExternalQuote = o => o.amount > 0 && o.price > 0 && !ownIds.has(o.id);
+        let maxBuy = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_BUY)
+            .reduce((max, o) => isExternalQuote(o) ? Math.max(max, o.price) : max, 0);
         let avg = StrategyMarketPrice.getResTypeHistory(RESOURCE_ENERGY);
         // 挂单价要有竞争力才有人卖给你：跟到最高买价 × 1.05 或最低卖价 × 1.02，
         // 取较高者——低于最低卖价的买单会永远挂着没人理。
         // 信用点 83.8B 远超门槛，能量才是升级瓶颈。
         let sellLow = StrategyMarket.getAllOrdersCacheList(RESOURCE_ENERGY, ORDER_SELL)
-            .filter(o => o.amount > 0)
-            .reduce((min, o) => Math.min(min, o.price), Infinity);
+            .reduce((min, o) => isExternalQuote(o) ? Math.min(min, o.price) : min, Infinity);
         let desiredPrice = Math.max(
             Math.max(maxBuy * 1.05, isFinite(sellLow) ? sellLow * 1.02 : 0),
             avg);
@@ -689,7 +693,7 @@ let pro = {
                 && room.controller.progress < room.controller.progressTotal;
             let target = activelyUpgrading ? 120000 : (room.name === "E53S21" && room.level < 8 ? 800000 : 100000);
             let energyCnt = StationCarry.roomMassStoreCnt(room, RESOURCE_ENERGY);
-            let orders = _.values(Game.market.orders).filter(e => e.remainingAmount > 0
+            let orders = _.values(ownOrders).filter(e => e.remainingAmount > 0
                 && e.resourceType == RESOURCE_ENERGY && e.type == ORDER_BUY && e.roomName == room.name);
             // 同房间只保留一个 energy buy 单；历史遗留/重复单会互相干扰计价。
             orders.slice(1).forEach(e => Game.market.cancelOrder(e.id));
@@ -709,12 +713,13 @@ let pro = {
                     if (order.remainingAmount < missing * 0.95) {
                         Game.market.extendOrder(order.id, Math.ceil(missing - order.remainingAmount));
                     }
-                    if (order.price < desiredPrice * 0.995) {
+                    if (desiredPrice > 0 && order.price < desiredPrice * 0.995) {
                         Game.market.changeOrderPrice(order.id, desiredPrice);
                     }
                     return;
                 }
             }
+            if (!(desiredPrice > 0)) return;
             let amount = Math.max(30000, target - energyCnt);
             Game.market.createOrder({
                 type: ORDER_BUY,
