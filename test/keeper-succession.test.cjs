@@ -75,9 +75,9 @@ function loadStation(extra = {}) {
 }
 
 /** 造一个「本房自己的矿点」场景：Memory 里一个 source data + 指定的在岗爬 */
-function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTimeAge = 1600 } = {}) {
+function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTimeAge = 1600, targetRoom = "W1N1" } = {}) {
     const stationName = ctx.StationSources.stationName;
-    ctx.Memory.rooms["W1N1"] = {
+    ctx.Memory.rooms[targetRoom] = {
         [stationName]: {
             src1: {
                 id: "src1", container: undefined,
@@ -91,7 +91,7 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
         body: [{ type: ctx.MOVE }, { type: ctx.MOVE }, { type: ctx.MOVE },
                { type: ctx.MOVE }, { type: ctx.MOVE }],   // 5 部件 ⇒ 孵化 15 tick
         memory: Object.assign({ role: "harvestEnergyKeeper" }, keeperMemory),
-        headTask: () => ({ id: "src1", taskName: "harvestEnergyKeeper" }),
+        headTask: () => ({ id: "src1", taskName: "harvestEnergyKeeper", roomName:targetRoom }),
     };
     const spawnCalls = [];
     const carrier = { id: "c1", spawning: false, ticksToLive: 1000, memory: { role: "carrier" }, headTask: () => ({ id: "hx" }) };
@@ -121,6 +121,28 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     ctx.StationSources.generatorOuterHarTask = () => [];
     ctx.StationHive.trySpawn = (...args) => { spawnCalls.push(args); return spawnOk ? "newKeeper" : undefined; };
     return { room, keeper, spawnCalls };
+}
+
+for (const targetRoom of ["W1N1", "W2N2"]) {
+    const ctx = loadStation();
+    const S = ctx.StationSources;
+    const {room, keeper, spawnCalls} = setup(ctx, {keeperTtl:119, targetRoom});
+    const data = ctx.Memory.rooms[targetRoom].stationSources.src1;
+    room.spawn = [{}];
+    S.getHarvesterBodyConfig = () => new Array(10).fill(ctx.MOVE);
+    data.pathTime = 10; // The old route cap is shorter than actual travel.
+    const task = {keeperArrivalPending:true};
+    S.recordKeeperArrival({ticksToLive:1458},task,data);
+    assert.equal(data.keeperTravelTime,42);
+    assert.equal(task.keeperArrivalPending,undefined);
+    assert.equal(S.keeperSuccessionLead(room,targetRoom,data,new Array(10)),118,
+        "42 travel + 30 for the successor + 16 margin + 30 shared spawn buffer");
+    S.trySpawnOuterHarKeeper(targetRoom,room);
+    assert.equal(spawnCalls.length,0,"wait until the actual successor lead window");
+    keeper.ticksToLive--;
+    S.trySpawnOuterHarKeeper(targetRoom,room);
+    assert.equal(spawnCalls.length,1,"use the larger successor body, not the old keeper's five parts");
+    assert.equal(keeper.memory.successorName,"newKeeper");
 }
 
 {
@@ -288,7 +310,7 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
 }
 
 {
-    // ⑨ 外矿 + 主房穷 + **已有在岗 keeper** → 缓一缓（闸门原本的保护仍然生效）
+    // ⑨ 出兵房储备低也不能把能付得起的外矿接班拖到老 keeper 死后。
     const ctx = loadStation();
     const S = ctx.StationSources;
     ctx.Memory.rooms["W2N2"] = { stationSources: { out1: { id: "out1", spawnTime: ctx.Game.time - 3000, creeps: ["k1"] } } };
@@ -309,7 +331,7 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
         creeps: () => [keeper], find: () => [],
     };
     S.trySpawnOuterHarKeeper("W2N2", room);
-    assert.equal(calls.length, 0, "主房穷且矿点有人在岗 ⇒ 缓一缓");
+    assert.equal(calls.length, 1, "主房能付得起时，到接班窗口就派，不等老 keeper 死");
 }
 
 {
@@ -344,7 +366,7 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     S.trySpawnOuterHarKeeper("W1N1", mkRoom(ctx, [{ spawning: true, memory: { role: "carrier" } }]));
     assert.equal(calls.length, 1, "搬运爬都在孵化时，keeper 续派不能也被挡");
 
-    // ⑫ 连在孵的搬运都没有 ⇒ 仍然「优先生搬运」（原意图保留）
+    // ⑫ 没有本房搬运时仍补即将退役的矿工，但不抢开只有空位的额外矿点。
     const ctx2 = loadStation();
     const S2 = ctx2.StationSources;
     ctx2.Memory.rooms["W1N1"] = { [S2.stationName]: { src1: { id: "src1", spawnTime: ctx2.Game.time - 1490, creeps: ["k1"] } } };
@@ -354,7 +376,12 @@ function setup(ctx, { keeperTtl = 60, keeperMemory = {}, spawnOk = true, spawnTi
     S2.generatorHarTask = () => [];
     ctx2.Game.getObjectById = id => (id === "k1" ? warmKeeper : null);
     S2.trySpawnOuterHarKeeper("W1N1", mkRoom(ctx2, []));
-    assert.equal(calls2.length, 0, "一只搬运都没有（含孵化中）⇒ 仍然先搬运");
+    assert.equal(calls2.length, 1, "没有搬运也不能错过已有矿点的交接");
+    calls2.length = 0;
+    const vacant = mkRoom(ctx2, []);
+    vacant.creeps = role => role === "harvestEnergyKeeper" ? [matureKeeper] : [];
+    S2.trySpawnOuterHarKeeper("W1N1", vacant);
+    assert.equal(calls2.length, 0, "没有搬运时，不抢开已有另一只矿工以外的矿点");
 }
 
 {

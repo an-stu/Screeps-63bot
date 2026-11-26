@@ -76,7 +76,7 @@ function makeCreep(id, name, { ttl = 1000, spawning = false, roomName = "W1N1", 
 
 function cleanup({ targetRoom = "W1N1", sourceRoom = targetRoom,
     successorRoom = targetRoom, successorX = 10, successorY = 10, successorSpawning = false,
-    marked = true, withSuccessor = true } = {}) {
+    marked = true, withSuccessor = true, fatigue = 0 } = {}) {
     const ctx = loadStation();
     const S = ctx.StationSources;
     const source = { id: "src1", pos: pos(sourceRoom, 10, 10) };
@@ -88,6 +88,7 @@ function cleanup({ targetRoom = "W1N1", sourceRoom = targetRoom,
         ttl: 1490, spawning: successorSpawning, roomName: successorRoom,
         x: successorX, y: successorY,
     }) : undefined;
+    if (successor) successor.fatigue = fatigue;
     const data = { id: "src1", container: "container", creeps: withSuccessor ? ["inc", "succ"] : ["inc"] };
     const objects = { src1: source, inc: incumbent, container: { id: "container", pos: pos(sourceRoom, 11, 10) } };
     if (successor) objects.succ = successor;
@@ -132,6 +133,14 @@ function cleanup({ targetRoom = "W1N1", sourceRoom = targetRoom,
     const transit = cleanup({ successorRoom: "W1N0", successorX: 25, successorY: 25 });
     assert.equal(transit.incumbent.suicided, false, "successor still in the spawn room is not ready");
     assert.equal(transit.successor.suicided, false);
+}
+
+{
+    const staged = cleanup({successorX:12, successorY:10});
+    assert.equal(staged.incumbent.suicided,true,
+        "one step from the incumbent's usable container is ready in a narrow mine");
+    const tired = cleanup({successorX:12, successorY:10,fatigue:2});
+    assert.equal(tired.incumbent.suicided,false,"a successor unable to step yet must not retire the incumbent");
 }
 
 // A missing successor marker must not change ordinary duplicate or stale-id cleanup.

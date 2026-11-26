@@ -77,10 +77,12 @@ function makeFixture({
     x = 10, y = 10, ttl = 90, freeCapacity = 0, energy = 100,
     bucket = 10000, containerEnergy = 0, containerHits = 1000, linkEnergy = 800,
     linkHits = 1000, link2Energy, containerOccupied = false, sites = [], sourceX = 11, sourceY = 10,
-    containerCap = 2000,
+    containerCap = 2000, shard = "shard3", saveCpu = false, workParts = 2,
 } = {}) {
     const { ctx, objects } = makeContext();
     ctx.Game.cpu.bucket = bucket;
+    ctx.Game.shard.name = shard;
+    ctx.isSaveCpu = saveCpu;
     let constructionSiteReads = 0;
     let containerLookCalls = 0;
     const room = {
@@ -142,7 +144,7 @@ function makeFixture({
         transfer(target, resource) { creepActions.push(["transfer", target.id, resource]); },
         withdraw(target, resource) { creepActions.push(["withdraw", target.id, resource]); },
         pickup(target) { creepActions.push(["pickup", target.id]); },
-        getPartCnt(type) { return type === "work" ? 2 : 1; },
+        getPartCnt(type) { return type === "work" ? workParts : 1; },
     };
     // A creep on the container is the normal keeper working position.
     if (x === 10 && y === 10) container.pos.x = 10;
@@ -202,23 +204,30 @@ function makeFixture({
         "newly observed site is not hidden by the prior empty result");
 }
 
-// Harvest cadence is unchanged: normal bucket harvests each eligible tick,
-// while the low-bucket guard harvests on even TTL ticks only.
+// Restrict alternating ticks to shard3's large keepers when their body
+// can still keep up with the source.
 {
     const normal = makeFixture({ ttl: 91 });
     normal.run();
     assert.equal(normal.creepActions.filter(a => a[0] === "harvest").length, 1,
         "normal bucket keeps per-tick harvesting cadence");
 
-    const lowEven = makeFixture({ ttl: 90, bucket: 4000 });
+    const lowEven = makeFixture({ ttl: 90, bucket: 4000, saveCpu:true, workParts:26 });
     lowEven.run();
     assert.equal(lowEven.creepActions.filter(a => a[0] === "harvest").length, 1,
         "low bucket still harvests on even TTL ticks");
 
-    const lowOdd = makeFixture({ ttl: 91, bucket: 4000 });
+    const lowOdd = makeFixture({ ttl: 91, bucket: 4000, saveCpu:true, workParts:26 });
     lowOdd.run();
     assert.equal(lowOdd.creepActions.filter(a => a[0] === "harvest").length, 0,
         "low bucket skips odd TTL ticks");
+
+    for (const opts of [{shard:"shard2",workParts:6},{shard:"shard3",workParts:6}]) {
+        const small = makeFixture({ ttl:91, bucket:4000, saveCpu:true, ...opts });
+        small.run();
+        assert.equal(small.creepActions.filter(a => a[0] === "harvest").length, 1,
+            "a 6-WORK keeper must not be throttled below the source's regeneration rate");
+    }
 }
 
 // A full keeper still transfers to an available link and withdraws backlog

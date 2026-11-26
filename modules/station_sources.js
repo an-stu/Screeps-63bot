@@ -275,8 +275,8 @@ const OUTER_CARRIER_PRESPAWN = 100;
 const OUTER_REBIND_COOLDOWN = 400;
 
 /**
- * 源再生周期（官方常量 ENERGY_REGEN_TIME）：energyCapacity 在 300 tick 内连续
- * 回填完毕，速率恒定 = capacity/300（保留房 10/tick，未保留房 5/tick）。
+ * 源的平均产能 = energyCapacity / ENERGY_REGEN_TIME。
+ * 普通已占领/保留矿为 3000 / 300 = 10/tick；未保留矿为 5/tick。
  * `ticksToRegeneration` 只是 300→0 的倒计时，**不是**分母。
  */
 const SOURCE_REGEN_TICKS = 300;
@@ -335,6 +335,7 @@ Creep.prototype.registerStationSourcesCarryInRoom = function () {
  * 这两条修好之后，余量只用来吸收「孵化完成 → 迈出第一步」的抖动，6 tick 足够。
  */
 let KEEPER_SUCCESSION_MARGIN = 16;   // 6 → 16：用户 10-16「所有 energykeeper 的接力再加 10t」
+const KEEPER_TRAVEL_CAP = 600;
 
 Creep.prototype.concatStationSources = function () {
     let rm = Memory.rooms[this.headTask().roomName];
@@ -425,14 +426,25 @@ Creep.prototype.harvestEnergyOuterKeeper = function () {
         let station = Memory.rooms[this.headTask().roomName][pro.stationName][task["id"]];
         let container = Game.getObjectById(station["container"]);
         if (container && !container.pos.isEqualTo(this)) {
-            this.addTask(UtilsTask.task(container, "concatStationSources"));
-            this.addTaskAndExec(UtilsTask.task(container, "goToPop"));
-            return;
+            // Do not issue an exact-tile task when the outgoing keeper still
+            // occupies the container. The successor can approach the source
+            // normally so cleanup can hand over once it is in working range.
+            const occupied = container.pos.lookFor(LOOK_CREEPS).length > 0;
+            if (!occupied) {
+                this.addTask(UtilsTask.task(container, "concatStationSources"));
+                this.addTaskAndExec(UtilsTask.task(container, "goToPop"));
+                return;
+            }
+            if (source && !source.pos.isNearTo(this)) {
+                this.moveTo(source, {range:1, reusePath:15});
+                return;
+            }
         } else if (source && !source.pos.isNearTo(this)) {
             this.addTask(UtilsTask.task(source, "concatStationSources"));
             this.addTaskAndExec(UtilsTask.task(source, "goToNearPop"));
             return;
         }
+        if (task.keeperArrivalPending && source) pro.recordKeeperArrival(this, task, station);
         // **容器满了就别挖**（2026-11-12，与主房 harvestEnergyKeeper 的
         // harvestSinkFree 同源 —— 那条闸 0.78.234 只加在主房，外矿这条漏了）。
         //
@@ -752,6 +764,7 @@ Creep.prototype.harvestEnergyKeeper = function () {
             this.moveTo(source, { range: 1, reusePath: 15, visualizePathStyle: { stroke: '#67ffed' } });
             return;
         }
+        if (task.keeperArrivalPending) pro.recordKeeperArrival(this, task, station);
         // 搬到作业位前不需要 link 状态；把这些对象查询挪到抵达分支之后，避免
         // 每 tick 行进时都解析 link/link2（双 link 房尤其多一次 getObjectById）。
         let link = station.link ? Game.getObjectById(station.link) : undefined;
@@ -782,12 +795,7 @@ Creep.prototype.harvestEnergyKeeper = function () {
             || (notLinkFull && !!container)
             || !!(container && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
         if (harvestSinkFree && (source.energy + 300) / source.energyCapacity > (source.ticksToRegeneration || 300) / 300 && source.energy) {
-            // bucket 吃紧时挖矿降频（每 2 tick 一次），能量产量略降但守住 CPU
-            if (Game.cpu.bucket < 5000 && this.ticksToLive % 2 != 0) {
-                // 不挖，但保留 harvest 节奏
-            } else {
-                this.harvest(source);
-            }
+            if (!pro.skipKeeperHarvestForCpu(this, source, station)) this.harvest(source);
         }
         if (this.ticksToLive % 3 == 0 || freeEnergyCapacity <= 0) {
             let nearFull = freeEnergyCapacity < this.getPartCnt(WORK) * 2;
@@ -1865,24 +1873,11 @@ Creep.prototype.harvestEnergyOuterCarry = function () {
 
 
 /**
- * 外矿 keeper 的 WORK 组数上限。
- *
- * 中间九房（Source Keeper 房）的 source 容量是 4000，每 300 tick 重置一次
- * —— 也就是重置速率 4000/300 ≈ **13.33 能量/tick**。
- *
- * 这个值原来是 3，算出来的体型是 {MOVE:3, WORK:6, CARRY:1}，只有 6 个 WORK = 12 能量/tick，**低于重置速率**：source 永远采不完，keeper 一直被 regen 追着跑，3 个矿点合计只出 ~36/tick，却要占 3 个 keeper 的 spawn 与防守成本。
- *
- * 提到 5 → 体型 {MOVE:5, WORK:10, CARRY:2}，10 个 WORK = 20 能量/tick > 13.33，能在 ~200 tick 内把一个矿点采空（留 100 tick 缓冲应对往返与骚扰）。
- *
- * 主房 keeper 不受影响（下面 innerMaxPartCnt）。
- * 想再保守/激进可用 Memory.marketSettings.outerMaxPartCnt 覆盖。
+ * Large keeper groups are only for shard3's CPU-saving mode. Elsewhere
+ * standard energy keepers cap at 6 WORK (12 energy/tick before repairs).
  */
-let outerMaxPartCnt = 5
-let innerMaxPartCnt = 3
-let saveCpuLevel = 8
-if (isSaveCpu) innerMaxPartCnt = 13
-if (Game.shard.name == '6g3y-station') innerMaxPartCnt = 14
-if (Game.shard.name == '6g3y-station') saveCpuLevel = 7
+const LARGE_OUTER_KEEPER_GROUPS = 5;
+const LARGE_HOME_KEEPER_GROUPS = 13;
 
 
 let pro = {
@@ -1936,28 +1931,63 @@ let pro = {
         let disposable = disposableEnergy;
         return disposable < threshold;
     },
+    usesLargeEnergyKeeper() {
+        return Game.shard?.name === "shard3" && typeof isSaveCpu !== "undefined" && isSaveCpu;
+    },
     getHarvesterBodyConfig(energy, isOutRoom, level, data) {
-        let regPerTick = 10; // 每tick+10的能量
-        if (data["lastPowerTime"] + 3000 > Game.time)
-            regPerTick += data["lastPowerLevel"] * 50 / 15 // power了
-        // log(regPerTick,Math.max(Math.ceil(regPerTick+0.1)/2,innerMaxPartCnt))
-        // 外矿：默认 outerMaxPartCnt（见上面注释里 4000/300 tick 的重置速率推导），
-        // 可用 Memory.marketSettings.outerMaxPartCnt 覆盖。
-        let maxPart = isOutRoom
-            ? Number(Memory.marketSettings && Memory.marketSettings.outerMaxPartCnt || outerMaxPartCnt)
-            : Math.max(Math.ceil(regPerTick / 4 + 0.1), innerMaxPartCnt);
-        if (level < saveCpuLevel && isSaveCpu) maxPart = 4;
-        let current = 0;
-        let cost = BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE];
-        let num = 0;
-        while (current + cost <= energy - BODYPART_COST[CARRY] * Math.ceil(num / 5)) {// 超过 10个 work 加一个 carry
-            num += 1;
-            current += cost
-            if (num >= maxPart) break;
+        let maxGroups = 3; // 6 WORK, 3 MOVE, 1 CARRY (800 energy).
+        if (pro.usesLargeEnergyKeeper()) {
+            const configured = Number(Memory.marketSettings?.outerMaxPartCnt);
+            maxGroups = level < 8 ? 4 : isOutRoom
+                ? (configured > 0 ? Math.floor(configured) : LARGE_OUTER_KEEPER_GROUPS)
+                : LARGE_HOME_KEEPER_GROUPS;
+            maxGroups = Math.max(1, Math.min(16, maxGroups));
         }
-        let carryCnt = Math.min(2, Math.ceil(num / 5))
-        if (num > 10 && num == innerMaxPartCnt) carryCnt = Math.min(8, 50 - num * 3)
-        return ManagerCreeps.calcBodyPart({ [MOVE]: num, [WORK]: num * 2, [CARRY]: carryCnt });
+        const groupCost = BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE];
+        const carryFor = groups => !isOutRoom && groups === LARGE_HOME_KEEPER_GROUPS
+            ? 8 : Math.min(2, Math.ceil(groups / 5));
+        let num = 0;
+        let carry = 0;
+        for (let groups = 1; groups <= maxGroups; groups++) {
+            const nextCarry = carryFor(groups);
+            if (!(groups * groupCost + nextCarry * BODYPART_COST[CARRY] <= energy)) break;
+            num = groups;
+            carry = nextCarry;
+        }
+        return num ? ManagerCreeps.calcBodyPart({ [MOVE]: num, [WORK]: num * 2, [CARRY]: carry }) : [];
+    },
+    skipKeeperHarvestForCpu(creep, source, station) {
+        if (!pro.usesLargeEnergyKeeper() || Game.cpu.bucket >= 5000 || creep.ticksToLive % 2 === 0) return false;
+        const regen = (source.energyCapacity || 3000) / SOURCE_REGEN_TICKS
+            + (station.lastPowerTime + 3000 > Game.time ? (station.lastPowerLevel || 0) * 50 / 15 : 0);
+        // On every other tick, each active WORK only yields 1 energy/tick on average.
+        return (creep.getActiveBodyparts?.(WORK) ?? creep.getPartCnt(WORK)) >= regen;
+    },
+    recordKeeperArrival(creep, task, data) {
+        if (!Number.isFinite(creep.ticksToLive) || creep.ticksToLive <= 0) return;
+        delete task.keeperArrivalPending;
+        // Dedicated estimate: the carrier's pathTime is capped by road
+        // length and doesn't necessarily reflect slow terrain or congestion.
+        data.keeperTravelTime = Math.min(KEEPER_TRAVEL_CAP, Math.max(1, 1500 - creep.ticksToLive));
+    },
+    keeperSuccessionLead(spawnRoom, roomName, data, body) {
+        let travel = Number(data.keeperTravelTime) || Number(data.pathTime);
+        if (!(travel > 0)) {
+            if (roomName === spawnRoom.name) {
+                const ranges = (spawnRoom.spawn || []).map(s => s.pos
+                    ? Math.max(Math.abs(s.pos.x - data.x), Math.abs(s.pos.y - data.y)) : NaN).filter(Number.isFinite);
+                travel = ranges.length ? Math.max(1, 2 * Math.min(...ranges)) : 30;
+            } else {
+                const route = pro.getOuterRoadPath(data);
+                const rooms = Game.map?.getRoomLinearDistance?.(spawnRoom.name, roomName) || 1;
+                travel = route?.length ? route.length * 2 : 50 * rooms + 25;
+            }
+        }
+        const value = Memory.marketSettings?.keeperSuccessionMargin;
+        const margin = Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : KEEPER_SUCCESSION_MARGIN;
+        const spawnTicks = body.length * (typeof CREEP_SPAWN_TIME === "number" ? CREEP_SPAWN_TIME : 3);
+        const sharedSpawnBuffer = spawnRoom.spawn?.length === 1 ? Math.min(spawnTicks, 30) : 0;
+        return Math.min(travel, KEEPER_TRAVEL_CAP) + spawnTicks + margin + sharedSpawnBuffer;
     },
     getMineralHarvesterBodyConfig(energy) {
         return ManagerCreeps.calcBodyPart({ [MOVE]: 15, [WORK]: 30, [CARRY]: 4 });
@@ -2129,12 +2159,12 @@ let pro = {
     },
     generatorHarTask(data) {
         return [
-            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestEnergyKeeper", "registerStationSources")
+            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestEnergyKeeper", "registerStationSources", {keeperArrivalPending:true})
         ]
     },
     generatorOuterHarTask(data) {
         return [
-            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestEnergyOuterKeeper", "registerStationSources")
+            UtilsTask.taskOutView(data["id"], data["roomName"], data["x"], data["y"], "harvestEnergyOuterKeeper", "registerStationSources", {keeperArrivalPending:true})
         ]
     },
     generatorOuterMineTask(data) {
@@ -3572,10 +3602,21 @@ let pro = {
                         ? (pos.getRangeTo ? pos.getRangeTo(sourcePos)
                             : Math.max(Math.abs(pos.x - sourcePos.x), Math.abs(pos.y - sourcePos.y)))
                         : Infinity;
-                    let successorAtPost = !successor.spawning && successor.ticksToLive > 0
+                    const successorInRoom = !successor.spawning && successor.ticksToLive > 0
                         && pos && pos.roomName == targetRoomName
-                        && sourcePos && sourcePos.roomName == targetRoomName
-                        && range <= 1;
+                        && sourcePos && sourcePos.roomName == targetRoomName;
+                    let successorAtPost = successorInRoom && range <= 1;
+                    if (successorInRoom && !successorAtPost && !successor.fatigue && data.container
+                        && (successor.getActiveBodyparts?.(MOVE) ?? 1) > 0) {
+                        // A narrow mine may have no other source-adjacent
+                        // tile. Yield if the successor is one step from the
+                        // usable container that only the incumbent blocks.
+                        const post = Game.getObjectById(data.container)?.pos;
+                        const old = incumbent.pos;
+                        successorAtPost = !!(post && old && post.roomName === targetRoomName
+                            && old.roomName === targetRoomName && old.x === post.x && old.y === post.y
+                            && pos.getRangeTo(post) === 1 && sourcePos.getRangeTo(post) === 1);
+                    }
                     let keep = successorAtPost ? [successor] : [incumbent, successor];
                     alive.filter(e => !keep.includes(e)).forEach(e => e.suicide());
                     data.creeps = keep.map(e => e.id);
@@ -3598,7 +3639,6 @@ let pro = {
     trySpawnHarKeeper(room) {
         // 清理动作收敛到 trySpawnOuterHarKeeper 内部，避免同一 room 的
         // economy pass 重复执行两次 cleanupDuplicateKeepers。
-        if (room.spawnFailure) return null;
         pro.trySpawnOuterHarKeeper(room.name, room);
     },
     /**
@@ -3618,17 +3658,9 @@ let pro = {
         return false;
     },
     trySpawnOuterHarKeeper(roomName, spawnRoom) {
-        // 主房能量优先：storage + spawn/extension 可支配能量低于阈值时，
-        // 外矿 keeper 缓一缓——否则外矿爬先吃光能量、主房 spawn/worker/
-        // carrier 补员被 spawnFailure 连锁挡死，主房经济崩溃（E53S21 事件）。
-        // 注意：只挡外矿（roomName != spawnRoom.name），主房自己的 keeper
-        // 是能量源头，永远不能挡——否则主房无能量来源，恶性循环
-        // ⚠️ 「主房能量优先」那条闸门**已经挪进下面的循环、按矿点判**（原来在这里做函数级
-        // 早返回）：keeper 是外矿**唯一的能量输入**，连「这个矿点一只在岗 keeper 都没有」
-        // 也一起挡掉 = 外矿收入归零 = 主房永远回不来 —— 就是 10-08 记过的**闸门自锁**。
-        // 实测 W33N55 storage 掉到 4~8k（阈值 2 万）期间，外矿 keeper 全部派不出去，
-        // `shard3_83651808_1` 老死后无人接班。豁免口径与 carrier 那条（3466 行的
-        // `onThisMine >= outerCarrierBacklogQuota`）同源：**已有覆盖就不补，一个都没有就必须补**。
+        // The outer strategy still checks the home economy and mine safety
+        // before calling this. Here, protect the actual spawn budget rather
+        // than delaying an already due replacement until after the gap.
         pro.cleanupDuplicateKeepers(roomName);
         // **不再用 `spawnRoom.spawnFailure` 早返回**（2026-10-30 实测 W26N59：5 只搬运、
         // 0 只 keeper —— 矿房没人挖、容器清零）。这个标记只是「本 tick 有过一次孵化尝试
@@ -3636,7 +3668,8 @@ let pro = {
         // 能量输入**，用它当闸门就是 10-08 记过的闸门自锁。
         // 真正该判的是「有没有空闲 spawn」，交给下面的 trySpawn 去判（它自己会置位这个标记）。
         // log(roomName,spawnRoom.name)
-        if (roomName == spawnRoom.name
+        const isOutRoom = roomName !== spawnRoom.name;
+        const waitingForCarrier = !isOutRoom
             && spawnRoom.creeps("harvestEnergyKeeper").filter(e => e.ticksToLive > 300).length
             && spawnRoom.creeps("carrier").filter(e => e.ticksToLive > 300).length == 0
             // ⚠️ 已经在孵化的搬运爬也算「有搬运」。原判据只数**长大**的（ttl>300），
@@ -3644,7 +3677,7 @@ let pro = {
             // 实测 W34N52：carrier=[孵,孵]、keeper ttl=71、carrier(>300)=0 ⇒ 直接 return，
             // 老 keeper 死后要等新搬运爬长大才补 ⇒ 白丢一段挖矿。
             // 与 keeper 自己那条守卫同理：**有一个在路上就够了**。
-            && spawnRoom.creeps("carrier", false).filter(e => e.spawning).length == 0) return; // 低等级且「一个搬运都没有（连在孵的也没有）」时才优先生搬运
+            && spawnRoom.creeps("carrier", false).filter(e => e.spawning).length == 0;
         delete Memory.rooms[roomName][StationSources.stationName]["undefined"]
 
         for (let k in Memory.rooms[roomName][StationSources.stationName])
@@ -3706,45 +3739,25 @@ let pro = {
                 delete e.memory.successorSpawned;
                 delete e.memory.successorName;
             });
-            // ③ 主房能量优先：外矿在「主房穷」时缓一缓 —— **但只在这个矿点已经有在岗
-            //    keeper 时才缓**。一只都没有时（新矿点 / 老 keeper 刚死）必须放行，
-            //    否则外矿收入归零、主房永远穷，闸门自锁（见上面挪走那条的注释）。
-            if (roomName != spawnRoom.name
-                && mine.some(e => !e.spawning)
-                && pro.outerMineStarvesSpawnRoom(spawnRoom, false)) return;
-            // ④ 触发：老那只**剩余寿命 ≤ 提前量** ⇒ 现在就必须派接班人。
-            //    提前量 = 赶路（pathTime）+ 孵化（体型×3）+ 余量（用户 10-14 的定义）。
-            //
-            // ⚠️ **不要**再用 `Game.time - data["spawnTime"] > 1500`。`spawnTime` 会被
-            // `registerStationSources`（本文件 262 行）在**孵化期间每 tick** 改写成
-            // 「当前 tick」，孵化结束时它正好 = **出生时刻** ⇒ 这条判据只有在
-            // **老那只死的那一刻**才成立 ⇒ 提前量被清零，断档 = 整个孵化时间 + 赶路。
-            // 铁证：实测所有主房源的 `记录龄 + ttl` **恒等于 1500**。
-            // 爬自己的 `ticksToLive` 才是不受别人改写的不可变事实（见 10-14 那条教训）。
-            let inc = mine.filter(e => !e.spawning)[0];
-            // 余量可调：`Memory.marketSettings.keeperSuccessionMargin`（改完立刻生效，不必重传代码）
-            let margin = Number(Memory.marketSettings && Memory.marketSettings.keeperSuccessionMargin);
-            if (!(margin >= 0)) margin = KEEPER_SUCCESSION_MARGIN;
-            let lead = (Number(data["pathTime"]) || 0)
-                + (inc ? inc.body.length * 3 : 150)
-                + margin;
+            // The absence of a carrier can defer opening an additional home
+            // source, but must not delay replacing a keeper already on duty.
+            const inc = mine[0]; // The spawning guard above already returned.
+            if (!inc && waitingForCarrier) return;
+            const capacity = spawnRoom.getEnergyCapacityAvailable();
+            const capacityBody = StationSources.getHarvesterBodyConfig(capacity, isOutRoom, spawnRoom.level, data);
+            if (!capacityBody?.length) return;
+            // Use the size of the body we're about to spawn, not the outgoing
+            // keeper's body. Keep the actual spawn-energy and defense gates;
+            // the home stock reserve must not postpone a due remote handoff
+            // until the old keeper dies (the replacement would then spawn anyway).
+            const due = inc && inc.ticksToLive <= pro.keeperSuccessionLead(spawnRoom, roomName, data, capacityBody);
             // 体型升级换班（2026-11-18）：历史小体型 keeper（WORK2）原本要等
             // ttl ≤ lead 才换，房间会被 4/tick 的收入锁 20+ 分钟（E51S29）。
             // 在岗 keeper 的 WORK 数低于容量满配、且 hive 付得起满配时立即换班；
             // 接班成功后会在老 keeper 上打 successorSpawned，不会重复派。
-            let capacityBody = StationSources.getHarvesterBodyConfig(
-                spawnRoom.getEnergyCapacityAvailable(), false, spawnRoom.level, data);
-            let capacityWork = (capacityBody || []).filter(p => p === WORK).length;
-            let capacityCost = 0;
-            if (typeof BODYPART_COST != "undefined")
-                for (let p of (capacityBody || [])) capacityCost += (BODYPART_COST[p] || 0);
-            let budgetNow = spawnRoom.currentEnergyAvailable;
-            if (budgetNow == undefined) budgetNow = spawnRoom.getEnergyAvailable
-                ? spawnRoom.getEnergyAvailable() : (spawnRoom.energyAvailable || 0);
-            let undersized = roomName == spawnRoom.name && inc && capacityWork > 0
-                && inc.body.filter(p => p.type === WORK).length < capacityWork
-                && budgetNow >= capacityCost;
-            if ((inc && inc.ticksToLive <= lead) || mine.length == 0 || undersized) {
+            const undersized = !isOutRoom && inc && !due && !waitingForCarrier
+                && inc.body.filter(p => p.type === WORK).length < capacityBody.filter(p => p === WORK).length;
+            if (due || !inc || undersized) {
                 // 正常补员按房间容量取满配；临时 hive 低能量只在 worker + carrier
                 // 同时为零时允许缩成当前预算内最大的救急体型（用户 2026-11-26）。
                 let budgetLeft = spawnRoom.currentEnergyAvailable;
@@ -3761,13 +3774,14 @@ let pro = {
                     && !spawnRoom.creeps("carrier", false).length;
                 let energyBudget;
                 if (inc || !depleted) {
-                    energyBudget = spawnRoom.getEnergyCapacityAvailable();
-                } else if (roomName == spawnRoom.name) {
-                    energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), budgetLeft);
+                    energyBudget = capacity;
+                } else if (!isOutRoom) {
+                    energyBudget = Math.min(capacity, budgetLeft);
                 } else {
-                    energyBudget = Math.min(spawnRoom.getEnergyCapacityAvailable(), Math.max(budgetLeft, 550));
+                    energyBudget = Math.min(capacity, Math.max(budgetLeft, 550));
                 }
-                let harBody = StationSources.getHarvesterBodyConfig(energyBudget, roomName != spawnRoom.name, spawnRoom.level, data)
+                let harBody = energyBudget === capacity ? capacityBody
+                    : StationSources.getHarvesterBodyConfig(energyBudget, isOutRoom, spawnRoom.level, data);
                 // 连 1 组（300）都付不起时 getHarvesterBodyConfig 返回**空体型**，
                 // spawnCreep([]) 是 ERR_INVALID_ARGS；而它算出来的体型也常比预算贵
                 // 一格（循环里多带 1 个 CARRY）—— 两种情况都只会在 trySpawn 里静默
