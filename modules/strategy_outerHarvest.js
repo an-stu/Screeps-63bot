@@ -286,7 +286,43 @@ let pro = {
         if (Game.time - m.lastSeen > pro.INVADER_CORE_GONE_CLEAR) return false;
         return (m.deployAt || 0) - Game.time <= pro.INVADER_CORE_MATURE_WARN;
     },
+    /**
+     * 外矿优先级闸：本房必须先有至少 1 只正常体型的 home keeper 和 carrier。
+     * keeper 只看任务目标为本房的（外矿 keeper 不算）；carrier 只看本地 carrier
+     * （outerHarvestEnergyCarrier 不算）。体型按本房容量的满配配置判断。
+     */
+    homeCoreReady(room) {
+        if (!room || !room.my) return false;
+        // 精简 VM/分阶段加载时可能没有核心模块：保持旧行为，不能因缺桩而中断。
+        if (typeof StationSources == "undefined" || !StationSources
+            || typeof StationSources.getHarvesterBodyConfig != "function"
+            || typeof StationCarry == "undefined" || !StationCarry
+            || typeof StationCarry.getCarrierBodyConfig != "function") return true;
+        let bodyCost = body => (body || []).reduce((sum, part) => {
+            let type = part && part.type || part;
+            return sum + (typeof BODYPART_COST != "undefined" ? BODYPART_COST[type] || 0 : 50);
+        }, 0);
+        let capacity = room.getEnergyCapacityAvailable
+            ? room.getEnergyCapacityAvailable() : (room.energyCapacityAvailable || 0);
+        let keeperBody = StationSources.getHarvesterBodyConfig
+            ? StationSources.getHarvesterBodyConfig(capacity, false, room.level,
+                { lastPowerTime: 0, lastPowerLevel: 0 })
+            : [];
+        let needWork = (keeperBody || []).filter(part => part == WORK).length;
+        if (needWork <= 0) needWork = 1;
+        let keeperReady = room.creeps("harvestEnergyKeeper", false).some(creep => {
+            let body = creep && creep.body || [];
+            if (body.filter(part => (part && part.type || part) == WORK).length < needWork) return false;
+            let task = creep.headTask && creep.headTask();
+            return task ? task.roomName == room.name : creep.room && creep.room.name == room.name;
+        });
+        if (!keeperReady) return false;
+        let carrierNeed = bodyCost(StationCarry.getCarrierBodyConfig(room));
+        return carrierNeed > 0 && room.creeps("carrier", false).some(creep => bodyCost(creep.body) >= carrierNeed);
+    },
     exec(room) {
+        // 外矿优先级低于本房核心：没有正常 keeper/carrier 时暂停一切外矿派发。
+        if (!pro.homeCoreReady(room)) return;
         // **不要再加一层 `(Game.time + hashCode) % N` 的节流**（2026-11-05 拆掉）。
         //
         // 调用方本来就有节流：`StrategyHighLevel.exec` 每 economyInterval（7，低桶时 14）

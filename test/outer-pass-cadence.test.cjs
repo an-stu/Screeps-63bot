@@ -55,6 +55,7 @@ vm.runInNewContext("var pro = {" + execSrc + "\n};\n", ctx, { filename: "strateg
 
 // exec 内部会用到这几个 pro 方法：威胁判定关掉、防守编制放行、专队空操作。
 Object.assign(ctx.pro, {
+    homeCoreReady: () => true,
     hasStopRemoteFlag: () => false,
     invaderCoreBlocks: () => false,
     roomNeedsDefense: () => false,

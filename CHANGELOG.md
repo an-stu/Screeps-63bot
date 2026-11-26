@@ -1,3 +1,13 @@
+## v0.78.338 — 外矿派发让位于本房核心 keeper/carrier
+
+- 用户 2026-11-26：外矿优先级低，本房必须先有至少 1 只正常体型的 home keeper
+  和 1 只正常体型的本地 carrier，之后才允许孵化外矿相关爬。
+- 新增 `StrategyOuterHarvest.homeCoreReady(room)`：keeper 必须任务目标为本房且
+  WORK 数达到本房容量满配；carrier 只看本地 `carrier` 角色，体型成本必须达到
+  容量满配。任一项不满足，整个外矿策略暂停派发；已在场的爬继续执行原任务。
+- 回归：新增 outer-home-core-priority 测试，覆盖小 keeper、小 carrier、外矿
+  keeper 冒充 home keeper 等负例；outer-pass-cadence 补上闸门桩。
+
 ## v0.78.337 — 低库存暂停 upgrader；外矿 carrier 非救急不再缩体型
 
 - 用户 2026-11-26：能量库存太低时不要孵 upgrader，除非控制器快降级。
