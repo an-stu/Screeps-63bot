@@ -64,6 +64,35 @@ function getRoomMemory(room) {
     return Memory.rooms[room.name] = Memory.rooms[room.name] || {};
 }
 
+/**
+ * 目标房里的武装敌对爬（有 ATTACK / RANGED_ATTACK 部件才算）。
+ *
+ * 2026-11-28 shard2/W31N51：zGeneral 的 4~5 只满 boost hydralisk（各 50 部件，
+ * 30 RANGED_ATTACK + 6 HEAL）长期停在 spawn 工地 (37,35) 上；本房 0 塔能量、
+ * 0 只爬、0 个 spawn。援建派单**没有任何威胁判据**，于是每轮照派 3 只 3,000
+ * 能量的 50 部件 builder 过虫洞，落地即被秒：W31N51 内实测 tombstone
+ * shard3_84523960_1 / shard3_84524005_1（各带 446/447 能量），死亡时刻与
+ * `Memory.crossShardBuilds.W31N51.pending[*].acceptedAt` 对得上。派的是纯损耗，
+ * 还占着出兵房 W31N55 的 spawn 队列。
+ *
+ * 这里复用驻守方的判据（ATTACK/RANGED_ATTACK 部件 > 0）。**没有视野时返回
+ * null**（维持原行为）：看不见就不援建是另一种故障。
+ */
+function armedHostiles(room) {
+    if (!room || typeof room.find != "function") return null;
+    if (typeof FIND_HOSTILE_CREEPS == "undefined") return null;
+    let hostiles = room.find(FIND_HOSTILE_CREEPS);
+    if (!Array.isArray(hostiles)) return null;
+    return hostiles.filter(creep => {
+        if (!creep) return false;
+        if (typeof creep.getActiveBodyparts == "function") {
+            return creep.getActiveBodyparts(ATTACK) > 0 || creep.getActiveBodyparts(RANGED_ATTACK) > 0;
+        }
+        return Array.isArray(creep.body) && creep.body.some(part => part && part.hits !== 0
+            && (part.type == ATTACK || part.type == RANGED_ATTACK));
+    });
+}
+
 function copyOptionsInto(cfg, options) {
     options = options || {};
     if (options.originShard !== undefined && typeof options.originShard == "string" && options.originShard) {
@@ -259,6 +288,17 @@ let pro = {
 
     /** Keep pending bounded by the configured concurrent-builder target. */
     dispatchBuilders(cfg) {
+        // 武装敌对爬在场时暂停派单（见 armedHostiles 的实测记录）。必须放在
+        // reconcilePending / 重试**之前**：本 tick 一只都不该发出去。
+        // 敌情消失后自动恢复，pending 里的老 request 由既有超时逻辑自然清理。
+        let threat = armedHostiles(Game.rooms && Game.rooms[cfg.roomName]);
+        if (threat && threat.length) {
+            pro.recordOperation(cfg, "BLOCKED_HOSTILES", {
+                hostiles:threat.length,
+                owners:[...new Set(threat.map(creep => creep.owner && creep.owner.username).filter(Boolean))].slice(0,4),
+            });
+            return;
+        }
         pro.reconcilePending(cfg);
         // Retry expired requests with the same slotId (source deduplication
         // prevents double-spawning), but a fresh requestId and real deadline.

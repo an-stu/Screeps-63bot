@@ -13,6 +13,9 @@ const FIND_STRUCTURES = "structures";
 const FIND_DROPPED_RESOURCES = "drops";
 const FIND_TOMBSTONES = "tombstones";
 const FIND_RUINS = "ruins";
+const FIND_HOSTILE_CREEPS = "hostiles";
+const ATTACK = "attack";
+const RANGED_ATTACK = "ranged_attack";
 const STRUCTURE_SPAWN = "spawn";
 const STRUCTURE_EXTENSION = "extension";
 const RESOURCE_ENERGY = "energy";
@@ -47,7 +50,7 @@ function makeWorld(opts = {}) {
         Game:{time:1000, cpu:{bucket:8000}, creeps:{}, rooms:{}, shard:{name:"shard2"}},
         Memory:{rooms:{}},
         FIND_MY_SPAWNS, FIND_MY_CONSTRUCTION_SITES, FIND_SOURCES, FIND_STRUCTURES,
-        FIND_DROPPED_RESOURCES, FIND_TOMBSTONES, FIND_RUINS,
+        FIND_DROPPED_RESOURCES, FIND_TOMBSTONES, FIND_RUINS, FIND_HOSTILE_CREEPS, ATTACK, RANGED_ATTACK,
         STRUCTURE_SPAWN, STRUCTURE_EXTENSION, RESOURCE_ENERGY,
         OK, ERR_NOT_IN_RANGE, WORK:"work", CARRY:"carry", MOVE:"move",
         Date:{now:() => world.now},
@@ -101,6 +104,7 @@ function makeRoom(sb, name = "E51S29", opts = {}) {
             upgradeBlocked:false, pos:new RoomPosition(32, 16, name)},
         sites:opts.sites || [], spawns:opts.spawns || [], sources:opts.sources || [],
         drops:opts.drops || [], tombstones:opts.tombstones || [], ruins:opts.ruins || [], structures:opts.structures || [],
+        hostiles:opts.hostiles || [],
         level:opts.level || 1,
         energyAvailable:opts.energyAvailable === undefined ? 5000 : opts.energyAvailable,
         energyCapacityAvailable:opts.energyCapacityAvailable === undefined ? 5000 : opts.energyCapacityAvailable,
@@ -112,6 +116,7 @@ function makeRoom(sb, name = "E51S29", opts = {}) {
             if (type === FIND_DROPPED_RESOURCES) return this.drops;
             if (type === FIND_TOMBSTONES) return this.tombstones;
             if (type === FIND_RUINS) return this.ruins;
+            if (type === FIND_HOSTILE_CREEPS) return this.hostiles;
             if (type === FIND_STRUCTURES) return this.structures;
             return [];
         },
@@ -816,6 +821,45 @@ function runExec(sb, time) {
     creep.buildCrossShardRoom();
     assert.equal(harvested, source, "空载援建爬从源取能");
     assert.equal(withdrawn, undefined, "绝不从 Hive（spawn/extension）抽能量");
+}
+
+// 18. 目标房有武装敌对爬时暂停援建派单（2026-11-28 shard2/W31N51 实测：
+//     zGeneral 的 4~5 只满 boost hydralisk 停在 spawn 工地上，builder 落地即死）。
+{
+    const sb = makeWorld();
+    // 负对照：无武装的敌对爬（探路爬）不该拦援建。
+    const room = makeRoom(sb, "W31N51", {memory:{structMap:{spawn:"encoded"}},
+        hostiles:[{owner:{username:"scout"}, getActiveBodyparts:() => 0, body:[{type:"move", hits:100}]}],
+        sites:[{id:"spawnSite", structureType:STRUCTURE_SPAWN, pos:new RoomPosition(37, 35, "W31N51")}]});
+    const cfg = sb.StrategyBuildCrossShard.start("W31N51", {originShard:"shard3", spawnRoom:"W31N55",
+        builders:1, path:{path:[{shard:"shard3", roomName:"W30N50", x:30, y:8}]}});
+    runExec(sb, 1000);
+    assert.equal(world.missions.length, 1, "无武装敌对爬不拦援建（否则会把正常房误锁）");
+
+    // 武装敌对爬：暂停派单，状态落进 claimOperations 供巡检读取。
+    sb.Memory.crossShardBuilds.W31N51.pending = [];
+    world.missions = [];
+    room.hostiles = [{owner:{username:"zGeneral"}, getActiveBodyparts:t => t === RANGED_ATTACK ? 30 : 0}];
+    runExec(sb, 1005);
+    assert.equal(world.missions.length, 0,
+        "武装敌对爬在场时不派援建爬：builder 落地即死，纯损耗还占出兵房 spawn");
+    assert.equal(cfg.pending.length, 0, "被拦时不登记 in-flight 请求");
+    assert.equal(world.operations.at(-1).state, "BLOCKED_HOSTILES", "状态写入 claimOperations");
+    assert.equal(world.operations.at(-1).details.hostiles, 1);
+
+    // 敌情消失 → 自动恢复，不需要人工清状态。
+    room.hostiles = [];
+    runExec(sb, 1010);
+    assert.equal(world.missions.length, 1, "敌情消失后立刻恢复派单");
+
+    // 没有视野时走的是既有的 WAITING_FOR_OWNERSHIP 分支，绝不能报成 BLOCKED_HOSTILES
+    // ——「看不见」不等于「有敌人」，否则暗房会被永久锁死援建。
+    delete sb.Game.rooms.W31N51;
+    sb.Memory.crossShardBuilds.W31N51.pending = [];
+    world.missions = [];
+    runExec(sb, 1015);
+    assert.equal(world.missions.length, 0, "无视野不发请求（既有行为）");
+    assert.equal(world.operations.at(-1).state, "WAITING_FOR_OWNERSHIP", "无视野不下「有敌人」的结论");
 }
 
 console.log("cross-shard build checks passed");

@@ -20,3 +20,6 @@ room-*.json
 # 而且带本机绝对路径，不该进仓库（之前被 git add -A 误收过一个）。
 __pycache__/
 *.pyc
+
+# deploy.py 每次上传前留的旧产物备份（机器生成，永不入库）
+deploy/core-payload.json.bak-*

@@ -1,3 +1,28 @@
+## v0.78.366 — 援建派单在武装敌人面前停手（W31N51 实测）
+
+- 故障现场 shard2/W31N51（RCL5）：zGeneral 的 4~5 只满 boost hydralisk（各 50 部件，
+  30 `RANGED_ATTACK` + 6 `HEAL`，tough/boost 全带）长期停在 spawn 工地 `(37,35)` 上；
+  本房 0 个 spawn、0 只爬、0 塔能量（storage 尚有 43,081），援建工地 `spawn 0/15000`
+  恒不动。
+- 根因：`StrategyBuildCrossShard.dispatchBuilders` **没有任何威胁判据** —— 它只看
+  「本地建筑爬 + pending 数量」，于是每轮照派 3 只 3,000 能量的 50 部件 builder 过虫洞。
+  实测 W31N51 内两块 tombstone `shard3_84523960_1` / `shard3_84524005_1`（各带
+  446 / 447 能量），死亡时刻与 `Memory.crossShardBuilds.W31N51.pending[*].acceptedAt`
+  对得上 ⇒ 派出去的是纯损耗，还占着出兵房 W31N55 的 spawn 队列（该房同时要给驻守
+  队孵 R2H2）。
+- 修法：`dispatchBuilders` 开头加 `armedHostiles(room)` 闸 —— 目标房当前视野里存在
+  `ATTACK`/`RANGED_ATTACK` 部件的敌对爬时，记 `BLOCKED_HOSTILES`（带只数与 owner）
+  并直接 return，本 tick 不发请求、不登记 pending。敌情消失后下一次派单自动恢复，
+  老 pending 仍走原有超时清理，不需要人工清状态。
+- 不做「看不见就不援建」：没有视野（`Game.rooms` 里没有该房）时走既有
+  `WAITING_FOR_OWNERSHIP` 分支，绝不报成敌对阻塞 —— 暗房被锁死是更坏的故障。
+  RCL<3 持续援建、spawn 建成复检、源端 receipt 去重等既有路径全部不变。
+- 测试：`test/cross-shard-build.test.cjs` 第 18 节（无武装敌对爬不拦、武装敌对爬
+  拦且状态落 `claimOperations`、敌情消失自动恢复、无视野不误判）；对旧代码该节第二节红
+  （负对照实测）。
+- 顺带：`.gitignore` 收掉 `deploy/core-payload.json.bak-*`（`deploy.py` 每次上传前的
+  旧产物备份，机器生成），让 `check-sync.cjs` 的「工作区干净」判据不再被它误伤。
+
 ## v0.78.365 — W31N51 门口射程与虫洞后路段侦察
 
 - `(45,18)` 是站位搜索锚点，不限定方向。按 `entryGate` 对应的本房边界格优先安排能在射程 3 内同打一只的 2×2，再权衡占路与锚点距离；继续复用塔队共同目标与撤退逻辑。
