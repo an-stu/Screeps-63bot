@@ -1,16 +1,8 @@
 /**
- * 跨 shard T3 RA 驻守（2026-11-27 W31N51）。
- *
- * 现场：shard2/W31N51 被 Overmind 玩家的 4 人 heal+RA T3 小队攻击，safe mode
- * 剩约 1.06 万 tick。防守从 shard3/W31N55 经 W30N50(30,8) 虫洞派 T3 RA，
- * 到达后用 crossShardGarrison 行为驻守：近战风筝、HEAL 目标优先集火。
- *
- * 本测试覆盖：
- *  ① 调度器只按缺员派一只，mission 里任务栈/路径/boost/目标房正确；
- *  ② 已在任务队列里的 mission 会阻止重复派兵；
- *  ③ 目标 shard 的 audit 记录 safe mode、敌方 HEAL/RA/ATTACK、驻守数量；
- *  ④ 驻守行为在无敌人时回 anchor，有敌人时优先打 HEAL 单位；
- *  ⑤ 源码钉：CODEX AUDIT 注释和 main 调用点必须在。
+ * Bounded VM regressions for the W31N51 cross-shard garrison protocol.
+ * These mocks exercise plan handoff, accepted spawn requests, last-moment
+ * portal authorization, and the target-room combat frame without simulating
+ * Screeps pathfinding or the full spawn/boost engine.
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -19,259 +11,855 @@ const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
 const src = fs.readFileSync(path.join(root, "modules", "team_raL1.js"), "utf8");
-const main = fs.readFileSync(path.join(root, "modules", "main.js"), "utf8");
+const teamL2Src = fs.readFileSync(path.join(root, "modules", "teamL2.js"), "utf8");
 
-function partBody(...parts) {
-    return parts.map(type => ({type, boost: undefined}));
+function loadTeamL2Bodies(ctx) {
+    const team = {
+        console: {log() {}},
+        Logger: {log() {}},
+        global: null,
+        ManagerCreeps: ctx.ManagerCreeps,
+        TOUGH: ctx.TOUGH,
+        RANGED_ATTACK: ctx.RANGED_ATTACK,
+        MOVE: ctx.MOVE,
+        HEAL: ctx.HEAL,
+        ATTACK: ctx.ATTACK,
+        WORK: ctx.WORK,
+        CARRY: ctx.CARRY,
+        CLAIM: ctx.CLAIM,
+        UtilsTask: ctx.UtilsTask,
+        ManagerCrossShard: ctx.ManagerCrossShard,
+        ManagerFlags: ctx.ManagerFlags,
+        Game: ctx.Game,
+    };
+    team.global = team;
+    vm.runInNewContext(teamL2Src, team, {filename: "teamL2.js"});
+    return {
+        teamL2: team.teamL2,
+        ra: team.teamL2.getR2H2ra(),
+        healer: team.teamL2.getR2H2heal(),
+    };
 }
 
-function load({ time = 100000, shard = "shard3" } = {}) {
+function load({time = 100000, shard = "shard3", spawnCount = 4} = {}) {
     let missionSeq = 0;
-    const ctx = {
+    let spawnSeq = 0;
+    let ctx;
+    const acceptedSpawns = [];
+    const spawnAttempts = [];
+    const partBoost = {
+        tough: "XGHO2",
+        ranged_attack: "XKHO2",
+        move: "XZHO2",
+        heal: "XLHO2",
+    };
+
+    function profileForSlot(slot) {
+        return slot % 2 === 0 ? ctx.TeamL2Bodies.ra : ctx.TeamL2Bodies.healer;
+    }
+    function toughFrontBody(slot) {
+        const body = profileForSlot(slot);
+        return [...body.filter(part => part === ctx.TOUGH), ...body.filter(part => part !== ctx.TOUGH)];
+    }
+    function boostMapForSlot(slot) {
+        const body = profileForSlot(slot);
+        const counts = body.reduce((out, part) => {
+            out[part] = (out[part] || 0) + 1;
+            return out;
+        }, {});
+        return {
+            XGHO2: counts[ctx.TOUGH] * 30,
+            XKHO2: counts[ctx.RANGED_ATTACK] * 30,
+            XZHO2: counts[ctx.MOVE] * 30,
+            XLHO2: counts[ctx.HEAL] * 30,
+        };
+    }
+    function acceptedT3Body(body, tasks) {
+        if (!Array.isArray(body) || body.length !== 50) return false;
+        const task = (tasks || []).find(t => t.taskName === "crossShardGarrison");
+        if (!task || !Number.isInteger(task.slot) || task.slot < 0 || task.slot > 3) return false;
+        const expected = toughFrontBody(task.slot);
+        if (!body.every((part, i) => part === expected[i]) || body.slice(0, 11).some(part => part !== ctx.TOUGH)) return false;
+        const boostTask = (tasks || []).find(t => t.taskName === "boostCreepBodyPart");
+        if (!boostTask || !boostTask.data) return false;
+        const expectedBoosts = boostMapForSlot(task.slot);
+        return Object.keys(expectedBoosts).every(resource => boostTask.data[resource] === expectedBoosts[resource])
+            && Object.keys(boostTask.data).length === 4;
+    }
+
+    ctx = {
         console: {log() {}},
         log() {},
         Logger: {log() {}, warning() {}},
         Creep: function () {},
         RoomPosition: function (x, y, roomName) {
-            this.x = x; this.y = y; this.roomName = roomName;
+            this.x = x;
+            this.y = y;
+            this.roomName = roomName;
+            this.isEqualTo = other => !!other && this.x === other.x && this.y === other.y
+                && this.roomName === other.roomName;
+            this.getDirectionTo = other => other.x > this.x ? 3 : other.x < this.x ? 7
+                : other.y > this.y ? 5 : other.y < this.y ? 1 : 0;
         },
         ManagerCreeps: {
-            calcBodyPart: spec => {
+            calcBodyPart(spec) {
                 const out = [];
                 (Array.isArray(spec) ? spec : Object.keys(spec).map(k => [k, spec[k]]))
-                    .forEach(([part, n]) => { for (let i = 0; i < n; i++) out.push(part); });
+                    .forEach(([part, count]) => {
+                        for (let i = 0; i < count; i++) out.push(part);
+                    });
                 return out;
             },
         },
         ManagerFlags: {getFlagsByPrefix() { return []; }},
         ManagerCrossShard: {
             calls: [],
-            addCrossShardRequest(toShard, mission) {
-                const id = "m" + (++missionSeq);
-                this.calls.push({toShard, id, mission});
-                ctx.Memory.missions[id] = mission;
-                return id;
+            addCrossShardRequest(toShard, mission, id) {
+                const request = {toShard, id: id || "m" + (++missionSeq), mission};
+                this.calls.push(request);
+                return request.id;
             },
         },
         StationLab: {
-            boostAble() { return true; },
-            generatorBoostResTask(boost, room) {
-                return [{taskName: "boostCreepBodyPart", regFun: "registerBoostCreep", data: boost}];
+            calls: [],
+            boostAble(room, boost) {
+                this.calls.push({room, boost});
+                return true;
+            },
+            generatorBoostResTask(boost) {
+                return [{taskName: "boostCreepBodyPart", regFun: "registerBoostCreep", data: {...boost}}];
             },
         },
-        StationHive: {},
+        StationHive: {
+            acceptedSpawns,
+            spawnAttempts,
+            trySpawn(room, targetRoom, body, role, tasks) {
+                const call = {room, targetRoom, body: body.slice(), role, tasks: tasks.slice()};
+                const isScout = tasks.some(t => t.taskName === "crossShardGarrisonScout");
+                const accepted = isScout
+                    ? body.length === 1 && body[0] === "move"
+                    : acceptedT3Body(body, tasks);
+                spawnAttempts.push({...call, accepted});
+                if (!accepted) return undefined;
+                const spawn = room.spawn.find(s => !s.spawning && !room.spawnedMap[s.id] && s.isActive());
+                if (!spawn) return undefined;
+
+                const name = "garrison_" + (++spawnSeq);
+                spawn.spawning = {name};
+                const creep = {
+                    name,
+                    spawning: true,
+                    ticksToLive: undefined,
+                    room: {name: room.name},
+                    body: body.map(type => ({type, boost: partBoost[type], hits: 100})),
+                    memory: {tasks},
+                };
+                ctx.Game.creeps[name] = creep;
+                const acceptedCall = {...call, name, creep, isScout};
+                acceptedSpawns.push(acceptedCall);
+                return name;
+            },
+        },
+        Utils: {getBodyEnergyNeed: body => body.length * 100},
         UtilsTask: {
             taskData(taskName, regFun, ops = {}) {
-                const t = {taskName, regFun};
-                for (let k in ops) t[k] = ops[k];
-                return t;
+                return {taskName, regFun, ...ops};
             },
             taskFlag(flag, taskName, regFun, ops = {}) {
                 return this.taskData(taskName, regFun, {id: flag.name, ...ops});
             },
         },
-        TOUGH: "tough", ATTACK: "attack", RANGED_ATTACK: "ranged_attack",
-        HEAL: "heal", MOVE: "move", WORK: "work", CARRY: "carry", CLAIM: "claim",
-        OK: 0, ERR_NOT_IN_RANGE: -9,
+        TOUGH: "tough",
+        ATTACK: "attack",
+        RANGED_ATTACK: "ranged_attack",
+        MOVE: "move",
+        HEAL: "heal",
+        WORK: "work",
+        CARRY: "carry",
+        CLAIM: "claim",
+        OK: 0,
+        ERR_NOT_IN_RANGE: -9,
         RESOURCE_ENERGY: "energy",
         FIND_HOSTILE_CREEPS: 1,
-        FIND_MY_STRUCTURES: 2,
+        FIND_HOSTILE_POWER_CREEPS: 2,
+        FIND_HOSTILE_STRUCTURES: 3,
+        FIND_STRUCTURES: 4,
+        FIND_MY_STRUCTURES: 5,
+        FIND_CREEPS: 6,
+        TOP: 1,
+        RIGHT: 3,
+        BOTTOM: 5,
+        LEFT: 7,
         STRUCTURE_TOWER: "tower",
+        OBSTACLE_OBJECT_TYPES: [],
+        TERRAIN_MASK_WALL: 1,
         BOOST_RES: {
             damage: ["G", "GHO2", "XGHO2"],
             rangedAttack: ["K", "KHO2", "XKHO2"],
             fatigue: ["Z", "ZHO2", "XZHO2"],
             heal: ["L", "LHO2", "XLHO2"],
         },
-        Game: {time, shard: {name: shard}, creeps: {}, rooms: {}, flags: {}, map: {getRoomLinearDistance: () => 1}},
+        BOOSTS: {
+            tough: {XGHO2: {damage: 0.3}},
+            ranged_attack: {XKHO2: {rangedAttack: 4}},
+            move: {XZHO2: {fatigue: 2}},
+            heal: {XLHO2: {heal: 4, rangedHeal: 4}},
+        },
+        Game: {
+            time,
+            shard: {name: shard},
+            creeps: {},
+            rooms: {},
+            flags: {},
+            map: {
+                getRoomLinearDistance: () => 1,
+                getRoomTerrain: () => ({get: () => 0}),
+                findExit: () => [],
+            },
+        },
+        PathFinder: {
+            calls: [],
+            search(start, goals, options) {
+                this.calls.push({start, goals, options});
+                options?.roomCallback?.(start.roomName);
+                return {
+                    incomplete: false,
+                    path: [new ctx.RoomPosition(start.x + 1, start.y, start.roomName)],
+                };
+            },
+        },
         Memory: {creeps: {}, missions: {}},
         global: null,
     };
+    const teamL2 = loadTeamL2Bodies(ctx);
+    ctx.teamL2 = teamL2.teamL2;
+    ctx.TeamL2Bodies = {ra: teamL2.ra, healer: teamL2.healer};
     ctx.global = ctx;
     vm.runInNewContext(src, ctx, {filename: "team_raL1.js"});
+    ctx.acceptedSpawns = acceptedSpawns;
+    ctx.spawnAttempts = spawnAttempts;
     return ctx;
 }
 
+function makeSpawnRoom(ctx, spawnCount = 4) {
+    return {
+        name: "W31N55",
+        my: true,
+        currentEnergyAvailable: 100000,
+        energyAvailable: 100000,
+        spawnedMap: {},
+        spawn: Array.from({length: spawnCount}, (_, i) => ({
+            id: "spawn" + i,
+            pos: {x: 25 + (i % 2), y: 25 + Math.floor(i / 2), roomName: "W31N55"},
+            spawning: null,
+            isActive: () => true,
+        })),
+    };
+}
+
 function cfg(ctx, overrides = {}) {
-    ctx.Memory.crossShardGarrisons = {
-        W31N51: Object.assign({
-            active: true,
-            roomName: "W31N51",
-            targetShard: "shard2",
-            originShard: "shard3",
-            spawnRoom: "W31N55",
-            anchor: {x: 41, y: 35},
-            slots: [[0, 0], [1, -1], [-1, 1], [0, 2], [2, 2], [-1, 0]],
-            squad: 2,
-            dispatchEnabled: true,
-            path: {path: [{shard: "shard3", roomName: "W30N50", x: 30, y: 8}]},
-        }, overrides),
-    };
-    ctx.Game.rooms.W31N55 = {name: "W31N55", my: true};
-    return ctx.Memory.crossShardGarrisons.W31N51;
+    const value = Object.assign({
+        active: true,
+        roomName: "W31N51",
+        targetShard: "shard2",
+        originShard: "shard3",
+        spawnRoom: "W31N55",
+        anchor: {x: 25, y: 25},
+        squad: 4,
+        wave: 0,
+        leadTicks: 2500,
+        path: {path: [{shard: "shard3", roomName: "W30N50", x: 30, y: 8}]},
+        landingRoute: ["W30N50", "W30N51", "W31N51"],
+    }, overrides);
+    ctx.Memory.crossShardGarrisons = {W31N51: value};
+    ctx.Game.rooms.W31N55 = makeSpawnRoom(ctx);
+    return value;
 }
 
-// ── ① 缺员时派一只：任务栈顺序/路径/boost/目标房必须正确 ─────────────────
-{
-    const ctx = load({time: 100000, shard: "shard3"});
-    const c = cfg(ctx, {squad: 1});
-    ctx.CrossShardGarrison.exec();
-    assert.equal(ctx.ManagerCrossShard.calls.length, 1, "空编制应派一只");
-    const call = ctx.ManagerCrossShard.calls[0];
-    assert.equal(call.toShard, "shard3", "应在 origin shard 本地 spawn");
-    const d = call.mission.data;
-    assert.equal(d.spawnRoom, "W31N55");
-    assert.equal(d.targetRoomName, "W31N51");
-    assert.equal(d.garrisonRoom, "W31N51");
-    assert.equal(d.body.length, 50, "T3 RA 一体机必须是 50 部件");
-    assert.equal(d.tasks.map(t => t.taskName).join(","),
-        "crossShardGarrison,moveCrossShardByPath,boostCreepBodyPart",
-        "LIFO：boost 最后压栈、先执行；其次是虫洞；最后驻守");
-    assert.deepEqual(d.tasks[1].path, c.path.path, "虫洞路径必须来自配置");
-    assert.ok(d.tasks[2].data.XKHO2 >= 30 * 22, "RA 必须带满 XKHO2 T3 强化");
-    assert.equal(c.lastDispatch.slot, 0, "第一只使用 0 号驻守位");
-
-    // ── ② mission 还没孵化时不能重复派 ──────────────────────────────────
-    ctx.CrossShardGarrison.exec();
-    assert.equal(ctx.ManagerCrossShard.calls.length, 1, "编制已满（1 只在途）时不得重复派兵");
-
-    // 跨过虫洞后 origin 的 Game.creeps 看不到它，只能靠台账；cycle 到期才换班。
-    ctx.Memory.missions = {};
-    ctx.Game.time += 1200;
-    ctx.CrossShardGarrison.exec();
-    assert.equal(ctx.ManagerCrossShard.calls.length, 2, "台账到期后必须补新一只（不能因跨 shard 失联而不补）");
-    assert.equal(c.dispatches.length, 1, "旧台账过期，只保留新一批");
+function freshRemote({open = true, members = [], scoutTtl = 0, observedAt = Date.now()} = {}) {
+    return {open, members, scoutTtl, observedAt};
 }
 
-// ── ③ 目标 shard 的 audit：safe mode / 敌方部件 / 驻守数量 ────────────────
-{
-    const ctx = load({time: 100000, shard: "shard2"});
-    const c = cfg(ctx);
-    const hostileHealer = {
-        name: "enemyHealer", hits: 4800, body: [{type: "heal", boost: "XLHO2"}],
-        owner: {username: "enemy"},
-        getActiveBodyparts(part) { return part === "heal" ? 30 : 0; },
-    };
-    const hostileRa = {
-        name: "enemyRa", hits: 3200, body: [{type: "ranged_attack", boost: "XKHO2"}],
-        owner: {username: "enemy"},
-        getActiveBodyparts(part) { return part === "ranged_attack" ? 20 : 0; },
-    };
-    const room = {
-        name: "W31N51",
-        controller: {safeMode: 10598, safeModeAvailable: 3, safeModeCooldown: 40598},
-        getHostileCreeps() { return [hostileHealer, hostileRa]; },
-        find(type, opts) {
-            if (type === ctx.FIND_MY_STRUCTURES) {
-                return [{structureType: "tower", store: {energy: 840}}].filter(opts.filter);
-            }
-            return [];
-        },
-    };
-    ctx.Game.rooms.W31N51 = room;
-    ctx.Game.creeps = {
-        g1: {name: "g1", ticksToLive: 1200, memory: {garrisonRoom: "W31N51"}},
-    };
-    ctx.CrossShardGarrison.exec();
-    assert.equal(c.audit.safeMode, 10598, "audit 必须记录 safe mode 剩余");
-    assert.equal(c.audit.safeModeAvailable, 3);
-    assert.equal(c.audit.hostiles, 2);
-    assert.equal(c.audit.hostileHeal, 30, "敌方 HEAL 部件必须可读");
-    assert.equal(c.audit.hostileRangedAttack, 20);
-    assert.equal(c.audit.hostileBoosted, 2);
-    assert.equal(c.audit.hostileOwners.join(","), "enemy");
-    assert.equal(c.audit.garrison, 1);
-    assert.equal(c.audit.garrisonReady, 1);
-    assert.equal(c.audit.towers.join(","), "840");
-    const req = ctx.ManagerCrossShard.calls.find(x => x.mission.func === "setMemoryWithPath");
-    assert.ok(req, "safe mode 期间必须把 origin 的 dispatchEnabled 关掉");
-    assert.equal(req.toShard, "shard3");
-    assert.equal(req.mission.data.data, false);
-    assert.ok(req.mission.data.path.includes("dispatchEnabled"));
+function roleBody(ctx, slot) {
+    const raw = slot % 2 === 0 ? ctx.TeamL2Bodies.ra : ctx.TeamL2Bodies.healer;
+    return [...raw.filter(part => part === ctx.TOUGH), ...raw.filter(part => part !== ctx.TOUGH)];
 }
 
-// ── ③b safe mode 剩余 ≤ leadTicks：通知 origin 开启派兵 ───────────────────
+function boostMapForSlot(ctx, slot) {
+    const body = slot % 2 === 0 ? ctx.TeamL2Bodies.ra : ctx.TeamL2Bodies.healer;
+    const counts = body.reduce((out, part) => {
+        out[part] = (out[part] || 0) + 1;
+        return out;
+    }, {});
+    return {
+        XGHO2: counts[ctx.TOUGH] * 30,
+        XKHO2: counts[ctx.RANGED_ATTACK] * 30,
+        XZHO2: counts[ctx.MOVE] * 30,
+        XLHO2: counts[ctx.HEAL] * 30,
+    };
+}
+
+function boostedT3Body(ctx, slot = 0) {
+    const boost = {tough: "XGHO2", ranged_attack: "XKHO2", move: "XZHO2", heal: "XLHO2"};
+    return roleBody(ctx, slot).map(type => ({type, boost: boost[type], hits: 100}));
+}
+
+function assertRoleBody(ctx, body, slot, message = "") {
+    const expected = roleBody(ctx, slot);
+    const counts = expected.reduce((out, part) => {
+        out[part] = (out[part] || 0) + 1;
+        return out;
+    }, {});
+    assert.equal(body.length, 50, message + " body is 50 parts");
+    assert.deepEqual(Array.from(body), Array.from(expected), message + " ordered teamL2 body with TOUGH front");
+    assert.ok(body.slice(0, 11).every(part => part === ctx.TOUGH), message + " has 11 front-loaded TOUGH");
+    assert.equal(counts[ctx.TOUGH], 11);
+    assert.equal(counts[ctx.MOVE], 10);
+    assert.equal(counts[ctx.RANGED_ATTACK], slot % 2 === 0 ? 21 : 8);
+    assert.equal(counts[ctx.HEAL], slot % 2 === 0 ? 8 : 21);
+}
+
+function memberRecords(names, ttls, wave = 0) {
+    return names.map((name, slot) => [slot, name, ttls[slot], true, wave]);
+}
+
+// 1. A configured 2500-tick lead is capped at 1000: closed at 2500 and 1001,
+// open at 1000. The target reports its decision as a cross-shard plan frame.
 {
-    const ctx = load({time: 100000, shard: "shard2"});
+    const ctx = load({shard: "shard2"});
     const c = cfg(ctx, {leadTicks: 2500});
     const room = {
         name: "W31N51",
-        controller: {safeMode: 1500, safeModeAvailable: 3, safeModeCooldown: 31500},
+        controller: {my: true, safeMode: 2500, safeModeAvailable: 3},
+        tower: [],
         getHostileCreeps() { return []; },
-        find() { return []; },
     };
     ctx.Game.rooms.W31N51 = room;
+    const targetMember = fullMember(ctx, "wave-member", 0);
+    targetMember.room = {name: "W31N51"};
+    targetMember.ticksToLive = 1000;
+    targetMember.memory.tasks[0].wave = 9;
+    ctx.Game.creeps[targetMember.name] = targetMember;
+
     ctx.CrossShardGarrison.exec();
-    const req = ctx.ManagerCrossShard.calls.find(x => x.mission.func === "setMemoryWithPath");
-    assert.ok(req, "safe mode 快结束必须通知 origin");
-    assert.equal(req.mission.data.data, true, "剩余 1500 ≤ lead 2500 ⇒ 开启");
+    let plan = ctx.ManagerCrossShard.calls.at(-1).mission.data;
+    assert.equal(c.audit.dispatchWindow, 1000);
+    assert.deepEqual(Array.from(plan.members[0]), [0, "wave-member", 1000, true, 9],
+        "target frame preserves the exact slot and deployment wave");
+    assert.equal(plan.open, false, "2500 configured lead must remain capped and closed");
+
+    ctx.Game.time += 20;
+    room.controller.safeMode = 1001;
+    ctx.CrossShardGarrison.exec();
+    plan = ctx.ManagerCrossShard.calls.at(-1).mission.data;
+    assert.equal(plan.open, false, "one tick above the cap stays closed");
+
+    ctx.Game.time += 20;
+    room.controller.safeMode = 1000;
+    ctx.CrossShardGarrison.exec();
+    plan = ctx.ManagerCrossShard.calls.at(-1).mission.data;
+    assert.equal(plan.open, true, "dispatch opens at the capped threshold");
 }
 
-// ── ③c 安全期 dispatchEnabled=false 时 origin 一只也不派 ─────────────────
+// 2. Origin rejects stale plan frames and will not dispatch from stale or
+// current-but-closed remote state.
 {
-    const ctx = load({time: 100000, shard: "shard3"});
-    cfg(ctx, {dispatchEnabled: false});
+    const ctx = load({shard: "shard3"});
+    const c = cfg(ctx, {remote: freshRemote({open: true, observedAt: Date.now() - 200000})});
+    const stale = {
+        roomName: "W31N51", targetShard: "shard2", observedAt: Date.now() - 200000,
+        open: false, members: [], scoutTtl: 0,
+    };
+    assert.equal(ctx.CrossShardGarrison.receivePlan(stale), false, "stale plan must be rejected");
+    assert.equal(c.remote.open, true, "stale closed frame must not overwrite the last plan");
+
     ctx.CrossShardGarrison.exec();
-    assert.equal(ctx.ManagerCrossShard.calls.length, 0, "安全期不得派兵（用户 2026-11-27 要求）");
-    assert.equal(ctx.Memory.crossShardGarrisons.W31N51.dispatchError, "waiting safe-mode window");
+    assert.equal(ctx.acceptedSpawns.length, 0, "stale open state must fail closed");
+
+    const closed = {
+        roomName: "W31N51", targetShard: "shard2", observedAt: Date.now(),
+        open: false, members: [], scoutTtl: 0,
+    };
+    assert.equal(ctx.CrossShardGarrison.receivePlan(closed), true);
+    assert.equal(c.dispatchEnabled, false);
+    ctx.Game.time += 10;
+    delete ctx.Game._crossGarrisonUnits;
+    ctx.CrossShardGarrison.exec();
+    assert.equal(ctx.acceptedSpawns.length, 0, "fresh closed plan must not spawn a scout or member");
+    assert.equal(c.dispatchError, "waiting safe-mode window");
 }
 
-// ── ④ 驻守行为：无敌人回 anchor；有 HEAL 目标优先集火 ────────────────────
+// 3. A six-unit request is capped to the four all-in-one slots. The initial
+// scout plus three members consume four spawns; once one spawn frees, slot 3
+// fills. All four accepted member bodies must be fully T3 and no reserve slots
+// may be created or duplicated.
 {
-    const ctx = load({time: 100000, shard: "shard2"});
+    const ctx = load({shard: "shard3"});
+    const c = cfg(ctx, {squad: 6, remote: freshRemote()});
+    assert.equal(ctx.CrossShardGarrison.squad(c), 4, "six configured requests still produce only four members");
+    ctx.CrossShardGarrison.exec();
+
+    const scouts = ctx.acceptedSpawns.filter(call => call.isScout);
+    const members = ctx.acceptedSpawns.filter(call => !call.isScout);
+    assert.equal(scouts.length, 1);
+    assert.deepEqual(Array.from(scouts[0].body), [ctx.MOVE]);
+    assert.equal(members.length, 3, "three free spawn slots after the scout should accept multiple members");
+    assert.deepEqual(members.map(call => call.tasks[0].slot), [0, 1, 2]);
+    assert.ok(members.every(call => Number.isFinite(call.tasks[0].wave)),
+        "each accepted member carries a numeric deployment wave");
+    assert.ok(members.every(call => call.tasks[0].wave === c.wave),
+        "all first-wave members share the current wave identifier");
+    for (const call of members) {
+        const slot = call.tasks[0].slot;
+        assert.equal(call.tasks[0].taskName, "crossShardGarrison");
+        assertRoleBody(ctx, Array.from(call.body), slot, "spawn slot " + slot);
+        assert.deepEqual({...call.tasks[1].data}, boostMapForSlot(ctx, slot),
+            "boost request must match the RA/healer role assigned to this slot");
+        assert.deepEqual(
+            call.creep.body.reduce((counts, p) => {
+                const key = p.type + ":" + p.boost;
+                counts[key] = (counts[key] || 0) + 1;
+                return counts;
+            }, {}),
+            {
+                ["tough:XGHO2"]: 11,
+                ["ranged_attack:XKHO2"]: slot % 2 === 0 ? 21 : 8,
+                ["move:XZHO2"]: 10,
+                ["heal:XLHO2"]: slot % 2 === 0 ? 8 : 21,
+            },
+            "accepted creep must match its fully T3-boosted same-slot R2H2 role",
+        );
+    }
+    assert.ok(ctx.acceptedSpawns.every(call => call.isScout
+        || (call.body.length === 50 && call.tasks.some(t => t.taskName === "boostCreepBodyPart"))));
+    assert.deepEqual(Object.keys(c.roster).sort(), ["0", "1", "2"]);
+
+    ctx.Game.rooms.W31N55.spawn[0].spawning = null;
+    ctx.Game.time += 10;
+    delete ctx.Game._crossGarrisonUnits;
+    ctx.CrossShardGarrison.exec();
+    const allMembers = ctx.acceptedSpawns.filter(call => !call.isScout);
+    assert.equal(allMembers.length, 4, "the fourth and final member fills slot 3");
+    assert.deepEqual(allMembers.map(call => call.tasks[0].slot), [0, 1, 2, 3]);
+    assert.ok(allMembers.every(call => call.tasks[0].wave === c.wave));
+    assert.deepEqual(Object.keys(c.roster).sort(), ["0", "1", "2", "3"]);
+    assert.ok(!Object.keys(c.roster).some(slot => Number(slot) >= 4), "no reserve slots are spawned");
+
+    const count = ctx.acceptedSpawns.length;
+    ctx.Game.time += 10;
+    delete ctx.Game._crossGarrisonUnits;
+    ctx.CrossShardGarrison.exec();
+    assert.equal(ctx.acceptedSpawns.length, count, "occupied slots and active scout must not be duplicated");
+    assert.deepEqual(Object.keys(c.roster).sort(), ["0", "1", "2", "3"]);
+}
+
+// 4. A near-expiry deployed cohort is refreshed as one four-member wave, not
+// as an isolated highway replacement. New tasks occupy slots 0-3 together.
+{
+    const ctx = load({shard: "shard3", spawnCount: 4});
+    const names = ["old0", "old1", "old2", "old3"];
+    const c = cfg(ctx, {
+        wave: 7,
+        squad: 6,
+        remote: freshRemote({
+            members: memberRecords(names, [750, 750, 750, 750], 7),
+            scoutTtl: 500,
+        }),
+        roster: Object.fromEntries(names.map((name, slot) => [slot, {name, tick: 99000, wave: 7}])),
+    });
+    ctx.CrossShardGarrison.exec();
+    const refreshed = ctx.acceptedSpawns.filter(call => !call.isScout);
+    assert.equal(refreshed.length, 4, "expiry refreshes the complete 2x2 unit");
+    assert.deepEqual(refreshed.map(call => call.tasks[0].slot), [0, 1, 2, 3]);
+    assert.ok(refreshed.every(call => call.tasks[0].wave === c.wave && call.tasks[0].wave !== 7),
+        "all replacement slots share one new wave ID");
+    assert.deepEqual(Object.keys(c.roster).sort(), ["0", "1", "2", "3"]);
+    for (const call of refreshed) {
+        const slot = call.tasks[0].slot;
+        assertRoleBody(ctx, Array.from(call.body), slot, "refreshed slot " + slot);
+        assert.deepEqual({...call.tasks[1].data}, boostMapForSlot(ctx, slot));
+    }
+    assert.equal(ctx.CrossShardGarrison.squad(c), 4);
+}
+
+function makePortalContext(options = {}) {
+    const remote = Object.hasOwn(options, "remote") ? options.remote : freshRemote();
+    const landing = Object.hasOwn(options, "landing")
+        ? options.landing
+        : {observedAt: Date.now(), room: "W30N50", clear: true};
+    const ctx = load({shard: "shard3"});
+    const c = cfg(ctx, {remote, landing, wave: 1});
+    const portal = {
+        id: "portal-1",
+        pos: {roomName: "W30N50", x: 30, y: 8},
+        destination: {shard: "shard2", room: "W30N50"},
+    };
+    return {ctx, c, portal};
+}
+
+function portalTask(roomName = "W31N51", kind = "member", slot = 0, wave = 1) {
+    return {roomName, slot, wave, garrisonPortal: {roomName, kind, slot, wave}};
+}
+
+function fullMember(ctx, name, slot = 0) {
+    const garrisonTask = {taskName: "crossShardGarrison", roomName: "W31N51", slot, wave: 1};
+    return {name, body: boostedT3Body(ctx, slot), memory: {tasks: [garrisonTask]}};
+}
+
+// 5. Member portal entry fails closed on missing/stale/closed plans, stale or
+// armed landing reports, wrong landing room/portal, and incomplete boosts.
+{
+    const {ctx, portal} = makePortalContext({remote: undefined});
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "missing"), portalTask(), portal), false);
+}
+{
+    const {ctx, portal} = makePortalContext({
+        remote: freshRemote({open: true, observedAt: Date.now() - 200000}),
+    });
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "stale"), portalTask(), portal), false);
+}
+{
+    const {ctx, portal} = makePortalContext({remote: freshRemote({open: false})});
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "closed"), portalTask(), portal), false);
+}
+{
+    const {ctx, portal} = makePortalContext({
+        landing: {observedAt: Date.now() - 100000, room: "W30N50", clear: true},
+    });
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "stale-clear"), portalTask(), portal), false);
+}
+{
+    const {ctx, portal} = makePortalContext({
+        landing: {observedAt: Date.now(), room: "W30N50", clear: false},
+    });
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "armed-clear"), portalTask(), portal), false);
+}
+{
+    const {ctx, portal} = makePortalContext({
+        landing: {observedAt: Date.now(), room: "W31N51", clear: true},
+    });
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "wrong-clear-room"), portalTask(), portal), false);
+}
+{
+    const {ctx, portal} = makePortalContext();
+    const wrongRoom = {...portal, destination: {...portal.destination, room: "W31N51"}};
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "wrong-portal-room"), portalTask(), wrongRoom), false);
+    const wrongShard = {...portal, destination: {...portal.destination, shard: "shard1"}};
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "wrong-portal-shard"), portalTask(), wrongShard), false);
+    const partial = {name: "partial", body: [{type: ctx.MOVE, boost: "XZHO2", hits: 100}]};
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(partial, portalTask(), portal), false);
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(fullMember(ctx, "wrong-role", 1),
+        portalTask("W31N51", "member", 0), portal), false, "healer setup cannot occupy an RA slot");
+    const underBoosted = fullMember(ctx, "under-boosted", 0);
+    underBoosted.body.find(p => p.type === ctx.TOUGH).boost = "GHO2";
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(underBoosted, portalTask(), portal), false,
+        "one missing same-slot T3 boost blocks portal entry");
+}
+
+// 6. The target scout reports an unsafe armed landing and cannot report from
+// an unexpected room. The origin accepts only a clear report for the pinned
+// landing room, which is then required for member entry.
+{
+    const target = load({shard: "shard2"});
+    const armed = {
+        name: "armed-landing-hostile",
+        body: [{type: "ranged_attack", hits: 100}],
+        getActiveBodyparts(type) { return type === target.RANGED_ATTACK ? 1 : 0; },
+    };
+    const room = {
+        name: "W30N50",
+        controller: {},
+        getHostileCreeps() { return [armed]; },
+        find() { return []; },
+    };
+    const task = {
+        roomName: "W31N51", originShard: "shard3", targetShard: "shard2",
+        landingRoom: "W30N50",
+    };
+    target.CrossShardGarrison.scout({room, ticksToLive: 1000}, task);
+    const unsafeFrame = target.ManagerCrossShard.calls[0].mission.data;
+    assert.equal(unsafeFrame.landingRoom, "W30N50");
+    assert.equal(unsafeFrame.clear, false, "armed hostile makes the landing report unsafe");
+
+    const source = load({shard: "shard3"});
+    const c = cfg(source);
+    assert.equal(source.CrossShardGarrison.receivePlan({...unsafeFrame, roomName: c.roomName}, true), true);
+    const portal = {
+        id: "portal-1", pos: {roomName: "W30N50", x: 30, y: 8},
+        destination: {shard: "shard2", room: "W30N50"},
+    };
+    assert.equal(source.CrossShardGarrison.canEnterPortal(fullMember(source, "unsafe"), portalTask(), portal), false);
+    assert.equal(source.CrossShardGarrison.receivePlan({
+        ...unsafeFrame, roomName: c.roomName, landingRoom: "W30N51", clear: true,
+    }, true), false, "origin rejects a clear report from the wrong landing room");
+
+    const wrongRoom = load({shard: "shard2"});
+    const wrongTask = {...task, landingRoom: "W30N50"};
+    wrongRoom.CrossShardGarrison.scout({
+        room: {...room, name: "W30N51"},
+        ticksToLive: 1000,
+    }, wrongTask);
+    assert.equal(wrongRoom.ManagerCrossShard.calls.length, 0, "scout in an unexpected room sends no landing report");
+}
+
+// 7. A scout may enter before the member-clear report exists, but only through
+// the same live, verified shard+room portal configured for this garrison.
+{
+    const {ctx, portal} = makePortalContext({landing: undefined});
+    const scout = {name: "scout", body: [{type: ctx.MOVE, hits: 100}]};
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(scout, portalTask("W31N51", "scout"), portal), true);
+    const wrongRoom = {...portal, destination: {...portal.destination, room: "W31N51"}};
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(scout, portalTask("W31N51", "scout"), wrongRoom), false);
+    const wrongShard = {...portal, destination: {...portal.destination, shard: "shard1"}};
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(scout, portalTask("W31N51", "scout"), wrongShard), false);
+    const stale = {...portal};
+    ctx.Memory.crossShardGarrisons.W31N51.remote = freshRemote({
+        open: true, observedAt: Date.now() - 200000,
+    });
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(scout, portalTask("W31N51", "scout"), stale), false);
+}
+
+// 8. Portal occupancy permits one distinct creep per portal per tick, allows
+// retries by that same creep, and resets on the next simulated tick.
+{
+    const {ctx, portal} = makePortalContext();
+    const a = fullMember(ctx, "member-a", 0), b = fullMember(ctx, "member-b", 1);
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(a, portalTask("W31N51", "member", 0), portal), true);
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(a, portalTask("W31N51", "member", 0), portal), true,
+        "same creep can retry its own hop");
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(b, portalTask("W31N51", "member", 1), portal), false,
+        "second creep cannot share this tick's portal");
+    ctx.Game.time += 1;
+    ctx.Game._garrisonPortalUsed = {};
+    assert.equal(ctx.CrossShardGarrison.canEnterPortal(b, portalTask("W31N51", "member", 1), portal), true,
+        "portal can accept the next tick");
+}
+
+function combatRoom(ctx, {safeMode = 0, hostiles = []} = {}) {
+    const exits = [{x: 49, y: 25, roomName: "W31N55"}];
+    return {
+        name: "W31N51",
+        controller: {my: true, safeMode, pos: {x: 10, y: 10, roomName: "W31N51"}},
+        tower: [],
+        getHostileCreeps() { return hostiles; },
+        find(type) {
+            if (type === ctx.RIGHT) return exits;
+            if (type === ctx.FIND_STRUCTURES) return [];
+            if (type === ctx.FIND_CREEPS) return Object.values(ctx.Game.creeps).filter(c => c.room === this);
+            if (type === ctx.FIND_HOSTILE_POWER_CREEPS || type === ctx.FIND_HOSTILE_STRUCTURES) return [];
+            return [];
+        },
+    };
+}
+
+function combatCreep(ctx, room, name, slot, pos, {heal = false, hits = 1000, hitsMax = 1000} = {}) {
+    const body = [{type: ctx.RANGED_ATTACK, hits: 100}];
+    if (heal) body.push({type: ctx.HEAL, boost: "XLHO2", hits: 100});
+    const actions = [];
     const task = {
         taskName: "crossShardGarrison", roomName: "W31N51", garrisonRoom: "W31N51",
-        x: 41, y: 35,
+        slot, originShard: "shard3", targetShard: "shard2",
     };
-    const calls = [];
-    function makeCreep(hostiles) {
-        return {
-            name: "g1",
-            room: {name: "W31N51", getHostileCreeps: () => hostiles},
-            pos: {
-                inRangeTo(pos) { return true; },
-                isNearTo() { return false; },
-                getRangeTo(target) { return target && target.name ? 2 : 5; },
-                findClosestByRange(list) { return list[0]; },
-            },
-            hits: 5000, hitsMax: 5000,
-            memory: {tasks: [task]},
-            heal() { calls.push("heal"); },
-            autoHeal() { calls.push("autoHeal"); },
-            rangedAttack(t) { calls.push(["rangedAttack", t.name]); },
-            rangedMassAttack() { calls.push("rangedMassAttack"); },
-            moveTo(t) { calls.push(["moveTo", t && t.name || "anchor"]); },
-            moveByPath() { calls.push("moveByPath"); },
-        };
-    }
-    const empty = makeCreep([]);
-    empty.pos.inRangeTo = () => false;
-    ctx.Creep.prototype.crossShardGarrison.call(empty);
-    assert.ok(calls.some(c => c[0] === "moveTo"), "无敌人且不在 anchor 时必须回防");
-
-    calls.length = 0;
-    function hostile(name, heal, hits) {
-        return {
-            name, hits,
-            getActiveBodyparts(part) { return part === "heal" ? heal : 0; },
-        };
-    }
-    const healer = hostile("healer", 30, 4000);
-    const ra = hostile("ra", 0, 3000);
-    const creep = makeCreep([ra, healer]);
-    ctx.Creep.prototype.crossShardGarrison.call(creep);
-    assert.deepEqual(calls.find(c => Array.isArray(c) && c[0] === "rangedAttack"),
-        ["rangedAttack", "healer"], "必须优先集火 HEAL 单位");
+    return {
+        name, room, body, task, actions,
+        hits, hitsMax, ticksToLive: 1200, spawning: false,
+        pos: {x: pos[0], y: pos[1], roomName: room.name},
+        memory: {tasks: [task]},
+        getActiveBodyparts(type) {
+            return body.filter(p => p.type === type && p.hits > 0).length;
+        },
+        heal(target) { actions.push(["heal", target.name]); },
+        rangedHeal(target) { actions.push(["rangedHeal", target.name]); },
+        rangedAttack(target) { actions.push(["rangedAttack", target.name]); },
+        moveTo(target, options) { actions.push(["moveTo", target.x, target.y, options]); },
+    };
 }
 
-// ── ⑤ 源码钉：Codex 审计注释、配置键、main 调用点 ─────────────────────────
+function hostile(ctx, name, x, y, {heal = false, hits = 5000, hitsMax = 5000} = {}) {
+    const body = [{type: ctx.RANGED_ATTACK, hits: 100}];
+    if (heal) body.push({type: ctx.HEAL, boost: "XLHO2", hits: 100});
+    return {
+        name, id: name, hits, hitsMax, body,
+        pos: {x, y, roomName: "W31N51"},
+        getActiveBodyparts(type) {
+            return body.filter(p => p.type === type && p.hits > 0).length;
+        },
+    };
+}
+
+function installCombatCrew(ctx, room, members) {
+    ctx.Game.rooms.W31N51 = room;
+    ctx.Game.creeps = Object.fromEntries(members.map(c => [c.name, c]));
+}
+
+// 9. A single cached combat frame gives all members the same in-range focus;
+// paired healers split two comparable patients, and members do not chase a
+// hostile outside the covered firing area.
 {
-    assert.ok(src.includes("CODEX AUDIT"), "必须留下 Codex 审计注释");
-    assert.ok(src.includes("Memory.crossShardGarrisons"), "配置键必须写清楚");
-    assert.ok(src.includes("crossShardGarrison") && src.includes("registerCrossShardGarrison"),
-        "驻守任务与注册函数必须存在");
-    assert.ok(main.includes("CrossShardGarrison.exec()"), "main 必须调用驻守调度器");
-    assert.ok(main.includes('isCpuFeatureEnabled("crossShard")'), "驻守必须服从跨 shard 开关");
+    const ctx = load({shard: "shard2"});
+    cfg(ctx, {anchor: {x: 25, y: 25}, squad: 6});
+    const enemy = hostile(ctx, "enemy", 27, 25);
+    const room = combatRoom(ctx, {hostiles: [enemy]});
+    const posts = [[25, 25], [25, 26], [26, 25], [26, 26]];
+    const members = [
+        combatCreep(ctx, room, "g0", 0, posts[0], {heal: true}),
+        combatCreep(ctx, room, "g1", 1, posts[1], {heal: true}),
+        combatCreep(ctx, room, "g2", 2, posts[2], {hits: 760}),
+        combatCreep(ctx, room, "g3", 3, posts[3], {hits: 800}),
+    ];
+    installCombatCrew(ctx, room, members);
+
+    const frame = ctx.CrossShardGarrison.combatFrame(room);
+    assert.equal(frame.slots.length, 4, "combat formation has no reserve slots");
+    assert.deepEqual(Array.from(frame.posts.slice(0, 4), p => [p.x, p.y]), posts);
+    assert.equal(frame.formed, true);
+    assert.equal(frame.focus, enemy);
+    assert.equal(ctx.CrossShardGarrison.towerFocus(room), enemy, "tower and member focus share the same frame");
+    assert.equal(frame.heal.get("g0").patient.name, "g2");
+    assert.equal(frame.heal.get("g1").patient.name, "g3");
+    assert.equal(frame.heal.get("g0").direct, true);
+    assert.equal(frame.heal.get("g1").direct, true);
+
+    for (const member of members) ctx.CrossShardGarrison.defend(member, member.task);
+    const shots = members.flatMap(c => c.actions.filter(a => a[0] === "rangedAttack"));
+    assert.equal(shots.length, 4);
+    assert.ok(shots.every(a => a[1] === enemy.name), "all four slots concentrate on the one shared focus");
+    assert.ok(members[0].actions.some(a => a[0] === "heal" && a[1] === "g2"));
+    assert.ok(members[1].actions.some(a => a[0] === "heal" && a[1] === "g3"));
+
+    const distant = hostile(ctx, "distant", 40, 40);
+    const tower = {my: true, pos: {x: 25, y: 25, roomName: "W31N51"}, store: {energy: 1000}};
+    const noChaseRoom = combatRoom(ctx, {hostiles: [distant]});
+    noChaseRoom.tower = [tower];
+    const noChase = posts.map((pos, slot) => combatCreep(ctx, noChaseRoom, "still" + slot, slot,
+        slot === 0 ? [20, 20] : pos));
+    installCombatCrew(ctx, noChaseRoom, noChase);
+    const noChaseFrame = ctx.CrossShardGarrison.combatFrame(noChaseRoom);
+    assert.equal(noChaseFrame.focus, undefined, "out-of-range threats are not selected for pursuit");
+    for (const member of noChase) ctx.CrossShardGarrison.defend(member, member.task);
+    for (const member of noChase) {
+        assert.ok(!member.actions.some(a => a[0] === "rangedAttack"), "garrison does not attack a distant target");
+        for (const action of member.actions.filter(a => a[0] === "moveTo")) {
+            const post = noChaseFrame.posts[member.task.slot];
+            assert.deepEqual([action[1], action[2]], [post.x, post.y], "movement only returns to the member's assigned post");
+            assert.ok(Math.max(Math.abs(action[1] - tower.pos.x), Math.abs(action[2] - tower.pos.y)) <= 7,
+                "hold movement remains within tower coverage");
+        }
+    }
+}
+
+// 10. In Safe Mode, an out-of-position member still assembles at its assigned
+// post, while armed visible hostiles are suppressed from focus/attack actions.
+{
+    const ctx = load({shard: "shard2"});
+    cfg(ctx, {anchor: {x: 25, y: 25}, squad: 4});
+    const enemy = hostile(ctx, "safe-mode-hostile", 26, 25);
+    const room = combatRoom(ctx, {safeMode: 500, hostiles: [enemy]});
+    const members = [
+        combatCreep(ctx, room, "g0", 0, [20, 20]),
+        combatCreep(ctx, room, "g1", 1, [20, 21]),
+        combatCreep(ctx, room, "g2", 2, [20, 22]),
+        combatCreep(ctx, room, "g3", 3, [20, 23]),
+    ];
+    installCombatCrew(ctx, room, members);
+    const frame = ctx.CrossShardGarrison.combatFrame(room);
+    assert.equal(frame.armed.length, 0, "Safe Mode suppresses hostile combat planning");
+    assert.equal(frame.focus, undefined);
+    assert.equal(frame.formed, false);
+
+    ctx.CrossShardGarrison.defend(members[0], members[0].task);
+    assert.ok(members[0].actions.some(a => a[0] === "moveTo"
+        && a[1] === frame.posts[0].x && a[2] === frame.posts[0].y),
+    "Safe Mode does not disable formation assembly");
+    assert.ok(!members[0].actions.some(a => a[0] === "rangedAttack"), "no attack intent while the frame is safe");
+}
+
+function transitCreep(ctx, room, name, slot, pos, wave = 4) {
+    const task = {
+        taskName: "crossShardGarrison", roomName: "W31N51", garrisonRoom: "W31N51",
+        slot, wave, originShard: "shard3", targetShard: "shard2",
+        homeRoom: "W31N55", landingRoom: "W30N50",
+        originRoute: ["W31N55", "W30N50"], landingRoute: ["W30N50", "W30N51", "W31N51"],
+        portalPath: [{shard: "shard3", roomName: "W30N50", x: 30, y: 8}],
+    };
+    const actions = [];
+    const body = boostedT3Body(ctx, slot);
+    const creepPos = new ctx.RoomPosition(pos.x, pos.y, room.name);
+    return {
+        name, room, pos: creepPos, body, task, actions,
+        spawning: false, fatigue: 0, ticksToLive: 1200, hits: 10000, hitsMax: 10000,
+        memory: {tasks: [task]},
+        getActiveBodyparts(type) { return body.filter(p => p.type === type && p.hits > 0).length; },
+        lastTask() { return task; },
+        moveTo(target, options) { actions.push(["moveTo", target.x, target.y, target.roomName, options]); },
+        move(direction) { actions.push(["move", direction]); },
+        addTask(next) { actions.push(["addTask", next]); return this; },
+        execLastTask() { actions.push(["execLastTask"]); return this; },
+    };
+}
+
+// 11. Three members may assemble locally but never independently begin the
+// origin route or portal transit. Once all four are in a 2x2, one shared
+// direction step is issued for the entire cohort at most once per tick.
+{
+    const ctx = load({shard: "shard3"});
+    const c = cfg(ctx, {
+        wave: 4,
+        remote: freshRemote({members: [], scoutTtl: 500}),
+        originRoute: ["W31N55", "W30N50"],
+    });
+    const room = ctx.Game.rooms.W31N55;
+    room.find = function (type) {
+        if (type === ctx.RIGHT) return [{x: 49, y: 25, roomName: this.name}];
+        if (type === ctx.FIND_CREEPS) return Object.values(ctx.Game.creeps).filter(creep => creep.room === this);
+        if (type === ctx.FIND_STRUCTURES) return [];
+        return [];
+    };
+    ctx.Game.map.findExit = () => ctx.RIGHT;
+    const posts = [[25, 25], [25, 26], [26, 25], [26, 26]];
+    const firstThree = posts.slice(0, 3).map((pos, slot) =>
+        transitCreep(ctx, room, "partial" + slot, slot,
+            slot === 0 ? {x: 20, y: 20} : {x: pos[0], y: pos[1]}));
+    ctx.Game.creeps = Object.fromEntries(firstThree.map(creep => [creep.name, creep]));
+    let groupMoves = 0, squareChecks = 0;
+    ctx.WarCache = {getMoveAbleCostMatrix() { return {}; }};
+    ctx.WarTeamCore = {action: {
+        team4checkSquarePos({ _creeps }) {
+            squareChecks++;
+            assert.equal(_creeps.length, 4, "only a complete four-member cohort can make a square step");
+            return true;
+        },
+        moveByDirection({ _creeps, _direction }) {
+            groupMoves++;
+            assert.equal(_creeps.length, 4);
+            return true;
+        },
+    }};
+
+    ctx.CrossShardGarrison.defend(firstThree[0], firstThree[0].task);
+    assert.equal(groupMoves, 0, "partial cohort may not travel as a group");
+    assert.equal(ctx.PathFinder.calls.length, 0, "partial cohort does not path toward a portal");
+    assert.ok(firstThree[0].actions.some(a => a[0] === "moveTo" && a[3] === room.name),
+        "partial cohort may only reposition to its local muster post");
+    assert.ok(!firstThree[0].actions.some(a => a[0] === "addTask" || a[0] === "execLastTask"),
+        "partial cohort does not start the cross-shard movement task");
+
+    firstThree[0].pos.x = 25;
+    firstThree[0].pos.y = 25;
+    firstThree[0].actions.length = 0;
+    const fourth = transitCreep(ctx, room, "partial3", 3, {x: posts[3][0], y: posts[3][1]});
+    ctx.Game.creeps[fourth.name] = fourth;
+    ctx.Game._crossGarrisonUnits = {};
+    ctx.CrossShardGarrison.defend(firstThree[0], firstThree[0].task);
+    for (const member of [firstThree[1], firstThree[2], fourth]) {
+        ctx.CrossShardGarrison.defend(member, member.task);
+    }
+    assert.equal(groupMoves, 1, "complete cohort advances with one shared direction intent per tick");
+    assert.equal(squareChecks, 1);
+    assert.equal(ctx.PathFinder.calls.length, 1);
+    assert.ok([firstThree[0], firstThree[1], firstThree[2], fourth]
+        .every(member => !member.actions.some(a => a[0] === "moveTo")),
+    "coordinated route step does not fall back to independent creep movement");
 }
 
 console.log("cross-shard garrison checks passed");

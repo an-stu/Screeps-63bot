@@ -48,6 +48,7 @@ function makeWorld(opts) {
         STRUCTURE_PORTAL: "portal",
         console: {log() {}},
     };
+    sandbox.global = sandbox;
     load("Creep.prototype.moveCrossShardByPath", sandbox);
     load("Creep.prototype.notifyClaimDone", sandbox);
     vm.runInNewContext("Array.prototype.head = function () { return this[0]; };", sandbox);
@@ -79,6 +80,7 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     creep.autoHeal = function () {};
     creep.rangedAttack = function () {};
     creep.attack = function () {};
+    creep.heal = function (target) { this.healed = target; };
     creep.lastTask = function () { return this.memory.tasks[this.memory.tasks.length - 1]; };
     creep.popTask = function () { this.popped = (this.popped || 0) + 1; this.memory.tasks.pop(); return this; };
     creep.execLastTask = function () { this.exec = (this.exec || 0) + 1; return this; };
@@ -125,6 +127,85 @@ function makeCreep(Creep, shard, x, y, roomName, tasks, portal) {
     world.sandbox.Game.shard.name = "shard2";
     c.moveCrossShardByPath();
     assert.equal(c.popped,1);
+}
+
+// Garrison portal hops fail closed without explicit permission. A peaceful
+// garrison transit self-heals, but never takes combat or chase actions.
+{
+    const portal = {x:15,y:5,roomName:"W31N51",destinationShard:"shard2"};
+    const world = makeWorld({shard:"shard3",portal});
+    const move = {taskName:"moveCrossShardByPath",peaceful:true,expectedDestShard:"shard2",
+        garrisonPortal:{roomName:"W31N51",kind:"member"},
+        path:[{shard:"shard3",roomName:"W31N51",x:15,y:5}]};
+    const c = makeCreep(world.Creep,"shard3",15,6,"W31N51",[move],portal);
+    c.hits = 80;
+    c.hitsMax = 100;
+    c.autoHeal = c.rangedAttack = c.attack = () => assert.fail("peaceful garrison transit must not issue combat intents");
+
+    c.moveCrossShardByPath(); // no CrossShardGarrison authorization API
+    assert.equal(move.index,0,"missing authorization must not advance the route");
+    assert.equal(move.pendingTransition,undefined,"denial must not create a pending hop");
+    assert.equal(c.submitted,undefined,"denial must not submit creep memory");
+    assert.equal(c.goto,undefined,"denial must not move onto the portal");
+    assert.equal(c.healed,c,"damaged garrison transit must self-heal");
+
+    let authorizedCall;
+    world.sandbox.CrossShardGarrison = {canEnterPortal(creep, task, livePortal) {
+        authorizedCall = {creep, task, livePortal};
+        return false;
+    }};
+    c.moveCrossShardByPath();
+    assert.equal(authorizedCall.creep,c);
+    assert.equal(authorizedCall.task,move);
+    assert.equal(authorizedCall.livePortal.destination.shard,"shard2");
+    assert.equal(c.submitted,undefined,"explicit denial must not submit creep memory");
+    assert.equal(c.goto,undefined,"explicit denial must not move onto the portal");
+}
+
+// Authorization is rechecked while a source-side hop is pending. A lapse
+// pauses movement without resubmission; permission recovery retries, and
+// destination confirmation/pop remains independent of the authorization gate.
+{
+    const portal = {x:15,y:5,roomName:"W31N51",destinationShard:"shard2"};
+    const world = makeWorld({shard:"shard3",portal});
+    const move = {taskName:"moveCrossShardByPath",peaceful:true,expectedDestShard:"shard2",
+        garrisonPortal:{roomName:"W31N51",kind:"scout"},
+        path:[{shard:"shard3",roomName:"W31N51",x:15,y:5}]};
+    const c = makeCreep(world.Creep,"shard3",15,6,"W31N51",[move],portal);
+    let allowed = true;
+    let authCalls = 0;
+    world.sandbox.CrossShardGarrison = {canEnterPortal(creep, task, livePortal) {
+        authCalls++;
+        assert.equal(creep,c);
+        assert.equal(task,move);
+        assert.equal(livePortal.destination.shard,"shard2");
+        return allowed;
+    }};
+
+    c.moveCrossShardByPath();
+    assert.equal(authCalls,1);
+    assert.equal(move.pendingTransition.toShard,"shard2");
+    assert.deepEqual(c.submitted,["shard2"]);
+    assert.equal(c.goto.length,1);
+
+    allowed = false;
+    c.moveCrossShardByPath();
+    assert.equal(authCalls,2,"pending source-side retry must reauthorize");
+    assert.equal(c.goto.length,1,"lapsed permission must pause before the portal");
+    assert.equal(c.submitted.length,1,"pending retry must not resubmit creep memory");
+    assert.equal(move.pendingTransition.toShard,"shard2","denial must preserve the pending hop");
+
+    allowed = true;
+    c.moveCrossShardByPath();
+    assert.equal(authCalls,3);
+    assert.equal(c.goto.length,2,"permission recovery must retry movement");
+    assert.equal(c.submitted.length,1);
+
+    world.sandbox.Game.shard.name = "shard2";
+    c.moveCrossShardByPath();
+    assert.equal(c.popped,1,"confirmed destination must finish the final hop");
+    assert.equal(c.exec,1);
+    assert.equal(authCalls,3,"destination confirmation must not require portal authorization");
 }
 
 // 2) Failed first crossing: retain the transition and keep approaching the

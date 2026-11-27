@@ -451,301 +451,707 @@ let pro = {
 
 global.TeamRaL1=pro;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 跨 shard T3 RA 驻守 —— 2026-11-27 shard2/W31N51
-//
-// 现场：W31N51 被一名使用 Overmind 的玩家攻击，控制器已开 safe mode
-// （三次可用，本次剩约 1.06 万 tick）。来时编成是 4 人 heal+RA 的 T3 强化
-// 小队；Overmind 的 pairDestroy/swarmDestroy 还会带 T3 melee zergling +
-// T3 transfuser（见其 CombatSetups.zerglings.boosted_T3 / healers.boosted_T3）。
-// 因此本驻守队使用 T3 强化 RA 一体机（TeamRaL1.raBody1/raBoost1），
-// 遇到 ATTACK 近战先拉到 4 格风筝；面对 RA+HEAL 则优先集火带 HEAL 的
-// 目标、贴到 1 格打满伤害（T3 回复量很高，必须集中火力）。
-//
-// 出发房：shard3/W31N55（RCL8、3 spawn、X*HO2 库存充足、boostAble=true），
-// 路径：shard3/W30N50 (30,8) 虫洞 → shard2/W30N50 → 陆行至 W31N51。
-// 配置放在各 shard 自己的 Memory.crossShardGarrisons（Memory 不跨 shard）：
-//
-//   Memory.crossShardGarrisons.W31N51 = {
-//     active: true,
-//     roomName: "W31N51", targetShard: "shard2",
-//     originShard: "shard3", spawnRoom: "W31N55",
-//     anchor: {x:41,y:35},
-//     slots: [[0,0],[1,-1],[-1,1],[0,2],[2,2],[-1,0]], // 相对 anchor，避开核心建筑
-//     squad: 6,
-//     leadTicks: 2500,          // safe mode 剩余 ≤ 该值才允许 origin 派兵
-//     dispatchEnabled: false,   // 由 target shard 的 requestDispatch 跨 shard 打开
-//     path: {path:[{shard:"shard3", roomName:"W30N50", x:30, y:8}]}
-//   }
-//
-//   安全期（用户 2026-11-27）：safe mode 期间不派兵；target shard 在
-//   safeMode 剩余 ≤ leadTicks 时通过 setMemoryWithPath 把 origin 的
-//   dispatchEnabled 置 true，origin 才逐只补员。
-//
-// CODEX AUDIT（以后修改本段/跨 shard 防守时必须做）：
-//  1. 监视 W31N51：读取 Memory.crossShardGarrisons.W31N51.audit（本模块每 20
-//     tick 写一次）：safeMode 剩余、safeModeAvailable/Cooldown、hostiles 数量与
-//     HEAL/RANGED_ATTACK/ATTACK 部件、强化敌人数、garrison 存活与名字、tower 能量。
-//     也可在 shard2 console 直接查 Game.rooms.W31N51.controller.safeMode。
-//  2. 审计出兵链：shard3 Memory.missions 里 data.garrisonRoom=="W31N51" 的
-//     spawnCreepCressShard 任务、W31N55 的 spawn 孵化/boost task、
-//     W30N50(30,8) portal.destination.shard 是否仍为 "shard2"。行军会绕开
-//     shard3 的他人控制房 W31N51/W31N52/W31N53（前两个在
-//     Memory.betterMoveAvoidRooms，W31N53 在移动模块硬编码表）；审计时必须
-//     确认这三个房仍在回避列表，禁止穿行控制房（项目长途路径硬规则）。
-//     另：W31N55 的 boost lab 填液会被「先填 hive」抢占，若出发前
-//     Memory.rooms.W31N55.stationLab.boostLabMap 对应 lab 为空，需先给空闲
-//     carrier 派 X*HO2 补给任务，否则 boost 任务 200 tick 后会过期裸奔。
-//  3. 若 Overmind 编成从 4 人 RA+heal 变为 swarm/melee/ranged 混编，必须重新
-//     核算 squad/body/boost；raBody1 是 50 部件 T3 一体机，不能拿去贴脸扛
-//     T3 melee（会被白打），近战威胁交给风筝分支。
-//  4. safe mode 不是永久方案：safeModeAvailable 见底或 garrison 连续为空时，按
-//     audit 报警并考虑增派第二组（把 squad 调大即可，调度器会逐只补员）。
-// ═══════════════════════════════════════════════════════════════════════════
-
+// Opt-in defense on the two shards that own the source and target configs.
+// Target W31N51 owns the Safe Mode dispatch decision; W31N55 owns spawning.
+// A disposable scout reports the entire landing room, because the exact
+// landing square is not guaranteed. Fighters travel single-file, then rally
+// as a four-member 2x2 in their tower zone. Do not chase outside that zone.
 const GARRISON_MEMORY_KEY = "crossShardGarrisons";
-const GARRISON_REPLACE_TTL = 700;      // 老车低于该 TTL 就补接班，避免真空
-const GARRISON_EXEC_INTERVAL = 10;     // 10 tick 一次，足够及时且几乎不耗 CPU
+const GARRISON_REPLACE_TTL = 750;
+const GARRISON_PLAN_MAX_AGE = 150000;
+const GARRISON_LANDING_MAX_AGE = 90000;
+const GARRISON_MAX_LEAD = 1000;
+const GARRISON_EXEC_INTERVAL = 10;
+// Ranged slots 0/2 face the historically observed northern approach.
+const GARRISON_OFFSETS = [[0,0],[0,1],[1,0],[1,1]];
+// W31N55 has no east exit into W30N55. The verified northern route
+// bypasses both that dead edge and the foreign W31N51/52/53 rooms.
+const GARRISON_W31_ORIGIN_ROUTE = ["W31N55","W31N56","W30N56","W30N55","W30N54","W30N53","W30N52","W30N51","W30N50"];
+const GARRISON_W31_MUSTER = {W31N55:{x:2,y:14},W31N56:{x:41,y:47},W30N56:{x:1,y:45},W30N55:{x:5,y:1}};
+const GARRISON_W31_GATES = {W31N55:{x:41,y:0},W31N56:{x:49,y:46},W30N56:{x:6,y:49}};
+const garrisonTravelPaths = Object.create(null);
+const garrisonMusterCache = Object.create(null);
 
-Creep.prototype.registerCrossShardGarrison = function () {
-    let task = (this.memory.tasks || [])[0];
-    if (!task || task.taskName != "crossShardGarrison") return;
-    this.memory.garrisonRoom = task.garrisonRoom || task.roomName;
-    this.memory.garrisonSlot = task.slot;
-};
+function garrisonRange(a,b) {
+    const p = a?.pos || a, q = b?.pos || b;
+    if (!p || !q || (p.roomName && q.roomName && p.roomName !== q.roomName)) return Infinity;
+    return Math.max(Math.abs(p.x-q.x), Math.abs(p.y-q.y));
+}
 
-Creep.prototype.crossShardGarrison = function () {
-    let tasks = this.memory.tasks || [];
-    let task = tasks[tasks.length - 1];
-    if (!task || task.taskName != "crossShardGarrison") return;
-    let roomName = task.roomName || task.garrisonRoom;
-    if (!roomName) return;
+const garrisonBodySpecs = Object.create(null);
+function garrisonBodySpec(slot) {
+    const healer=Number.isInteger(slot)&&slot%2===1;
+    const key=healer?"heal":"ranged";
+    if(garrisonBodySpecs[key])return garrisonBodySpecs[key];
+    const preset=healer?global.teamL2?.getR2H2heal?.():global.teamL2?.getR2H2ra?.();
+    if(!Array.isArray(preset)||preset.length!==50)return;
+    // Keep the TeamL2 R2H2 part counts, with armor first to protect active
+    // ranged/heal parts while the hostile four-RA volley is being absorbed.
+    const body=preset.filter(p=>p===TOUGH).concat(preset.filter(p=>p!==TOUGH));
+    const parts=[[TOUGH,"XGHO2"],[RANGED_ATTACK,"XKHO2"],[MOVE,"XZHO2"],[HEAL,"XLHO2"]]
+        .map(([type,boost])=>[type,boost,body.filter(p=>p===type).length]);
+    const boosts=Object.fromEntries(parts.map(([,boost,n])=>[boost,n*30]));
+    return garrisonBodySpecs[key]={body,parts,boosts};
+}
+function garrisonBodyReady(creep,slot) {
+    const design=garrisonBodySpec(slot);
+    return !!design&&design.parts.every(([type,boost,n])=>creep.body?.filter(p=>
+        p.type===type&&p.boost===boost&&p.hits>0).length>=n);
+}
 
-    // 自我修复优先于输出；T3 XLHO2 一口 576，能顶住 tower/RA 的持续磨血。
-    if (this.hits < this.hitsMax) this.heal(this);
-    else if (this.autoHeal) this.autoHeal();
+function garrisonFresh(frame,maxAge) {
+    const age = Date.now() - frame?.observedAt;
+    return age >= 0 && age <= maxAge;
+}
 
-    if (this.room.name != roomName) {
-        this.moveTo(new RoomPosition(25, 25, roomName));
-        return;
+function garrisonPower(creep,type,ability,base) {
+    return (creep.body || []).reduce((n,p) => n + (p.type===type&&p.hits>0
+        ? base * (global.BOOSTS?.[type]?.[p.boost]?.[ability] || 1) : 0), 0);
+}
+
+function garrisonIncoming(creep, hostiles) {
+    return hostiles.reduce((sum,h) => sum + (garrisonRange(h,creep)<=1
+        ? garrisonPower(h,ATTACK,"attack",30) : 0) + (garrisonRange(h,creep)<=3
+        ? garrisonPower(h,RANGED_ATTACK,"rangedAttack",10) : 0), 0);
+}
+
+function garrisonDamageAfterTough(creep, incoming) {
+    let actual = 0;
+    for (const p of creep.body || []) {
+        if (!incoming || !(p.hits > 0)) continue;
+        const factor = p.type === TOUGH ? global.BOOSTS?.[TOUGH]?.[p.boost]?.damage || 1 : 1;
+        const portion = Math.min(incoming,p.hits / factor);
+        incoming -= portion;
+        actual += portion * factor;
     }
+    return actual + incoming;
+}
 
-    let hostiles = this.room.getHostileCreeps
-        ? this.room.getHostileCreeps()
-        : this.room.find(FIND_HOSTILE_CREEPS);
-    if (hostiles && hostiles.length) {
-        // 先处理近战：保持 4 格风筝，绝不让 T3 melee 贴上来。
-        let melee = this.pos.findClosestByRange(hostiles.filter(e =>
-            e.getActiveBodyparts && e.getActiveBodyparts(ATTACK) > 0));
-        if (melee && this.pos.getRangeTo(melee) <= 3) {
-            let flee = PathFinder.search(this.pos, {pos: melee.pos, range: 4}, {flee: true}).path;
-            if (flee && flee.length) this.moveByPath(flee);
-            if (this.pos.getRangeTo(melee) <= 3) this.rangedAttack(melee);
-            return;
-        }
+function garrisonHostiles(room) {
+    return room.getHostileCreeps ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
+}
 
-        // 目标固定：HEAL 优先（打奶），其次残血，再按距离；所有驻守爬同序 ⇒ 集火。
-        let targets = hostiles.slice().sort((a, b) => {
-            let ah = a.getActiveBodyparts ? a.getActiveBodyparts(HEAL) : 0;
-            let bh = b.getActiveBodyparts ? b.getActiveBodyparts(HEAL) : 0;
-            if (ah != bh) return bh - ah;
-            if (a.hits != b.hits) return a.hits - b.hits;
-            return this.pos.getRangeTo(a) - this.pos.getRangeTo(b);
-        });
-        let target = targets[0];
-        let meleeTarget = target.getActiveBodyparts && target.getActiveBodyparts(ATTACK) > 0;
-        let desired = meleeTarget ? 3 : 1;
-        if (this.pos.getRangeTo(target) > desired) this.moveTo(target, {range: desired});
-        if (this.pos.getRangeTo(target) <= 3) {
-            if (this.pos.isNearTo(target)) this.rangedMassAttack();
-            else this.rangedAttack(target);
+function garrisonArmed(hostile) {
+    return hostile.getActiveBodyparts(ATTACK) > 0 || hostile.getActiveBodyparts(RANGED_ATTACK) > 0;
+}
+
+function garrisonLandingClear(room) {
+    return !room.controller?.owner && !garrisonHostiles(room).some(garrisonArmed)
+        && !room.find(FIND_HOSTILE_POWER_CREEPS).length
+        && !room.find(FIND_HOSTILE_STRUCTURES,{filter:s=>s.structureType===STRUCTURE_TOWER}).length;
+}
+
+function garrisonLandmarks(cfg) {
+    const exit = cfg.path?.path?.[0];
+    if (cfg.path?.path?.length !== 1 || !exit || exit.shard !== cfg.originShard) return;
+    // Inter-shard arrival is somewhere in the destination room, not on
+    // the paired return portal. Only the room name is pinned here.
+    const landingRoom=cfg.landingRoom||exit.roomName;
+    const route=cfg.landingRoute||(cfg.roomName==="W31N51"?["W30N50","W30N51","W31N51"]:[landingRoom,cfg.roomName]);
+    if (!Array.isArray(route)||route[0]!==landingRoom||route.at(-1)!==cfg.roomName) return;
+    const originRoute=cfg.originRoute||(cfg.roomName==="W31N51"?GARRISON_W31_ORIGIN_ROUTE:[cfg.spawnRoom,exit.roomName]);
+    if(!Array.isArray(originRoute)||originRoute[0]!==cfg.spawnRoom||originRoute.at(-1)!==exit.roomName)return;
+    return {path:cfg.path.path,landingRoom,route,originRoute};
+}
+
+function garrisonTravel(creep,nextRoom,chosen) {
+    const exit = Game.map.findExit(creep.room.name,nextRoom);
+    if (exit < 0) return;
+    const border = chosen ? new RoomPosition(chosen.x,chosen.y,creep.room.name) : creep.pos.findClosestByRange(exit);
+    if (!border) return;
+    if (creep.pos.isEqualTo(border)) creep.move(exit);
+    else creep.moveTo(border,{range:0,maxRooms:1,reusePath:8,maxOps:1200,costCallback:(name,matrix)=>{
+        if(name!==creep.room.name)return matrix;
+        for(const obj of creep.room.find(FIND_STRUCTURES,{filter:s=>s.structureType==="portal"}))
+            matrix.set(obj.pos.x,obj.pos.y,255);
+        return matrix;
+    }});
+}
+
+function garrisonPivot(crew) {
+    if(crew.length!==4||!crew.every(c=>c.room.name===crew[0].room.name))return;
+    const x=Math.min(...crew.map(c=>c.pos.x)),y=Math.min(...crew.map(c=>c.pos.y));
+    if(new Set(crew.map(c=>c.pos.x*50+c.pos.y)).size!==4
+        ||crew.some(c=>c.pos.x>x+1||c.pos.y>y+1))return;
+    return new RoomPosition(x,y,crew[0].room.name);
+}
+
+function garrisonBlocks(room,crew) {
+    const closed=new Set(),own=new Set(crew.map(c=>c.id||c.name));
+    for(const s of room.find(FIND_STRUCTURES))if(s.structureType==="portal"||OBSTACLE_OBJECT_TYPES.includes(s.structureType)
+        ||(s.structureType==="rampart"&&!s.my&&!s.isPublic))closed.add(s.pos.x*50+s.pos.y);
+    for(const c of room.find(FIND_CREEPS))if(!own.has(c.id||c.name))closed.add(c.pos.x*50+c.pos.y);
+    return closed;
+}
+
+function garrisonSquareLegal(room, x,y,closed,terrain) {
+    return x>=1&&y>=1&&x<48&&y<48&&GARRISON_OFFSETS.slice(0,4).every(([dx,dy])=>
+        terrain.get(x+dx,y+dy)!==TERRAIN_MASK_WALL&&!closed.has((x+dx)*50+y+dy));
+}
+
+function garrisonMuster(creep,task,crew,baseOverride) {
+    // Assembling at home or after a split crossing is the only independent
+    // movement in an ordinary room. No member leaves it until the square is complete.
+    const room=creep.room,key=room.name+":"+task.roomName+":"+task.wave+(baseOverride?":handover":"");
+    let p=garrisonMusterCache[key];
+    if(!p||Game.time-p.tick>30){
+        const preferred=task.roomName==="W31N51"&&Game.shard.name===task.originShard&&GARRISON_W31_MUSTER[room.name];
+        const base=baseOverride||preferred||(task.roomExit?.to===room.name&&task.roomExit.landing)
+            ||(room.name===task.homeRoom && room.spawn?.[0]?.pos)||creep.pos;
+        const terrain=Game.map.getRoomTerrain(room.name),closed=garrisonBlocks(room,crew);
+        let best,rank=Infinity;
+        for(let x=base.x-5;x<=base.x+5;x++)for(let y=base.y-5;y<=base.y+5;y++){
+            if(!garrisonSquareLegal(room,x,y,closed,terrain))continue;
+            const r=garrisonRange({x,y},base);
+            if(r<rank){rank=r;best={x,y,tick:Game.time};}
         }
-        return;
+        p=best;
+        if(p)garrisonMusterCache[key]=p;
     }
+    const slot=GARRISON_OFFSETS[task.slot];
+    if(!p||!slot)return;
+    const post=new RoomPosition(p.x+slot[0],p.y+slot[1],room.name);
+    if(!creep.pos.isEqualTo(post))creep.moveTo(post,{range:0,maxRooms:1,reusePath:3,maxOps:700});
+}
 
-    let anchor = new RoomPosition(task.x, task.y, roomName);
-    if (!this.pos.inRangeTo(anchor, 3)) this.moveTo(anchor);
-};
+function garrisonMoveSquare(crew,direction,key) {
+    if(!direction||crew.some(c=>c.fatigue||c.getActiveBodyparts(MOVE)<=0))return false;
+    const moves=Game._garrisonMoveIssued||(Game._garrisonMoveIssued={});
+    if(moves[key])return false;
+    moves[key]=true;
+    const war=global.WarTeamCore?.action;
+    if(!war?.team4checkSquarePos({ _creeps:crew }))return false;
+    return war.moveByDirection({_creeps:crew,_direction:direction});
+}
 
-let garrisonPro = {
-    memoryKey: GARRISON_MEMORY_KEY,
-    replaceTtl: GARRISON_REPLACE_TTL,
-    config(roomName) {
-        return Memory[GARRISON_MEMORY_KEY] && Memory[GARRISON_MEMORY_KEY][roomName];
-    },
-    countCreeps(roomName) {
-        let out = [];
-        for (let name in Game.creeps) {
-            let creep = Game.creeps[name];
-            if (!creep || !creep.memory) continue;
-            if (creep.memory.garrisonRoom == roomName) { out.push(creep); continue; }
-            let tasks = creep.memory.tasks || [];
-            if (tasks.some(t => t && t.taskName == "crossShardGarrison"
-                && (t.garrisonRoom || t.roomName) == roomName)) out.push(creep);
+function garrisonNavigateSquare(crew, pivot, goals, key) {
+    if(!goals.length||crew.some(c=>c.fatigue))return;
+    const {room}=crew[0], goalKey=goals.map(g=>g.pos.x+":"+g.pos.y+":"+g.range).join(";");
+    const terrain=Game.map.getRoomTerrain(room.name),closed=garrisonBlocks(room,crew);
+    let data=garrisonTravelPaths[key];
+    if(data?.goalKey===goalKey&&data.path[0]?.isEqualTo(pivot))data.path.shift();
+    let next=data?.goalKey===goalKey&&data.path[0];
+    if(!next||garrisonRange(next,pivot)!==1||!garrisonSquareLegal(room,next.x,next.y,closed,terrain)){
+        if(!global.WarCache)return;
+        const result=PathFinder.search(pivot,goals,{maxRooms:1,maxOps:2400,
+            roomCallback:name=>name===room.name?WarCache.getMoveAbleCostMatrix(name,crew,1000,undefined,0,true,true,false,5):false});
+        if(result.incomplete)return;
+        garrisonTravelPaths[key]={goalKey,path:result.path,tick:Game.time};
+        next=result.path[0];
+    }
+    if(garrisonTravelPaths[key])garrisonTravelPaths[key].tick=Game.time;
+    if(next&&garrisonSquareLegal(room,next.x,next.y,closed,terrain))
+        garrisonMoveSquare(crew,pivot.getDirectionTo(next),key);
+}
+
+function garrisonExitPlan(room,next,pivot,crew,pin) {
+    const dir=Game.map.findExit(room.name,next);
+    if(dir<0)return;
+    const exits=room.find(dir).filter(p=>!pin||p.x===pin.x&&p.y===pin.y);
+    const closed=garrisonBlocks(room,crew),terrain=Game.map.getRoomTerrain(room.name);
+    const choices=[],seen=new Set();
+    for(const e of exits){
+        // Approach the edge as a square; the one/two-tile threshold itself
+        // is handled by a bounded, shared crossing record.
+        for(let offset=0;offset<2;offset++){
+            const x=dir===RIGHT?47:dir===LEFT?1:e.x-offset;
+            const y=dir===BOTTOM?47:dir===TOP?1:e.y-offset;
+            if(seen.has(x*50+y)||!garrisonSquareLegal(room,x,y,closed,terrain))continue;
+            seen.add(x*50+y);
+            choices.push({pos:new RoomPosition(x,y,room.name),range:0,exit:{x:e.x,y:e.y},dir});
         }
-        return out;
-    },
-    pendingMissions(roomName) {
-        let out = [];
-        let missions = Memory.missions;
-        if (!missions || typeof missions != "object") return out;
-        for (let id in missions) {
-            let m = missions[id];
-            if (m && m.func == "spawnCreepCressShard" && m.data && m.data.garrisonRoom == roomName) {
-                out.push(id);
+    }
+    if(!choices.length&&exits.length) {
+        // Some real gates narrow to one tile several steps before the edge.
+        // Keep the full square until an interior holding square can reach
+        // the same exit in <=8 single-file steps for all four members.
+        const pass=(x,y)=>x>=0&&y>=0&&x<50&&y<50
+            &&terrain.get(x,y)!==TERRAIN_MASK_WALL&&!closed.has(x*50+y);
+        for(const e of exits){
+            const dist=new Map([[e.x*50+e.y,0]]),queue=[[e.x,e.y,0]];
+            for(let i=0;i<queue.length;i++){
+                const [x,y,d]=queue[i];if(d>=8)continue;
+                for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){
+                    const X=x+a,Y=y+b,k=X*50+Y;
+                    if(pass(X,Y)&&!dist.has(k)){dist.set(k,d+1);queue.push([X,Y,d+1]);}
+                }
             }
+            let depth=Infinity, best=[];
+            for(const [x,y,d] of queue){
+                if(!garrisonSquareLegal(room,x,y,closed,terrain))continue;
+                if(!GARRISON_OFFSETS.every(([a,b])=>dist.has((x+a)*50+y+b)))continue;
+                const score=Math.max(...GARRISON_OFFSETS.map(([a,b])=>dist.get((x+a)*50+y+b)));
+                if(score<depth){depth=score;best=[];}
+                if(score===depth)best.push({pos:new RoomPosition(x,y,room.name),range:0,exit:{x:e.x,y:e.y},dir});
+            }
+            choices.push(...best);
         }
-        return out;
+    }
+    choices.sort((a,b)=>garrisonRange(pivot,a.pos)-garrisonRange(pivot,b.pos));
+    return choices.slice(0,48);
+}
+
+function garrisonBestSlots(units,spec) {
+    const list=Array(4).fill(null);
+    for(const c of units){
+        const i=spec(c).slot;
+        if(Number.isInteger(i)&&i>=0&&i<4&&(!list[i]||(c.ticksToLive||0)>(list[i].ticksToLive||0)))list[i]=c;
+    }
+    return list;
+}
+
+function garrisonManeuver(room,crew,posts,hostiles,focus,uncovered,towerRange=8) {
+    const pivot=garrisonPivot(crew),home=posts[0];
+    if(!pivot||!home||crew.some(c=>c.fatigue||c.getActiveBodyparts(MOVE)<=0))return;
+    const target=focus||hostiles.filter(h=>garrisonRange(h,home)<=9)
+        .sort((a,b)=>garrisonRange(a,home)-garrisonRange(b,home)||String(a.id||a.name).localeCompare(String(b.id||b.name)))[0];
+    if(!target&&garrisonRange(pivot,home)===0)return;
+    const retreat=crew.some(c=>c.hits<c.hitsMax*0.7||(uncovered.get(c.name)||0)>c.hits*0.22);
+    const closed=garrisonBlocks(room,crew),terrain=Game.map.getRoomTerrain(room.name);
+    const towers=(room.tower||[]).filter(t=>t.my!==false&&(t.store?.[RESOURCE_ENERGY]||0)>=10);
+    const healBudget=crew.reduce((n,c)=>n+garrisonPower(c,HEAL,"heal",12),0);
+    const firepower=crew.map(c=>garrisonPower(c,RANGED_ATTACK,"rangedAttack",10));
+    const pressure=(x,y)=>crew.map(c=>{
+        const a={x:x+c.pos.x-pivot.x,y:y+c.pos.y-pivot.y,roomName:room.name};
+        return garrisonDamageAfterTough(c,garrisonIncoming(a,hostiles));
+    });
+    const before=pressure(pivot.x,pivot.y);
+    const deathPressure=(p)=>Math.max(...p.map((n,i)=>n/Math.max(1,crew[i].hits)));
+    let best=-Infinity,next=null;
+    // Include staying still. Ties never cause wandering or an independent chase.
+    for(const [dx,dy] of [[0,0],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]]){
+        const x=pivot.x+dx,y=pivot.y+dy, pos={x,y,roomName:room.name};
+        if(garrisonRange(pos,home)>6||!garrisonSquareLegal(room,x,y,closed,terrain))continue;
+        if(GARRISON_OFFSETS.some(([a,b])=>garrisonRange({x:x+a,y:y+b},room.controller)<=2))continue;
+        if(towers.length&&!GARRISON_OFFSETS.every(([a,b])=>towers.some(t=>garrisonRange({x:x+a,y:y+b},t)<=towerRange)))continue;
+        const after=pressure(x,y), damage=after.reduce((n,v)=>n+v,0), prevDamage=before.reduce((n,v)=>n+v,0);
+        if((dx||dy)&&!retreat&&((damage>healBudget*0.95&&damage>prevDamage)||deathPressure(after)>0.5))continue;
+        const d=garrisonRange(pos,home), targetDistance=target?garrisonRange(pos,target):0;
+        const shots=target?crew.reduce((n,c,i)=>n+(garrisonRange({x:x+c.pos.x-pivot.x,y:y+c.pos.y-pivot.y},target)<=3?firepower[i]:0),0):0;
+        const metric=retreat?-damage-deathPressure(after)*1500-d*25
+            :target?shots*0.4-targetDistance*28-d*4-damage*0.08:-d*100;
+        if(metric>best){best=metric;next=(dx||dy)?new RoomPosition(x,y,room.name):null;}
+    }
+    return next?pivot.getDirectionTo(next):null;
+}
+
+const garrisonPostCache = Object.create(null);
+const garrisonFallBackUntil = Object.create(null);
+function garrisonPositions(room,cfg,count) {
+    const anchor = cfg.anchor || {x:41,y:35};
+    const range=cfg.towerRange||7;
+    const key=room.name+":"+anchor.x+":"+anchor.y+":"+count+":"+range, cached=garrisonPostCache[key];
+    if(cached&&Game.time-cached.tick<20)return cached.posts;
+    const terrain = Game.map.getRoomTerrain(room.name);
+    const blockers = new Set(), roads = new Set();
+    for (const obj of room.find(FIND_STRUCTURES)) {
+        const p=obj.pos.x*50+obj.pos.y;
+        if (obj.structureType==="road") roads.add(p);
+        if (obj.structureType==="portal" || obj.structureType==="container"
+            || OBSTACLE_OBJECT_TYPES.includes(obj.structureType)
+            || (obj.structureType==="rampart" && !obj.my && !obj.isPublic)) blockers.add(p);
+    }
+    const towers = (room.tower || []).filter(t=>t.my!==false);
+    const legal = (x,y) => x>0&&y>0&&x<49&&y<49&&terrain.get(x,y)!==TERRAIN_MASK_WALL
+        && !blockers.has(x*50+y) && garrisonRange({x,y},room.controller)>3
+        && (!towers.length || towers.some(t=>garrisonRange({x,y},t)<=range));
+    let best, score=Infinity;
+    for(let x=anchor.x-4;x<=anchor.x+4;x++) for(let y=anchor.y-4;y<=anchor.y+4;y++){
+        const slots=GARRISON_OFFSETS.slice(0,Math.max(4,count)).map(([dx,dy])=>[x+dx,y+dy]);
+        if(!slots.slice(0,4).every(([a,b])=>legal(a,b)))continue;
+        const extras=slots.slice(4).map(([a,b])=>legal(a,b)?[a,b]:null);
+        const posts=[...slots.slice(0,4),...extras];
+        const value=garrisonRange({x,y},anchor)*4+extras.filter(p=>!p).length*5
+            + posts.filter(p=>p&&roads.has(p[0]*50+p[1])).length*7;
+        if(value<score){score=value;best=posts;}
+    }
+    const free=[];
+    for(let x=anchor.x-5;x<=anchor.x+5;x++)for(let y=anchor.y-5;y<=anchor.y+5;y++){
+        if(legal(x,y)&&!best?.some(p=>p&&p[0]===x&&p[1]===y))free.push([x,y]);
+    }
+    free.sort((a,b)=>Number(roads.has(a[0]*50+a[1]))-Number(roads.has(b[0]*50+b[1]))
+        ||garrisonRange({x:a[0],y:a[1]},anchor)-garrisonRange({x:b[0],y:b[1]},anchor));
+    const posts=(best||Array(count).fill(null)).map(p=>p||free.shift()).map(p=>p&&new RoomPosition(p[0],p[1],room.name));
+    garrisonPostCache[key]={tick:Game.time,posts};
+    return posts;
+}
+
+const garrisonPro = {
+    memoryKey:GARRISON_MEMORY_KEY,
+    replaceTtl:GARRISON_REPLACE_TTL,
+    config(name) { return Memory[GARRISON_MEMORY_KEY]?.[name]; },
+    squad() { return 4; },
+    units(name) {
+        const tick = Game._crossGarrisonUnits || (Game._crossGarrisonUnits = {});
+        if (tick[name]) return tick[name];
+        return tick[name] = Object.values(Game.creeps).filter(c => c.memory?.tasks?.some(t=>
+            ["crossShardGarrison","crossShardGarrisonScout"].includes(t.taskName)&&(t.garrisonRoom||t.roomName)===name));
     },
-    /**
-     * 写 W31N51 的攻防审计，供 Codex/控制台排查。
-     * 注意：Memory 按 shard 隔离；target shard 的 audit 不会自动出现在 origin shard。
-     */
-    /**
-     * 目标 shard 在 safe mode 快结束时通知 origin 开启/关闭派兵。
-     * 不能只看 origin 本地 Memory（两个 shard 的 Memory 不同步），也不能早派：
-     * 安全期内派出的 T3 RA 会白烧 1500 tick 生命周期。leadTicks 要覆盖
-     * 孵化 150 + boost ~50 + 过洞/陆行 ~500，默认留 2500 的余量。
-     */
-    requestDispatch(cfg, enabled) {
-        if (!global.ManagerCrossShard || !cfg.originShard) return;
-        // 每 300 tick 重发一次，丢失/重启也能自愈；状态翻转时立即发。
-        if (cfg.requestedDispatch === enabled && Game.time - (cfg.requestTick || 0) < 300) return;
-        ManagerCrossShard.addCrossShardRequest(cfg.originShard, {
-            func: "setMemoryWithPath",
-            data: {
-                path: GARRISON_MEMORY_KEY + "." + cfg.roomName + ".dispatchEnabled",
-                data: enabled,
-            },
-        });
-        cfg.requestedDispatch = enabled;
-        cfg.requestTick = Game.time;
+    spec(creep) {
+        return creep.memory.tasks.find(t=>t.taskName==="crossShardGarrison"||t.taskName==="crossShardGarrisonScout");
+    },
+    receivePlan(data,landing=false) {
+        const cfg = data && this.config(data.roomName);
+        if (!cfg || cfg.active===false || cfg.originShard!==Game.shard.name || cfg.targetShard!==data.targetShard
+            || !garrisonFresh(data,GARRISON_PLAN_MAX_AGE)) return false;
+        if(landing){
+            if(data.landingRoom!==garrisonLandmarks(cfg)?.landingRoom)return false;
+            if (!cfg.landing || data.observedAt >= cfg.landing.observedAt) cfg.landing = {
+                observedAt:data.observedAt,clear:data.clear===true,room:data.landingRoom,
+            };
+        } else if(!cfg.remote || data.observedAt>=cfg.remote.observedAt){
+            if(!Array.isArray(data.members))return false;
+            cfg.remote={observedAt:data.observedAt,open:data.open===true,members:data.members.slice(0,16),scoutTtl:data.scoutTtl||0};
+            cfg.dispatchEnabled=cfg.remote.open;
+        }
+        return true;
+    },
+    canEnterPortal(creep,task,portal) {
+        const cfg=this.config(task.garrisonPortal.roomName),route=cfg&&garrisonLandmarks(cfg);
+        if(!cfg||!route||cfg.active===false||cfg.originShard!==Game.shard.name
+            ||portal.destination?.shard!==cfg.targetShard||portal.destination?.room!==route.landingRoom
+            ||!garrisonFresh(cfg.remote,GARRISON_PLAN_MAX_AGE)||!cfg.remote.open) return false;
+        const scout=task.garrisonPortal.kind==="scout";
+        if(!scout&&task.garrisonPortal.wave!==undefined&&task.garrisonPortal.wave!==cfg.wave)return false;
+        if(!scout&&(!garrisonBodyReady(creep,task.garrisonPortal.slot)||!garrisonFresh(cfg.landing,GARRISON_LANDING_MAX_AGE)
+            ||cfg.landing.room!==route.landingRoom||!cfg.landing.clear))return false;
+        const used=Game._garrisonPortalUsed||(Game._garrisonPortalUsed={});
+        const key=portal.id||portal.pos.roomName+":"+portal.pos.x+":"+portal.pos.y;
+        if(used[key]&&used[key]!==creep.name)return false;
+        used[key]=creep.name;
+        return true;
     },
     audit(cfg) {
-        let room = Game.rooms[cfg.roomName];
-        if (!room || !room.controller) return;
-        if (Game.time % 20 != 0 && cfg.audit && Game.time - (cfg.audit.tick || 0) < 20) return;
-        let hostiles = room.getHostileCreeps ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
-        let partCnt = (creep, part) => creep.getActiveBodyparts
-            ? creep.getActiveBodyparts(part)
-            : (creep.body || []).filter(p => p.type == part).length;
-        let sumParts = part => hostiles.reduce((n, c) => n + partCnt(c, part), 0);
-        let towers = typeof FIND_MY_STRUCTURES != "undefined"
-            ? room.find(FIND_MY_STRUCTURES, {filter: s => s.structureType == STRUCTURE_TOWER})
-            : [];
-        let crew = this.countCreeps(cfg.roomName);
-        let old = cfg.audit || {};
-        cfg.audit = {
-            tick: Game.time,
-            safeMode: room.controller.safeMode || 0,
-            safeModeAvailable: room.controller.safeModeAvailable,
-            safeModeCooldown: room.controller.safeModeCooldown || 0,
-            hostiles: hostiles.length,
-            hostileHeal: sumParts(HEAL),
-            hostileRangedAttack: sumParts(RANGED_ATTACK),
-            hostileAttack: sumParts(ATTACK),
-            hostileBoosted: hostiles.filter(c => (c.body || []).some(p => p.boost)).length,
-            hostileNames: hostiles.map(c => c.name).slice(0, 8),
-            hostileOwners: Array.from(new Set(hostiles.map(c =>
-                c.owner && c.owner.username).filter(Boolean))).slice(0, 4),
-            garrison: crew.length,
-            garrisonNames: crew.map(c => c.name).slice(0, 12),
-            garrisonReady: crew.filter(c => c.ticksToLive === undefined
-                || c.ticksToLive > GARRISON_REPLACE_TTL).length,
-            towers: towers.map(t => t.store && t.store[RESOURCE_ENERGY] || 0),
-            lastHostileTick: hostiles.length ? Game.time : (old.lastHostileTick || 0),
+        const room=Game.rooms[cfg.roomName];
+        if(!room?.controller||!room.controller.my)return;
+        if(cfg.audit&&Game.time-cfg.audit.tick<20)return;
+        const safe=room.controller.safeMode||0;
+        const lead=Math.min(GARRISON_MAX_LEAD,Math.max(650,Number(cfg.leadTicks)||GARRISON_MAX_LEAD));
+        const hostiles=garrisonHostiles(room), units=this.units(cfg.roomName);
+        const fighters=units.filter(c=>this.spec(c).taskName==="crossShardGarrison");
+        const members=fighters.map(c=>[this.spec(c).slot,c.name,c.ticksToLive??1500,c.room.name===cfg.roomName,this.spec(c).wave]);
+        const scoutTtl=Math.max(0,...units.filter(c=>this.spec(c).taskName==="crossShardGarrisonScout").map(c=>c.ticksToLive??1500));
+        const inRoom=fighters.filter(c=>c.room.name===cfg.roomName);
+        cfg.audit={tick:Game.time,safeMode:safe,safeModeAvailable:room.controller.safeModeAvailable,
+            hostiles:hostiles.length,hostileOwners:[...new Set(hostiles.map(c=>c.owner?.username))].slice(0,4),
+            hostileHeal:hostiles.reduce((n,c)=>n+c.getActiveBodyparts(HEAL),0),
+            hostileRangedAttack:hostiles.reduce((n,c)=>n+c.getActiveBodyparts(RANGED_ATTACK),0),
+            hostileAttack:hostiles.reduce((n,c)=>n+c.getActiveBodyparts(ATTACK),0),
+            hostileBoosted:hostiles.filter(c=>c.body?.some(p=>p.boost)).length,
+            garrison:inRoom.length,garrisonNames:inRoom.map(c=>c.name),garrisonReady:inRoom.filter(c=>garrisonBodyReady(c,this.spec(c).slot)).length,
+            inTransit:fighters.length-inRoom.length,towers:(room.tower||[]).map(t=>t.store[RESOURCE_ENERGY]||0),
+            lastHostileTick:hostiles.length?Game.time:(cfg.audit?.lastHostileTick||0),dispatchWindow:lead,
         };
-        // 安全期不派兵；只在 safe mode 剩余 ≤ leadTicks 或已经结束时通知 origin。
-        // 条件只在翻转时发一次；origin 侧 `dispatchEnabled` 才是真正的派兵闸门。
-        let safe = room.controller.safeMode || 0;
-        let lead = Math.max(300, Number(cfg.leadTicks) || 2500);
-        let shouldDispatch = safe <= 0 || safe <= lead;
-        this.requestDispatch(cfg, shouldDispatch);
+        if (hostiles.length) cfg.lastAttack=Object.assign({tick:Game.time}, {
+            creeps:hostiles.slice(0,8).map(c=>[c.owner?.username,c.name,c.pos.x,c.pos.y,
+                (c.body||[]).filter(p=>p.hits>0).reduce((n,p)=>{const k=p.type+(p.boost?":"+p.boost:"");n[k]=(n[k]||0)+1;return n;},{})]),
+        });
+        ManagerCrossShard.addCrossShardRequest(cfg.originShard,{
+            func:"crossShardGarrisonPlan",data:{roomName:cfg.roomName,targetShard:cfg.targetShard,
+                observedAt:Date.now(),open:safe<=lead,members,scoutTtl},
+        },"garrison-plan:"+cfg.roomName+":"+Game.time);
+    },
+    covered(cfg,slot,units) {
+        const all=cfg.remote.members.filter(x=>x[0]===slot&&x[4]===cfg.wave);
+        const record=cfg.roster[slot];
+        if(all.some(x=>x[2]>0))return true;
+        const here=units.find(c=>this.spec(c).slot===slot&&this.spec(c).taskName==="crossShardGarrison"
+            && this.spec(c).wave===cfg.wave && (c.spawning || (c.ticksToLive||0)>180));
+        if(here){
+            if(record?.name===here.name)record.lastSeen=Game.time;
+            return true;
+        }
+        if(!record)return false;
+        if(all.some(x=>x[1]===record.name)){record.landed=true;return false;}
+        // Between leaving origin Game.creeps and arriving in the next target
+        // report, a real spawn must still occupy its slot.
+        return !record.landed && Game.time-(record.lastSeen||record.tick)<90;
     },
     ensure(cfg) {
-        if (!global.ManagerCrossShard || !global.StationLab || !TeamRaL1) {
-            cfg.dispatchError = "missing cross-shard/boost/team dependency";
+        if(!garrisonFresh(cfg.remote,GARRISON_PLAN_MAX_AGE)||!cfg.remote.open){
+            cfg.dispatchError="waiting safe-mode window";
             return;
         }
-        // 目标 shard 在 safe mode 剩余 ≤ leadTicks 时通过跨 shard request 打开；
-        // 安全期内保持关闭，已到期的 roster 不再续派。
-        if (cfg.dispatchEnabled !== true) {
-            if (cfg.dispatchError != "waiting safe-mode window") {
-                cfg.dispatchError = "waiting safe-mode window";
-            }
-            return;
+        const room=Game.rooms[cfg.spawnRoom],land=garrisonLandmarks(cfg);
+        if(!room?.my||!land||!global.StationLab||!global.StationHive)return;
+        const units=this.units(cfg.roomName);
+        const atTarget=cfg.remote.members.filter(x=>x[3]&&x[4]===cfg.wave);
+        const complete=new Set(atTarget.map(x=>x[0])).size>=4;
+        if(complete)cfg.waveDeployed=true;
+        if(!cfg.wave||(cfg.waveDeployed&&(!complete||atTarget.some(x=>x[2]<=GARRISON_REPLACE_TTL)))){
+            cfg.wave=Game.time; cfg.waveDeployed=false;cfg.roster={};
         }
-        let spawnRoom = Game.rooms[cfg.spawnRoom];
-        if (!spawnRoom || !spawnRoom.my) {
-            cfg.dispatchError = "spawn room not visible/owned";
-            return;
+        cfg.roster=cfg.roster||{};
+        let missing=Array.from({length:this.squad(cfg)},(_,i)=>i).filter(i=>!this.covered(cfg,i,units));
+        if(missing.length&&Object.keys(cfg.roster).length>=4&&(
+            cfg.remote.members.some(x=>x[4]===cfg.wave)
+            ||units.some(c=>this.spec(c).wave===cfg.wave&&c.room.name!==cfg.spawnRoom))){
+            // A member lost after departure must not cause a lone highway
+            // reinforcement. Launch a fresh complete wave instead.
+            cfg.wave=Game.time;cfg.waveDeployed=false;cfg.roster={};
+            missing=[0,1,2,3];
         }
-        let boost = TeamRaL1.raBoost1();
-        if (!StationLab.boostAble(spawnRoom, boost)) {
-            cfg.dispatchError = "boostAble=false";
-            return;
-        }
-        if (!cfg.path || !cfg.path.path || !cfg.path.path.length) {
-            cfg.dispatchError = "missing cross-shard path";
-            return;
-        }
-        let squad = Math.max(1, Number(cfg.squad) || 1);
-        // 驻守爬跨过虫洞后就不再出现在 origin 的 Game.creeps 里，无法用本地存活
-        // 数判断编制。用「派兵台账」记录每次成功入队的出生批次，按 cycle 到期
-        // 退役；每次只保留一个 pending mission，既不会漏派也不会在跨 shard 后
-        // 重复刷兵。目标房的真实存活由 target shard 的 audit.garrison 记录。
-        let cycle = Math.max(300, Number(cfg.cycle) || 1150);
-        let roster = (cfg.dispatches || []).filter(t => Game.time - t < cycle);
-        cfg.dispatches = roster;
-        if (roster.length >= squad) {
-            if (cfg.dispatchError) delete cfg.dispatchError;
-            return;
-        }
-        // 一次只允许一个未完成的出生 mission，避免同一批孵出 2 倍兵力。
-        if (this.pendingMissions(cfg.roomName).length) return;
-
-        let slot = roster.length % (cfg.slots && cfg.slots.length || 1);
-        let slots = cfg.slots || [[0, 0]];
-        let offset = slots[slot % slots.length];
-        let anchor = cfg.anchor || {x: 25, y: 25};
-        let task = UtilsTask.taskData("crossShardGarrison", "registerCrossShardGarrison", {
-            roomName: cfg.roomName,
-            garrisonRoom: cfg.roomName,
-            x: anchor.x + offset[0],
-            y: anchor.y + offset[1],
-            slot: slot,
-        });
-        let tasks = [
-            task,
-            UtilsTask.taskData("moveCrossShardByPath", undefined, cfg.path),
-            StationLab.generatorBoostResTask(boost, spawnRoom)[0],
-        ];
-        let mission = {
-            func: "spawnCreepCressShard",
-            data: {
-                spawnRoom: cfg.spawnRoom,
-                targetRoomName: cfg.roomName,
-                body: TeamRaL1.raBody1,
-                role: "raL1",
-                tasks: tasks,
-                garrisonRoom: cfg.roomName,
-            },
+        if(!missing.length){delete cfg.dispatchError;return;}
+        const available=()=>room.currentEnergyAvailable??room.energyAvailable;
+        const free=()=>room.spawn.some(s=>!s.spawning&&!room.spawnedMap?.[s.id]&&s.isActive());
+        const tasksFor=(kind,slot)=>{
+            const task=UtilsTask.taskData(kind==="scout"?"crossShardGarrisonScout":"crossShardGarrison",
+                "registerCrossShardGarrison",{roomName:cfg.roomName,garrisonRoom:cfg.roomName,slot,
+                originShard:cfg.originShard,targetShard:cfg.targetShard,homeRoom:cfg.spawnRoom,
+                landingRoom:land.landingRoom,landingRoute:land.route,originRoute:land.originRoute,
+                portalPath:land.path,wave:cfg.wave});
+            return [task];
         };
-        let id = ManagerCrossShard.addCrossShardRequest(cfg.originShard, mission);
-        roster.push(Game.time);
-        cfg.lastDispatch = {tick: Game.time, id: id, slot: slot};
+        if(cfg.remote.scoutTtl<180&&!units.some(c=>this.spec(c).taskName==="crossShardGarrisonScout"
+            && (c.spawning||(c.ticksToLive||0)>180)) && Game.time-(cfg.scoutSentAt??-Infinity)>70 && free()&&available()>=50){
+            const scout=StationHive.trySpawn(room,cfg.roomName,[MOVE],"raL1",tasksFor("scout",null));
+            if(scout)cfg.scoutSentAt=Game.time;
+        }
+        for(const slot of missing){
+            const spec=garrisonBodySpec(slot);
+            if(!spec){cfg.dispatchError="missing TeamL2 R2H2 bodies";return;}
+            const {body,boosts}=spec,cost=Utils.getBodyEnergyNeed(body);
+            if(!free()||available()<cost) {cfg.dispatchError="waiting spawn capacity";return;}
+            if(!StationLab.boostAble(room,boosts)) {cfg.dispatchError="boostAble=false";return;}
+            const tasks=tasksFor("member",slot).concat(StationLab.generatorBoostResTask(boosts,room));
+            if(tasks.length<2) {cfg.dispatchError="no boost task";return;}
+            const name=StationHive.trySpawn(room,cfg.roomName,body,"raL1",tasks);
+            if(!name){cfg.dispatchError="spawn rejected";return;}
+            cfg.roster[slot]={name,tick:Game.time};
+            cfg.lastDispatch={tick:Game.time,name,slot};
+        }
         delete cfg.dispatchError;
     },
+    startPortal(creep,task,kind) {
+        const cfg=this.config(task.roomName);
+        if(!cfg||!garrisonFresh(cfg.remote,GARRISON_PLAN_MAX_AGE)||!cfg.remote.open){
+            if(creep.ticksToLive<180){creep.memory.roomName=task.homeRoom;creep.popTask().addTask(UtilsTask.taskData("recycleCreep"));}
+            return;
+        }
+        if(kind==="member"&&!garrisonBodyReady(creep,task.slot)){
+            task.boostWaitAt ??= Game.time;
+            if(Game.time-task.boostWaitAt>3){creep.memory.roomName=task.homeRoom;creep.popTask().addTask(UtilsTask.taskData("recycleCreep"));}
+            return;
+        }
+        if(kind==="member"&&!task.portalReleased)return;
+        if(!task.portalPath?.length)return;
+        creep.addTask(UtilsTask.taskData("moveCrossShardByPath",undefined,{path:task.portalPath,
+            expectedDestShard:task.targetShard,peaceful:true,garrisonPortal:{roomName:task.roomName,kind,wave:task.wave,slot:task.slot}})).execLastTask();
+    },
+    scout(creep,task) {
+        if(Game.shard.name===task.originShard)return this.startPortal(creep,task,"scout");
+        if(Game.shard.name!==task.targetShard||creep.room.name!==task.landingRoom)return;
+        let clear=garrisonLandingClear(creep.room);
+        if(task.landingClear===clear&&Game.time-(task.landingReportAt??-Infinity)<8)return;
+        task.landingClear=clear;task.landingReportAt=Game.time;
+        ManagerCrossShard.addCrossShardRequest(task.originShard,{
+            func:"crossShardGarrisonLanding",data:{roomName:task.roomName,targetShard:task.targetShard,
+                observedAt:Date.now(),landingRoom:task.landingRoom,clear},
+        },"garrison-landing:"+task.roomName+":"+Game.time);
+    },
+    travel(creep,task,arrived) {
+        if(!arrived){
+            const cfg=this.config(task.roomName);
+            const fresh=garrisonFresh(cfg?.remote,GARRISON_PLAN_MAX_AGE);
+            if(!cfg||cfg.wave!==task.wave||(fresh&&!cfg.remote.open)){
+                if(creep.room.name===task.homeRoom){creep.memory.roomName=task.homeRoom;creep.popTask().addTask(UtilsTask.taskData("recycleCreep"));}
+                return;
+            }
+            if(!fresh)return;
+        }
+        const key=task.roomName+":"+task.wave+":"+creep.room.name;
+        const available=this.units(task.roomName).filter(c=>{
+            const s=this.spec(c);
+            return !c.spawning && s.taskName==="crossShardGarrison"&&s.wave===task.wave
+                && c.lastTask()?.taskName==="crossShardGarrison"&&(arrived||garrisonBodyReady(c,s.slot));
+        });
+        const crew=garrisonBestSlots(available,c=>this.spec(c)).filter(Boolean);
+        const s=task.roomExit;
+        if(s){
+            if(creep.room.name===s.from)return garrisonTravel(creep,s.to,s.exit);
+            if(creep.room.name===s.to){
+                if(crew.length!==4||crew.some(c=>c.room.name!==s.to))return garrisonMuster(creep,task,crew.filter(c=>c.room.name===s.to));
+                for(const c of crew)delete this.spec(c).roomExit;
+            }
+        }
+        if(!arrived&&task.portalReleased)return this.startPortal(creep,task,"member");
+        if(crew.length!==4||crew.some(c=>c.room.name!==creep.room.name)){
+            // Boosted units may gather next to their spawn or landing tile,
+            // but do not travel out of that room independently.
+            if(arrived||garrisonBodyReady(creep,task.slot))return garrisonMuster(creep,task,crew.filter(c=>c.room.name===creep.room.name));
+            return this.startPortal(creep,task,"member");
+        }
+        const pivot=garrisonPivot(crew);
+        if(!pivot)return garrisonMuster(creep,task,crew);
+        const room=creep.room, seen=garrisonHostiles(room);
+        if(seen.some(garrisonArmed))return;
+        const route=arrived?task.landingRoute:task.originRoute;
+        const index=route?.indexOf(room.name)??-1;
+        if(index<0)return;
+        const next=route[index+1];
+        if(!next){
+            if(arrived)return;
+            const p=task.portalPath[0];
+            if(crew.every(c=>garrisonRange(c,p)<=4)){
+                for(const c of crew)this.spec(c).portalReleased=true;
+                return this.startPortal(creep,task,"member");
+            }
+            return garrisonNavigateSquare(crew,pivot,[{pos:new RoomPosition(p.x,p.y,p.roomName),range:3}],key);
+        }
+        const nextRoom=Game.rooms[next];
+        if(next!==task.roomName&&nextRoom&&((nextRoom.controller?.owner&&!nextRoom.controller.my)
+            ||garrisonHostiles(nextRoom).some(garrisonArmed)))return;
+        const pinnedNext=GARRISON_W31_ORIGIN_ROUTE[GARRISON_W31_ORIGIN_ROUTE.indexOf(room.name)+1];
+        const pin=arrived&&next===task.roomName?this.config(task.roomName)?.entryGate:
+            !arrived&&task.roomName==="W31N51"&&next===pinnedNext?GARRISON_W31_GATES[room.name]:undefined;
+        const chosen=garrisonExitPlan(room,next,pivot,crew,pin)||[],near=chosen.find(x=>x.pos.isEqualTo(pivot));
+        if(near){
+            const landing={x:near.exit.x,y:near.exit.y};
+            if(near.dir===LEFT)landing.x=49;else if(near.dir===RIGHT)landing.x=0;
+            else if(near.dir===TOP)landing.y=49;else landing.y=0;
+            const crossing={from:room.name,to:next,exit:near.exit,landing};
+            for(const c of crew)this.spec(c).roomExit=crossing;
+            return garrisonTravel(creep,next,near.exit);
+        }
+        return garrisonNavigateSquare(crew,pivot,chosen,key);
+    },
+    combatFrame(room) {
+        if(room._garrisonCombatFrame)return room._garrisonCombatFrame;
+        const cfg=this.config(room.name);
+        if(!cfg||cfg.active===false||cfg.targetShard!==Game.shard.name)return;
+        const all=this.units(room.name).filter(c=>!c.spawning&&c.room.name===room.name
+            && this.spec(c).taskName==="crossShardGarrison");
+        if(!all.length)return;
+        const waves=new Map();
+        for(const c of all){
+            const w=this.spec(c).wave;
+            if(!waves.has(w))waves.set(w,[]);
+            waves.get(w).push(c);
+        }
+        const ready=[...waves.entries()].map(([wave,cs])=>{
+            const slots=garrisonBestSlots(cs,c=>this.spec(c)), crew=slots.filter(Boolean);
+            return {wave,slots,count:crew.length,formed:!!garrisonPivot(crew)};
+        });
+        ready.sort((a,b)=>b.count-a.count || Number(b.formed)-Number(a.formed) || (b.wave||0)-(a.wave||0));
+        const slots=ready[0].slots;
+        const crew=slots.filter(Boolean);
+        const innerPosts=garrisonPositions(room,cfg,slots.length);
+        const entryPosts=cfg.entryAnchor
+            ? garrisonPositions(room,{anchor:cfg.entryAnchor,towerRange:19},slots.length) : [];
+        const fallbackPosts=cfg.entryFallback
+            ? garrisonPositions(room,{anchor:cfg.entryFallback,towerRange:16},slots.length) : innerPosts;
+        const armed=room.controller?.safeMode?[]:garrisonHostiles(room);
+        const incoming=new Map(crew.map(c=>[c.name,garrisonDamageAfterTough(c,garrisonIncoming(c,armed))]));
+        const projected=new Map(crew.map(c=>[c.name,c.hitsMax-c.hits+incoming.get(c.name)]));
+        const heal=new Map();
+        for(const c of crew){
+            if(c.getActiveBodyparts(HEAL)<=0)continue;
+            const patients=crew.filter(e=>garrisonRange(c,e)<=3&&projected.get(e.name)>0)
+                .sort((a,b)=>(projected.get(b.name)-b.hits*0.15)-(projected.get(a.name)-a.hits*0.15)||a.name.localeCompare(b.name));
+            const patient=patients[0];
+            if(!patient)continue;
+            const direct=garrisonRange(c,patient)<=1;
+            heal.set(c.name,{patient,direct});
+            projected.set(patient.name,projected.get(patient.name)-garrisonPower(c,HEAL,direct?"heal":"rangedHeal",direct?12:4));
+        }
+        let focus, best=-Infinity;
+        for(const e of armed){
+            const shooters=crew.filter(c=>garrisonRange(c,e)<=3&&c.getActiveBodyparts(RANGED_ATTACK)>0
+                &&heal.get(c.name)?.direct!==false);
+            if(!shooters.length)continue; // never chase enemies outside the defended area
+            const damage=shooters.reduce((n,c)=>n+garrisonPower(c,RANGED_ATTACK,"rangedAttack",10),0)
+                +(room.tower||[]).filter(t=>(t.store[RESOURCE_ENERGY]||0)>=10).reduce((n,t)=>n+(t.getDamageTo?.(e)||0),0);
+            const repair=armed.reduce((n,h)=>{
+                const d=garrisonRange(h,e);
+                return n+(d<=3?garrisonPower(h,HEAL,d<=1?"heal":"rangedHeal",d<=1?12:4):0);
+            },0);
+            const net=garrisonDamageAfterTough(e,damage)-repair;
+            const value=(net>=e.hits?10000:0)+net+garrisonPower(e,HEAL,"heal",12)*0.3-e.hits*0.08;
+            if(value>best||(value===best&&String(e.id||e.name)<String(focus?.id||focus?.name))){
+                best=value;focus=e;
+            }
+        }
+        const pivot=garrisonPivot(crew),formed=!!pivot;
+        const danger=armed.length&&crew.some(c=>c.hits<c.hitsMax*0.7||(projected.get(c.name)||0)>c.hits*0.22);
+        if(danger&&entryPosts.every(Boolean)&&entryPosts.length===4)garrisonFallBackUntil[room.name]=Game.time+35;
+        const fallBack=(garrisonFallBackUntil[room.name]||0)>Game.time;
+        const hasEntry=entryPosts.length===4&&entryPosts.every(Boolean)&&
+            (room.tower||[]).some(t=>(t.store?.[RESOURCE_ENERGY]||0)>=10);
+        const posts=hasEntry?(fallBack&&fallbackPosts.every(Boolean)&&fallbackPosts.length===4?fallbackPosts:entryPosts):innerPosts;
+        // If the approach/retreat is longer than a combat maneuver, route
+        // the entire 2x2 to the prepared post. The four never break to chase.
+        const transfer=formed&&hasEntry&&posts[0]&&garrisonRange(pivot,posts[0])>2
+            && (fallBack || !armed.length);
+        const direction=formed&&!transfer&&garrisonManeuver(room,crew,posts,armed,focus,projected,hasEntry?19:8);
+        return room._garrisonCombatFrame={slots,posts,focus,heal,formed,direction,armed,wave:ready[0].wave,
+            transfer:transfer?{pivot,post:posts[0]}:null};
+    },
+    towerFocus(room) { return this.combatFrame(room)?.focus; },
+    towerSupplyUrgent(room) {
+        const cfg=this.config(room.name);
+        return !!(cfg&&cfg.active!==false&&cfg.targetShard===Game.shard.name&&!room.controller?.safeMode
+            &&garrisonHostiles(room).some(garrisonArmed));
+    },
+    defend(creep,task) {
+        if(Game.shard.name===task.originShard&&task.portalPath)return this.travel(creep,task,false);
+        if(task.targetShard&&Game.shard.name!==task.targetShard)return;
+        if(creep.room.name!==task.roomName){
+            if(creep.hits<creep.hitsMax)creep.heal(creep);
+            if(task.landingRoute)return this.travel(creep,task,true);
+            // Existing stationary garrisons without the new route remain
+            // compatible, but an unexpected new landing is not chased.
+            if(!task.landingRoute)creep.moveTo(new RoomPosition(25,25,task.roomName));
+            return;
+        }
+        const f=this.combatFrame(creep.room);
+        if(!f)return;
+        const i=task.slot,other=f.slots[i],post=f.posts[i];
+        if(other!==creep){
+            if((task.wave||0)>(f.wave||0)){
+                const batch=this.units(task.roomName).filter(c=>c.room.name===creep.room.name&&this.spec(c).wave===task.wave);
+                return garrisonMuster(creep,task,batch,this.config(task.roomName)?.anchor||{x:41,y:35});
+            }
+            if(!f.armed.length&&other&&f.slots.every(Boolean)){
+                creep.popTask().addTask(UtilsTask.taskData("recycleCreep"));
+            } else if(creep.hits<creep.hitsMax)creep.heal(creep);
+            return;
+        }
+        const heal=f.heal.get(creep.name);
+        if(heal)creep[heal.direct?"heal":"rangedHeal"](heal.patient);
+        // Keep the full direct-heal + ranged volley in formation. If an
+        // unformed unit needs ranged rescue, reserve this creep's action.
+        if(heal?.direct!==false&&f.focus&&garrisonRange(creep,f.focus)<=3)creep.rangedAttack(f.focus);
+        if(f.transfer)garrisonNavigateSquare(f.slots,f.transfer.pivot,[{pos:f.transfer.post,range:0}],task.roomName+":post-transfer");
+        else if(f.formed)garrisonMoveSquare(f.slots,f.direction,task.roomName+":combat");
+        else if(post&&garrisonRange(creep,post)>0) {
+            // Moving individually here only reforms a broken square. Combat
+            // advance and retreat are issued through WarTeamCore together.
+            creep.moveTo(post,{range:0,maxRooms:1,reusePath:4,maxOps:600});
+        }
+    },
     exec() {
-        if (Game.time % GARRISON_EXEC_INTERVAL != 0) return;
-        if (!Memory[GARRISON_MEMORY_KEY]) return;
-        for (let roomName in Memory[GARRISON_MEMORY_KEY]) {
-            let cfg = Memory[GARRISON_MEMORY_KEY][roomName];
-            if (!cfg || cfg.active === false || !cfg.roomName) continue;
-            if (Game.shard.name == cfg.targetShard) this.audit(cfg);
-            if (Game.shard.name == cfg.originShard) this.ensure(cfg);
+        if(Game.time%GARRISON_EXEC_INTERVAL!==0)return;
+        if(Game.time%200===0)for(const cache of [garrisonTravelPaths,garrisonMusterCache,garrisonPostCache])
+            for(const [k,v] of Object.entries(cache))if(Game.time-v.tick>600)delete cache[k];
+        for(const cfg of Object.values(Memory[GARRISON_MEMORY_KEY]||{})){
+            if(!cfg||cfg.active===false||!cfg.roomName)continue;
+            if(Game.shard.name===cfg.targetShard)this.audit(cfg);
+            if(Game.shard.name===cfg.originShard)this.ensure(cfg);
         }
     },
 };
 
-global.CrossShardGarrison = garrisonPro;
+Creep.prototype.registerCrossShardGarrison = function () {
+    const t=(this.memory.tasks||[])[0];
+    if(t?.taskName==="crossShardGarrison"||t?.taskName==="crossShardGarrisonScout"){
+        this.memory.garrisonRoom=t.garrisonRoom||t.roomName;
+        this.memory.garrisonSlot=t.slot;
+    }
+};
+Creep.prototype.crossShardGarrison = function () { garrisonPro.defend(this,this.lastTask()); };
+Creep.prototype.crossShardGarrisonScout = function () { garrisonPro.scout(this,this.lastTask()); };
+
+global.missionFunc=global.missionFunc||{};
+global.missionFunc.crossShardGarrisonPlan=d=>garrisonPro.receivePlan(d);
+global.missionFunc.crossShardGarrisonLanding=d=>garrisonPro.receivePlan(d,true);
+global.CrossShardGarrison=garrisonPro;

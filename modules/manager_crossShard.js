@@ -65,7 +65,11 @@ Creep.prototype.testEnd = function(){
  */
 Creep.prototype.moveCrossShardByPath = function(){
     let task = this.lastTask()
-    if (!task.peaceful) {
+    if (task.garrisonPortal && task.peaceful) {
+        // Garrison portal transit is peaceful, but a damaged member should
+        // spend its action healing itself rather than attacking or chasing.
+        if (this.hits < this.hitsMax) this.heal(this)
+    } else if (!task.peaceful) {
         this.autoHeal()
         let hostile = this.pos.findClosestByRange(FIND_HOSTILE_CREEPS)
         this.rangedAttack(hostile)
@@ -76,6 +80,8 @@ Creep.prototype.moveCrossShardByPath = function(){
     task.index = Number.isFinite(task.index) ? Math.max(0, Math.floor(task.index)) : 0;
 
     let shard = Game.shard.name
+    let canEnterPortal = portal => !task.garrisonPortal
+        || global.CrossShardGarrison?.canEnterPortal?.(this, task, portal) === true
     let getPortal = waypoint => {
         if (Game.rooms && !Game.rooms[waypoint.roomName]) return undefined
         let pos = new RoomPosition(waypoint.x,waypoint.y,waypoint.roomName)
@@ -101,6 +107,7 @@ Creep.prototype.moveCrossShardByPath = function(){
                 let portal = departurePos.lookFor(LOOK_STRUCTURES).filter(e=>e.structureType==STRUCTURE_PORTAL).head()
                 let liveDestination = portal && portal.destination && portal.destination.shard
                 if (portal && liveDestination == pending.toShard) {
+                    if (!canEnterPortal(portal)) return
                     // The original request already includes this task state;
                     // keep retrying movement without enqueuing another copy.
                     this.goTo(departurePos)
@@ -178,6 +185,9 @@ Creep.prototype.moveCrossShardByPath = function(){
                 // landing-side return portal as their final waypoint.
                 return this.popTask().execLastTask()
             } else if(destShard && destShard != shard){
+                // A garrison member must be authorized at the last safe point:
+                // before recording/submitting the hop or moving onto the portal.
+                if (!canEnterPortal(portal)) return
                 let departureIndex = task.index
                 task.pendingTransition = {
                     fromShard: shard,

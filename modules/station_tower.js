@@ -143,6 +143,14 @@ let pro={
                 holdFire = !focus && hostiles.every(isNpc);
             }
 
+            // The opt-in cross-shard garrison scores the same target for all
+            // RA defenders. Join that volley instead of splitting tower fire.
+            const squadFocus = hostiles.length && typeof global !== "undefined" && global.CrossShardGarrison?.towerFocus?.(room);
+            if (squadFocus && hostiles.includes(squadFocus)) {
+                focus = squadFocus;
+                holdFire = false;
+            }
+
             room.tower.filter(e=>!e._used).forEach(tower => {
 
                 if(injured){
@@ -195,6 +203,7 @@ let pro={
     /** 房间当前是否有 Invader 活体（用户 2026-11-26：有敌时塔优先补能）。 */
     invaderThreat(room) {
         if (!room) return false;
+        if (typeof global !== "undefined" && global.CrossShardGarrison?.towerSupplyUrgent?.(room)) return true;
         let hostiles = room.getHostileCreeps
             ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
         return (hostiles || []).some(c => c && c.owner && c.owner.username == "Invader");
