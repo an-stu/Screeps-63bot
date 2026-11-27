@@ -984,4 +984,30 @@ function transitCreep(ctx, room, name, slot, pos, wave = 4) {
     assert.equal(ctx.acceptedSpawns[0].isScout,true);
 }
 
+// 17. The W31N55 exit has legal squares on the far side of a one-tile
+// chokepoint. Keeping the old edge goals strands a perfectly formed crew.
+{
+    const ctx = load({shard: "shard3"});
+    const c = cfg(ctx, {wave: 4, remote: freshRemote({scoutTtl: 500})});
+    const room = ctx.Game.rooms[c.spawnRoom];
+    const exit = x => new ctx.RoomPosition(x,0,room.name);
+    room.find = t => t===ctx.TOP ? [exit(38),exit(41)] : [];
+    room.getHostileCreeps = () => [];
+    ctx.Game.map.findExit = () => ctx.TOP;
+    ctx.Game.map.getRoomTerrain = () => ({get:(x,y)=>y===3&&x!==38?ctx.TERRAIN_MASK_WALL:0});
+    ctx.WarCache = {getMoveAbleCostMatrix() {return {};}};
+    const crew = [[2,14],[2,15],[3,14],[3,15]].map(([x,y],slot) =>
+        transitCreep(ctx,room,"north-gate-"+slot,slot,{x,y}));
+    for (const m of crew) m.task.originRoute = [room.name,"W31N56","W30N56"];
+    ctx.Game.creeps = Object.fromEntries(crew.map(m=>[m.name,m]));
+    ctx.CrossShardGarrison.travel(crew[0],crew[0].task,false);
+    const goals = ctx.PathFinder.calls[0].goals;
+    assert.deepEqual(Array.from(goals,g=>[g.pos.x,g.pos.y]),[[37,4]],"target the reachable side while in formation");
+    assert.ok(crew.every(m=>!m.task.roomExit),"no individual movement until the squad reaches staging");
+    crew.forEach((m,i)=>{m.pos.x=37+Math.floor(i/2);m.pos.y=4+i%2;});
+    for (const m of crew) ctx.CrossShardGarrison.travel(m,m.task,false);
+    assert.ok(crew.every(m=>m.task.roomExit?.to==="W31N56"&&m.task.roomExit.exit.x===38));
+    assert.ok(crew.every(m=>m.actions.some(a=>a[0]==="moveTo"&&a[1]===38&&a[2]===0)));
+}
+
 console.log("cross-shard garrison checks passed");

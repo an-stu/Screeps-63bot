@@ -468,7 +468,11 @@ const GARRISON_OFFSETS = [[0,0],[0,1],[1,0],[1,1]];
 // bypasses both that dead edge and the foreign W31N51/52/53 rooms.
 const GARRISON_W31_ORIGIN_ROUTE = ["W31N55","W31N56","W30N56","W30N55","W30N54","W30N53","W30N52","W30N51","W30N50"];
 const GARRISON_W31_MUSTER = {W31N55:{x:2,y:14},W31N56:{x:41,y:47},W30N56:{x:1,y:45},W30N55:{x:5,y:1}};
-const GARRISON_W31_GATES = {W31N55:{x:41,y:0},W31N56:{x:49,y:46},W30N56:{x:6,y:49}};
+// W31N55's north border has open 2x2 tiles behind a one-tile gap in the
+// wall line at y=3. Hold the square on the reachable side of that gap.
+const GARRISON_W31_GATES = {
+    W31N55:{x:38,y:0,staging:{x:37,y:4}},W31N56:{x:49,y:46},W30N56:{x:6,y:49},
+};
 const garrisonTravelPaths = Object.create(null);
 const garrisonMusterCache = Object.create(null);
 
@@ -656,6 +660,11 @@ function garrisonExitPlan(room,next,pivot,crew,pin) {
     if(dir<0)return;
     const exits=room.find(dir).filter(p=>!pin||p.x===pin.x&&p.y===pin.y);
     const closed=garrisonBlocks(room,crew),terrain=Game.map.getRoomTerrain(room.name);
+    if(pin?.staging){
+        const {x,y}=pin.staging;
+        return exits.length&&garrisonSquareLegal(room,x,y,closed,terrain)
+            ? [{pos:new RoomPosition(x,y,room.name),range:0,exit:{x:pin.x,y:pin.y},dir}] : [];
+    }
     const choices=[],seen=new Set();
     for(const e of exits){
         // Approach the edge as a square; the one/two-tile threshold itself
