@@ -1,3 +1,24 @@
+## v0.78.359 — shard2/W31N51 跨 shard T3 RA 驻守
+
+- 2026-11-27 shard2/W31N51（RCL5）被使用 Overmind 的玩家攻击，已触发 safe mode
+  （剩约 1.06 万 tick，safeModeAvailable=3）。来袭编成为 **4 人 heal+RA T3 强化
+  小队**；Overmind 的 pair/swarm destroy 另有 T3 melee zergling + T3 transfuser
+  模板，因此防守不能沿用 `raL1` 的贴脸打法。
+- 新增 `CrossShardGarrison`（挂在 team_raL1.js，无需旗标）：从 shard3/W31N55
+  （RCL8、3 spawn、X*HO2 库存充足）经 `W30N50(30,8)` 虫洞向 shard2/W31N51
+  派送 **6 只 50 部件 T3 RA**（TeamRaL1.raBody1/raBoost1）。任务栈为
+  `boost → moveCrossShardByPath → crossShardGarrison`。
+- 驻守行为：有 ATTACK 近战时向 4 格外风筝；面对 heal+RA 小队时按
+  HEAL 部件优先、残血其次的固定顺序集火，并贴近到 1 格打满 T3 RA 伤害；
+  无敌人时回 anchor。6 个驻守位已按 W31N51 核心区可站立格排布。
+- 跨 shard 后 origin 看不到爬：用 `Memory.crossShardGarrisons[room].dispatches`
+  台账按 cycle 换班（默认 1150 tick），每次只保留一个 pending mission，避免
+  失联漏派或重复刷兵。目标 shard 每 20 tick 写 `audit`：safe mode 剩余/可用次数、
+  敌方 HEAL/RA/ATTACK 与强化数、garrison 实际存活、tower 能量（Codex 审计入口）。
+- 代码内已写 `CODEX AUDIT` 注释，明确后续修改必须同时监视 W31N51 与审计
+  shard3→shard2 的出兵/boost/虫洞链。开启方式：
+  `Memory.crossShardGarrisons.W31N51 = {active:true, ...}`（两个 shard 各自配置）。
+
 ## v0.78.358 — 丢 spawn 的跨 shard 房重新援建，蓝图多槽位逐个试
 
 - shard2/W31N51（RCL5、storage 43,982、hive 1500/1500 满、2 tower、0 只爬、0 工地、**0 个 spawn**）已停摆约 137k tick：spawn 被打掉后没 spawn 生不出爬，没爬又建不了 spawn。跨 shard 援建配置在 spawn 建成、RCL≥3 时即 COMPLETE 删除，而恢复逻辑只认「RCL<3 且没 storage」，因此已完成的房再也拿不回援建队。

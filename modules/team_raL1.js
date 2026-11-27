@@ -450,3 +450,256 @@ let pro = {
 }
 
 global.TeamRaL1=pro;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 跨 shard T3 RA 驻守 —— 2026-11-27 shard2/W31N51
+//
+// 现场：W31N51 被一名使用 Overmind 的玩家攻击，控制器已开 safe mode
+// （三次可用，本次剩约 1.06 万 tick）。来时编成是 4 人 heal+RA 的 T3 强化
+// 小队；Overmind 的 pairDestroy/swarmDestroy 还会带 T3 melee zergling +
+// T3 transfuser（见其 CombatSetups.zerglings.boosted_T3 / healers.boosted_T3）。
+// 因此本驻守队使用 T3 强化 RA 一体机（TeamRaL1.raBody1/raBoost1），
+// 遇到 ATTACK 近战先拉到 4 格风筝；面对 RA+HEAL 则优先集火带 HEAL 的
+// 目标、贴到 1 格打满伤害（T3 回复量很高，必须集中火力）。
+//
+// 出发房：shard3/W31N55（RCL8、3 spawn、X*HO2 库存充足、boostAble=true），
+// 路径：shard3/W30N50 (30,8) 虫洞 → shard2/W30N50 → 陆行至 W31N51。
+// 配置放在各 shard 自己的 Memory.crossShardGarrisons（Memory 不跨 shard）：
+//
+//   Memory.crossShardGarrisons.W31N51 = {
+//     active: true,
+//     roomName: "W31N51", targetShard: "shard2",
+//     originShard: "shard3", spawnRoom: "W31N55",
+//     anchor: {x:41,y:35},
+//     slots: [[0,0],[1,-1],[-1,1],[0,2],[2,2],[-1,0]], // 相对 anchor，避开核心建筑
+//     squad: 6,
+//     path: {path:[{shard:"shard3", roomName:"W30N50", x:30, y:8}]}
+//   }
+//
+// CODEX AUDIT（以后修改本段/跨 shard 防守时必须做）：
+//  1. 监视 W31N51：读取 Memory.crossShardGarrisons.W31N51.audit（本模块每 20
+//     tick 写一次）：safeMode 剩余、safeModeAvailable/Cooldown、hostiles 数量与
+//     HEAL/RANGED_ATTACK/ATTACK 部件、强化敌人数、garrison 存活与名字、tower 能量。
+//     也可在 shard2 console 直接查 Game.rooms.W31N51.controller.safeMode。
+//  2. 审计出兵链：shard3 Memory.missions 里 data.garrisonRoom=="W31N51" 的
+//     spawnCreepCressShard 任务、W31N55 的 spawn 孵化/boost task、
+//     W30N50(30,8) portal.destination.shard 是否仍为 "shard2"。
+//  3. 若 Overmind 编成从 4 人 RA+heal 变为 swarm/melee/ranged 混编，必须重新
+//     核算 squad/body/boost；raBody1 是 50 部件 T3 一体机，不能拿去贴脸扛
+//     T3 melee（会被白打），近战威胁交给风筝分支。
+//  4. safe mode 不是永久方案：safeModeAvailable 见底或 garrison 连续为空时，按
+//     audit 报警并考虑增派第二组（把 squad 调大即可，调度器会逐只补员）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GARRISON_MEMORY_KEY = "crossShardGarrisons";
+const GARRISON_REPLACE_TTL = 700;      // 老车低于该 TTL 就补接班，避免真空
+const GARRISON_EXEC_INTERVAL = 10;     // 10 tick 一次，足够及时且几乎不耗 CPU
+
+Creep.prototype.registerCrossShardGarrison = function () {
+    let task = (this.memory.tasks || [])[0];
+    if (!task || task.taskName != "crossShardGarrison") return;
+    this.memory.garrisonRoom = task.garrisonRoom || task.roomName;
+    this.memory.garrisonSlot = task.slot;
+};
+
+Creep.prototype.crossShardGarrison = function () {
+    let tasks = this.memory.tasks || [];
+    let task = tasks[tasks.length - 1];
+    if (!task || task.taskName != "crossShardGarrison") return;
+    let roomName = task.roomName || task.garrisonRoom;
+    if (!roomName) return;
+
+    // 自我修复优先于输出；T3 XLHO2 一口 576，能顶住 tower/RA 的持续磨血。
+    if (this.hits < this.hitsMax) this.heal(this);
+    else if (this.autoHeal) this.autoHeal();
+
+    if (this.room.name != roomName) {
+        this.moveTo(new RoomPosition(25, 25, roomName));
+        return;
+    }
+
+    let hostiles = this.room.getHostileCreeps
+        ? this.room.getHostileCreeps()
+        : this.room.find(FIND_HOSTILE_CREEPS);
+    if (hostiles && hostiles.length) {
+        // 先处理近战：保持 4 格风筝，绝不让 T3 melee 贴上来。
+        let melee = this.pos.findClosestByRange(hostiles.filter(e =>
+            e.getActiveBodyparts && e.getActiveBodyparts(ATTACK) > 0));
+        if (melee && this.pos.getRangeTo(melee) <= 3) {
+            let flee = PathFinder.search(this.pos, {pos: melee.pos, range: 4}, {flee: true}).path;
+            if (flee && flee.length) this.moveByPath(flee);
+            if (this.pos.getRangeTo(melee) <= 3) this.rangedAttack(melee);
+            return;
+        }
+
+        // 目标固定：HEAL 优先（打奶），其次残血，再按距离；所有驻守爬同序 ⇒ 集火。
+        let targets = hostiles.slice().sort((a, b) => {
+            let ah = a.getActiveBodyparts ? a.getActiveBodyparts(HEAL) : 0;
+            let bh = b.getActiveBodyparts ? b.getActiveBodyparts(HEAL) : 0;
+            if (ah != bh) return bh - ah;
+            if (a.hits != b.hits) return a.hits - b.hits;
+            return this.pos.getRangeTo(a) - this.pos.getRangeTo(b);
+        });
+        let target = targets[0];
+        let meleeTarget = target.getActiveBodyparts && target.getActiveBodyparts(ATTACK) > 0;
+        let desired = meleeTarget ? 3 : 1;
+        if (this.pos.getRangeTo(target) > desired) this.moveTo(target, {range: desired});
+        if (this.pos.getRangeTo(target) <= 3) {
+            if (this.pos.isNearTo(target)) this.rangedMassAttack();
+            else this.rangedAttack(target);
+        }
+        return;
+    }
+
+    let anchor = new RoomPosition(task.x, task.y, roomName);
+    if (!this.pos.inRangeTo(anchor, 3)) this.moveTo(anchor);
+};
+
+let garrisonPro = {
+    memoryKey: GARRISON_MEMORY_KEY,
+    replaceTtl: GARRISON_REPLACE_TTL,
+    config(roomName) {
+        return Memory[GARRISON_MEMORY_KEY] && Memory[GARRISON_MEMORY_KEY][roomName];
+    },
+    countCreeps(roomName) {
+        let out = [];
+        for (let name in Game.creeps) {
+            let creep = Game.creeps[name];
+            if (!creep || !creep.memory) continue;
+            if (creep.memory.garrisonRoom == roomName) { out.push(creep); continue; }
+            let tasks = creep.memory.tasks || [];
+            if (tasks.some(t => t && t.taskName == "crossShardGarrison"
+                && (t.garrisonRoom || t.roomName) == roomName)) out.push(creep);
+        }
+        return out;
+    },
+    pendingMissions(roomName) {
+        let out = [];
+        let missions = Memory.missions;
+        if (!missions || typeof missions != "object") return out;
+        for (let id in missions) {
+            let m = missions[id];
+            if (m && m.func == "spawnCreepCressShard" && m.data && m.data.garrisonRoom == roomName) {
+                out.push(id);
+            }
+        }
+        return out;
+    },
+    /**
+     * 写 W31N51 的攻防审计，供 Codex/控制台排查。
+     * 注意：Memory 按 shard 隔离；target shard 的 audit 不会自动出现在 origin shard。
+     */
+    audit(cfg) {
+        let room = Game.rooms[cfg.roomName];
+        if (!room || !room.controller) return;
+        if (Game.time % 20 != 0 && cfg.audit && Game.time - (cfg.audit.tick || 0) < 20) return;
+        let hostiles = room.getHostileCreeps ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
+        let partCnt = (creep, part) => creep.getActiveBodyparts
+            ? creep.getActiveBodyparts(part)
+            : (creep.body || []).filter(p => p.type == part).length;
+        let sumParts = part => hostiles.reduce((n, c) => n + partCnt(c, part), 0);
+        let towers = typeof FIND_MY_STRUCTURES != "undefined"
+            ? room.find(FIND_MY_STRUCTURES, {filter: s => s.structureType == STRUCTURE_TOWER})
+            : [];
+        let crew = this.countCreeps(cfg.roomName);
+        let old = cfg.audit || {};
+        cfg.audit = {
+            tick: Game.time,
+            safeMode: room.controller.safeMode || 0,
+            safeModeAvailable: room.controller.safeModeAvailable,
+            safeModeCooldown: room.controller.safeModeCooldown || 0,
+            hostiles: hostiles.length,
+            hostileHeal: sumParts(HEAL),
+            hostileRangedAttack: sumParts(RANGED_ATTACK),
+            hostileAttack: sumParts(ATTACK),
+            hostileBoosted: hostiles.filter(c => (c.body || []).some(p => p.boost)).length,
+            hostileNames: hostiles.map(c => c.name).slice(0, 8),
+            hostileOwners: Array.from(new Set(hostiles.map(c =>
+                c.owner && c.owner.username).filter(Boolean))).slice(0, 4),
+            garrison: crew.length,
+            garrisonNames: crew.map(c => c.name).slice(0, 12),
+            garrisonReady: crew.filter(c => c.ticksToLive === undefined
+                || c.ticksToLive > GARRISON_REPLACE_TTL).length,
+            towers: towers.map(t => t.store && t.store[RESOURCE_ENERGY] || 0),
+            lastHostileTick: hostiles.length ? Game.time : (old.lastHostileTick || 0),
+        };
+    },
+    ensure(cfg) {
+        if (!global.ManagerCrossShard || !global.StationLab || !TeamRaL1) {
+            cfg.dispatchError = "missing cross-shard/boost/team dependency";
+            return;
+        }
+        let spawnRoom = Game.rooms[cfg.spawnRoom];
+        if (!spawnRoom || !spawnRoom.my) {
+            cfg.dispatchError = "spawn room not visible/owned";
+            return;
+        }
+        let boost = TeamRaL1.raBoost1();
+        if (!StationLab.boostAble(spawnRoom, boost)) {
+            cfg.dispatchError = "boostAble=false";
+            return;
+        }
+        if (!cfg.path || !cfg.path.path || !cfg.path.path.length) {
+            cfg.dispatchError = "missing cross-shard path";
+            return;
+        }
+        let squad = Math.max(1, Number(cfg.squad) || 1);
+        // 驻守爬跨过虫洞后就不再出现在 origin 的 Game.creeps 里，无法用本地存活
+        // 数判断编制。用「派兵台账」记录每次成功入队的出生批次，按 cycle 到期
+        // 退役；每次只保留一个 pending mission，既不会漏派也不会在跨 shard 后
+        // 重复刷兵。目标房的真实存活由 target shard 的 audit.garrison 记录。
+        let cycle = Math.max(300, Number(cfg.cycle) || 1150);
+        let roster = (cfg.dispatches || []).filter(t => Game.time - t < cycle);
+        cfg.dispatches = roster;
+        if (roster.length >= squad) {
+            if (cfg.dispatchError) delete cfg.dispatchError;
+            return;
+        }
+        // 一次只允许一个未完成的出生 mission，避免同一批孵出 2 倍兵力。
+        if (this.pendingMissions(cfg.roomName).length) return;
+
+        let slot = roster.length % (cfg.slots && cfg.slots.length || 1);
+        let slots = cfg.slots || [[0, 0]];
+        let offset = slots[slot % slots.length];
+        let anchor = cfg.anchor || {x: 25, y: 25};
+        let task = UtilsTask.taskData("crossShardGarrison", "registerCrossShardGarrison", {
+            roomName: cfg.roomName,
+            garrisonRoom: cfg.roomName,
+            x: anchor.x + offset[0],
+            y: anchor.y + offset[1],
+            slot: slot,
+        });
+        let tasks = [
+            task,
+            UtilsTask.taskData("moveCrossShardByPath", undefined, cfg.path),
+            StationLab.generatorBoostResTask(boost, spawnRoom)[0],
+        ];
+        let mission = {
+            func: "spawnCreepCressShard",
+            data: {
+                spawnRoom: cfg.spawnRoom,
+                targetRoomName: cfg.roomName,
+                body: TeamRaL1.raBody1,
+                role: "raL1",
+                tasks: tasks,
+                garrisonRoom: cfg.roomName,
+            },
+        };
+        let id = ManagerCrossShard.addCrossShardRequest(cfg.originShard, mission);
+        roster.push(Game.time);
+        cfg.lastDispatch = {tick: Game.time, id: id, slot: slot};
+        delete cfg.dispatchError;
+    },
+    exec() {
+        if (Game.time % GARRISON_EXEC_INTERVAL != 0) return;
+        if (!Memory[GARRISON_MEMORY_KEY]) return;
+        for (let roomName in Memory[GARRISON_MEMORY_KEY]) {
+            let cfg = Memory[GARRISON_MEMORY_KEY][roomName];
+            if (!cfg || cfg.active === false || !cfg.roomName) continue;
+            if (Game.shard.name == cfg.targetShard) this.audit(cfg);
+            if (Game.shard.name == cfg.originShard) this.ensure(cfg);
+        }
+    },
+};
+
+global.CrossShardGarrison = garrisonPro;

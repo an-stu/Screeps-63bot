@@ -69,6 +69,10 @@ let pro = {
         }
         if (global.WarDefenseCore && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["defense","defenseAH","defenseRA"])) HelperError.catchError(() => WarDefenseCore.exec());
         if (global.WarPowerCreepOperator && isCpuFeatureEnabled("combat") && ManagerFlags.hasAnyPrefix(["disCtrl","OPSCarry","PCAtk","showDisSpawn"])) HelperError.catchError(() => WarPowerCreepOperator.exec());
+        // 跨 shard T3 RA 驻守由 Memory.crossShardGarrisons 显式开启；目标 shard 上
+        // 只写 audit（combat 开关在 shard2 可以是 false，但驻守爬的任务仍会执行）。
+        if (global.CrossShardGarrison && isCpuFeatureEnabled("crossShard")
+            && Memory.crossShardGarrisons) HelperError.catchError(() => CrossShardGarrison.exec());
 
         // 配置资源
         let warTeamEnabled = global.WarTeamFlag && isCpuFeatureEnabled("combat")
