@@ -103,6 +103,7 @@ function cfg(ctx, overrides = {}) {
             anchor: {x: 41, y: 35},
             slots: [[0, 0], [1, -1], [-1, 1], [0, 2], [2, 2], [-1, 0]],
             squad: 2,
+            dispatchEnabled: true,
             path: {path: [{shard: "shard3", roomName: "W30N50", x: 30, y: 8}]},
         }, overrides),
     };
@@ -182,6 +183,37 @@ function cfg(ctx, overrides = {}) {
     assert.equal(c.audit.garrison, 1);
     assert.equal(c.audit.garrisonReady, 1);
     assert.equal(c.audit.towers.join(","), "840");
+    const req = ctx.ManagerCrossShard.calls.find(x => x.mission.func === "setMemoryWithPath");
+    assert.ok(req, "safe mode 期间必须把 origin 的 dispatchEnabled 关掉");
+    assert.equal(req.toShard, "shard3");
+    assert.equal(req.mission.data.data, false);
+    assert.ok(req.mission.data.path.includes("dispatchEnabled"));
+}
+
+// ── ③b safe mode 剩余 ≤ leadTicks：通知 origin 开启派兵 ───────────────────
+{
+    const ctx = load({time: 100000, shard: "shard2"});
+    const c = cfg(ctx, {leadTicks: 2500});
+    const room = {
+        name: "W31N51",
+        controller: {safeMode: 1500, safeModeAvailable: 3, safeModeCooldown: 31500},
+        getHostileCreeps() { return []; },
+        find() { return []; },
+    };
+    ctx.Game.rooms.W31N51 = room;
+    ctx.CrossShardGarrison.exec();
+    const req = ctx.ManagerCrossShard.calls.find(x => x.mission.func === "setMemoryWithPath");
+    assert.ok(req, "safe mode 快结束必须通知 origin");
+    assert.equal(req.mission.data.data, true, "剩余 1500 ≤ lead 2500 ⇒ 开启");
+}
+
+// ── ③c 安全期 dispatchEnabled=false 时 origin 一只也不派 ─────────────────
+{
+    const ctx = load({time: 100000, shard: "shard3"});
+    cfg(ctx, {dispatchEnabled: false});
+    ctx.CrossShardGarrison.exec();
+    assert.equal(ctx.ManagerCrossShard.calls.length, 0, "安全期不得派兵（用户 2026-11-27 要求）");
+    assert.equal(ctx.Memory.crossShardGarrisons.W31N51.dispatchError, "waiting safe-mode window");
 }
 
 // ── ④ 驻守行为：无敌人回 anchor；有 HEAL 目标优先集火 ────────────────────

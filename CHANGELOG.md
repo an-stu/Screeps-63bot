@@ -1,3 +1,15 @@
+## v0.78.360 — 安全期不派兵，safe mode 快结束才开闸
+
+- 用户 2026-11-27 明确：safe mode 期间房间安全，**等 sf 结束（快结束）再派**。
+- 跨 shard 驻守改为 target shard 驱动：W31N51 的 audit 每 20 tick 读
+  `controller.safeMode`，只有剩余 ≤ `leadTicks`（默认 2500，覆盖孵化 150 +
+  boost + 过洞/陆行）或已归零时，才通过 `setMemoryWithPath` 把 origin shard3
+  的 `Memory.crossShardGarrisons.W31N51.dispatchEnabled` 置 true；安全期内
+  保持 false，origin 一只也不派。条件翻转立即发，平时每 300 tick 重发一次。
+- origin `ensure` 增加 `dispatchEnabled === true` 硬闸门，避免安全期空烧 T3
+  RA 的 1500 tick 生命周期。已早发的 6 只作为一次性先遣批，不再补员；sf
+  临近结束时按开闸后的编制重新补满。
+
 ## v0.78.359 — shard2/W31N51 跨 shard T3 RA 驻守
 
 - 2026-11-27 shard2/W31N51（RCL5）被使用 Overmind 的玩家攻击，已触发 safe mode

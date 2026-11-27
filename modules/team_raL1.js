@@ -473,8 +473,14 @@ global.TeamRaL1=pro;
 //     anchor: {x:41,y:35},
 //     slots: [[0,0],[1,-1],[-1,1],[0,2],[2,2],[-1,0]], // 相对 anchor，避开核心建筑
 //     squad: 6,
+//     leadTicks: 2500,          // safe mode 剩余 ≤ 该值才允许 origin 派兵
+//     dispatchEnabled: false,   // 由 target shard 的 requestDispatch 跨 shard 打开
 //     path: {path:[{shard:"shard3", roomName:"W30N50", x:30, y:8}]}
 //   }
+//
+//   安全期（用户 2026-11-27）：safe mode 期间不派兵；target shard 在
+//   safeMode 剩余 ≤ leadTicks 时通过 setMemoryWithPath 把 origin 的
+//   dispatchEnabled 置 true，origin 才逐只补员。
 //
 // CODEX AUDIT（以后修改本段/跨 shard 防守时必须做）：
 //  1. 监视 W31N51：读取 Memory.crossShardGarrisons.W31N51.audit（本模块每 20
@@ -483,7 +489,13 @@ global.TeamRaL1=pro;
 //     也可在 shard2 console 直接查 Game.rooms.W31N51.controller.safeMode。
 //  2. 审计出兵链：shard3 Memory.missions 里 data.garrisonRoom=="W31N51" 的
 //     spawnCreepCressShard 任务、W31N55 的 spawn 孵化/boost task、
-//     W30N50(30,8) portal.destination.shard 是否仍为 "shard2"。
+//     W30N50(30,8) portal.destination.shard 是否仍为 "shard2"。行军会绕开
+//     shard3 的他人控制房 W31N51/W31N52/W31N53（前两个在
+//     Memory.betterMoveAvoidRooms，W31N53 在移动模块硬编码表）；审计时必须
+//     确认这三个房仍在回避列表，禁止穿行控制房（项目长途路径硬规则）。
+//     另：W31N55 的 boost lab 填液会被「先填 hive」抢占，若出发前
+//     Memory.rooms.W31N55.stationLab.boostLabMap 对应 lab 为空，需先给空闲
+//     carrier 派 X*HO2 补给任务，否则 boost 任务 200 tick 后会过期裸奔。
 //  3. 若 Overmind 编成从 4 人 RA+heal 变为 swarm/melee/ranged 混编，必须重新
 //     核算 squad/body/boost；raBody1 是 50 部件 T3 一体机，不能拿去贴脸扛
 //     T3 melee（会被白打），近战威胁交给风筝分支。
@@ -589,6 +601,26 @@ let garrisonPro = {
      * 写 W31N51 的攻防审计，供 Codex/控制台排查。
      * 注意：Memory 按 shard 隔离；target shard 的 audit 不会自动出现在 origin shard。
      */
+    /**
+     * 目标 shard 在 safe mode 快结束时通知 origin 开启/关闭派兵。
+     * 不能只看 origin 本地 Memory（两个 shard 的 Memory 不同步），也不能早派：
+     * 安全期内派出的 T3 RA 会白烧 1500 tick 生命周期。leadTicks 要覆盖
+     * 孵化 150 + boost ~50 + 过洞/陆行 ~500，默认留 2500 的余量。
+     */
+    requestDispatch(cfg, enabled) {
+        if (!global.ManagerCrossShard || !cfg.originShard) return;
+        // 每 300 tick 重发一次，丢失/重启也能自愈；状态翻转时立即发。
+        if (cfg.requestedDispatch === enabled && Game.time - (cfg.requestTick || 0) < 300) return;
+        ManagerCrossShard.addCrossShardRequest(cfg.originShard, {
+            func: "setMemoryWithPath",
+            data: {
+                path: GARRISON_MEMORY_KEY + "." + cfg.roomName + ".dispatchEnabled",
+                data: enabled,
+            },
+        });
+        cfg.requestedDispatch = enabled;
+        cfg.requestTick = Game.time;
+    },
     audit(cfg) {
         let room = Game.rooms[cfg.roomName];
         if (!room || !room.controller) return;
@@ -623,10 +655,24 @@ let garrisonPro = {
             towers: towers.map(t => t.store && t.store[RESOURCE_ENERGY] || 0),
             lastHostileTick: hostiles.length ? Game.time : (old.lastHostileTick || 0),
         };
+        // 安全期不派兵；只在 safe mode 剩余 ≤ leadTicks 或已经结束时通知 origin。
+        // 条件只在翻转时发一次；origin 侧 `dispatchEnabled` 才是真正的派兵闸门。
+        let safe = room.controller.safeMode || 0;
+        let lead = Math.max(300, Number(cfg.leadTicks) || 2500);
+        let shouldDispatch = safe <= 0 || safe <= lead;
+        this.requestDispatch(cfg, shouldDispatch);
     },
     ensure(cfg) {
         if (!global.ManagerCrossShard || !global.StationLab || !TeamRaL1) {
             cfg.dispatchError = "missing cross-shard/boost/team dependency";
+            return;
+        }
+        // 目标 shard 在 safe mode 剩余 ≤ leadTicks 时通过跨 shard request 打开；
+        // 安全期内保持关闭，已到期的 roster 不再续派。
+        if (cfg.dispatchEnabled !== true) {
+            if (cfg.dispatchError != "waiting safe-mode window") {
+                cfg.dispatchError = "waiting safe-mode window";
+            }
             return;
         }
         let spawnRoom = Game.rooms[cfg.spawnRoom];
