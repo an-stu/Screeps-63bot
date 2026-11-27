@@ -803,12 +803,17 @@ const garrisonPro = {
     squad() { return 4; },
     units(name) {
         const tick = Game._crossGarrisonUnits || (Game._crossGarrisonUnits = {});
-        if (tick[name]) return tick[name];
-        return tick[name] = Object.values(Game.creeps).filter(c => c.memory?.tasks?.some(t=>
-            ["crossShardGarrison","crossShardGarrisonScout"].includes(t.taskName)&&(t.garrisonRoom||t.roomName)===name));
+        const assigned = c => {
+            const task = this.spec(c);
+            return task && (task.garrisonRoom || task.roomName) === name;
+        };
+        // Spawn/boost/defend can pop an assignment mid-tick. Cache the global
+        // search, not membership: revalidate the small candidate list on use.
+        if (tick[name]) return tick[name].filter(assigned);
+        return tick[name] = Object.values(Game.creeps).filter(assigned);
     },
     spec(creep) {
-        return creep.memory.tasks.find(t=>t.taskName==="crossShardGarrison"||t.taskName==="crossShardGarrisonScout");
+        return creep.memory?.tasks?.find(t=>t?.taskName==="crossShardGarrison"||t?.taskName==="crossShardGarrisonScout");
     },
     receivePlan(data,landing=false) {
         const cfg = data && this.config(data.roomName);
@@ -921,8 +926,9 @@ const garrisonPro = {
                 portalPath:land.path,wave:cfg.wave});
             return [task];
         };
-        const inTransit=cfg.remote.members.some(m=>m[4]===cfg.wave&&!m[3]);
-        if((missing.length||inTransit)&&cfg.remote.scoutTtl<180&&!units.some(c=>this.spec(c).taskName==="crossShardGarrisonScout"
+        // A filled roster can still be entirely on the source shard. It
+        // needs a fresh landing report until the whole wave reaches the post.
+        if((missing.length||!complete)&&cfg.remote.scoutTtl<180&&!units.some(c=>this.spec(c).taskName==="crossShardGarrisonScout"
             && (c.spawning||(c.ticksToLive||0)>180)) && Game.time-(cfg.scoutSentAt??-Infinity)>70 && free()&&available()>=50){
             const scout=StationHive.trySpawn(room,cfg.roomName,[MOVE],"raL1",tasksFor("scout",null));
             if(scout)cfg.scoutSentAt=Game.time;
@@ -933,7 +939,9 @@ const garrisonPro = {
             const {body,boosts}=spec,cost=Utils.getBodyEnergyNeed(body);
             if(!free()||available()<cost) {cfg.dispatchError="waiting spawn capacity";return;}
             if(!StationLab.boostAble(room,boosts)) {cfg.dispatchError="boostAble=false";return;}
-            const tasks=tasksFor("member",slot).concat(StationLab.generatorBoostResTask(boosts,room));
+            // StationLab consumes task.data in place. Do not hand it the
+            // role's cached recipe, or two same-role spawns share one order.
+            const tasks=tasksFor("member",slot).concat(StationLab.generatorBoostResTask({...boosts},room));
             if(tasks.length<2) {cfg.dispatchError="no boost task";return;}
             const name=StationHive.trySpawn(room,cfg.roomName,body,"raL1",tasks);
             if(!name){cfg.dispatchError="spawn rejected";return;}

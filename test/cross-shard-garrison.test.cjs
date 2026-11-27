@@ -127,7 +127,7 @@ function load({time = 100000, shard = "shard3", spawnCount = 4} = {}) {
                 return true;
             },
             generatorBoostResTask(boost) {
-                return [{taskName: "boostCreepBodyPart", regFun: "registerBoostCreep", data: {...boost}}];
+                return [{taskName: "boostCreepBodyPart", regFun: "registerBoostCreep", data: boost}];
             },
         },
         StationHive: {
@@ -926,6 +926,62 @@ function transitCreep(ctx, room, name, slot, pos, wave = 4) {
     delete ctx.Game.rooms[next];
     ctx.CrossShardGarrison.travel(crew[1],crew[1].task,true);
     assert.equal(crew[1].actions.length,0,"a started crossing does not skip the next-tick check");
+}
+
+// 14. Boost expiry or a superseded wave can replace a task with recycling
+// after ensure() populated the per-tick candidate list. Other creep handlers
+// in that tick must ignore the stale assignments instead of throwing.
+{
+    const ctx = load({shard: "shard3"});
+    const c = cfg(ctx, {wave: 4, remote: freshRemote({scoutTtl: 500})});
+    const room = ctx.Game.rooms[c.spawnRoom];
+    room.find = () => [];
+    const crew = [[25,25],[25,26],[26,25],[26,26]].map(([x,y],slot) =>
+        transitCreep(ctx,room,"cached"+slot,slot,{x,y}));
+    const garrison = ctx.CrossShardGarrison;
+    ctx.Game.creeps = Object.fromEntries(crew.map(c => [c.name,c]));
+    assert.equal(garrison.units(c.roomName).length,4);
+    crew[0].memory.tasks.splice(0,1,{taskName:"recycleCreep"});
+    crew[1].memory.tasks = [];
+    assert.doesNotThrow(() => garrison.travel(crew[2],crew[2].task,false));
+    assert.equal(garrison.units(c.roomName).length,2);
+    assert.equal(ctx.PathFinder.calls.length,0,"remaining pair cannot advance independently");
+}
+
+// 15. StationLab deletes completed compounds from the actual task data.
+// Neither another creep of the same role nor the next wave may share it.
+{
+    const ctx = load({shard: "shard3", spawnCount: 4});
+    const c = cfg(ctx, {remote: freshRemote({scoutTtl: 500})});
+    const garrison = ctx.CrossShardGarrison;
+    garrison.ensure(c);
+    assert.equal(ctx.acceptedSpawns.length,4);
+    const data = ctx.acceptedSpawns.map(s => s.tasks[1].data);
+    for (const k of Object.keys(data[0])) delete data[0][k];
+    for (const k of Object.keys(data[1])) delete data[1][k];
+    assert.deepEqual({...data[2]},boostMapForSlot(ctx,2));
+    assert.deepEqual({...data[3]},boostMapForSlot(ctx,3));
+    ctx.Game.creeps = {};
+    ctx.Game.time += 100;
+    delete ctx.Game._crossGarrisonUnits;
+    c.remote = freshRemote({scoutTtl: 500});
+    for (const spawn of ctx.Game.rooms[c.spawnRoom].spawn) spawn.spawning = null;
+    garrison.ensure(c);
+    assert.equal(ctx.acceptedSpawns.length,8,"subsequent spawns still receive complete T3 recipes");
+}
+
+// 16. All fighter slots can be covered at origin while a dead (or expiring)
+// scout leaves the portal closed. Refresh vision without spawning any fighters.
+{
+    const ctx = load({shard: "shard3"});
+    const c = cfg(ctx, {wave: 4, remote: freshRemote({scoutTtl: 20})});
+    const room = ctx.Game.rooms[c.spawnRoom];
+    const members = [[25,25],[25,26],[26,25],[26,26]].map(([x,y],slot) =>
+        transitCreep(ctx,room,"awaiting-portal-"+slot,slot,{x,y}));
+    ctx.Game.creeps = Object.fromEntries(members.map(c => [c.name,c]));
+    ctx.CrossShardGarrison.ensure(c);
+    assert.equal(ctx.acceptedSpawns.length,1);
+    assert.equal(ctx.acceptedSpawns[0].isScout,true);
 }
 
 console.log("cross-shard garrison checks passed");
