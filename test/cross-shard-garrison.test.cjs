@@ -182,7 +182,7 @@ function load({time = 100000, shard = "shard3", spawnCount = 4} = {}) {
         RESOURCE_ENERGY: "energy",
         FIND_HOSTILE_CREEPS: 1,
         FIND_HOSTILE_POWER_CREEPS: 2,
-        FIND_HOSTILE_STRUCTURES: 3,
+        FIND_HOSTILE_STRUCTURES: 113,
         FIND_STRUCTURES: 4,
         FIND_MY_STRUCTURES: 5,
         FIND_CREEPS: 6,
@@ -860,6 +860,72 @@ function transitCreep(ctx, room, name, slot, pos, wave = 4) {
     assert.ok([firstThree[0], firstThree[1], firstThree[2], fourth]
         .every(member => !member.actions.some(a => a[0] === "moveTo")),
     "coordinated route step does not fall back to independent creep movement");
+}
+
+// 12. The preferred anchor is only a hint: all four posts should fire on
+// the mirrored gate even if the nearest square (or road-free one) cannot.
+{
+    const ctx = load({shard: "shard2"});
+    cfg(ctx, {entryGate: {x: 0, y: 18}, entryAnchor: {x: 45, y: 18}});
+    const enemy = hostile(ctx, "at-the-border", 49, 18);
+    const room = combatRoom(ctx, {hostiles: [enemy]});
+    const tower = {my: true, pos: {x: 43, y: 33, roomName: room.name}, store: {energy: 600},
+        getDamageTo() { return 300; }};
+    room.tower = [tower];
+    const members = [[46,18],[46,19],[47,18],[47,19]]
+        .map((pos, slot) => combatCreep(ctx, room, "entry" + slot, slot, pos));
+    installCombatCrew(ctx, room, members);
+    const frame = ctx.CrossShardGarrison.combatFrame(room);
+    assert.ok(frame.posts.every(p => Math.max(49 - p.x, Math.abs(18 - p.y)) <= 3),
+        "stationary posts prefer a full volley at the entry, not a specific side of the anchor");
+    assert.equal(frame.focus, enemy);
+    assert.equal(ctx.CrossShardGarrison.towerFocus(room), enemy);
+    members.forEach(c => ctx.CrossShardGarrison.defend(c, c.task));
+    assert.ok(members.every(c => c.actions.some(a => a[0] === "rangedAttack" && a[1] === enemy.name)),
+        "all four members can fire as soon as the creep appears on the entry tile");
+}
+
+// 13. Do not file into a neutral post-portal leg without current vision,
+// and recheck it even after a shared crossing record has been set.
+{
+    const ctx = load({shard: "shard2"});
+    cfg(ctx);
+    const makeRoom = (name, hostiles = []) => {
+        const room = combatRoom(ctx, {hostiles});
+        room.name = name;
+        room.controller = undefined;
+        return room;
+    };
+    const landing = makeRoom("W30N50");
+    ctx.Game.rooms[landing.name] = landing;
+    ctx.Game.map.findExit = () => ctx.RIGHT;
+    const crew = [[47,25],[47,26],[48,25],[48,26]].map(([x,y],slot) =>
+        transitCreep(ctx,landing,"landed"+slot,slot,{x,y}));
+    const scout = transitCreep(ctx,landing,"scout",null,{x:45,y:25});
+    scout.task.taskName = "crossShardGarrisonScout";
+    scout.pos.findClosestByRange = () => new ctx.RoomPosition(49,25,landing.name);
+    const next = "W30N51";
+    ctx.Game.creeps = Object.fromEntries([...crew.slice(0,3),scout].map(c => [c.name,c]));
+    ctx.CrossShardGarrison.scout(scout,scout.task);
+    assert.equal(scout.actions.length,0,"landing scout stays until all four slots have landed");
+    ctx.Game.creeps[crew[3].name] = crew[3];
+    ctx.Game._crossGarrisonUnits = {};
+    ctx.CrossShardGarrison.scout(scout,scout.task);
+    assert.equal(scout.actions[0]?.[0],"moveTo","scout advances to observe the next leg");
+
+    ctx.CrossShardGarrison.travel(crew[0],crew[0].task,true);
+    assert.equal(crew[0].task.roomExit,undefined,"no vision means no crossing");
+    ctx.Game.rooms[next] = makeRoom(next,[hostile(ctx,"armed",7,39)]);
+    ctx.CrossShardGarrison.travel(crew[0],crew[0].task,true);
+    assert.equal(crew[0].task.roomExit,undefined,"a visible but armed leg stays closed");
+    ctx.Game.rooms[next] = makeRoom(next);
+    ctx.CrossShardGarrison.travel(crew[0],crew[0].task,true);
+    assert.equal(crew[0].task.roomExit?.to,next,"clear live vision lets the square cross");
+    assert.equal(crew[0].actions[0]?.[0],"moveTo");
+
+    delete ctx.Game.rooms[next];
+    ctx.CrossShardGarrison.travel(crew[1],crew[1].task,true);
+    assert.equal(crew[1].actions.length,0,"a started crossing does not skip the next-tick check");
 }
 
 console.log("cross-shard garrison checks passed");
