@@ -818,6 +818,25 @@ Creep.prototype.harvestEnergyKeeper = function () {
                 if (nearFull) this.transfer(link, RESOURCE_ENERGY);
                 if (container.store.getUsedCapacity(RESOURCE_ENERGY) > this.getPartCnt(CARRY) * 50)
                     this.withdraw(container, RESOURCE_ENERGY)
+            } else if (!link && container && freeEnergyCapacity <= 0
+                && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                && this.pos.isNearTo(container)) {
+                // **无 link 可倒的房间，容器是唯一出口**（2026-11-27 shard2/E58S26）。
+                //
+                // 上面那条 `nearFull` 转移只在 `notLinkFull`（存在未满的 link）时执行；
+                // 低 RCL 房没有 link，keeper 满载后既没有 transfer 也没有 withdraw，
+                // 只能继续 `harvest(source)` —— 而满载的 creep 调用 harvest 返回
+                // ERR_FULL、一格能量都进不来。于是：keeper 恒 50/50 站在容器上，
+                // 容器恒 10~16 能量，carrier 的 300 取货门槛永远够不到（3 只空车挂机），
+                // 升级容器 0，upgrader 空转，控制器一路衰减（E58S26 L3：prog 654 卡死、
+                // ttd 只剩 1.4 万 tick，房内 5 只 36 部件 worker 全体空手）。
+                // 注释里「满仓后溢出自动进脚下容器」是错的：引擎不会替你把溢出的能量
+                // 倒进容器，必须显式 transfer。
+                //
+                // 只在「本房没有 link + 自己真的装不下 + 容器还有余量」时倒；有 link 的
+                // 房间行为完全不变（link 满时 keeper 满载空转是既定状态，能量留在源里不会
+                // 烂），装满的容器也不接（避免落地衰减）。
+                this.transfer(container, RESOURCE_ENERGY);
             }
         }
 

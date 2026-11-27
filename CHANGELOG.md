@@ -1,3 +1,23 @@
+## v0.78.363 — 无 link 房的 keeper 终于能把能量倒进容器
+
+- 故障现场 shard2/E58S26（RCL3，无 link、无 storage）：控制器 `progress` 恒 654、
+  `ticksToDowngrade` 只剩 1.47 万 tick（≈9.4 小时）就掉房；两只 keeper 恒 44~50/50
+  站在源容器上，容器却只有 **10 / 16** 能量；3 只 carrier 因 `carryMin=300` 永远接不到
+  单子，空手停在 21,14 一线；升级容器 0，upgrader `upgradeKeeper` 空转；房内 5 只
+  36 部件的 worker 全员空手。
+- 根因：`harvestEnergyKeeper` 唯一的「把身上能量交出去」的分支是
+  `if (notLinkFull && container)` —— 需要**存在未满的 link**。低 RCL 房没有 link，
+  keeper 满仓后什么都不做，只能继续 `this.harvest(source)`，而**满载的 creep 调
+  `harvest` 返回 ERR_FULL、引擎不会把溢出倒进脚下的容器**（原注释「满仓溢出自动进
+  容器」是错的）。于是 keeper 卡死满仓、容器永远攒不到 300、整条链断在上游。
+- 修法：新增 `else if (!link && container && freeEnergyCapacity <= 0
+  && container.getFreeCapacity(ENERGY) > 0 && pos.isNearTo(container))` ⇒ 显式
+  `transfer(container)`。有 link 的房间行为完全不变（link 满时 keeper 满载空转是
+  既定状态，能量留在源里不会烂），容器也满时不倒（避免落地衰减）。
+- 测试：`test/keeper-container-deposit.test.cjs` 6 节（无 link 满仓必倒、满容器不倒
+  且停挖、未满不倒、有 link 仍优先 link、link 满不改变行为、源低于再生闸门不挖）；
+  对旧代码第一节红（负对照实测）。
+
 ## v0.78.362 — 把丢失的跨 shard 驻守代码补回线上（整包重部署）
 
 - 故障：线上 `RUNTIME_PROFILE.version` 已是 0.78.361，但 `main` 与 `team_raL1`
