@@ -7,8 +7,9 @@
   的 `Memory.crossShardGarrisons.W31N51.dispatchEnabled` 置 true；安全期内
   保持 false，origin 一只也不派。条件翻转立即发，平时每 300 tick 重发一次。
 - origin `ensure` 增加 `dispatchEnabled === true` 硬闸门，避免安全期空烧 T3
-  RA 的 1500 tick 生命周期。已早发的 6 只作为一次性先遣批，不再补员；sf
-  临近结束时按开闸后的编制重新补满。
+  RA 的 1500 tick 生命周期。此前已早发在 shard3 途中的 6 只已改任务为
+  `recycleCreep` 回 W31N55 回收，安全期内不留守；sf 临近结束时按开闸后的
+  编制重新补满。
 
 ## v0.78.359 — shard2/W31N51 跨 shard T3 RA 驻守
 
