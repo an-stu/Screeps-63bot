@@ -645,7 +645,17 @@ let pro = {
         // 比 keeper（950）便宜 ⇒ 抢不走 keeper 的孵化费（MEMORY：keeper 永远第一）。
         let cachedEnergy = room.currentEnergyAvailable === undefined
             ? room.energyAvailable : Math.min(room.energyAvailable, room.currentEnergyAvailable);
-        let bodyBudget = Math.max(300, Math.min(room.getEnergyCapacityAvailable(), cachedEnergy));
+        let capacity = room.getEnergyCapacityAvailable();
+        // 高 RCL 不再为了「有只爬在升级」而孵 4 部件的小 upgrader。
+        // E56S29 RCL5（容量 1,800）实测：hive 被 keeper/carrier 抽到 300 时这里
+        // 照单孵出 WORK2/CARRY1/MOVE1（300），等 3 只正常体出生后它成了只会
+        // 占 spawn 的累赘。正常状态攒到「容量一半、至少 1,000」再孵；只有
+        // 「有效在岗 0 只 + 控制器进入 5,000 tick 降级余量」才允许退化体型顶住。
+        let minBudget = room.level >= 4 ? Math.min(capacity, Math.max(1000, Math.floor(capacity * 0.5))) : 300;
+        let emergency = room.controller && room.controller.ticksToDowngrade < 5000
+            && pro.upgraderCoverageCount(room) == 0;
+        let bodyBudget = Math.min(capacity, cachedEnergy);
+        if (bodyBudget < 300 || (bodyBudget < minBudget && !emergency)) return;
         let getBodyLowLevel = function (budget) { //低等级的part 无限多
             let current = 0;
             let cost = BODYPART_COST[WORK] * 2 + BODYPART_COST[MOVE];

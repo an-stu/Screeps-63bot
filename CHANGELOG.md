@@ -1,3 +1,17 @@
+## v0.78.361 — 高 RCL upgrader 拒绝 4 部件小体型
+
+- 用户 2026-11-27 点名：shard2/E56S29 的 `shard2_78408005_2`（WORK2/CARRY1/MOVE1，
+  300 能量）出生时房间已是 RCL5（容量 1,800），不是低 RCL 遗留。根因是
+  `trySpawnUpgrader` 的 `Math.max(300, …)` 下限：keeper/carrier 把 hive 抽到 300
+  的瞬间就按 300 孵化，随后 3 只 20 部件正常体出生，小体格长期占「在岗」名额。
+- 高 RCL（≥4）改为**攒够再孵**：最小预算 = min(容量, max(1,000, 容量的一半))
+  （RCL5 1,000 / RCL6 1,150 / RCL7 1,500），攒不到就等，不再缩成 4 部件。
+  唯一例外：有效在岗 0 只且控制器 <5,000 tick 降级（emergency）才允许退化体型。
+  RCL<4 无 storage 的房仍保留 300 退化档，避免低 RCL 控制器停摆。
+- 测试：`upgrader-affordable-body` 改为断言 1,150 才孵、1,000 等待；
+  `upgrader-degraded-body` 重写为新政策并保留旧行为作负对照（hive 464 时旧代码
+  确实孵 300 体）。
+
 ## v0.78.360 — 安全期不派兵，safe mode 快结束才开闸
 
 - 用户 2026-11-27 明确：safe mode 期间房间安全，**等 sf 结束（快结束）再派**。

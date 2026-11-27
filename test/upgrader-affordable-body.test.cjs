@@ -15,7 +15,10 @@
  *      （`StationHive.trySpawn` 只静默 return，不报错）。
  *
  * 这里验「付得起 + 正常房不缩水 + 饿的时候别抽」：
- *   ① hive 1,000 / cap 2,300 ⇒ 必须派，且体型造价 ≤ 1,000（旧写法是 2,100，必失败）
+ *   ① hive 1,150（cap 2,300 的一半）⇒ 必须派，且体型造价 ≤ 1,150
+ *   ①b hive 1,000（低于高 RCL 最小预算）⇒ 不派，等 hive 攒大再孵
+ *      （2026-11-27 用户：E56S29 RCL5 时 hive 被抽到 300 就孵出
+ *      WORK2/CARRY1/MOVE1 的 4 部件小 upgrader，不要再产这种小体型）
  *   ② hive 2,300（满格）⇒ 体型不缩水（16 WORK / 2,100），正常运行不受影响
  *   ③ hive 900（< cap 的 40%）⇒ 不派（hive 真的在挨饿时不许抽）
  *   ④ 源码断言：`getBodyLowLevel` 必须带预算调用；strategy 侧门槛必须按容量折算
@@ -124,7 +127,9 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
     const { StationUpgrade, attempts } = load();
     for (const [storageEnergy, downgrade, blocked] of [[0, 115000, true], [24999, 5000, true], [25000, 115000, false], [0, 4999, false]]) {
         attempts.length = 0;
-        const room = mkRoom({storageEnergy, downgrade});
+        // 未拦截的行要给到高 RCL 最小预算（1,150），否则会被新的体型闸挡住，
+        // 测到的就不是「库存闸是否放行」了。
+        const room = mkRoom({storageEnergy, downgrade, avail: blocked ? 1000 : 1150});
         assert.equal(StationUpgrade.isSpawnBlockedByEnergyStock(room), blocked);
         StationUpgrade.spawnUpgrader(room);
         assert.equal(attempts.length === 0, blocked, "shared hold state must match the actual spawn decision");
@@ -132,22 +137,31 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
 }
 
 {
-    // ── ① 低 hive（1,000 / cap 2,300）+ storage 还不富裕：必须派，且体型付得起 ──
+    // ── ① 攒到容量一半（1,150 / cap 2,300）+ storage 够：必须派，且体型付得起 ──
     //
     // storage 30,000 已高于本 RCL 的 25,000 安全库存；此时「0 只 upgrader」分支
-    // 只受 hive 40% 门槛约束，验证低 hive 仍能孵且体型付得起。
+    // 只受 hive 40% 门槛与高 RCL 最小预算约束，验证攒够后仍能孵且体型付得起。
     const { StationUpgrade, attempts } = load();
-    StationUpgrade.spawnUpgrader(mkRoom({ avail: 1000, storageEnergy: 30000 }));
+    StationUpgrade.spawnUpgrader(mkRoom({ avail: 1150, storageEnergy: 30000 }));
 
     assert.equal(attempts.length, 1,
-        "0 只 upgrader + hive 1,000（cap 2,300 的 43%）必须尝试孵化："
-        + "旧门槛 Math.min(cap,4000)=2,300 等于要求满格，RCL5/6 房几乎永远等不到");
+        "0 只 upgrader + hive 1,150（cap 2,300 的一半）必须尝试孵化");
     assert.equal(attempts[0].role, "upgrader");
     assert.ok(attempts[0].okSpawn,
         "体型必须 ≤ 本 tick 可用能量，否则 StationHive.trySpawn 静默失败（实测控制器 200+ tick 不动）"
         + `：cost=${attempts[0].cost} avail=${attempts[0].avail}`);
-    assert.ok(attempts[0].body.filter(p => p === "work").length >= 2,
-        "付得起就要有能干的 WORK 部件：" + JSON.stringify(attempts[0].body));
+    assert.ok(attempts[0].body.filter(p => p === "work").length >= 6,
+        "高 RCL 最小预算下不该再出 4 部件小体格：" + JSON.stringify(attempts[0].body));
+}
+
+{
+    // ── ①b hive 1,000（低于高 RCL 最小预算 1,150）⇒ 等待，不出小体型 ──────
+    // 2026-11-27 E56S29：RCL5 容量 1,800，hive 被 keeper/carrier 抽到 300 时
+    // 立即孵出 4 部件（300 能量）upgrader，成为长期累赘。高 RCL 必须等攒大。
+    const { StationUpgrade, attempts } = load();
+    StationUpgrade.spawnUpgrader(mkRoom({ avail: 1000, storageEnergy: 30000 }));
+    assert.equal(attempts.length, 0,
+        "hive 1,000 < 最小预算 1,150 时必须等待，不能再产 4 部件小 upgrader");
 }
 
 {
@@ -203,10 +217,13 @@ function mkRoom({ level = 6, cap = 2300, avail = 1000, storageEnergy = 31587, up
         "getBodyLowLevel 必须传预算（bodyBudget）调用");
     assert.ok(!/getBodyLowLevel\(\s*\)/.test(upg),
         "负对照：不得再有无预算的 getBodyLowLevel() 调用（那会按 hive 满容量算体型）");
-    assert.ok(/bodyBudget\s*=\s*Math\.max\(300,\s*Math\.min\(room\.getEnergyCapacityAvailable\(\),\s*cachedEnergy\)\)/.test(upg),
-        "bodyBudget 必须夹在 [300, 本房容量] 之间，且输入是本 tick 真可用能量"
-        + "（下限 300 = 最便宜的可用法体型 2 WORK + 1 MOVE + 1 CARRY；"
-        + "2026-11-05 实测下限 600 会造出 550 体型的爬，hive 长期 300~500 的房里恒付不起 ⇒ 与「真付得起」自相矛盾）");
+    assert.ok(/bodyBudget\s*=\s*Math\.min\(capacity,\s*cachedEnergy\)/.test(upg),
+        "bodyBudget 必须取本 tick 真可用能量与容量的较小值（无强制下限，靠 minBudget 闸等待）");
+    assert.ok(/minBudget\s*=\s*room\.level\s*>=\s*4\s*\?\s*Math\.min\(capacity,\s*Math\.max\(1000,\s*Math\.floor\(capacity\s*\*\s*0\.5\)\)\)\s*:\s*300/.test(upg),
+        "RCL>=4 的 upgrader 最小预算必须是「容量一半、至少 1,000」（RCL<4 才允许 300 退化体）；"
+        + "2026-11-27 E56S29 实测：RCL5 容量 1,800 时 hive 被抽到 300 就出 4 部件小 upgrader");
+    assert.ok(upg.includes("bodyBudget < minBudget && !emergency"),
+        "攒不到最小预算时必须等待；只有 emergency（0 只在岗 + 快降级）才可破例");
     assert.ok(/zeroUpgraderNeedEnergy\s*=\s*Math\.min\(room\.getEnergyCapacityAvailable\(\)\s*\*\s*0\.4,\s*4000\)/.test(upg),
         "0 只 upgrader 的门槛必须按本房容量折算，不能写死 hive 满格");
     assert.ok(upg.includes("room.energyAvailable >= zeroUpgraderNeedEnergy"),
