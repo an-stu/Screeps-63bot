@@ -1,3 +1,19 @@
+## v0.78.362 — 把丢失的跨 shard 驻守代码补回线上（整包重部署）
+
+- 故障：线上 `RUNTIME_PROFILE.version` 已是 0.78.361，但 `main` 与 `team_raL1`
+  两个模块的正文**逐字节等于 v0.78.358**（109b326）—— 16:03 那次整包部署用了
+  一份「main/team_raL1 还是 358、main_mount 已到 361」的混合产物。后果是
+  `CrossShardGarrison` 在线上根本不存在：`main.js` 没有那行 hook，
+  shard2/W31N51 的 `Memory.crossShardGarrisons.W31N51` 里连 `audit` 都不再写，
+  360 的「safe mode 快结束才开闸」逻辑等于没上线（safe mode 剩 6,350 tick，
+  ≤ leadTicks 2500 时不会有任何一方派兵）。
+- 处理：本版不改游戏逻辑，只从 HEAD 重新整包构建/部署，把 359/360/361 的内容
+  还原到线上；版本 +1 是为了让读回能证明「这次上传的确实是新产物」。
+- 防复发：`deploy.py` 上传前先跑 `scripts/build-core-payload.cjs` 重建产物，
+  不再使用磁盘上可能过期的 `deploy/core-payload.json`。
+- 验证：读回 75 模块 0 mismatch、`main` 含 `CrossShardGarrison` hook、
+  `team_raL1` 含驻守段、errorCount 0。
+
 ## v0.78.361 — 高 RCL upgrader 拒绝 4 部件小体型
 
 - 用户 2026-11-27 点名：shard2/E56S29 的 `shard2_78408005_2`（WORK2/CARRY1/MOVE1，
