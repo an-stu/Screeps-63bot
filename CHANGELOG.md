@@ -1,3 +1,19 @@
+## v0.78.376 — 无视野时按 Invader 自然寿命解除外矿撤退
+
+- 用户 2026-11-29：外矿 Invader 消失判断应分两种：有视野直接看是否还有
+  Invader；没视野则按**最后目击时的剩余 TTL** 推算自然死亡时间，不打它们
+  也会老死，不能无限停矿。
+- `outerRetreat` 状态记录 `firstSeen/lastSeen/maxTtl/expireAt`；每次有视野
+  刷新最大 `ticksToLive`，无视野时 `outerRetreatState` 在 `expireAt` 后自动
+  删除状态并恢复生产。旧状态没有 `expireAt` 时按 `lastSeen/tick` +
+  1500 + 30 tick 余量迁移。
+- 有视野且 Invader=0 仍立即解除，优先级高于 TTL 等待；单/多 Invader 的
+  撤退/defenser 政策不变。
+- 撤退期不再派 **scouter/retreatProbe**：有 defenser 时由它直接确认清零；
+  没有 defenser（≥2 Invader）时按 TTL 自然死亡，不需要额外探头。
+- edge-link 增加行为测试（TTL 未到保持、到期解除）；outer-retreat-policy
+  更新“有视野直判 / 无视野 TTL 兜底 / 不派 scouter”的源码钉。
+
 ## v0.78.375 — Invader 在场时不再补 reserver/claimer
 
 - 用户 2026-11-29 点名 `shard2_78439166_2`：外矿 E51S27 有 Invader 时仍被

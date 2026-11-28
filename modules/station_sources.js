@@ -32,10 +32,14 @@ const OUTER_DEFENSE_TRAVEL_FALLBACK = 150;
 /** keeper 撤离触发距离：敌对爬进入该半径且无防守爬接战就撤（Overmind flee 语义） */
 const OUTER_KEEPER_FLEE_RANGE = 6;
 /**
- * 外矿撤退政策（用户 2026-11-26）：**任何 Invader 在场**，所有采运爬立即回主房
- * 等待；defenser 留场清理。只有房间重新可见且 Invader 数为 0（defenser 清完或
- * 侦察兵确认）才解除，失去视野期间不得自动解除。
+ * 外矿撤退政策（用户 2026-11-26 / 2026-11-29）：
+ *  · 任何 Invader 在场 ⇒ 所有采运爬撤到矿区房外等待，defenser 留场清理；
+ *  · 有视野 ⇒ 直接按 Invader 数量判断，看到 0 立刻解除；
+ *  · 无视野 ⇒ 按最后一次看到时 Invader 的剩余寿命（ticksToLive）推算自然
+ *    死亡时间，超时自动解除；不打它们也会自然老死，不能无限停矿。
  */
+const OUTER_INVADER_LIFE_FALLBACK = 1500;
+const OUTER_INVADER_EXPIRE_MARGIN = 30;
 /**
  * 无威胁的普通矿房，防守爬安静多少 tick 后退役（回收成能量）。
  *
@@ -2971,8 +2975,15 @@ let pro = {
         let hit = cache[room.name];
         if (hit && hit.t === Game.time) return hit.n;
         let hostiles = room.getHostileCreeps ? room.getHostileCreeps() : room.find(FIND_HOSTILE_CREEPS);
-        let n = hostiles.filter(e => e.owner && e.owner.username == "Invader").length;
-        cache[room.name] = {t: Game.time, n: n};
+        let invaders = hostiles.filter(e => e.owner && e.owner.username == "Invader");
+        let n = invaders.length;
+        let maxTtl = null;
+        for (let invader of invaders) {
+            let ttl = Number(invader.ticksToLive);
+            if (Number.isFinite(ttl) && ttl >= 0 && (maxTtl === null || ttl > maxTtl)) maxTtl = ttl;
+        }
+        // maxTtl 供无视野时的自然死亡推算；没有 TTL 的 NPC 用标准寿命兜底。
+        cache[room.name] = {t: Game.time, n: n, maxTtl: maxTtl};
         // 供无视野时的编制决策使用（有变化或每 50 tick 落一次，避免 Memory 抖动）
         let mem = Memory.rooms[room.name] || (Memory.rooms[room.name] = {});
         let seen = mem.outerInvaderSeen;
@@ -2981,7 +2992,18 @@ let pro = {
     },
     outerRetreatState(roomName) {
         let mem = Memory.rooms && Memory.rooms[roomName];
-        return (mem && mem.outerRetreat) || null;
+        let state = mem && mem.outerRetreat;
+        if (!state) return null;
+        // 兼容旧状态：没有 expireAt 的按最后目击 + 标准寿命补齐。
+        if (!state.expireAt) {
+            let lastSeen = state.lastSeen || state.tick || Game.time;
+            state.expireAt = lastSeen + OUTER_INVADER_LIFE_FALLBACK + OUTER_INVADER_EXPIRE_MARGIN;
+        }
+        if (Game.time > state.expireAt) {
+            delete mem.outerRetreat;
+            return null;
+        }
+        return state;
     },
     outerRetreatCheck(roomOrName) {
         let rooms = Game.rooms || {};
@@ -2991,10 +3013,22 @@ let pro = {
         let mem = Memory.rooms[roomName] || (Memory.rooms[roomName] = {});
         if (room) {
             let count = pro.outerInvaderCount(room);
-            if (count >= 1) mem.outerRetreat = {tick: Game.time, count: count};
-            else if (mem.outerRetreat) delete mem.outerRetreat;
+            if (count >= 1) {
+                let info = (Game._outerInvaderCnt && Game._outerInvaderCnt[room.name]) || {};
+                let maxTtl = Number.isFinite(info.maxTtl) ? info.maxTtl : OUTER_INVADER_LIFE_FALLBACK;
+                let prev = mem.outerRetreat;
+                let firstSeen = prev && prev.firstSeen ? prev.firstSeen : Game.time;
+                mem.outerRetreat = {
+                    tick: Game.time,
+                    count: count,
+                    firstSeen: firstSeen,
+                    lastSeen: Game.time,
+                    maxTtl: maxTtl,
+                    expireAt: Game.time + maxTtl + OUTER_INVADER_EXPIRE_MARGIN,
+                };
+            } else if (mem.outerRetreat) delete mem.outerRetreat;
         }
-        // 没视野时保留状态，必须等 defenser 或侦察兵实际看到 0 个 Invader 才解除。
+        // 有视野：count=0 直接解除；没视野：按最后目击 TTL 自然死亡到期解除。
         return pro.outerRetreatState(roomName);
     },
     /**

@@ -2,9 +2,9 @@
 //   · 任何 Invader 出现 ⇒ 除 defenser 外的所有外矿爬退到矿区房外 1~2 格等待
 //     （不再跑回主房 storage，Invader 清零后马上回矿）；
 //   · 恰好 1 个 Invader ⇒ defenser 进场清理；
-//   · ≥2 个 Invader ⇒ 不派任何 defenser，只侦察到确认清零；
-//   · 解除必须来自实际视野里的 Invader=0（defenser 或侦察兵确认），
-//     失视野期间不得自动解除。
+//   · ≥2 个 Invader ⇒ 不派任何 defenser，只按最后目击 TTL 等自然死；
+//   · 有视野 ⇒ 直接按 Invader=0 解除；
+//   · 无视野 ⇒ 按最后目击时的剩余 TTL 推算自然死亡，过期自动解除。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -18,22 +18,24 @@ const code = strip(src);
 const strat = strip(read("strategy_outerHarvest.js"));
 const creepCode = strip(read("prototype_creep.js"));
 
-// ① 撤退状态：>=1 落闸；只有实际看到 0 才解除；没有盲态自动解除
+// ① 撤退状态：>=1 落闸；有视野看到 0 直接解除；无视野按最后目击 TTL 过期
 {
     const m = /outerRetreatCheck\(roomOrName\) \{[\s\S]*?\n    \},/.exec(code);
     assert.ok(m, "outerRetreatCheck 必须存在");
     const body = m[0];
-    assert.ok(/if \(count >= 1\) mem\.outerRetreat = \{tick: Game\.time, count: count\};/.test(body),
-        "任何 Invader（>=1）都必须触发全员撤退");
+    assert.ok(/if \(count >= 1\) \{/.test(body) && /count: count/.test(body)
+        && /expireAt: Game\.time \+ maxTtl \+ OUTER_INVADER_EXPIRE_MARGIN/.test(body),
+        "任何 Invader（>=1）都必须触发撤退，并记录自然死亡到期时间");
     assert.ok(/else if \(mem\.outerRetreat\) delete mem\.outerRetreat;/.test(body),
-        "实际视野里 Invader=0 才解除撤退");
-    assert.ok(!/OUTER_RETREAT_BLIND_TICKS/.test(code) && !/OUTER_RETREAT_STALE_TICKS/.test(code),
-        "失视野不得靠超时自动解除，必须等 defenser/侦察兵确认清零");
+        "有视野且 Invader=0 时必须直接解除撤退");
+    assert.ok(code.includes("OUTER_INVADER_LIFE_FALLBACK") && code.includes("OUTER_INVADER_EXPIRE_MARGIN"),
+        "无视野兜底必须使用 Invader 寿命常量");
 }
 {
     const m = /outerRetreatState\(roomName\) \{[\s\S]*?\n    \},/.exec(code);
-    assert.ok(m && !/delete mem\.outerRetreat/.test(m[0]),
-        "outerRetreatState 不得自行过期删除状态");
+    assert.ok(m && /if \(Game\.time > state\.expireAt\)/.test(m[0])
+        && /delete mem\.outerRetreat/.test(m[0]),
+        "无视野的撤退状态必须在最后目击 TTL 到期后自动解除");
 }
 
 // ② 除 defenser 外的所有外矿任务都必须先撤退
@@ -95,19 +97,11 @@ assert.ok(/moveOuterCarrierOnRoad\(creep, task, data, -1\)/.test(code),
         "core/tower 专队只在未撤退时派");
 }
 
-// ⑤ 侦察探头：无视野时每 40 tick 派 1-MOVE 侦察兵确认
-assert.ok(/retreatProbe\(flag, spawnRoom, targetRoomName\);/.test(strat),
-    "撤退分支必须调用 retreatProbe");
-assert.ok(/retreatProbe\(flag, spawnRoom, mineRoom\) \{/.test(strat),
-    "retreatProbe 必须存在");
-{
-    const body = /retreatProbe\(flag, spawnRoom, mineRoom\) \{[\s\S]*?\n    \},/.exec(strat)[0];
-    assert.ok(/if \(Game\.rooms\[mineRoom\]\) return;/.test(body), "有视野时不重复派探头");
-    assert.ok(/Game\.time - mem\.retreatProbeAt < 40/.test(body), "探头要节流（40 tick）");
-    assert.ok(/\[MOVE\], "scouter"/.test(body), "探头必须是最便宜的 1-MOVE scouter");
-}
-assert.ok(/scouterToRoom = function \(\) \{[\s\S]{0,700}?StationSources\.outerRetreatCheck/.test(creepCode),
-    "侦察兵到场必须用真实视野确认是否清零");
+// ⑤ 撤退期不再派 scouter：有 defenser 直接确认，没 defenser 等 TTL 自然到期
+assert.ok(!strat.includes("retreatProbe"),
+    "撤退分支不得再派 scouter/retreatProbe（用户 2026-11-29）");
+assert.ok(/if \(outerRetreat\) \{[\s\S]{0,220}?continue;/.test(strat),
+    "撤退状态仍必须直接 continue，不能进入外矿生产");
 
 // ⑥ >=2 Invader 不派 defenser（视野内或撤退状态缓存都拒绝）
 assert.ok(/if \(retreat && retreat\.count >= 2\) return null;/.test(code),

@@ -98,27 +98,6 @@ let pro = {
      *
      * 规模按 core 等级（见 coreBusterPlan）：一级只上 ATTACK；更高等级补 HEAL。
      */
-    /**
-     * 撤退期间的**盲态探头**（用户 2026-11-21：多 invader 全员离房直到它们死）。
-     *
-     * 全员撤出后房里没人 → 没有视野 → `outerRetreatCheck` 数不到 invader，
-     * 撤退状态只能等宽限/硬过期，矿点白停几小时。这里每 40 tick 派一只 1-MOVE
-     * scouter 进去看一眼：看到 0 只就解除撤退、生产回流；看到 ≥2 就重新落闸，
-     * 代价只有 50 能量（死也要死得便宜）。
-     */
-    retreatProbe(flag, spawnRoom, mineRoom) {
-        if (Game.rooms[mineRoom]) return;                         // 有视野：等它自己数
-        let mem = Memory.rooms[mineRoom] || (Memory.rooms[mineRoom] = {});
-        if (mem.retreatProbeAt && Game.time - mem.retreatProbeAt < 40) return;
-        let busy = spawnRoom.creeps("scouter", false).some(c => {
-            let t = c.headTask && c.headTask();
-            return t && t.roomName == mineRoom;
-        });
-        if (busy) return;
-        mem.retreatProbeAt = Game.time;
-        StationHive.trySpawn(spawnRoom, spawnRoom.name, [MOVE], "scouter",
-            [UtilsTask.taskOutView(flag.id, mineRoom, undefined, undefined, "scouterToRoom")]);
-    },
     spawnCoreBuster(targetRoomName, spawnRoom) {
         if (spawnRoom.spawnFailure) return;
         let harRoom = Game.rooms[targetRoomName];
@@ -419,11 +398,12 @@ let pro = {
                 Memory.outerPaused[targetRoomName] = Game.time + OUTER_CONGESTION_PAUSE_TICKS;
                 continue;
             }
-            // 撤退政策（用户 2026-11-26 / 2026-11-28）：任何 Invader 出现时，
-            // 除 defenser 外的所有外矿爬退到**矿区房外 1~2 格**等待（不再回主房
-            // storage，Invader 清零后马上回矿）。**恰好 1 只** Invader 时仍派/保留
-            // 1 只 defenser 进场清理；**≥2 只**时完全不派防守，只由侦察探头持续
-            // 确认，直到房里 Invader 清零才恢复生产。
+            // 撤退政策（用户 2026-11-26 / 2026-11-28 / 2026-11-29）：任何 Invader
+            // 出现时，除 defenser 外的所有外矿爬退到**矿区房外 1~2 格**等待（不再
+            // 回主房 storage，Invader 清零后马上回矿）。**恰好 1 只** Invader 时仍
+            // 派/保留 1 只 defenser 进场清理；**≥2 只**时完全不派防守，也不派
+            // scouter：有视野直接看到 0 解除，无视野按最后目击的剩余 TTL 等它们
+            // 自然老死后解除，不能无限停矿。
             let outerRetreat = typeof StationSources != "undefined" && StationSources
                 && StationSources.outerRetreatCheck
                 ? StationSources.outerRetreatCheck(targetRoomName) : null;
@@ -444,7 +424,8 @@ let pro = {
                 }
             }
             if (outerRetreat) {
-                pro.retreatProbe(flag, spawnRoom, targetRoomName);
+                // 有 defenser 就由它确认 0；没有 defenser（≥2 Invader）则由
+                // outerRetreat 记录的最后 TTL 自然到期解除，不再派 scouter。
                 continue;
             }
             // Scout 只负责首次建立 source Memory。已有坐标、container ID 与路径

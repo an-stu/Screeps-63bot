@@ -272,6 +272,27 @@ function makeStore(contents, capacity) {
     assert.equal(moves.length, before, "主房一侧应原地等待，不得返回矿区");
 }
 
+// ── 1c) Invader 撤退：有视野直接清零，无视野按最后目击 TTL 到期解除 ──────
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    ctx.Game.time = 1000;
+    const invader = {owner: {username: "Invader"}, ticksToLive: 100};
+    const room = {name: "W1N1", getHostileCreeps: () => [invader], find: () => [invader]};
+    ctx.Game.rooms.W1N1 = room;
+    const state = S.outerRetreatCheck(room);
+    assert.equal(state.count, 1, "有视野且 Invader≥1 必须落闸");
+    assert.equal(state.lastSeen, 1000);
+    assert.equal(state.expireAt, 1000 + 100 + 30, "到期时间 = 最后目击 + 剩余 TTL + 余量");
+
+    delete ctx.Game.rooms.W1N1;
+    ctx.Game.time = state.expireAt;
+    assert.ok(S.outerRetreatCheck("W1N1"), "未到自然死亡时间前保持撤退");
+    ctx.Game.time = state.expireAt + 1;
+    assert.equal(S.outerRetreatCheck("W1N1"), null, "无视野时 TTL 到期后必须自动解除");
+}
+
 // ───────────────────────── 2) 回程只交 Storage，兼容旧 Link 任务 ─────────────────────────
 function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBuilding, wait, missingTarget, missingStorage } = {}) {
     const ctx = makeContext();
