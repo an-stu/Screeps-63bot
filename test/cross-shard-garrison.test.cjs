@@ -1010,4 +1010,79 @@ function transitCreep(ctx, room, name, slot, pos, wave = 4) {
     assert.ok(crew.every(m=>m.actions.some(a=>a[0]==="moveTo"&&a[1]===38&&a[2]===0)));
 }
 
+// 18. A wave split across two origin-route rooms must walk back together.
+// Every subset used to muster in its own room forever (forward half waiting
+// for four, trailing half waiting for four), so the wave aged out in place
+// without ever reaching the portal. Laggards now walk one room forward, but
+// only while the next room is clear and only when someone is already ahead.
+{
+    const build = ({armed = false} = {}) => {
+        const ctx = load({shard: "shard3"});
+        const c = cfg(ctx, {wave: 4, remote: freshRemote({scoutTtl: 500})});
+        const home = ctx.Game.rooms[c.spawnRoom];
+        home.find = type => {
+            if (type === ctx.TOP) return [new ctx.RoomPosition(38, 0, home.name)];
+            if (type === ctx.FIND_CREEPS) return Object.values(ctx.Game.creeps).filter(e => e.room === home);
+            return [];
+        };
+        home.getHostileCreeps = () => [];
+        const north = {
+            name: "W31N56", controller: undefined,
+            find(type) {
+                if (type === ctx.FIND_CREEPS) return Object.values(ctx.Game.creeps).filter(e => e.room === north);
+                if (type === ctx.FIND_HOSTILE_CREEPS) return armed ? [hostile(ctx, "camp-north", 41, 46)] : [];
+                return [];
+            },
+        };
+        ctx.Game.rooms[north.name] = north;
+        ctx.Game.map.findExit = () => ctx.TOP;
+        const route = ["W31N55", "W31N56", "W30N56"];
+        const rear = [[2, 15], [3, 15]].map(([x, y], i) =>
+            transitCreep(ctx, home, "rear" + i, [1, 3][i], {x, y}));
+        const front = [[41, 47], [42, 47]].map(([x, y], i) =>
+            transitCreep(ctx, north, "front" + i, [0, 2][i], {x, y}));
+        for (const m of [...rear, ...front]) {
+            m.task.originRoute = route;
+            m.task.roomExit = undefined;
+        }
+        ctx.Game.creeps = Object.fromEntries([...rear, ...front].map(m => [m.name, m]));
+        return {ctx, home, north, rear, front};
+    };
+
+    // A. Split 2/2: the trailing pair walks to the W31N55 north gate, the
+    // forward pair holds its muster post and never paths on its own.
+    {
+        const {ctx, rear, front} = build();
+        for (const m of rear) ctx.CrossShardGarrison.travel(m, m.task, false);
+        assert.ok(rear.every(m => m.actions.some(a => a[0] === "moveTo" && a[1] === 38 && a[2] === 0)),
+            "laggards walk the one room that separates them from the wave");
+        assert.equal(ctx.PathFinder.calls.length, 0, "rejoining is a plain border walk, not a route harvest");
+        for (const m of front) ctx.CrossShardGarrison.travel(m, m.task, false);
+        assert.ok(front.every(m => m.actions.length === 0),
+            "the forward half keeps mustering at 41,47/42,47 instead of running ahead");
+    }
+
+    // B. An armed camper in the next room stops the walk one border short.
+    {
+        const {ctx, rear} = build({armed: true});
+        for (const m of rear) ctx.CrossShardGarrison.travel(m, m.task, false);
+        assert.ok(rear.every(m => !m.actions.some(a => a[0] === "moveTo" && a[1] === 38 && a[2] === 0)),
+            "never file a partial squad into an armed room");
+        assert.ok(rear.every(m => m.actions.length === 0), "they hold their own muster post instead");
+    }
+
+    // C. Nobody ahead on the route: a squad that never left home still may
+    // not start the origin route by itself.
+    {
+        const {ctx, home, front} = build();
+        for (const m of [front[0], front[1]]) {
+            m.room = home;
+            m.pos = new ctx.RoomPosition(m.pos.x === 41 ? 2 : 3, 14, home.name);
+        }
+        for (const m of front) ctx.CrossShardGarrison.travel(m, m.task, false);
+        assert.ok(front.every(m => !m.actions.some(a => a[0] === "moveTo" && a[1] === 38 && a[2] === 0)),
+            "a same-room squad regroups locally, it does not begin the route");
+    }
+}
+
 console.log("cross-shard garrison checks passed");

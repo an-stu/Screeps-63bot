@@ -600,6 +600,40 @@ function garrisonSquareLegal(room, x,y,closed,terrain) {
         terrain.get(x+dx,y+dy)!==TERRAIN_MASK_WALL&&!closed.has((x+dx)*50+y+dy));
 }
 
+/**
+ * Walk one room forward when the wave is split across the origin route.
+ *
+ * `garrisonMuster` only ever regroups members **inside** one room, so a wave
+ * that lost `roomExit` (or whose trailing pair never got it) deadlocks:
+ * the forward half waits for four at its muster post, the trailing half waits
+ * for four at its own, and nobody walks the single room between them. Both
+ * halves then age out on the spot (2026-11-28 live: wave 84534470 = slots 0/2
+ * parked at W31N56 (41,47) and slots 1/3 at W31N55 (2,15), zero movement for
+ * 1,300+ ticks, 136 ticks to live, `cfg.wave` unchanged so `ensure()` sees a
+ * fully covered roster and never refreshes).
+ *
+ * Only a subset that is **behind** someone already on the route moves, and
+ * only into a room `garrisonCanAdvance` calls clear — a squad that has never
+ * left home still may not start the route on its own (test 11), and an armed
+ * room still stops the walk one border short instead of feeding creeps in.
+ */
+function garrisonRejoinStep(creep,task,crew) {
+    if(Game.shard.name!==task.originShard)return false;
+    const route=task.originRoute;
+    if(!Array.isArray(route))return false;
+    const index=route.indexOf(creep.room.name);
+    if(index<0)return false;
+    const ahead=crew.some(c=>c!==creep&&!c.spawning&&c.room.name!==creep.room.name
+        &&route.indexOf(c.room.name)>index);
+    if(!ahead)return false;
+    const next=route[index+1];
+    if(!next||next===task.roomName)return false;
+    if(!garrisonCanAdvance(next,task,false))return false;
+    const gate=GARRISON_W31_GATES[creep.room.name];
+    garrisonTravel(creep,next,gate?{x:gate.x,y:gate.y}:undefined);
+    return true;
+}
+
 function garrisonMuster(creep,task,crew,baseOverride) {
     // Assembling at home or after a split crossing is the only independent
     // movement in an ordinary room. No member leaves it until the square is complete.
@@ -1042,8 +1076,14 @@ const garrisonPro = {
         if(!arrived&&task.portalReleased)return this.startPortal(creep,task,"member");
         if(crew.length!==4||crew.some(c=>c.room.name!==creep.room.name)){
             // Boosted units may gather next to their spawn or landing tile,
-            // but do not travel out of that room independently.
-            if(arrived||garrisonBodyReady(creep,task.slot))return garrisonMuster(creep,task,crew.filter(c=>c.room.name===creep.room.name));
+            // but do not travel out of that room independently — unless the
+            // rest of the wave is already a room ahead on the origin route,
+            // in which case the laggards walk the one room that separates
+            // them (see garrisonRejoinStep; otherwise nobody ever moves).
+            if(arrived||garrisonBodyReady(creep,task.slot)){
+                if(!arrived&&garrisonRejoinStep(creep,task,crew))return;
+                return garrisonMuster(creep,task,crew.filter(c=>c.room.name===creep.room.name));
+            }
             return this.startPortal(creep,task,"member");
         }
         const pivot=garrisonPivot(crew);
