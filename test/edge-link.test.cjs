@@ -293,6 +293,49 @@ function makeStore(contents, capacity) {
     assert.equal(S.outerRetreatCheck("W1N1"), null, "无视野时 TTL 到期后必须自动解除");
 }
 
+// ── 1d) 外矿 container 异物：低频巡检、空 outer carrier 全部取出 ───────────
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    ctx.Game.time = 2000;
+    ctx.Memory.rooms = {M: {}};
+    const container = {
+        id: "c1", store: makeStore({energy: 500, GO: 10, UH: 5}, 2000),
+        pos: {x: 10, y: 10, roomName: "M"},
+    };
+    const storage = {id: "st", store: makeStore({}, 100000), pos: {x: 20, y: 20, roomName: "H"}};
+    const carrier = {
+        store: makeStore({}, 1600),
+        memory: {tasks: [{taskName: "harvestEnergyOuterCarry", roomName: "M"}]},
+        storeEmpty() { return this.store.getUsedCapacity() === 0; },
+        addTask(t) { this.memory.tasks.push(...(Array.isArray(t) ? t : [t])); },
+        execLastTask() {},
+    };
+    const home = {
+        name: "H", memory: {}, storage, terminal: null,
+        creeps(role) { return role === "outerHarvestEnergyCarrier" ? [carrier] : []; },
+    };
+    const target = {
+        name: "M", memory: {stationSources: {src1: {container: "c1"}}},
+        getHostileCreeps: () => [], find: () => [],
+    };
+    ctx.Game.rooms = {H: home, M: target};
+    ctx.Game.getObjectById = id => id === "c1" ? container : null;
+    ctx.ManagerFlags = {getFlagsByPrefix: () => [{pos: {roomName: "M"}, memory: {spawnRoom: "H"}}]};
+    S.cleanDirtyOuterContainers(home);
+    const tasks = carrier.memory.tasks;
+    assert.ok(tasks.some(t => t.taskName === "carryRes" && t.resType === "GO"),
+        "GO 异物必须被安排取出");
+    assert.ok(tasks.some(t => t.taskName === "carryRes" && t.resType === "UH"),
+        "UH 异物必须被安排取出");
+    assert.ok(!tasks.some(t => t.taskName === "carryRes" && t.resType === "energy"),
+        "正常的 energy 不应被当异物取走");
+    assert.ok(tasks.filter(t => t.taskName === "fillRes").length === 2,
+        "两种异物都要有回主房卸货任务");
+    assert.equal(home.memory.outerContainerCleanAt, 3000, "巡检必须按 1000 tick 节流");
+}
+
 // ───────────────────────── 2) 回程只交 Storage，兼容旧 Link 任务 ─────────────────────────
 function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBuilding, wait, missingTarget, missingStorage } = {}) {
     const ctx = makeContext();

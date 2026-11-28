@@ -1090,6 +1090,8 @@ let pro = {
         // 「本房 keeper 满员才派」的能量健康闸在函数内部（0.78.155 原则）。
         if (global.StrategyOuterHarvest && isCpuFeatureEnabled("outerHarvest")) {
             HelperError.catchError(() => StationSources.trySpawnReservers(room), "reserver:" + room.name);
+            // 低频巡检外矿容器异物，派在役空 carrier 清走（1000 tick/房）。
+            HelperError.catchError(() => StationSources.cleanDirtyOuterContainers(room), "outerClean:" + room.name);
         }
         // worker 优先 carrier 的事件
         pro.workerManager(room); // 包括了生爬逻辑

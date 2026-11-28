@@ -1,3 +1,20 @@
+## v0.78.377 — 外矿 container 异物低频巡检与清理
+
+- 用户 2026-11-29：外矿容器混入 boost 化合物等异物会一直占容量，需要隔很长时间
+  巡检一次并派取货爬全部取出。现场 E52S29 第二个源容器有
+  `energy 606 + GO10/KO5/ZH5/UH5`。
+- 新增 `StationSources.cleanDirtyOuterContainers(spawnRoom)`，由
+  strategy_highLevel 在 outerHarvest 开启时调用，每个出兵房
+  `OUTER_CONTAINER_CLEAN_INTERVAL = 1000 tick` 节流一次。
+- 巡检范围：该出兵房 har 旗对应的外矿 source container（预期只有 energy）和
+  mineral container（预期只有自身矿物）；发现异物时找一只在该矿点在役、
+  空仓的 `outerHarvestEnergyCarrier`，把**所有非预期资源**逐个 `carryRes`
+  取出，任务栈底配 `fillRes` 回主房 storage/terminal，卸完恢复原采矿任务。
+  在撤退状态（Invader 在场）时跳过，不派经济爬。
+- 主房 container 原本已有 `strategy_highLevel.cleanDirtyContainers` 每 pass
+  清理；本次补齐外矿侧。
+- edge-link 增加行为断言（GO/UH 被取出、energy 不取、回主房卸货、1000 tick 节流）。
+
 ## v0.78.376 — 无视野时按 Invader 自然寿命解除外矿撤退
 
 - 用户 2026-11-29：外矿 Invader 消失判断应分两种：有视野直接看是否还有

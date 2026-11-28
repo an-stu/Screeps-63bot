@@ -40,6 +40,8 @@ const OUTER_KEEPER_FLEE_RANGE = 6;
  */
 const OUTER_INVADER_LIFE_FALLBACK = 1500;
 const OUTER_INVADER_EXPIRE_MARGIN = 30;
+/** 外矿 container 异物巡检间隔（tick）：低频扫描，避免每 pass 扫全量容器。 */
+const OUTER_CONTAINER_CLEAN_INTERVAL = 1000;
 /**
  * 无威胁的普通矿房，防守爬安静多少 tick 后退役（回收成能量）。
  *
@@ -4376,6 +4378,70 @@ let pro = {
             let tasks = [UtilsTask.task(harRoom.controller, "reserveOuterHar")];
             StationHive.trySpawn(spawnRoom, spawnRoom.name, body, "reserver", tasks);
             return;
+        }
+    },
+    /**
+     * 外矿 source/mineral container 异物巡检（用户 2026-11-29）。
+     *
+     * 外矿容器偶尔会混入 boost 化合物等不该存在的资源，占容量后 source 的
+     * 能量/矿物就堆不进去。每 OUTER_CONTAINER_CLEAN_INTERVAL tick 扫一次，
+     * 用该矿点已在役的空 outer carrier 把非预期资源全部取出，随后按任务栈
+     * 回主房 storage/terminal 卸货，再恢复原来的采矿任务。
+     * 撤退期直接跳过（Invader 在场不派任何经济爬）。
+     */
+    cleanDirtyOuterContainers(spawnRoom) {
+        if (!spawnRoom || !spawnRoom.memory) return;
+        if (spawnRoom.memory.outerContainerCleanAt > Game.time) return;
+        spawnRoom.memory.outerContainerCleanAt = Game.time + OUTER_CONTAINER_CLEAN_INTERVAL;
+        let home = spawnRoom.storage || spawnRoom.terminal;
+        if (!home || !home.store) return;
+        let flags = ManagerFlags.getFlagsByPrefix("har");
+        for (let flag of flags) {
+            if (flag.memory && flag.memory.spawnRoom && flag.memory.spawnRoom != spawnRoom.name) continue;
+            let targetName = flag.pos.roomName;
+            let room = Game.rooms[targetName];
+            if (!room || !room.memory) continue;
+            if (pro.outerRetreatCheck && pro.outerRetreatCheck(targetName)) continue;
+            let stations = room.memory[pro.stationName];
+            if (!stations) continue;
+            let expected = {};
+            let containers = [];
+            for (let sourceId in stations) {
+                let data = stations[sourceId] || {};
+                if (!data.container) continue;
+                expected[data.container] = RESOURCE_ENERGY;
+                containers.push(data.container);
+            }
+            let mineral = global.StationMineral && room.memory[StationMineral.stationName];
+            if (mineral && mineral.container && mineral.resType) {
+                expected[mineral.container] = mineral.resType;
+                containers.push(mineral.container);
+            }
+            for (let containerId of containers) {
+                let container = Game.getObjectById(containerId);
+                if (!container || !container.store) continue;
+                let exp = expected[containerId];
+                let dirty = Object.keys(container.store).filter(r =>
+                    r != exp && (container.store[r] || 0) > 0);
+                if (!dirty.length) continue;
+                let carrier = spawnRoom.creeps("outerHarvestEnergyCarrier", false).find(e => {
+                    if (!e.storeEmpty || !e.storeEmpty()) return false;
+                    return (e.memory.tasks || []).some(t => t && t.roomName == targetName);
+                });
+                if (!carrier) continue;   // 下次低频巡检再试
+                // 栈底放卸货，栈顶放取货：LIFO 先逐个取出，最后回主房卸货。
+                let tasks = [];
+                for (let resType of dirty) {
+                    tasks.push(UtilsTask.task(home, "fillRes", undefined, {resType: resType}));
+                }
+                for (let resType of dirty) {
+                    tasks.push(UtilsTask.task(container, "carryRes", "registerStationCarryDrop", {
+                        resType: resType, resCount: container.store[resType],
+                    }));
+                }
+                carrier.addTask(tasks);
+                carrier.execLastTask();
+            }
         }
     },
     trySpawnOuterHarCarrier(roomName, spawnRoom) {
