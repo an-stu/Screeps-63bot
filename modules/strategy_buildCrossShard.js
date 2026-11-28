@@ -667,6 +667,29 @@ function gatherBootstrapEnergy(creep, room, task) {
     return result == OK || result == ERR_NOT_IN_RANGE;
 }
 
+function isRoadBootstrapUpgrader(creep, room) {
+    if (room._crossShardRoadUpgrader === undefined) {
+        // Choose one loaded builder closest to the controller. Room objects
+        // are per tick, so the other builders share this decision.
+        let lead = creep;
+        let range = creep.pos.getRangeTo(room.controller);
+        for (const other of room.find(FIND_MY_CREEPS)) {
+            if (other === creep || other.spawning || other.memory?.role !== "crossShardBuilder"
+                || !other.store[RESOURCE_ENERGY]) continue;
+            const task = other.lastTask();
+            if (task?.taskName !== "buildCrossShardRoom" || task.roomName !== room.name
+                || (task.gathering && other.store.getFreeCapacity(RESOURCE_ENERGY) > 0)) continue;
+            const d = other.pos.getRangeTo(room.controller);
+            if (d < range || (d === range && other.name < lead.name)) {
+                lead = other;
+                range = d;
+            }
+        }
+        room._crossShardRoadUpgrader = lead.name;
+    }
+    return room._crossShardRoadUpgrader === creep.name;
+}
+
 Creep.prototype.buildCrossShardRoom = function () {
     let task = this.lastTask();
     if (!task || !task.roomName) return;
@@ -737,12 +760,16 @@ Creep.prototype.buildCrossShardRoom = function () {
             if (this.transfer(hiveTarget, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) this.moveTo(hiveTarget, {range:1, reusePath:20});
             return;
         }
-        // Hive 已满 → 援建工地（spawn 优先，其余任意）。
-        if (buildSite) {
+        // RCL1 的蓝图会持续补道路工地。关键工地完成后留一只援建爬升
+        // RCL2，其余继续施工；不依赖本地有常规 worker 或改变孵化政策。
+        const roadUpgrade = level === 1 && spawns.length && room.controller && !room.controller.upgradeBlocked
+            && sites.length && sites.every(site => site.structureType === STRUCTURE_ROAD)
+            && isRoadBootstrapUpgrader(this, room);
+        if (buildSite && !roadUpgrade) {
             if (this.build(buildSite) == ERR_NOT_IN_RANGE) this.moveTo(buildSite, {range:3, reusePath:20});
             return;
         }
-        // 无工地 → 升级控制器。
+        // 无工地，或为道路队列预留的升 2 级爬 → 升级控制器。
         if (room.controller && !room.controller.upgradeBlocked) {
             let result = this.upgradeController(room.controller);
             if (result == ERR_NOT_IN_RANGE) this.moveTo(room.controller, {range:3, reusePath:20});

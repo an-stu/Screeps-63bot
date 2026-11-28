@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_buildCrossShard.js"), "utf8");
 const claimSource = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_claim.js"), "utf8");
 const FIND_MY_SPAWNS = "mySpawns";
+const FIND_MY_CREEPS = "myCreeps";
 const FIND_MY_CONSTRUCTION_SITES = "mySites";
 const FIND_SOURCES = "sources";
 const FIND_STRUCTURES = "structures";
@@ -18,6 +19,7 @@ const ATTACK = "attack";
 const RANGED_ATTACK = "ranged_attack";
 const STRUCTURE_SPAWN = "spawn";
 const STRUCTURE_EXTENSION = "extension";
+const STRUCTURE_ROAD = "road";
 const RESOURCE_ENERGY = "energy";
 const OK = 0;
 const ERR_NOT_IN_RANGE = -9;
@@ -49,9 +51,9 @@ function makeWorld(opts = {}) {
         RoomPosition,
         Game:{time:1000, cpu:{bucket:8000}, creeps:{}, rooms:{}, shard:{name:"shard2"}},
         Memory:{rooms:{}},
-        FIND_MY_SPAWNS, FIND_MY_CONSTRUCTION_SITES, FIND_SOURCES, FIND_STRUCTURES,
+        FIND_MY_SPAWNS, FIND_MY_CREEPS, FIND_MY_CONSTRUCTION_SITES, FIND_SOURCES, FIND_STRUCTURES,
         FIND_DROPPED_RESOURCES, FIND_TOMBSTONES, FIND_RUINS, FIND_HOSTILE_CREEPS, ATTACK, RANGED_ATTACK,
-        STRUCTURE_SPAWN, STRUCTURE_EXTENSION, RESOURCE_ENERGY,
+        STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_ROAD, RESOURCE_ENERGY,
         OK, ERR_NOT_IN_RANGE, WORK:"work", CARRY:"carry", MOVE:"move",
         Date:{now:() => world.now},
         Logger:{warning(...args) { world.warnings.push(args); }},
@@ -111,6 +113,7 @@ function makeRoom(sb, name = "E51S29", opts = {}) {
         currentEnergyAvailable:opts.currentEnergyAvailable,
         find(type) {
             if (type === FIND_MY_SPAWNS) return this.spawns;
+            if (type === FIND_MY_CREEPS) return Object.values(sb.Game.creeps).filter(c => c.pos?.roomName === name);
             if (type === FIND_MY_CONSTRUCTION_SITES) return this.sites;
             if (type === FIND_SOURCES) return this.sources;
             if (type === FIND_DROPPED_RESOURCES) return this.drops;
@@ -860,6 +863,42 @@ function runExec(sb, time) {
     runExec(sb, 1015);
     assert.equal(world.missions.length, 0, "无视野不发请求（既有行为）");
     assert.equal(world.operations.at(-1).state, "WAITING_FOR_OWNERSHIP", "无视野不下「有敌人」的结论");
+}
+
+// 19. A replenished road queue at RCL1 must not keep the controller at
+// zero, even with no native worker. Preserve other bootstrap priorities.
+{
+    const sb = makeWorld();
+    const name = "E48S19", pos = (x,y) => new RoomPosition(x,y,name);
+    let missingEnergy = 0;
+    const spawn = {id:"spawn1", structureType:STRUCTURE_SPAWN, pos:pos(30,15),
+        store:{getFreeCapacity:()=>missingEnergy}};
+    const road = {id:"road", structureType:STRUCTURE_ROAD, pos:pos(30,16)};
+    const room = makeRoom(sb,name,{spawns:[spawn],structures:[spawn],sites:[road]});
+    const near = makeBuilder(sb,name,{name:"near",pos:pos(32,15),energy:200});
+    const far = makeBuilder(sb,name,{name:"far",pos:pos(25,25),energy:200});
+    sb.Game.creeps = {near,far};
+    const intents = [];
+    for (const c of [near,far]) {
+        c.upgradeController = target => {intents.push([c.name,"upgrade",target.id]);return OK;};
+        c.build = target => {intents.push([c.name,"build",target.id]);return OK;};
+        c.transfer = target => {intents.push([c.name,"transfer",target.id]);return OK;};
+    }
+    far.buildCrossShardRoom();
+    near.buildCrossShardRoom();
+    assert.deepEqual(intents,[["far","build","road"],["near","upgrade",room.controller.id]],
+        "exactly one loaded cross-shard builder takes controller progress while the other builds");
+
+    intents.length = 0;
+    room.sites.push({id:"container",structureType:"container",pos:pos(32,15)});
+    near.buildCrossShardRoom();
+    assert.deepEqual(intents,[["near","build","container"]],"a critical site prevents the road-only bypass");
+
+    intents.length = 0;
+    room.sites = [road];
+    missingEnergy = 30;
+    near.buildCrossShardRoom();
+    assert.deepEqual(intents,[["near","transfer","spawn1"]],"hive refill still comes first");
 }
 
 console.log("cross-shard build checks passed");
