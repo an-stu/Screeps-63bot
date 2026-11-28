@@ -1192,8 +1192,13 @@ const garrisonPro = {
         const posts=hasEntry?(fallBack&&fallbackPosts.every(Boolean)&&fallbackPosts.length===4?fallbackPosts:entryPosts):innerPosts;
         // If the approach/retreat is longer than a combat maneuver, route
         // the entire 2x2 to the prepared post. The four never break to chase.
-        const transfer=formed&&hasEntry&&posts[0]&&garrisonRange(pivot,posts[0])>2
-            && (fallBack || !armed.length);
+        // In peacetime the walk is always allowed: `garrisonManeuver` only
+        // considers tiles within 6 of the post, so a crew that crosses the
+        // border far from its post (no `entryAnchor` ⇒ no covered entry posts)
+        // had no way to get there at all — four fighters stood 18 tiles short
+        // for hundreds of ticks (2026-11-29 live, W31N51 at (46,17) vs (41,35)).
+        const transfer=formed&&posts[0]&&garrisonRange(pivot,posts[0])>2
+            && (fallBack || !armed.length || hasEntry);
         const direction=formed&&!transfer&&garrisonManeuver(room,crew,posts,armed,focus,projected,hasEntry?19:8);
         return room._garrisonCombatFrame={slots,posts,focus,heal,formed,direction,armed,wave:ready[0].wave,
             transfer:transfer?{pivot,post:posts[0]}:null};

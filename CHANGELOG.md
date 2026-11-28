@@ -1,3 +1,19 @@
+## v0.78.373 — 驻军和平时期必须能走到自己的驻守点
+
+- 承接 v0.78.372 的现场：掉队者归队后整队从 W30N51 西侧边界进房（W31N51 x=49,y≈17），
+  结成 2x2 停在 (46,17)，而驻守点在 (41,35) —— **18 格，静止 27 tick 以上**。
+- 根因：`garrisonManeuver` 只给「距驻点 ≤6 格」的格子打分（更远的候选一律 `continue`），
+  把方块整体送过去靠的是 `transfer`，而 `transfer` 要求 `hasEntry`；`hasEntry` 需要
+  4 个「塔覆盖的入口点」，它又要求配置里有 `entryAnchor` —— W31N51 的配置没有这个字段，
+  ⇒ `transfer` 永远为 false、maneuver 永远无解，四只就钉在原地。
+- 修法：`transfer` 去掉 `hasEntry` 前置，改成 `(fallBack || !armed.length || hasEntry)`。
+  即**和平时期**（无敌对武装）无论有没有入口点都整队走向驻点；有敌人时行为完全不变
+  （仍只在回退或入口点齐备时整体转移，否则交给 6 格内的战斗机动）。
+- 回归：`test/cross-shard-garrison.test.cjs` 第 20 节（2x2 在 (46,17)、驻点 (25,25)、无敌人
+  ⇒ 每 tick 恰好一次共享方块步、只出一条 PathFinder 路径）。负对照：`transfer` 退回带
+  `hasEntry` ⇒ 首例实测红。
+- 线上自愈：部署后同一 tick 起整队走向 (41,35) 一带的驻点。
+
 ## v0.78.372 — 跨 shard 驻军在落地区（目标 shard）掉队也能归队
 
 - 线上实例（shard3 W31N55 → shard2 W31N51，wave 84542970）：过完虫洞落地后

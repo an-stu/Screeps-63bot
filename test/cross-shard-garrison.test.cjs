@@ -1167,4 +1167,38 @@ function transitCreep(ctx, room, name, slot, pos, wave = 4) {
     }
 }
 
+// 20. A crew that crosses the border far from its post must still walk there.
+// `garrisonManeuver` only scores tiles within 6 of the post, and the post
+// transfer used to be gated on tower-covered entry posts (`hasEntry`), which a
+// room without `entryAnchor` can never have. Four fighters then entered W31N51
+// at (49,17), formed a 2x2 at (46,17) and stood there with their post at
+// (41,35) — no maneuver tile and no transfer, so nothing ever moved them.
+{
+    const ctx = load({shard: "shard2"});
+    cfg(ctx, {anchor: {x: 25, y: 25}, squad: 4});
+    const room = combatRoom(ctx, {hostiles: []});
+    const members = [[46, 17], [47, 17], [46, 18], [47, 18]].map(([x, y], slot) =>
+        combatCreep(ctx, room, "far" + slot, slot, [x, y]));
+    for (const m of members) m.body.push({type: ctx.MOVE, hits: 100});
+    installCombatCrew(ctx, room, members);
+    const directions = [];
+    ctx.WarCache = {getMoveAbleCostMatrix() { return {}; }};
+    ctx.WarTeamCore = {
+        action: {
+            team4checkSquarePos: () => true,
+            moveByDirection: ({_direction}) => { directions.push(_direction); return true; },
+        },
+    };
+
+    const frame = ctx.CrossShardGarrison.combatFrame(room);
+    assert.equal(frame.formed, true, "the arriving crew is a legal 2x2");
+    assert.ok(frame.transfer, "peacetime: the square walks to its post even without entry posts");
+    assert.deepEqual([frame.transfer.post.x, frame.transfer.post.y],
+        [frame.posts[0].x, frame.posts[0].y], "the transfer targets the assigned post");
+
+    for (const member of members) ctx.CrossShardGarrison.defend(member, member.task);
+    assert.equal(directions.length, 1, "one shared square step per tick, not four individual paths");
+    assert.equal(ctx.PathFinder.calls.length, 1, "the whole square shares one path");
+}
+
 console.log("cross-shard garrison checks passed");
