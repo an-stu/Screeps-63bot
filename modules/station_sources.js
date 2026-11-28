@@ -4425,7 +4425,7 @@ let pro = {
                     r != exp && (container.store[r] || 0) > 0);
                 if (!dirty.length) continue;
                 let carrier = spawnRoom.creeps("outerHarvestEnergyCarrier", false).find(e => {
-                    if (!e.storeEmpty || !e.storeEmpty()) return false;
+                    if (!e.store || e.store.getFreeCapacity() <= 0) return false;
                     return (e.memory.tasks || []).some(t => t && t.roomName == targetName);
                 });
                 if (!carrier) continue;   // 下次低频巡检再试
