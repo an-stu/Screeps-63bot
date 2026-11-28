@@ -968,6 +968,39 @@ function defenceGateFixture(defenders) {
         + "消失，那一格才是真的「没有 road」，而且从 0 重建一格要 5000 能量（修回来只要 250）");
     ctx.Game.rooms.W34N55 = { name: "W34N55", lookForAt: () => [] };
     assert.equal(S.outerRoadComplete(data, true), false, "完全没有路 → 未完成");
+
+    // 容器格不要求路（用户 2026-11-29）：容器底下即使还留着历史道路，
+    // 也不按血量判定 —— 那一格取货/交接都站在容器上，让它自然衰减。
+    // 旧逻辑会因为它 <50% 把整条路线永久判成未完成，持续补修路爬。
+    ctx.Game.rooms.W34N55 = {
+        name: "W34N55",
+        lookForAt: (type, x, y) => {
+            if (x == 10 && y == 10) {
+                return type == "structures" ? [
+                    { structureType: "container", hits: 200000, hitsMax: 250000 },
+                    { structureType: "road", hits: 100, hitsMax: 5000 },
+                ] : [];
+            }
+            return type == "structures"
+                ? [{ structureType: "road", hits: 5000, hitsMax: 5000 }] : [];
+        },
+    };
+    assert.equal(S.outerRoadComplete(data, true), true,
+        "容器格的旧路（即使 <50%）不参与完成度判定，让它在容器下面自然衰减");
+
+    // 容器工地同样算「将来是容器格」：不能因为那里还没铺路就永久判未完成。
+    ctx.Game.rooms.W34N55 = {
+        name: "W34N55",
+        lookForAt: (type, x, y) => {
+            if (x == 10 && y == 10) {
+                return type == "constructionSite" ? [{ structureType: "container" }] : [];
+            }
+            return type == "structures"
+                ? [{ structureType: "road", hits: 5000, hitsMax: 5000 }] : [];
+        },
+    };
+    assert.equal(S.outerRoadComplete(data, true), true,
+        "容器工地格不需要路（迟早被容器占掉）");
 }
 
 // ── 10) 外矿路维护不能被「补员闸」挡住（carrier 到上限 / 出兵房缺能量） ──

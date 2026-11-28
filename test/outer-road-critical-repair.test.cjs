@@ -72,7 +72,7 @@ function makeContext() {
     return ctx;
 }
 
-function runBuilder({ aheadRoads, offRouteRoads = [] }) {
+function runBuilder({ aheadRoads, offRouteRoads = [], extraStructures = {}, containerRule = true }) {
     const ctx = makeContext();
     const S = ctx.StationSources;
     const route = [10, 11, 12, 13, 14].map(x => new ctx.RoomPosition(x, 10, "W1N1"));
@@ -82,6 +82,9 @@ function runBuilder({ aheadRoads, offRouteRoads = [] }) {
     structuresByTile.set(key(10, 10), [localRoad]);
     [...aheadRoads, ...offRouteRoads].forEach(road => {
         structuresByTile.set(key(road.x, road.y), [road]);
+    });
+    Object.keys(extraStructures).forEach(tile => {
+        structuresByTile.set(tile, (structuresByTile.get(tile) || []).concat(extraStructures[tile]));
     });
 
     const data = { id: "source", roomName: "W1N1" };
@@ -93,6 +96,8 @@ function runBuilder({ aheadRoads, offRouteRoads = [] }) {
     S.nearestOuterRoadSite = () => undefined;
     S.moveToOuterRoadPoint = () => ctx.OK;
     S.clearOuterRoadPathFail = () => {};
+    // 负对照用：关闭「容器格不修」判定，复现旧逻辑
+    if (!containerRule) S.outerRoadContainerTile = () => false;
 
     const creep = Object.create(ctx.Creep.prototype);
     creep.pos = route[0];
@@ -130,6 +135,29 @@ function runBuilder({ aheadRoads, offRouteRoads = [] }) {
     const criticalOffRouteRoad = { structureType: "road", x: 11, y: 11, hits: 100, hitsMax: 1000 };
     const repairs = runBuilder({ aheadRoads: [healthyOnRouteRoad], offRouteRoads: [criticalOffRouteRoad] });
     assert.deepEqual(repairs, [], "healthy route roads and critical off-route roads must not be repaired by the look-ahead");
+}
+
+// 容器格不需要路（用户 2026-11-29）：容器底下那条历史道路即使掉到 25% 以下，
+// 修路爬经过时也不许修 —— 取货/交接都站在容器上，让它自然衰减。
+{
+    const containerTileRoad = { structureType: "road", x: 12, y: 10, hits: 200, hitsMax: 1000 };
+    const container = { structureType: "container", hits: 200000, hitsMax: 250000 };
+
+    // 负对照：关掉容器格判定，同一组输入旧逻辑会去修（证明下一条断言真能抓回归）
+    const oldRepairs = runBuilder({
+        aheadRoads: [containerTileRoad],
+        extraStructures: { "12:10": [container] },
+        containerRule: false,
+    });
+    assert.deepEqual(oldRepairs, [containerTileRoad],
+        "负对照：旧逻辑会把容器底下的危急旧路修回去");
+
+    const repairs = runBuilder({
+        aheadRoads: [containerTileRoad],
+        extraStructures: { "12:10": [container] },
+    });
+    assert.deepEqual(repairs, [],
+        "容器格（取货/交接工作格）不需要路：底下的旧路不修，任其自然衰减");
 }
 
 console.log("outer-road-critical-repair: OK");

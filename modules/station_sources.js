@@ -1628,7 +1628,8 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
             let p = roadPath[i];
             return p && p.roomName == this.pos.roomName && p.x == this.pos.x && p.y == this.pos.y;
         });
-        if (canBuild && onRoadPath && !this.pos.isBorder()) {
+        if (canBuild && onRoadPath && !this.pos.isBorder()
+            && !pro.outerRoadContainerTile(this.room, this.pos.x, this.pos.y)) {
             let blocked = this.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType != STRUCTURE_ROAD);
             if (!blocked) {
                 let road = this.pos.lookFor(LOOK_STRUCTURES).filter(e => e.structureType == STRUCTURE_ROAD).head();
@@ -1643,6 +1644,9 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
                         for (let i = pathIndex + 1; i <= pathIndex + 3; i++) {
                             let wpAhead = roadPath[i];
                             if (!wpAhead || wpAhead.roomName != this.room.name) break;
+                            // 容器格不需要路（用户 2026-11-29）：容器底下的旧路
+                            // 不修，任其自然衰减；继续看后面 3 格里的别的危急路。
+                            if (pro.outerRoadContainerTile(this.room, wpAhead.x, wpAhead.y)) continue;
                             let roadAhead = this.room.lookForAt(LOOK_STRUCTURES, wpAhead.x, wpAhead.y)
                                 .filter(s => s.structureType == STRUCTURE_ROAD).head();
                             if (roadAhead && roadAhead.hits < roadAhead.hitsMax / 4) {
@@ -2374,6 +2378,27 @@ let pro = {
         // 等于「有一个可走就算可走」，同格的 rampart 会把 nuker 掩盖掉。
         // 实测 (22,30) 上 nuker 与己方 rampart 共存，判定成可走，寻路直接穿过 nuker。
         return !structures.some(s => !pro.outerRoadStructureWalkable(s));
+    },
+    /**
+     * 容器工作格（容器、或还没建成的容器工地）：**不需要路，也不修这一格的旧路**
+     * （用户 2026-11-29）。
+     *
+     * 取货/交接都是站在容器那一格上完成的，它不是运输通道上的"路过格"；底下
+     * 即使还留着历史道路，也不值当用自己的能量去修 —— 让它自然衰减掉。
+     *
+     * 现场：shard2 多条外矿路线穿过 E51S29:(16,20) 这类矿点容器格，修路爬的
+     * 25% 危急扫描每趟路过都把它修回去，路永远烂不掉；而且那一格只要旧路低于
+     * 50%，outerRoadComplete 就把整条路线判成「未完成」，系统持续补 WORK 型
+     * 修路爬 —— 修路爬反复跑到同一个容器格上"修路"。
+     *
+     * 判定必须覆盖**容器工地**：容器还没建成时，那一格的土层迟早会被容器占掉，
+     * 提前铺路只会等容器一建成又变成同一条要衰减的旧路。
+     */
+    outerRoadContainerTile(room, x, y) {
+        if (!room || !room.lookForAt) return false;
+        if (room.lookForAt(LOOK_STRUCTURES, x, y).some(s => s.structureType == STRUCTURE_CONTAINER)) return true;
+        return typeof LOOK_CONSTRUCTION_SITES != "undefined"
+            && room.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).some(s => s.structureType == STRUCTURE_CONTAINER);
     },
     /** Energy-source and upgrade-container work tiles, once per visible room and tick. */
     outerRoadSourceContainerTileSet(room) {
@@ -3392,6 +3417,9 @@ let pro = {
         let best;
         room.find(FIND_MY_CONSTRUCTION_SITES).forEach(site => {
             if (site.structureType != STRUCTURE_ROAD) return;
+            // 容器格不需要路（用户 2026-11-29）：容器/容器工地占着的格子上即使
+            // 残留修路工地也不接活，让既有旧路（若有）自然衰减。
+            if (pro.outerRoadContainerTile(room, site.pos.x, site.pos.y)) return;
             let index = routeIndex[site.pos.x + ":" + site.pos.y];
             if (index == undefined) return;
             let range = pos.getRangeTo(site);
@@ -3435,6 +3463,11 @@ let pro = {
                 return data.roadComplete === undefined ? true : data.roadComplete;
             }
             let structures = room.lookForAt(LOOK_STRUCTURES, p.x, p.y);
+            // 容器格不要求路（用户 2026-11-29）：容器/容器工地占着的格子即使还留着
+            // 历史道路，也不按血量判定、不修 —— 让它自然衰减。否则旧路掉到 50% 以下
+            // 会把整条路线永远判成「未完成」，系统持续补修路爬，修路爬每趟都跑到
+            // 同一个容器格上"修路"。
+            if (pro.outerRoadContainerTile(room, p.x, p.y)) continue;
             let road = structures.find(s => s.structureType == STRUCTURE_ROAD);
             // 有路也要看血量：崩到 OUTER_ROAD_KEEP_HITS 以下就算未完成，让修路爬
             // 提前补回来，而不是等它烂到 0 消失（那时这一格是真的"没有路"）。
