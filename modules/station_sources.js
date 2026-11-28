@@ -2997,20 +2997,69 @@ let pro = {
         // 没视野时保留状态，必须等 defenser 或侦察兵实际看到 0 个 Invader 才解除。
         return pro.outerRetreatState(roomName);
     },
-    /** 撤退：沿缓存外矿路线朝主房走（+1）；没路线就直接朝 har_<home> 的主房走人。 */
+    /**
+     * 撤退到外矿房**外面 1~2 格**等待，不再跑回 main room 的 storage。
+     *
+     * 用户 2026-11-28：Invader 出现时外矿爬撤离，但离开矿区房一两格即可，
+     * 因为 Invader 一死就要马上回矿；跑回主房既浪费往返，也把车堆到 storage。
+     *
+     * 位置判定：当前房必须是与矿区房相邻、且共享边界朝向矿区房的那一侧；
+     * 距共享边界 ≤2 格（左右 x / 上下 y / 角房 Chebyshev）即进入待命。
+     * 还在矿区房里 → 沿缓存路 +1 往外走；已经在房外 → 沿缓存路 -1 回到
+     * 矿区边界外；没有缓存路时朝矿区房中心走，但每 tick 先判边界距离，
+     * 不会真正跨进矿区房。
+     */
+    outerRetreatEdgeDistance(pos, mineRoom) {
+        if (!pos || !mineRoom || pos.roomName == mineRoom) return -1;
+        let exits = Game.map && Game.map.describeExits ? Game.map.describeExits(pos.roomName) : null;
+        if (!exits) return -2;
+        for (let dir in exits) {
+            if (exits[dir] != mineRoom) continue;
+            let d = Number(dir);
+            if (d == 1) return pos.y;                 // 上方
+            if (d == 5) return 49 - pos.y;            // 下方
+            if (d == 7) return pos.x;                 // 左侧
+            if (d == 3) return 49 - pos.x;            // 右侧
+            if (d == 8) return Math.max(pos.x, pos.y); // 左上角
+            if (d == 2) return Math.max(49 - pos.x, pos.y);
+            if (d == 6) return Math.max(pos.x, 49 - pos.y);
+            if (d == 4) return Math.max(49 - pos.x, 49 - pos.y);
+        }
+        return -2; // 不与该矿区房相邻
+    },
     outerRetreatMove(creep, dropEnergy) {
         let task = creep.headTask();
         if (!task) return;
-        let data = Memory.rooms[task.roomName] && Memory.rooms[task.roomName][pro.stationName]
-            && Memory.rooms[task.roomName][pro.stationName][task.id];
+        let mineRoom = task.roomName;
+        let data = Memory.rooms[mineRoom] && Memory.rooms[mineRoom][pro.stationName]
+            && Memory.rooms[mineRoom][pro.stationName][task.id];
         if (dropEnergy && creep.store && creep.store[RESOURCE_ENERGY] > 0) creep.drop(RESOURCE_ENERGY);
+
+        // 先看当前房里的追兵：已经在待命点但 Invader 追出来时要继续拉开。
+        let hunter = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+        let edgeDist = pro.outerRetreatEdgeDistance(creep.pos, mineRoom);
+        let waiting = edgeDist >= 0 && edgeDist <= 2;
+
+        if (hunter && creep.pos.getRangeTo(hunter) <= 3) {
+            let step = PathFinder.search(creep.pos, {pos:hunter.pos, range:8}, {flee:true, maxRooms:1}).path[0];
+            if (step) return pro.defenseStep(creep, new RoomPosition(step.x, step.y, creep.room.name), 0);
+        }
+        if (waiting) return;
+
+        if (creep.pos.roomName != mineRoom) {
+            // 已经在矿区房外：沿缓存路反向回到边界外；没有缓存路就朝矿区房走，
+            // 下一 tick 的 waiting 判定会在 1~2 格处截停。
+            if (pro.moveOuterCarrierOnRoad(creep, task, data, -1)) return;
+            return creep.moveTo(new RoomPosition(25, 25, mineRoom));
+        }
+
+        // 还在矿区房内：沿缓存路 +1 往主房方向撤离。
         if (pro.moveOuterCarrierOnRoad(creep, task, data, 1)) return;
-        // 兜底：从外矿旗 har_<home> 找到主房，跨房直接离开（moveTo 支持跨房）
-        let home = pro.outerHomeRoom(task.roomName);
+        // 兜底：缓存路不可用时仍先离开矿区房；跨房 moveTo 支持。
+        let home = pro.outerHomeRoom(mineRoom);
         if (home && home != creep.pos.roomName) {
             return creep.moveTo(new RoomPosition(25, 25, home));
         }
-        let hunter = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
         if (hunter) {
             let step = PathFinder.search(creep.pos, {pos:hunter.pos, range:8}, {flee:true, maxRooms:1}).path[0];
             if (step) return pro.defenseStep(creep, new RoomPosition(step.x, step.y, creep.room.name), 0);

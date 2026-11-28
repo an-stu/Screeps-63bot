@@ -232,6 +232,39 @@ function makeStore(contents, capacity) {
         { carry: 33, move: 17, cost: 2500 }, "满编普通搬运爬 33C17M / 1650 容量 / 成本 2500");
 }
 
+// ── 1b) 外矿撤退只退到矿区房外 1~2 格，不跑回 storage ────────────────────
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    const S = ctx.StationSources;
+    ctx.Game.map = {describeExits: room => room === "W30N51" ? {7: "W31N51"} : {}};
+    // 从 W31N51 西侧离开进入 W30N51；x 越小越贴近矿区边界
+    assert.equal(S.outerRetreatEdgeDistance({roomName: "W30N51", x: 0, y: 20}, "W31N51"), 0);
+    assert.equal(S.outerRetreatEdgeDistance({roomName: "W30N51", x: 2, y: 20}, "W31N51"), 2);
+    assert.equal(S.outerRetreatEdgeDistance({roomName: "W30N51", x: 3, y: 20}, "W31N51"), 3);
+    assert.equal(S.outerRetreatEdgeDistance({roomName: "W31N51", x: 10, y: 20}, "W31N51"), -1);
+    assert.equal(S.outerRetreatEdgeDistance({roomName: "W29N51", x: 2, y: 20}, "W31N51"), -2);
+
+    let moves = [];
+    const creep = {
+        headTask: () => ({taskName: "harvestEnergyOuterCarrier", roomName: "W31N51", id: "s1"}),
+        pos: {
+            roomName: "W30N51", x: 2, y: 20,
+            findClosestByRange: () => null,
+            getRangeTo: () => 99,
+        },
+        store: {},
+        moveTo: p => { moves.push(p); return 0; },
+    };
+    S.outerRetreatMove(creep, false);
+    assert.equal(moves.length, 0, "已在矿区房外 2 格必须原地等待，不得回 storage");
+
+    creep.pos.x = 3;
+    S.outerRetreatMove(creep, false);
+    assert.equal(moves.length, 1, "房外但还超过 2 格时必须继续向矿区边界靠拢");
+    assert.equal(moves[0].roomName, "W31N51", "目标方向必须是矿区房，而不是主房/storage");
+}
+
 // ───────────────────────── 2) 回程只交 Storage，兼容旧 Link 任务 ─────────────────────────
 function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBuilding, wait, missingTarget, missingStorage } = {}) {
     const ctx = makeContext();

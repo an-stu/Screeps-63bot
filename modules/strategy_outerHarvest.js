@@ -419,10 +419,11 @@ let pro = {
                 Memory.outerPaused[targetRoomName] = Game.time + OUTER_CONGESTION_PAUSE_TICKS;
                 continue;
             }
-            // 撤退政策（用户 2026-11-26）：任何 Invader 出现时，除 defenser 外的
-            // 所有外矿爬都先回主房等待。**恰好 1 只** Invader 时仍派/保留 1 只
-            // defenser 进场清理；**≥2 只**时完全不派防守，只由侦察探头持续确认，
-            // 直到房里 Invader 清零才恢复生产。
+            // 撤退政策（用户 2026-11-26 / 2026-11-28）：任何 Invader 出现时，
+            // 除 defenser 外的所有外矿爬退到**矿区房外 1~2 格**等待（不再回主房
+            // storage，Invader 清零后马上回矿）。**恰好 1 只** Invader 时仍派/保留
+            // 1 只 defenser 进场清理；**≥2 只**时完全不派防守，只由侦察探头持续
+            // 确认，直到房里 Invader 清零才恢复生产。
             let outerRetreat = typeof StationSources != "undefined" && StationSources
                 && StationSources.outerRetreatCheck
                 ? StationSources.outerRetreatCheck(targetRoomName) : null;

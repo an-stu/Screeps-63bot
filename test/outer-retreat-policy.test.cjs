@@ -1,5 +1,6 @@
-// 外矿撤退政策（用户 2026-11-26 定稿）：
-//   · 任何 Invader 出现 ⇒ 除 defenser 外的所有外矿爬回主房等待；
+// 外矿撤退政策（用户 2026-11-26 / 2026-11-28 定稿）：
+//   · 任何 Invader 出现 ⇒ 除 defenser 外的所有外矿爬退到矿区房外 1~2 格等待
+//     （不再跑回主房 storage，Invader 清零后马上回矿）；
 //   · 恰好 1 个 Invader ⇒ defenser 进场清理；
 //   · ≥2 个 Invader ⇒ 不派任何 defenser，只侦察到确认清零；
 //   · 解除必须来自实际视野里的 Invader=0（defenser 或侦察兵确认），
@@ -49,6 +50,12 @@ assert.ok(!/if \(pro\.outerRetreatCheck\(task\.roomName\)\)/.test(code),
     "撤退检查必须先判 task 存在");
 assert.ok(/if \(task && task\.mineRoom && pro\.outerRetreatCheck\(task\.mineRoom\)\)/.test(code),
     "路线维修爬用 mineRoom 判撤退");
+assert.ok(code.includes("outerRetreatEdgeDistance(creep.pos, mineRoom)"),
+    "撤退必须计算矿区边界距离");
+assert.ok(/if \(waiting\) return;/.test(code),
+    "已在矿区房外 1~2 格时必须原地等待，不得继续回主房");
+assert.ok(/moveOuterCarrierOnRoad\(creep, task, data, -1\)/.test(code),
+    "房外但还太远时必须反向朝矿区边界靠拢，而不是继续回主房");
 
 // ③ defenser：1 只 Invader 留场打；>=2 才撤退
 {
