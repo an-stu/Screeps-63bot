@@ -116,4 +116,14 @@ delete positionState.byX;
 // 清理不再靠爬（用户 2026-10-21）：已占领的房里直接 `structure.destroy()`。
 // 判据与执行都在 StrategyClaim.destroyForeignStructures 里，见 test/claim-cleanup.test.cjs。
 
+// claimer 重发窗口必须是 600 tick：300 tick 会让跨 shard 行军中的 claimer
+// 被重复补派（2026-11-29 E48S19/E53S21 实测多只 claimer）。
+{
+    const cross = fs.readFileSync(path.join(__dirname, "..", "modules", "strategy_claimCrossShard.js"), "utf8");
+    assert.ok(/CLAIMER_RETRY_TICKS = 600/.test(cross),
+        "claimer 重发窗口必须固定为 600 tick");
+    assert.ok(/withAttack \? 1000 : CLAIMER_RETRY_TICKS/.test(cross),
+        "普通 claimer 必须使用 600 tick 重发窗口（withAttack 保留 1000）");
+}
+
 console.log("claim flow checks passed");

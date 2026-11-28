@@ -1,3 +1,12 @@
+## v0.78.374 — claimCrossShard claimer 重发窗口 300→600 tick
+
+- 2026-11-29 占领 E48S19/E53S21 时出现同一目标多只 claimer：`claimCrossShard`
+  每 300 tick 无条件重发，而跨 shard 行军往往超过 300 tick，老 claimer 还在
+  途中就会再派一只。
+- 普通 claimer 的重发窗口改为 `CLAIMER_RETRY_TICKS = 600`；`withAttack`
+  仍保持 1000 tick。target 未占领前 600 tick 仍允许失败重试。
+- claim-flow 增加源码钉，固定 600 tick 常量与调用点。
+
 ## v0.78.373 — 驻军和平时期必须能走到自己的驻守点（潜在缺口加固）
 
 - 承接 v0.78.372 的现场：掉队者归队后整队从 W30N51 西侧边界进房，结成 2x2 停在 (46,17)。

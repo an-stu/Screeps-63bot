@@ -83,6 +83,10 @@ let DEFAULT_CLAIM_PATH = {
         { shard: 'shard3', roomName: 'E40S30', x: 14, y: 8 },
     ],
 };
+// claimer 重发窗口：300 tick 时，跨 shard 行军还没走完就会再派一只，
+// 一次占领会出现多只 claimer（2026-11-29 实测）。600 tick 给行军留出
+// 时间，同时仍能在 claimer 早死时重试。
+const CLAIMER_RETRY_TICKS = 600;
 let getClaimPath = function () {
     let p = Memory.claimCrossShardPath;
     if (p && Array.isArray(p.path) && p.path.length) return p;
@@ -130,7 +134,7 @@ let pro = {
             let room = Game.rooms[flag.pos.roomName]
             let withAttack = flag.name.indexOf("withAttack") >= 0
             if (!room || !room.my) {// 如果房间不是我的
-                if (Game.time - flag.memory.spawnTime > (withAttack ? 1000 : 300)) {
+                if (Game.time - flag.memory.spawnTime > (withAttack ? 1000 : CLAIMER_RETRY_TICKS)) {
                     let split = flag.name.split("_");
                     let mission = {
                         func: "spawnCreepCressShard",
