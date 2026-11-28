@@ -4317,6 +4317,11 @@ let pro = {
         for (let flag of flags) {
             if (flag.memory.spawnRoom && flag.memory.spawnRoom != spawnRoom.name) continue;
             let targetRoomName = flag.pos.roomName;
+            // 用户 2026-11-29：外矿有 Invader 时，除 defenser 外**一只外矿爬都
+            // 不再生**（包括 reserver/claimer）。这条高优先级补员绕过
+            // strategy_outerHarvest 的撤退 continue，曾在 E51S27 有 Invader 时
+            // 仍派 shard2_78439166_2 去 reserve，白跑一趟。
+            if (pro.outerRetreatCheck && pro.outerRetreatCheck(targetRoomName)) continue;
             if (global.StrategyOuterHarvest) {
                 if (StrategyOuterHarvest.hasStopRemoteFlag(targetRoomName)) continue;
                 if (StrategyOuterHarvest.invaderCoreBlocks(targetRoomName)) continue;

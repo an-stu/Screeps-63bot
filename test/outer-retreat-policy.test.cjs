@@ -57,6 +57,15 @@ assert.ok(/if \(waiting\) return;/.test(code),
 assert.ok(/moveOuterCarrierOnRoad\(creep, task, data, -1\)/.test(code),
     "房外但还太远时必须反向朝矿区边界靠拢，而不是继续回主房");
 
+// ②b 高优先级 reserver 补员也必须服从撤退：Invader 在场时连 claimer/reserver
+// 都不许生（用户 2026-11-29 的 shard2_78439166_2 白跑案例）。
+{
+    const m = /trySpawnReservers\(spawnRoom\) \{[\s\S]*?\n    \},/.exec(code);
+    assert.ok(m, "trySpawnReservers 必须可定位");
+    assert.ok(/if \(pro\.outerRetreatCheck && pro\.outerRetreatCheck\(targetRoomName\)\) continue;/.test(m[0]),
+        "reserver 补员必须先查 outerRetreat，Invader 在场时不得生 claimer/reserver");
+}
+
 // ③ defenser：1 只 Invader 留场打；>=2 才撤退
 {
     const m = /Creep\.prototype\.outerDefense = function \(\) \{[\s\S]*?\n\};/.exec(code);

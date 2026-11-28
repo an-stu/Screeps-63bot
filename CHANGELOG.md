@@ -1,3 +1,13 @@
+## v0.78.375 — Invader 在场时不再补 reserver/claimer
+
+- 用户 2026-11-29 点名 `shard2_78439166_2`：外矿 E51S27 有 Invader 时仍被
+  `trySpawnReservers` 派去 reserve，白跑一趟。该高优先级补员从
+  `strategy_highLevel` 调用，绕过了 `strategy_outerHarvest` 的撤退 continue。
+- `trySpawnReservers` 现在逐个目标先查 `pro.outerRetreatCheck(targetRoomName)`；
+  有撤退状态（Invader 在场/失视野未清零）就跳过，不再生任何 reserver/claimer。
+  defenser 仍走独立的 `trySpawnOuterDefenser`，不受影响。
+- outer-retreat-policy 增加源码钉，防止再次绕开撤退闸门。
+
 ## v0.78.374 — claimCrossShard claimer 重发窗口 300→600 tick
 
 - 2026-11-29 占领 E48S19/E53S21 时出现同一目标多只 claimer：`claimCrossShard`
