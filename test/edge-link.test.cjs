@@ -263,6 +263,13 @@ function makeStore(contents, capacity) {
     S.outerRetreatMove(creep, false);
     assert.equal(moves.length, 1, "房外但还超过 2 格时必须继续向矿区边界靠拢");
     assert.equal(moves[0].roomName, "W31N51", "目标方向必须是矿区房，而不是主房/storage");
+
+    // 已经越过相邻房回到主房一侧：不得被撤退逻辑又拉回战区。
+    const before = moves.length;
+    creep.pos.roomName = "W29N51";
+    creep.pos.x = 10;
+    S.outerRetreatMove(creep, false);
+    assert.equal(moves.length, before, "主房一侧应原地等待，不得返回矿区");
 }
 
 // ───────────────────────── 2) 回程只交 Storage，兼容旧 Link 任务 ─────────────────────────

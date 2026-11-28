@@ -3047,8 +3047,13 @@ let pro = {
         if (waiting) return;
 
         if (creep.pos.roomName != mineRoom) {
-            // 已经在矿区房外：沿缓存路反向回到边界外；没有缓存路就朝矿区房走，
-            // 下一 tick 的 waiting 判定会在 1~2 格处截停。
+            if (edgeDist < 0) {
+                // 已经越过相邻房、回到主房一侧：不再往矿区折返，就在这里等
+                // Invader 清零；避免被撤退逻辑从 home 又拉回战区。
+                return;
+            }
+            // 已经在矿区房相邻的外侧：沿缓存路反向回到边界外；没有缓存路就
+            // 朝矿区房走，下一 tick 的 waiting 判定会在 1~2 格处截停。
             if (pro.moveOuterCarrierOnRoad(creep, task, data, -1)) return;
             return creep.moveTo(new RoomPosition(25, 25, mineRoom));
         }
