@@ -336,6 +336,44 @@ function makeStore(contents, capacity) {
     assert.equal(home.memory.outerContainerCleanAt, 3000, "巡检必须按 1000 tick 节流");
 }
 
+// ── 1e) 修路把能量修光：空手必须掉头回对应 container，不许回主房 storage ──
+{
+    const ctx = makeContext();
+    vm.runInNewContext(read("station_sources.js"), ctx);
+    ctx.Game.time = 2000;
+    const container = {id: "c1", pos: {x: 10, y: 10, roomName: "M"}, store: makeStore({energy: 500}, 2000)};
+    const storage = {id: "st", pos: {x: 20, y: 20, roomName: "H"}, store: makeStore({}, 100000)};
+    const home = {name: "H", storage, terminal: null};
+    const targetRoom = {name: "M", getHostileCreeps: () => [], find: () => []};
+    ctx.Game.rooms = {H: home, M: targetRoom};
+    ctx.Game.getObjectById = id => id === "c1" ? container : id === "st" ? storage : null;
+    ctx.Memory.rooms = {M: {stationSources: {src: {id: "src", roomName: "M", container: "c1"}}}};
+    const task = {
+        taskName: "harvestEnergyOuterCarryRoadBuilder", mineRoom: "M", stationId: "src",
+        keepBuilding: true, roadDir: 1, pathIndex: 3,
+    };
+    const creep = {
+        memory: {roomName: "H", tasks: [task]},
+        store: makeStore({energy: 0}, 1000),
+        pos: {roomName: "H", x: 20, y: 20, isNearTo: () => false},
+        getPartCnt: () => 8, getActiveBodyparts: () => 8,
+        lastTask() { return this.memory.tasks[this.memory.tasks.length - 1]; },
+        headTask() { return this.memory.tasks[0]; },
+        lastTaskObj() { return storage; },
+        mainRoom() { return home; },
+        popTask() { this.memory.tasks.pop(); },
+        addTask(t) { this.memory.tasks.push(...(Array.isArray(t) ? t : [t])); },
+        execLastTask() {},
+        moveTo() { return 0; },
+    };
+    ctx.Creep.prototype.harvestEnergyOuterCarryRoadBuilder.call(creep);
+    assert.equal(creep.memory.tasks.length, 1, "空手 builder 必须换成一个回矿任务");
+    const next = creep.memory.tasks[0];
+    assert.equal(next.taskName, "harvestEnergyOuterCarryRoadBuilder");
+    assert.equal(next.id, "c1", "回矿目标必须是该矿点 container，不是主房 storage");
+    assert.equal(next.roadDir, -1, "回矿方向必须是 roadDir=-1");
+}
+
 // ───────────────────────── 2) 回程只交 Storage，兼容旧 Link 任务 ─────────────────────────
 function dropOffFixture({ linkFree, linkType = CONSTANTS.STRUCTURE_LINK, keepBuilding, wait, missingTarget, missingStorage } = {}) {
     const ctx = makeContext();

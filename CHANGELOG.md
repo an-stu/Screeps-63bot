@@ -1,3 +1,15 @@
+## v0.78.379 — 修路 WORK carrier 修光能量回矿点 container 补能
+
+- 用户 2026-11-29：外矿带 WORK 的 carrier 修路把能量修光后，沿回程方向空手
+  回主房 storage；应先回该矿点 container 补能再继续修。
+- `harvestEnergyOuterCarryRoadBuilder` 顶部：`keepBuilding + data + energy=0
+  + roadDir != -1` 时立即掉头，新建 `roadDir=-1` 任务指向该矿点
+  `getOuterMineTarget(data)`（container 优先，失视野用坐标）；不再继续空手
+  走回主房。
+- 到达矿点容器且空手时先 `withdraw(container, energy)`，用 `refilled` 记录
+  同 tick 成功（store 更新可能延迟），再按原逻辑生成回程修路任务。
+- edge-link 增加行为断言：空手 builder 的新任务必须指向 container、roadDir=-1。
+
 ## v0.78.378 — 外矿容器清理选取有剩余容量的 carrier
 
 - v0.78.377 的巡检只接受 `storeEmpty()` 的 outer carrier；实测 E52S29 容器有

@@ -1429,6 +1429,30 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
         && Memory.rooms[task.mineRoom][pro.stationName][task.stationId];
     let complete = !data || pro.outerRoadComplete(data);
     let canBuild = this.getPartCnt(WORK) > 0 && this.getActiveBodyparts(WORK) > 0;
+    // 修路把能量修光时，不能继续空手往主房 storage 走：掉头回该矿点的
+    // container 补能，补到能量后再沿路回程继续修。只有已经在回矿方向的
+    // 任务（roadDir=-1）才放行，避免每 tick 重建任务。
+    if (task.keepBuilding && data && this.store[RESOURCE_ENERGY] === 0
+        && task.roadDir != -1) {
+        let nextTarget = pro.getOuterMineTarget(data);
+        if (nextTarget) {
+            this.popTask();
+            let ops = {
+                mineRoom: task.mineRoom,
+                stationId: task.stationId,
+                keepBuilding: true,
+                roadDir: -1,
+            };
+            if (nextTarget.pos) {
+                this.addTask(UtilsTask.task(nextTarget, "harvestEnergyOuterCarryRoadBuilder", undefined, ops));
+            } else {
+                this.addTask(UtilsTask.taskOutView(data.container, nextTarget.roomName,
+                    nextTarget.x, nextTarget.y, "harvestEnergyOuterCarryRoadBuilder", undefined, ops));
+            }
+            this.execLastTask();
+            return;
+        }
+    }
     // Older deployments put every carrier (including pure CARRY/MOVE haulers)
     // into the keepBuilding loop. They can never make progress there, so they
     // kept returning to the source instead of delivering to Storage. Let such
@@ -1479,8 +1503,16 @@ Creep.prototype.harvestEnergyOuterCarryRoadBuilder = function () {
     // 下面的卸货有 `target && target.store` 守卫，随后照常掉头/返回。
     if (!target || this.pos.isNearTo(target) || (this.store[RESOURCE_ENERGY] == 0 && noRoute)) {
         if (target && target.store && this.store[RESOURCE_ENERGY] > 0) this.transfer(target, RESOURCE_ENERGY);
+        // 修路爬空手到达矿区容器：先补能，再生成回程任务。withdraw 的
+        // store 更新可能在本 tick 末才体现，所以用 refilled 记住本次成功。
+        let refilled = false;
+        if (data && data.container && target && target.id == data.container
+            && this.store[RESOURCE_ENERGY] <= 0 && target.store
+            && target.store[RESOURCE_ENERGY] > 0) {
+            if (this.withdraw(target, RESOURCE_ENERGY) == OK) refilled = true;
+        }
         this.popTask();
-        if (task.keepBuilding && this.store[RESOURCE_ENERGY] > 0 && data) {
+        if (task.keepBuilding && (this.store[RESOURCE_ENERGY] > 0 || refilled) && data) {
             // 确定完成后再退出：端点强制刷新完成度检查
             complete = pro.outerRoadComplete(data, true);
             if (!complete) {
