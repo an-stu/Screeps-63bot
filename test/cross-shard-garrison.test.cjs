@@ -1085,4 +1085,86 @@ function transitCreep(ctx, room, name, slot, pos, wave = 4) {
     }
 }
 
+// 19. The landing leg has the same split-squad deadlock. A wave that crossed
+// the portal together can still lose one member at the next border: the three
+// who crossed muster in the next room waiting for four, the laggard musters in
+// the landing room waiting for four, and `garrisonMuster` never crosses a
+// border. The origin-side rejoin step was gated to the origin shard, so the
+// wave aged out two rooms short of the target (2026-11-28 live: slots 0/1/2 at
+// W30N51 (12,47)+, slot 3 alone at W30N50 (16,3), no movement for ~900 ticks).
+{
+    const build = ({armed = false, allHome = false} = {}) => {
+        const ctx = load({shard: "shard2"});
+        const c = cfg(ctx, {wave: 4, remote: freshRemote({scoutTtl: 500})});
+        const landing = {
+            name: "W30N50", controller: undefined,
+            find(type) {
+                if (type === ctx.FIND_CREEPS) return Object.values(ctx.Game.creeps).filter(e => e.room === landing);
+                if (type === ctx.FIND_HOSTILE_CREEPS) return [];
+                return [];
+            },
+        };
+        const next = {
+            name: "W30N51", controller: undefined,
+            find(type) {
+                if (type === ctx.FIND_CREEPS) return Object.values(ctx.Game.creeps).filter(e => e.room === next);
+                if (type === ctx.FIND_HOSTILE_CREEPS) return armed ? [hostile(ctx, "camp-next", 20, 20)] : [];
+                return [];
+            },
+        };
+        ctx.Game.rooms[landing.name] = landing;
+        ctx.Game.rooms[next.name] = next;
+        ctx.Game.map.findExit = () => ctx.RIGHT;
+        const lag = transitCreep(ctx, landing, "lag", 3, {x: 16, y: 3});
+        const front = [[12, 47], [12, 48], [13, 47]].map(([x, y], i) =>
+            transitCreep(ctx, next, "front" + i, [0, 1, 2][i], {x, y}));
+        for (const m of [lag, ...front]) {
+            m.task.originRoute = ["W31N55", "W31N56", "W30N56"];
+            m.task.roomExit = undefined;
+            m.pos.findClosestByRange = () => new ctx.RoomPosition(49, 25, m.room.name);
+        }
+        if (allHome) {
+            for (const m of front) {
+                m.room = landing;
+                m.pos = new ctx.RoomPosition(13 + m.task.slot, 47 + (m.task.slot % 2), landing.name);
+            }
+        }
+        ctx.Game.creeps = Object.fromEntries([lag, ...front].map(m => [m.name, m]));
+        return {ctx, landing, next, lag, front};
+    };
+    // The border walk is a `moveTo` onto the x=49 edge tile plus the crossing
+    // `move`; mustering never produces either in these fixtures.
+    const crossed = m => m.actions.some(a => a[0] === "move")
+        || m.actions.some(a => a[0] === "moveTo" && a[1] === 49);
+
+    // A. The single laggard walks the one room that separates it from the
+    // squad; the three already across hold their muster square and never
+    // advance on the target room by themselves.
+    {
+        const {ctx, lag, front} = build();
+        ctx.CrossShardGarrison.travel(lag, lag.task, true);
+        assert.ok(crossed(lag), "the laggard walks to the room the squad already holds");
+        assert.equal(ctx.PathFinder.calls.length, 0, "rejoining is a plain border walk, not a route harvest");
+        for (const m of front) ctx.CrossShardGarrison.travel(m, m.task, true);
+        assert.ok(front.every(m => !crossed(m)),
+            "the forward three keep mustering instead of filing into W31N51 alone");
+    }
+
+    // B. An armed room stops the walk one border short.
+    {
+        const {ctx, lag} = build({armed: true});
+        ctx.CrossShardGarrison.travel(lag, lag.task, true);
+        assert.ok(!crossed(lag), "never walk a lone laggard into an armed room");
+    }
+
+    // C. Nobody ahead on the landing route: a squad still all in the landing
+    // room regroups locally instead of starting the route by itself.
+    {
+        const {ctx, lag, front} = build({allHome: true});
+        for (const m of [lag, ...front]) ctx.CrossShardGarrison.travel(m, m.task, true);
+        assert.ok([lag, ...front].every(m => !crossed(m)),
+            "a same-room squad musters, it does not begin the landing route");
+    }
+}
+
 console.log("cross-shard garrison checks passed");

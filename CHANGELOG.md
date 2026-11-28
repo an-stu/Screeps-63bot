@@ -1,3 +1,21 @@
+## v0.78.372 — 跨 shard 驻军在落地区（目标 shard）掉队也能归队
+
+- 线上实例（shard3 W31N55 → shard2 W31N51，wave 84542970）：过完虫洞落地后
+  走 W30N50 → W30N51 这段时掉了 1 只，slot 0/1/2 在 W30N51 (12,47)+ 集结、
+  slot 3 单独在 W30N50 (16,3) 集结，两边各自等「四只到齐」，**零位移约 900 tick**，
+  还剩 514 tick 就老死，离目标房还有两格房。
+- 根因：v0.78.369 的 `garrisonRejoinStep` 有 `Game.shard.name!==task.originShard`
+  硬门（且调用点只在 `!arrived` 分支），而 `garrisonMuster` 从不跨格房 ——
+  落地区这一侧根本没有任何「掉队者走一格」的恢复路径。
+- 修法：同一个函数按 `arrived` 选路线与 shard（origin 用 `originRoute`/`originShard`，
+  落地用 `landingRoute`/`targetShard`），调用点不再依赖 `!arrived`。
+  前缀守卫不变：只有「前面已经有人在更远的房」才走，且下一房必须
+  `garrisonCanAdvance` 放行；origin 段仍旧只有整队能进目标房（`next===task.roomName`
+  仍拦截），落地段允许掉队者补进已被占据的目标房（防守在打时需要最后一只补位）。
+- 回归：`test/cross-shard-garrison.test.cjs` 第 19 节三例（掉队者走一格 / 下一房有
+  敌对武装则一格不挪 / 全员同房只本地集结）。负对照：调用点退回 `!arrived` ⇒ 首例实测红。
+- 线上自愈：live 爬的任务里已带 `landingRoute`，部署后下一 tick 掉队者自动走回 W30N51。
+
 ## v0.78.371 — 外矿撤退在主房一侧不反向折返
 
 - 补 v0.78.370 的边界情况：已经越过矿区相邻房、回到主房一侧（或更远）的

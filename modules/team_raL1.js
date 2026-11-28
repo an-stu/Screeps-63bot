@@ -601,7 +601,7 @@ function garrisonSquareLegal(room, x,y,closed,terrain) {
 }
 
 /**
- * Walk one room forward when the wave is split across the origin route.
+ * Walk one room forward when the wave is split across a travel route.
  *
  * `garrisonMuster` only ever regroups members **inside** one room, so a wave
  * that lost `roomExit` (or whose trailing pair never got it) deadlocks:
@@ -617,9 +617,15 @@ function garrisonSquareLegal(room, x,y,closed,terrain) {
  * left home still may not start the route on its own (test 11), and an armed
  * room still stops the walk one border short instead of feeding creeps in.
  */
-function garrisonRejoinStep(creep,task,crew) {
-    if(Game.shard.name!==task.originShard)return false;
-    const route=task.originRoute;
+function garrisonRejoinStep(creep,task,crew,arrived) {
+    // The same deadlock exists on the landing leg, one shard later: the three
+    // who crossed the border hold the muster post waiting for four while the
+    // laggard holds its own post a room back (2026-11-28 live: wave 84542970
+    // slots 0/1/2 at W30N51 (12,47)+, slot 3 alone at W30N50 (16,3), zero
+    // movement for ~900 ticks). Muster never crosses a border, so the landing
+    // route needs the identical one-room step.
+    if(Game.shard.name!==(arrived?task.targetShard:task.originShard))return false;
+    const route=arrived?task.landingRoute:task.originRoute;
     if(!Array.isArray(route))return false;
     const index=route.indexOf(creep.room.name);
     if(index<0)return false;
@@ -627,9 +633,12 @@ function garrisonRejoinStep(creep,task,crew) {
         &&route.indexOf(c.room.name)>index);
     if(!ahead)return false;
     const next=route[index+1];
-    if(!next||next===task.roomName)return false;
-    if(!garrisonCanAdvance(next,task,false))return false;
-    const gate=GARRISON_W31_GATES[creep.room.name];
+    if(!next)return false;
+    // On the origin leg only the full crew may cross, and only through the
+    // portal; the target room is reached as a complete wave.
+    if(!arrived&&next===task.roomName)return false;
+    if(!garrisonCanAdvance(next,task,arrived))return false;
+    const gate=arrived?undefined:GARRISON_W31_GATES[creep.room.name];
     garrisonTravel(creep,next,gate?{x:gate.x,y:gate.y}:undefined);
     return true;
 }
@@ -1077,11 +1086,11 @@ const garrisonPro = {
         if(crew.length!==4||crew.some(c=>c.room.name!==creep.room.name)){
             // Boosted units may gather next to their spawn or landing tile,
             // but do not travel out of that room independently — unless the
-            // rest of the wave is already a room ahead on the origin route,
-            // in which case the laggards walk the one room that separates
-            // them (see garrisonRejoinStep; otherwise nobody ever moves).
+            // rest of the wave is already a room ahead on the same route, in
+            // which case the laggards walk the one room that separates them
+            // (see garrisonRejoinStep; otherwise nobody ever moves).
             if(arrived||garrisonBodyReady(creep,task.slot)){
-                if(!arrived&&garrisonRejoinStep(creep,task,crew))return;
+                if(garrisonRejoinStep(creep,task,crew,arrived))return;
                 return garrisonMuster(creep,task,crew.filter(c=>c.room.name===creep.room.name));
             }
             return this.startPortal(creep,task,"member");
